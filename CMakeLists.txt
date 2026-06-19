@@ -12,6 +12,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_subdirectory(packages/svp-core)
+add_subdirectory(packages/svp-models)
 add_subdirectory(packages/svp-validation)
 add_subdirectory(packages/svp-package)
 
@@ -19,3 +20,4 @@ add_subdirectory(tools/svp-validator)
 add_subdirectory(tools/svp-reader)
 add_subdirectory(tools/svp-inspector)
 add_subdirectory(tools/svp-builder)
+add_subdirectory(tools/svp-models-tool)
