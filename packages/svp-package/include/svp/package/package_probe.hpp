@@ -1,0 +1,17 @@
+#pragma once
+
+#include <filesystem>
+
+namespace svp::package {
+
+struct PackageProbe {
+  std::filesystem::path path;
+  bool exists = false;
+  bool is_regular_file = false;
+  bool has_svp_extension = false;
+};
+
+[[nodiscard]] PackageProbe probe_package(const std::filesystem::path& path);
+
+}  // namespace svp::package
+
