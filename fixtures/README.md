@@ -4,6 +4,15 @@ This folder will contain small `.svp` packages used to test validators, readers,
 
 Fixtures should be tiny, deterministic, and purpose-built.
 
+## phase-04-ocr-color
+
+Generated RC2 OCR/color fixture packages for the current validator. See
+`fixtures/phase-04-ocr-color/README.md` and regenerate with:
+
+```bash
+python3 fixtures/tools/make_phase04_ocr_color_fixtures.py
+```
+
 Initial fixture targets:
 
 ## static-card
