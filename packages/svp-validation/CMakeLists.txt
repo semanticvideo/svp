@@ -3,6 +3,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(SQLite3 REQUIRED)
 
 add_library(svp-validation
+  src/block_stream_validation.cpp
   src/color_record_validation.cpp
   src/code_registry.cpp
   src/index_validation.cpp
@@ -31,5 +32,6 @@ target_link_libraries(svp-validation
   PRIVATE
     libzip::zip
     SQLite::SQLite3
+    svp::blocks
     svp::package
 )
