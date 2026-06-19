@@ -129,7 +129,7 @@ color_absence = {
     "provenance_id": "processor_color_quantizer_0001",
 }
 
-def write_package(name, mutate):
+def write_package(name, mutate, text_regions_payload=None):
     region = copy.deepcopy(text_region)
     observation = copy.deepcopy(text_observation)
     numeric = copy.deepcopy(numeric_value)
@@ -154,7 +154,12 @@ def write_package(name, mutate):
             package.writestr(directory, "")
         package.writestr("mimetype", "application/vnd.svp.package")
         package.writestr("manifest.json", json.dumps(manifest, separators=(",", ":")))
-        package.writestr("text/text_regions.jsonl", json.dumps(region, separators=(",", ":")) + "\n")
+        package.writestr(
+            "text/text_regions.jsonl",
+            text_regions_payload
+            if text_regions_payload is not None
+            else json.dumps(region, separators=(",", ":")) + "\n",
+        )
         package.writestr("text/text_observations.jsonl", json.dumps(observation, separators=(",", ":")) + "\n")
         package.writestr("text/numeric_values.jsonl", json.dumps(numeric, separators=(",", ":")) + "\n")
         package.writestr("text/text_absence.json", json.dumps(text_absence, separators=(",", ":")))
@@ -180,6 +185,11 @@ write_package("valid", no_change)
 write_package("invalid-ocr", invalid_ocr)
 write_package("invalid-bucket-space", invalid_bucket_space)
 write_package("invalid-percentage-total", invalid_percentage_total)
+write_package(
+    "oversized-text-regions",
+    no_change,
+    text_regions_payload=" " * (32 * 1024 * 1024 + 1),
+)
 PY
 
 run_validator() {
@@ -233,5 +243,10 @@ invalid_percentage_report="$workdir/invalid-percentage-total.json"
 invalid_percentage_status="$(run_validator "$workdir/invalid-percentage-total.svp" "$invalid_percentage_report")"
 expect_status "$invalid_percentage_status" "1" "invalid color total package"
 expect_code "$invalid_percentage_report" "ERR_COLOR_INVALID_PERCENTAGE_TOTAL"
+
+oversized_report="$workdir/oversized-text-regions.json"
+oversized_status="$(run_validator "$workdir/oversized-text-regions.svp" "$oversized_report")"
+expect_status "$oversized_status" "1" "oversized text regions package"
+expect_code "$oversized_report" "ERR_TEXT_INVALID_REGION_RECORD"
 
 echo "OCR/color validator smoke checks passed."

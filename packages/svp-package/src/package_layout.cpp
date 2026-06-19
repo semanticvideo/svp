@@ -2,6 +2,7 @@
 
 #include <zip.h>
 
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -170,7 +171,8 @@ PackageLayoutResult read_package_layout(const std::filesystem::path& path) {
 }
 
 PackageEntryReadResult read_package_entry(const std::filesystem::path& path,
-                                          const std::string& entry) {
+                                          const std::string& entry,
+                                          std::uint64_t max_uncompressed_bytes) {
   int error_code = ZIP_ER_OK;
   ZipArchive archive{zip_open(path.string().c_str(), ZIP_RDONLY, &error_code)};
   if (!archive) {
@@ -185,6 +187,14 @@ PackageEntryReadResult read_package_entry(const std::filesystem::path& path,
 
   if ((stat.valid & ZIP_STAT_SIZE) == 0) {
     return PackageEntryReadResult::failure("ZIP entry size is unavailable");
+  }
+
+  if (stat.size > max_uncompressed_bytes) {
+    return PackageEntryReadResult::failure("ZIP entry exceeds maximum readable size");
+  }
+
+  if (stat.size > std::numeric_limits<std::size_t>::max()) {
+    return PackageEntryReadResult::failure("ZIP entry size exceeds addressable memory");
   }
 
   std::unique_ptr<zip_file_t, decltype(&zip_fclose)> file{
