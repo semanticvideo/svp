@@ -15,6 +15,7 @@ python3 - "$workdir" <<'PY'
 import copy
 import json
 import pathlib
+import sqlite3
 import sys
 import zipfile
 
@@ -129,7 +130,165 @@ color_absence = {
     "provenance_id": "processor_color_quantizer_0001",
 }
 
-def write_package(name, mutate, text_regions_payload=None):
+HASH_ZERO = "blake3:" + "0" * 64
+HASH_ONE = "blake3:" + "1" * 64
+HASH_TWO = "blake3:" + "2" * 64
+HASH_THREE = "blake3:" + "3" * 64
+HASH_FOUR = "blake3:" + "4" * 64
+
+INDEX_TABLES = [
+    """
+    CREATE TABLE svp_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE objects (
+      object_id TEXT PRIMARY KEY,
+      object_type TEXT NOT NULL,
+      start_us INTEGER,
+      end_us INTEGER,
+      json_path TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE temporal_spans (
+      object_id TEXT NOT NULL,
+      object_type TEXT NOT NULL,
+      start_us INTEGER NOT NULL,
+      end_us INTEGER NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE relationships (
+      relationship_id TEXT PRIMARY KEY,
+      relationship_type TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      start_us INTEGER NOT NULL,
+      end_us INTEGER NOT NULL,
+      confidence REAL NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE text_fts (
+      object_id TEXT,
+      object_type TEXT,
+      start_us INTEGER,
+      end_us INTEGER,
+      text TEXT
+    )
+    """,
+    """
+    CREATE TABLE vector_index (
+      embedding BLOB,
+      object_id TEXT,
+      object_type TEXT,
+      embedding_set_id TEXT,
+      start_us INTEGER,
+      end_us INTEGER
+    )
+    """,
+    """
+    CREATE TABLE binary_blocks (
+      block_id TEXT PRIMARY KEY,
+      block_type TEXT NOT NULL,
+      block_file TEXT NOT NULL,
+      block_offset INTEGER NOT NULL,
+      block_length INTEGER NOT NULL,
+      payload_offset INTEGER NOT NULL,
+      uncompressed_size INTEGER NOT NULL,
+      compressed_size INTEGER NOT NULL,
+      extent_0 INTEGER NOT NULL,
+      extent_1 INTEGER NOT NULL,
+      extent_2 INTEGER NOT NULL,
+      dtype INTEGER NOT NULL,
+      start_frame INTEGER,
+      frame_count INTEGER,
+      start_us INTEGER,
+      end_us INTEGER,
+      payload_blake3 TEXT NOT NULL,
+      header_blake3 TEXT NOT NULL,
+      block_blake3 TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE text_regions (
+      text_region_id TEXT PRIMARY KEY
+    )
+    """,
+    """
+    CREATE TABLE text_observations (
+      text_observation_id TEXT PRIMARY KEY
+    )
+    """,
+    """
+    CREATE TABLE numeric_values (
+      numeric_value_id TEXT PRIMARY KEY
+    )
+    """,
+    """
+    CREATE TABLE color_observations (
+      color_observation_id TEXT PRIMARY KEY
+    )
+    """,
+    """
+    CREATE TABLE color_bucket_coverage (
+      color_observation_id TEXT NOT NULL,
+      bucket_id TEXT NOT NULL,
+      coverage REAL NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE color_targets (
+      color_observation_id TEXT NOT NULL,
+      target_type TEXT NOT NULL,
+      target_id TEXT NOT NULL
+    )
+    """,
+]
+
+def index_manifest(table_count):
+    return {
+        "schema_version": "svp-index-manifest-v1",
+        "index_schema_version": "svp-index-v1",
+        "sqlite_file": "index/index.sqlite",
+        "sqlite_file_blake3": HASH_ZERO,
+        "logical_row_stream_version": "svp-logical-row-stream-v1",
+        "logical_rows_blake3": HASH_ONE,
+        "table_count": table_count,
+        "row_count": 0,
+        "created_from": {
+            "manifest_blake3": HASH_TWO,
+            "binary_blocks_manifest_blake3": HASH_THREE,
+            "embedding_sets_blake3": HASH_FOUR,
+        },
+    }
+
+def create_index_bytes(missing_table=None):
+    sqlite_path = root / f"index-{missing_table or 'valid'}.sqlite"
+    if sqlite_path.exists():
+        sqlite_path.unlink()
+
+    connection = sqlite3.connect(sqlite_path)
+    try:
+        for statement in INDEX_TABLES:
+            if missing_table and f"CREATE TABLE {missing_table} " in statement:
+                continue
+            connection.execute(statement)
+        connection.commit()
+        table_count = connection.execute(
+            "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchone()[0]
+    finally:
+        connection.close()
+
+    data = sqlite_path.read_bytes()
+    sqlite_path.unlink()
+    return data, table_count
+
+def write_package(name, mutate, text_regions_payload=None, index_case="valid"):
     region = copy.deepcopy(text_region)
     observation = copy.deepcopy(text_observation)
     numeric = copy.deepcopy(numeric_value)
@@ -166,6 +325,27 @@ def write_package(name, mutate, text_regions_payload=None):
         package.writestr("colors/color_observations.jsonl", json.dumps(color, separators=(",", ":")) + "\n")
         package.writestr("colors/color_summary.json", json.dumps(color_summary, separators=(",", ":")))
         package.writestr("colors/color_absence.json", json.dumps(color_absence, separators=(",", ":")))
+        if index_case == "missing_manifest":
+            sqlite_bytes, table_count = create_index_bytes()
+            package.writestr("index/index.sqlite", sqlite_bytes)
+        elif index_case == "malformed_manifest":
+            sqlite_bytes, table_count = create_index_bytes()
+            package.writestr("index/index.sqlite", sqlite_bytes)
+            package.writestr("index/index_manifest.json", "{not json")
+        elif index_case == "missing_sqlite":
+            _, table_count = create_index_bytes()
+            package.writestr("index/index_manifest.json", json.dumps(index_manifest(table_count), separators=(",", ":")))
+        elif index_case == "unreadable_sqlite":
+            package.writestr("index/index.sqlite", b"not sqlite")
+            package.writestr("index/index_manifest.json", json.dumps(index_manifest(0), separators=(",", ":")))
+        elif index_case == "missing_color_table":
+            sqlite_bytes, table_count = create_index_bytes("color_bucket_coverage")
+            package.writestr("index/index.sqlite", sqlite_bytes)
+            package.writestr("index/index_manifest.json", json.dumps(index_manifest(table_count), separators=(",", ":")))
+        else:
+            sqlite_bytes, table_count = create_index_bytes()
+            package.writestr("index/index.sqlite", sqlite_bytes)
+            package.writestr("index/index_manifest.json", json.dumps(index_manifest(table_count), separators=(",", ":")))
 
 def no_change(region, observation, numeric, color):
     pass
@@ -190,6 +370,11 @@ write_package(
     no_change,
     text_regions_payload=" " * (32 * 1024 * 1024 + 1),
 )
+write_package("missing-index-manifest", no_change, index_case="missing_manifest")
+write_package("malformed-index-manifest", no_change, index_case="malformed_manifest")
+write_package("missing-index-sqlite", no_change, index_case="missing_sqlite")
+write_package("unreadable-index-sqlite", no_change, index_case="unreadable_sqlite")
+write_package("missing-color-index-table", no_change, index_case="missing_color_table")
 PY
 
 run_validator() {
@@ -248,5 +433,30 @@ oversized_report="$workdir/oversized-text-regions.json"
 oversized_status="$(run_validator "$workdir/oversized-text-regions.svp" "$oversized_report")"
 expect_status "$oversized_status" "1" "oversized text regions package"
 expect_code "$oversized_report" "ERR_TEXT_INVALID_REGION_RECORD"
+
+missing_manifest_report="$workdir/missing-index-manifest.json"
+missing_manifest_status="$(run_validator "$workdir/missing-index-manifest.svp" "$missing_manifest_report")"
+expect_status "$missing_manifest_status" "1" "missing index manifest package"
+expect_code "$missing_manifest_report" "ERR_CORE_INDEX_MANIFEST_INVALID"
+
+malformed_manifest_report="$workdir/malformed-index-manifest.json"
+malformed_manifest_status="$(run_validator "$workdir/malformed-index-manifest.svp" "$malformed_manifest_report")"
+expect_status "$malformed_manifest_status" "1" "malformed index manifest package"
+expect_code "$malformed_manifest_report" "ERR_CORE_INDEX_MANIFEST_INVALID"
+
+missing_sqlite_report="$workdir/missing-index-sqlite.json"
+missing_sqlite_status="$(run_validator "$workdir/missing-index-sqlite.svp" "$missing_sqlite_report")"
+expect_status "$missing_sqlite_status" "1" "missing SQLite index package"
+expect_code "$missing_sqlite_report" "ERR_CORE_INDEX_SCHEMA_INVALID"
+
+unreadable_sqlite_report="$workdir/unreadable-index-sqlite.json"
+unreadable_sqlite_status="$(run_validator "$workdir/unreadable-index-sqlite.svp" "$unreadable_sqlite_report")"
+expect_status "$unreadable_sqlite_status" "1" "unreadable SQLite index package"
+expect_code "$unreadable_sqlite_report" "ERR_CORE_INDEX_SCHEMA_INVALID"
+
+missing_color_table_report="$workdir/missing-color-index-table.json"
+missing_color_table_status="$(run_validator "$workdir/missing-color-index-table.svp" "$missing_color_table_report")"
+expect_status "$missing_color_table_status" "1" "missing color index table package"
+expect_code "$missing_color_table_report" "ERR_CORE_INDEX_SCHEMA_INVALID"
 
 echo "OCR/color validator smoke checks passed."

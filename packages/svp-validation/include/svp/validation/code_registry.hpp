@@ -13,6 +13,12 @@ inline constexpr std::string_view kCodeMissingManifest = "ERR_CORE_MISSING_MANIF
 inline constexpr std::string_view kCodeMissingSection = "ERR_CORE_MISSING_SECTION";
 inline constexpr std::string_view kCodeUnknownRootSection = "ERR_CORE_UNKNOWN_ROOT_SECTION";
 inline constexpr std::string_view kCodePathTraversal = "ERR_CORE_PATH_TRAVERSAL";
+inline constexpr std::string_view kCodeIndexSchemaInvalid =
+    "ERR_CORE_INDEX_SCHEMA_INVALID";
+inline constexpr std::string_view kCodeIndexManifestInvalid =
+    "ERR_CORE_INDEX_MANIFEST_INVALID";
+inline constexpr std::string_view kCodeIndexLogicalMismatch =
+    "ERR_CORE_INDEX_LOGICAL_MISMATCH";
 inline constexpr std::string_view kCodeMissingTextSection = "ERR_CORE_MISSING_TEXT_SECTION";
 inline constexpr std::string_view kCodeMissingColorSection = "ERR_CORE_MISSING_COLOR_SECTION";
 inline constexpr std::string_view kCodeTextInvalidRegionRecord =

@@ -1,8 +1,11 @@
+find_package(libzip CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(SQLite3 REQUIRED)
 
 add_library(svp-validation
   src/color_record_validation.cpp
   src/code_registry.cpp
+  src/index_validation.cpp
   src/json_schema_subset.cpp
   src/ocr_color_spec.cpp
   src/record_file_reader.cpp
@@ -26,5 +29,7 @@ target_link_libraries(svp-validation
   PUBLIC
     nlohmann_json::nlohmann_json
   PRIVATE
+    libzip::zip
+    SQLite::SQLite3
     svp::package
 )
