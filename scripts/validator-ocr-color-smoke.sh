@@ -219,6 +219,124 @@ def zstd_compress(data):
         raise RuntimeError(libzstd.ZSTD_getErrorName(size).decode("utf-8"))
     return output.raw[:size]
 
+def blake3_hex(data):
+    return "blake3:" + blake3_digest(data).hex()
+
+def sqlite_identifier(name):
+    return '"' + name.replace('"', '""') + '"'
+
+def normalized_sql(value):
+    return " ".join(value.split())
+
+def canonical_sqlite_value(value):
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return "blob:" + value.hex()
+    return value
+
+def canonical_json_bytes(value):
+    return json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
+
+def canonical_json_line(value):
+    return json.dumps(value, separators=(",", ":")).encode("utf-8") + b"\n"
+
+def user_table_names(connection):
+    try:
+        rows = connection.execute("PRAGMA table_list").fetchall()
+    except sqlite3.DatabaseError:
+        rows = []
+    if rows:
+        return sorted(
+            row[1]
+            for row in rows
+            if row[0] == "main" and row[2] in {"table", "virtual"} and not row[1].startswith("sqlite_")
+        )
+
+    return [
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        )
+    ]
+
+def table_columns(connection, table_name):
+    return [
+        {"name": row[1], "primary_key_order": row[5]}
+        for row in connection.execute(f"PRAGMA table_info({sqlite_identifier(table_name)})")
+    ]
+
+def schema_fingerprint(connection, table_name):
+    sql_row = connection.execute(
+        "SELECT sql FROM sqlite_schema WHERE name = ? AND type = 'table'",
+        (table_name,),
+    ).fetchone()
+    source = {
+        "table": table_name,
+        "sql": normalized_sql(sql_row[0] if sql_row and sql_row[0] else ""),
+        "columns": [],
+    }
+    for row in connection.execute(f"PRAGMA table_xinfo({sqlite_identifier(table_name)})"):
+        source["columns"].append(
+            {
+                "cid": row[0],
+                "name": row[1] or "",
+                "type": row[2] or "",
+                "notnull": row[3],
+                "default": row[4],
+                "pk": row[5],
+                "hidden": row[6],
+            }
+        )
+    return blake3_hex(canonical_json_bytes(source))
+
+def order_expression(column_name):
+    column = sqlite_identifier(column_name)
+    return (
+        f"CASE typeof({column}) WHEN 'null' THEN 0 WHEN 'integer' THEN 1 WHEN 'real' THEN 2 "
+        f"WHEN 'text' THEN 3 WHEN 'blob' THEN 4 ELSE 5 END, "
+        f"CASE WHEN typeof({column}) IN ('integer', 'real') THEN {column} END, "
+        f"CASE WHEN typeof({column}) = 'text' THEN {column} END COLLATE BINARY, "
+        f"CASE WHEN typeof({column}) = 'blob' THEN hex({column}) END"
+    )
+
+def select_rows_query(table_name, columns):
+    select_columns = ", ".join(sqlite_identifier(column["name"]) for column in columns)
+    query = f"SELECT {select_columns} FROM {sqlite_identifier(table_name)}"
+    primary_key_columns = sorted(
+        [column for column in columns if column["primary_key_order"] > 0],
+        key=lambda column: column["primary_key_order"],
+    )
+    order_columns = primary_key_columns or columns
+    if order_columns:
+        query += " ORDER BY " + ", ".join(order_expression(column["name"]) for column in order_columns)
+    return query
+
+def logical_row_stream_summary(connection):
+    stream = bytearray()
+    row_count = 0
+    tables = user_table_names(connection)
+    for table_name in tables:
+        columns = table_columns(connection, table_name)
+        column_names = [column["name"] for column in columns]
+        stream.extend(canonical_json_line(["table", table_name]))
+        stream.extend(canonical_json_line(["schema", table_name, schema_fingerprint(connection, table_name)]))
+        stream.extend(canonical_json_line(["columns", table_name, column_names]))
+        if not columns:
+            continue
+        for row in connection.execute(select_rows_query(table_name, columns)):
+            stream.extend(
+                canonical_json_line(
+                    ["row", table_name, [canonical_sqlite_value(value) for value in row]]
+                )
+            )
+            row_count += 1
+    return {
+        "logical_rows_blake3": blake3_hex(bytes(stream)),
+        "table_count": len(tables),
+        "row_count": row_count,
+    }
+
 def block_header(
     *,
     magic=b"SVPB",
@@ -467,16 +585,16 @@ INDEX_TABLES = [
     """,
 ]
 
-def index_manifest(table_count):
+def index_manifest(index_summary):
     return {
         "schema_version": "svp-index-manifest-v1",
         "index_schema_version": "svp-index-v1",
         "sqlite_file": "index/index.sqlite",
         "sqlite_file_blake3": HASH_ZERO,
         "logical_row_stream_version": "svp-logical-row-stream-v1",
-        "logical_rows_blake3": HASH_ONE,
-        "table_count": table_count,
-        "row_count": 0,
+        "logical_rows_blake3": index_summary["logical_rows_blake3"],
+        "table_count": index_summary["table_count"],
+        "row_count": index_summary["row_count"],
         "created_from": {
             "manifest_blake3": HASH_TWO,
             "binary_blocks_manifest_blake3": HASH_THREE,
@@ -496,15 +614,13 @@ def create_index_bytes(missing_table=None):
                 continue
             connection.execute(statement)
         connection.commit()
-        table_count = connection.execute(
-            "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-        ).fetchone()[0]
+        index_summary = logical_row_stream_summary(connection)
     finally:
         connection.close()
 
     data = sqlite_path.read_bytes()
     sqlite_path.unlink()
-    return data, table_count
+    return data, index_summary
 
 def write_package(
     name,
@@ -573,32 +689,48 @@ def write_package(
             package.writestr("embeddings/embeddings.index.jsonl", "", compress_type=zipfile.ZIP_DEFLATED)
             package.writestr("embeddings/embeddings.blocks.svpez", tiny_embedding_block(), compress_type=zipfile.ZIP_STORED)
         if index_case == "missing_manifest":
-            sqlite_bytes, table_count = create_index_bytes()
+            sqlite_bytes, index_summary = create_index_bytes()
             package.writestr("index/index.sqlite", sqlite_bytes)
         elif index_case == "malformed_manifest":
-            sqlite_bytes, table_count = create_index_bytes()
+            sqlite_bytes, index_summary = create_index_bytes()
             package.writestr("index/index.sqlite", sqlite_bytes)
             package.writestr("index/index_manifest.json", "{not json")
         elif index_case == "empty_index_schema_version":
-            sqlite_bytes, table_count = create_index_bytes()
-            manifest_value = index_manifest(table_count)
+            sqlite_bytes, index_summary = create_index_bytes()
+            manifest_value = index_manifest(index_summary)
             manifest_value["index_schema_version"] = ""
             package.writestr("index/index.sqlite", sqlite_bytes)
             package.writestr("index/index_manifest.json", json.dumps(manifest_value, separators=(",", ":")))
         elif index_case == "missing_sqlite":
-            _, table_count = create_index_bytes()
-            package.writestr("index/index_manifest.json", json.dumps(index_manifest(table_count), separators=(",", ":")))
+            _, index_summary = create_index_bytes()
+            package.writestr("index/index_manifest.json", json.dumps(index_manifest(index_summary), separators=(",", ":")))
         elif index_case == "unreadable_sqlite":
             package.writestr("index/index.sqlite", b"not sqlite")
-            package.writestr("index/index_manifest.json", json.dumps(index_manifest(0), separators=(",", ":")))
+            package.writestr("index/index_manifest.json", json.dumps(index_manifest({
+                "logical_rows_blake3": HASH_ONE,
+                "table_count": 0,
+                "row_count": 0,
+            }), separators=(",", ":")))
         elif index_case == "missing_color_table":
-            sqlite_bytes, table_count = create_index_bytes("color_bucket_coverage")
+            sqlite_bytes, index_summary = create_index_bytes("color_bucket_coverage")
             package.writestr("index/index.sqlite", sqlite_bytes)
-            package.writestr("index/index_manifest.json", json.dumps(index_manifest(table_count), separators=(",", ":")))
+            package.writestr("index/index_manifest.json", json.dumps(index_manifest(index_summary), separators=(",", ":")))
+        elif index_case == "logical_hash_mismatch":
+            sqlite_bytes, index_summary = create_index_bytes()
+            manifest_value = index_manifest(index_summary)
+            manifest_value["logical_rows_blake3"] = HASH_ONE
+            package.writestr("index/index.sqlite", sqlite_bytes)
+            package.writestr("index/index_manifest.json", json.dumps(manifest_value, separators=(",", ":")))
+        elif index_case == "row_count_mismatch":
+            sqlite_bytes, index_summary = create_index_bytes()
+            manifest_value = index_manifest(index_summary)
+            manifest_value["row_count"] = index_summary["row_count"] + 1
+            package.writestr("index/index.sqlite", sqlite_bytes)
+            package.writestr("index/index_manifest.json", json.dumps(manifest_value, separators=(",", ":")))
         else:
-            sqlite_bytes, table_count = create_index_bytes()
+            sqlite_bytes, index_summary = create_index_bytes()
             package.writestr("index/index.sqlite", sqlite_bytes)
-            package.writestr("index/index_manifest.json", json.dumps(index_manifest(table_count), separators=(",", ":")))
+            package.writestr("index/index_manifest.json", json.dumps(index_manifest(index_summary), separators=(",", ":")))
 
 def no_change(region, observation, numeric, color):
     pass
@@ -629,6 +761,8 @@ write_package("empty-index-schema-version", no_change, index_case="empty_index_s
 write_package("missing-index-sqlite", no_change, index_case="missing_sqlite")
 write_package("unreadable-index-sqlite", no_change, index_case="unreadable_sqlite")
 write_package("missing-color-index-table", no_change, index_case="missing_color_table")
+write_package("logical-row-hash-mismatch", no_change, index_case="logical_hash_mismatch")
+write_package("logical-row-count-mismatch", no_change, index_case="row_count_mismatch")
 write_package("invalid-svpb-magic", no_change, depth_block_case="bad_magic")
 write_package("forbidden-svpb-type", no_change, depth_block_case="forbidden_type")
 write_package("svpb-raster-mismatch", no_change, depth_block_case="raster_mismatch")
@@ -724,6 +858,16 @@ missing_color_table_report="$workdir/missing-color-index-table.json"
 missing_color_table_status="$(run_validator "$workdir/missing-color-index-table.svp" "$missing_color_table_report")"
 expect_status "$missing_color_table_status" "1" "missing color index table package"
 expect_code "$missing_color_table_report" "ERR_CORE_INDEX_SCHEMA_INVALID"
+
+logical_hash_mismatch_report="$workdir/logical-row-hash-mismatch.json"
+logical_hash_mismatch_status="$(run_validator "$workdir/logical-row-hash-mismatch.svp" "$logical_hash_mismatch_report")"
+expect_status "$logical_hash_mismatch_status" "1" "logical row hash mismatch package"
+expect_code "$logical_hash_mismatch_report" "ERR_CORE_INDEX_LOGICAL_MISMATCH"
+
+logical_row_count_mismatch_report="$workdir/logical-row-count-mismatch.json"
+logical_row_count_mismatch_status="$(run_validator "$workdir/logical-row-count-mismatch.svp" "$logical_row_count_mismatch_report")"
+expect_status "$logical_row_count_mismatch_status" "1" "logical row count mismatch package"
+expect_code "$logical_row_count_mismatch_report" "ERR_CORE_INDEX_LOGICAL_MISMATCH"
 
 invalid_svpb_magic_report="$workdir/invalid-svpb-magic.json"
 invalid_svpb_magic_status="$(run_validator "$workdir/invalid-svpb-magic.svp" "$invalid_svpb_magic_report")"

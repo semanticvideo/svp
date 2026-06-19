@@ -1,5 +1,6 @@
 #include "index_validation.hpp"
 
+#include "index_logical_rows.hpp"
 #include "json_schema_subset.hpp"
 
 #include <nlohmann/json.hpp>
@@ -20,7 +21,6 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace svp::validation {
 namespace {
@@ -201,6 +201,10 @@ bool is_lower_hex(char value) noexcept {
   return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f');
 }
 
+bool starts_with(std::string_view value, std::string_view prefix) noexcept {
+  return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
+}
+
 bool valid_blake3_digest(const nlohmann::json& value) {
   if (!value.is_string()) {
     return false;
@@ -290,6 +294,42 @@ std::unique_ptr<sqlite3, SqliteDeleter> open_read_only_database(
 }
 
 std::set<std::string> read_user_table_names(sqlite3& database) {
+  constexpr std::string_view table_list_query = "PRAGMA table_list";
+
+  sqlite3_stmt* raw_table_list_statement = nullptr;
+  if (sqlite3_prepare_v2(&database, table_list_query.data(),
+                         static_cast<int>(table_list_query.size()),
+                         &raw_table_list_statement, nullptr) == SQLITE_OK) {
+    std::unique_ptr<sqlite3_stmt, StatementDeleter> statement{raw_table_list_statement};
+    std::set<std::string> table_names;
+    while (true) {
+      const auto step = sqlite3_step(statement.get());
+      if (step == SQLITE_DONE) {
+        return table_names;
+      }
+      if (step != SQLITE_ROW) {
+        break;
+      }
+
+      const auto* schema_text = sqlite3_column_text(statement.get(), 0);
+      const auto* name_text = sqlite3_column_text(statement.get(), 1);
+      const auto* type_text = sqlite3_column_text(statement.get(), 2);
+      if (schema_text == nullptr || name_text == nullptr || type_text == nullptr) {
+        continue;
+      }
+
+      const std::string schema = reinterpret_cast<const char*>(schema_text);
+      const std::string name = reinterpret_cast<const char*>(name_text);
+      const std::string type = reinterpret_cast<const char*>(type_text);
+      if (schema == "main" && (type == "table" || type == "virtual") &&
+          !starts_with(name, "sqlite_")) {
+        table_names.insert(name);
+      }
+    }
+  } else if (raw_table_list_statement != nullptr) {
+    sqlite3_finalize(raw_table_list_statement);
+  }
+
   constexpr std::string_view query =
       "SELECT name FROM sqlite_schema "
       "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
@@ -355,7 +395,7 @@ void validate_required_tables(ValidationReport& report,
 void validate_table_count(ValidationReport& report,
                           const ValidationCodeRegistry& registry,
                           const nlohmann::json& manifest,
-                          const std::set<std::string>& table_names) {
+                          const LogicalRowStreamSummary& stream) {
   const auto iterator = manifest.find("table_count");
   if (iterator == manifest.end() || !iterator->is_number_integer() ||
       iterator->get<std::int64_t>() < 0) {
@@ -363,11 +403,50 @@ void validate_table_count(ValidationReport& report,
   }
 
   const auto expected = static_cast<std::uint64_t>(iterator->get<std::int64_t>());
-  if (expected != table_names.size()) {
+  if (expected != stream.table_count) {
     add_finding(report,
                 make_finding(registry, kCodeIndexLogicalMismatch,
                              package_entry_path(kIndexManifestEntry),
-                             "table_count does not match the readable SQLite table count."));
+                             "table_count does not match the canonical logical row stream."));
+  }
+}
+
+void validate_row_count(ValidationReport& report,
+                        const ValidationCodeRegistry& registry,
+                        const nlohmann::json& manifest,
+                        const LogicalRowStreamSummary& stream) {
+  const auto iterator = manifest.find("row_count");
+  if (iterator == manifest.end() || !iterator->is_number_integer() ||
+      iterator->get<std::int64_t>() < 0) {
+    return;
+  }
+
+  const auto expected = static_cast<std::uint64_t>(iterator->get<std::int64_t>());
+  if (expected != stream.row_count) {
+    add_finding(report,
+                make_finding(registry, kCodeIndexLogicalMismatch,
+                             package_entry_path(kIndexManifestEntry),
+                             "row_count does not match the canonical logical row stream."));
+  }
+}
+
+void validate_logical_rows_blake3(ValidationReport& report,
+                                  const ValidationCodeRegistry& registry,
+                                  const nlohmann::json& manifest,
+                                  const LogicalRowStreamSummary& stream) {
+  const auto iterator = manifest.find("logical_rows_blake3");
+  if (iterator == manifest.end() || !iterator->is_string()) {
+    return;
+  }
+
+  const auto expected = iterator->get<std::string>();
+  if (expected != stream.blake3) {
+    add_finding(report,
+                make_finding(registry, kCodeIndexLogicalMismatch,
+                             package_entry_path(kIndexManifestEntry),
+                             "logical_rows_blake3 does not match the canonical SQLite "
+                             "logical row stream: expected " +
+                                 expected + ", actual " + stream.blake3 + "."));
   }
 }
 
@@ -393,7 +472,7 @@ std::optional<nlohmann::json> validate_index_manifest(
   }
 }
 
-std::optional<std::set<std::string>> validate_sqlite_index(
+std::optional<LogicalRowStreamSummary> validate_sqlite_index(
     ValidationReport& report,
     const ValidationCodeRegistry& registry,
     const std::filesystem::path& package_path,
@@ -410,7 +489,7 @@ std::optional<std::set<std::string>> validate_sqlite_index(
     auto database = open_read_only_database(sqlite_temp.path());
     auto table_names = read_user_table_names(*database);
     validate_required_tables(report, registry, table_names);
-    return table_names;
+    return compute_logical_row_stream_summary(*database, table_names);
   } catch (const std::exception& error) {
     add_finding(report, make_finding(registry, kCodeIndexSchemaInvalid,
                                      package_entry_path(kIndexSqliteEntry), error.what()));
@@ -427,9 +506,11 @@ void add_index_findings(ValidationReport& report,
                         const std::filesystem::path& schema_root) {
   const auto manifest =
       validate_index_manifest(report, registry, package_path, layout, schema_root);
-  const auto table_names = validate_sqlite_index(report, registry, package_path, layout);
-  if (manifest.has_value() && table_names.has_value()) {
-    validate_table_count(report, registry, manifest.value(), table_names.value());
+  const auto stream = validate_sqlite_index(report, registry, package_path, layout);
+  if (manifest.has_value() && stream.has_value()) {
+    validate_table_count(report, registry, manifest.value(), stream.value());
+    validate_row_count(report, registry, manifest.value(), stream.value());
+    validate_logical_rows_blake3(report, registry, manifest.value(), stream.value());
   }
 }
 
