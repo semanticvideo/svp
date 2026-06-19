@@ -31,6 +31,23 @@ class PackageLayoutResult {
   bool has_value_ = false;
 };
 
+class PackageEntryReadResult {
+ public:
+  [[nodiscard]] static PackageEntryReadResult success(std::string content);
+  [[nodiscard]] static PackageEntryReadResult failure(std::string message);
+
+  [[nodiscard]] bool has_value() const noexcept;
+  [[nodiscard]] const std::string& value() const;
+  [[nodiscard]] const std::string& error_message() const noexcept;
+
+ private:
+  std::string content_;
+  std::string error_message_;
+  bool has_value_ = false;
+};
+
 [[nodiscard]] PackageLayoutResult read_package_layout(const std::filesystem::path& path);
+[[nodiscard]] PackageEntryReadResult read_package_entry(const std::filesystem::path& path,
+                                                        const std::string& entry);
 
 }  // namespace svp::package

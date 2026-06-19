@@ -58,6 +58,9 @@ void add_temporary_validator_codes(ValidationCodeRegistry& registry) {
                               "A required schema asset could not be read."));
   registry.add(make_temp_code(kTempCodeSchemaInvalid, FindingSeverity::fatal,
                               "A required schema asset is malformed."));
+  registry.add(make_temp_code(
+      kTempCodeColorInvalidBucketRegistryVersion, FindingSeverity::error,
+      "A color observation uses an unsupported color bucket registry version."));
 }
 
 }  // namespace

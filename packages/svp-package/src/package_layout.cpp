@@ -4,7 +4,9 @@
 
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+#include <utility>
 
 namespace svp::package {
 namespace {
@@ -87,6 +89,34 @@ PackageLayoutResult PackageLayoutResult::failure(std::string message) {
   return result;
 }
 
+PackageEntryReadResult PackageEntryReadResult::success(std::string content) {
+  PackageEntryReadResult result;
+  result.content_ = std::move(content);
+  result.has_value_ = true;
+  return result;
+}
+
+PackageEntryReadResult PackageEntryReadResult::failure(std::string message) {
+  PackageEntryReadResult result;
+  result.error_message_ = std::move(message);
+  return result;
+}
+
+bool PackageEntryReadResult::has_value() const noexcept {
+  return has_value_;
+}
+
+const std::string& PackageEntryReadResult::value() const {
+  if (!has_value_) {
+    throw std::logic_error("package entry read result has no value");
+  }
+  return content_;
+}
+
+const std::string& PackageEntryReadResult::error_message() const noexcept {
+  return error_message_;
+}
+
 bool PackageLayoutResult::has_value() const noexcept {
   return has_value_;
 }
@@ -137,6 +167,53 @@ PackageLayoutResult read_package_layout(const std::filesystem::path& path) {
   }
 
   return PackageLayoutResult::success(std::move(layout));
+}
+
+PackageEntryReadResult read_package_entry(const std::filesystem::path& path,
+                                          const std::string& entry) {
+  int error_code = ZIP_ER_OK;
+  ZipArchive archive{zip_open(path.string().c_str(), ZIP_RDONLY, &error_code)};
+  if (!archive) {
+    return PackageEntryReadResult::failure(zip_error_message(error_code));
+  }
+
+  zip_stat_t stat;
+  zip_stat_init(&stat);
+  if (zip_stat(archive.get(), entry.c_str(), 0, &stat) != 0) {
+    return PackageEntryReadResult::failure(zip_strerror(archive.get()));
+  }
+
+  if ((stat.valid & ZIP_STAT_SIZE) == 0) {
+    return PackageEntryReadResult::failure("ZIP entry size is unavailable");
+  }
+
+  std::unique_ptr<zip_file_t, decltype(&zip_fclose)> file{
+      zip_fopen(archive.get(), entry.c_str(), 0), zip_fclose};
+  if (!file) {
+    return PackageEntryReadResult::failure(zip_strerror(archive.get()));
+  }
+
+  std::string content;
+  content.resize(static_cast<std::size_t>(stat.size));
+
+  std::size_t offset = 0;
+  while (offset < content.size()) {
+    const auto bytes_read =
+        zip_fread(file.get(), content.data() + offset, content.size() - offset);
+    if (bytes_read < 0) {
+      return PackageEntryReadResult::failure(zip_file_strerror(file.get()));
+    }
+    if (bytes_read == 0) {
+      break;
+    }
+    offset += static_cast<std::size_t>(bytes_read);
+  }
+
+  if (offset != content.size()) {
+    return PackageEntryReadResult::failure("ZIP entry ended before declared size");
+  }
+
+  return PackageEntryReadResult::success(std::move(content));
 }
 
 }  // namespace svp::package

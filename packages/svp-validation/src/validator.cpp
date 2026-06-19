@@ -6,7 +6,10 @@
 #include "svp/package/package_probe.hpp"
 #include "svp/validation/code_registry.hpp"
 
+#include "color_record_validation.hpp"
+#include "ocr_color_spec.hpp"
 #include "spec_assets.hpp"
+#include "text_record_validation.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -262,6 +265,29 @@ ValidationReport validate_package(const std::filesystem::path& package_path,
   }
 
   add_layout_findings(report, registry, layout_result.value());
+
+  try {
+    const auto registry_root = registry_root_for(options);
+    const auto schema_root = schema_root_for(options, registry_root);
+    const auto ocr_color_spec = load_ocr_color_spec(registry_root, schema_root);
+    add_text_record_findings(report, registry, probe.path, layout_result.value(),
+                             ocr_color_spec);
+    add_color_record_findings(report, registry, probe.path, layout_result.value(),
+                              ocr_color_spec);
+  } catch (const nlohmann::json::exception& error) {
+    const auto registry_root = registry_root_for(options);
+    add_finding(report, make_finding(registry, kTempCodeRegistryInvalid,
+                                     registry_root.string(), error.what()));
+    mark_unreadable(report);
+    return report;
+  } catch (const std::exception& error) {
+    const auto registry_root = registry_root_for(options);
+    add_finding(report, make_finding(registry, kTempCodeRegistryUnreadable,
+                                     registry_root.string(), error.what()));
+    mark_unreadable(report);
+    return report;
+  }
+
   recompute_status(report);
   return report;
 }

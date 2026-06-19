@@ -15,6 +15,33 @@ inline constexpr std::string_view kCodeUnknownRootSection = "ERR_CORE_UNKNOWN_RO
 inline constexpr std::string_view kCodePathTraversal = "ERR_CORE_PATH_TRAVERSAL";
 inline constexpr std::string_view kCodeMissingTextSection = "ERR_CORE_MISSING_TEXT_SECTION";
 inline constexpr std::string_view kCodeMissingColorSection = "ERR_CORE_MISSING_COLOR_SECTION";
+inline constexpr std::string_view kCodeTextInvalidRegionRecord =
+    "ERR_TEXT_INVALID_REGION_RECORD";
+inline constexpr std::string_view kCodeTextInvalidObservationRecord =
+    "ERR_TEXT_INVALID_OBSERVATION_RECORD";
+inline constexpr std::string_view kCodeTextInvalidBoundingBox =
+    "ERR_TEXT_INVALID_BOUNDING_BOX";
+inline constexpr std::string_view kCodeTextInvalidTiming = "ERR_TEXT_INVALID_TIMING";
+inline constexpr std::string_view kCodeTextInvalidReference = "ERR_TEXT_INVALID_REFERENCE";
+inline constexpr std::string_view kCodeTextInvalidConfidence =
+    "ERR_TEXT_INVALID_CONFIDENCE";
+inline constexpr std::string_view kCodeTextInvalidNormalizedText =
+    "ERR_TEXT_INVALID_NORMALIZED_TEXT";
+inline constexpr std::string_view kCodeTextInvalidNumericExtraction =
+    "ERR_TEXT_INVALID_NUMERIC_EXTRACTION";
+inline constexpr std::string_view kCodeColorInvalidObservationRecord =
+    "ERR_COLOR_INVALID_OBSERVATION_RECORD";
+inline constexpr std::string_view kCodeColorInvalidBucketId = "ERR_COLOR_INVALID_BUCKET_ID";
+inline constexpr std::string_view kCodeColorInvalidColorSpace =
+    "ERR_COLOR_INVALID_COLOR_SPACE";
+inline constexpr std::string_view kCodeColorInvalidPercentageTotal =
+    "ERR_COLOR_INVALID_PERCENTAGE_TOTAL";
+inline constexpr std::string_view kCodeColorInvalidPercentageBounds =
+    "ERR_COLOR_INVALID_PERCENTAGE_BOUNDS";
+inline constexpr std::string_view kCodeColorInvalidDominantBucket =
+    "ERR_COLOR_INVALID_DOMINANT_BUCKET";
+inline constexpr std::string_view kCodeColorInvalidSamplingBasis =
+    "ERR_COLOR_INVALID_SAMPLING_BASIS";
 
 inline constexpr std::string_view kTempCodeInputMissing = "X_VALIDATOR_INPUT_MISSING";
 inline constexpr std::string_view kTempCodeInputNotRegularFile = "X_VALIDATOR_INPUT_NOT_REGULAR_FILE";
@@ -24,6 +51,8 @@ inline constexpr std::string_view kTempCodeRegistryUnreadable = "X_VALIDATOR_REG
 inline constexpr std::string_view kTempCodeRegistryInvalid = "X_VALIDATOR_REGISTRY_INVALID";
 inline constexpr std::string_view kTempCodeSchemaUnreadable = "X_VALIDATOR_SCHEMA_UNREADABLE";
 inline constexpr std::string_view kTempCodeSchemaInvalid = "X_VALIDATOR_SCHEMA_INVALID";
+inline constexpr std::string_view kTempCodeColorInvalidBucketRegistryVersion =
+    "X_VALIDATOR_COLOR_INVALID_BUCKET_REGISTRY_VERSION";
 
 struct ValidationCode {
   std::string code;
