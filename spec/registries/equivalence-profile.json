@@ -1,0 +1,42 @@
+{
+  "schema_version": "svp-equivalence-profile-1",
+  "svp_version": "1.0-rc.1",
+  "status_values": [
+    "byte_identical",
+    "structurally_equivalent",
+    "numerically_equivalent",
+    "not_equivalent"
+  ],
+  "rules": {
+    "original_media": "exact_blake3",
+    "lossless_audio": "exact_blake3",
+    "canonical_json_jsonl": "exact_canonicalized_blake3",
+    "sqlite_index": "source_layer_aware_logical_reproducibility",
+    "ids_references": "exact_string_match",
+    "shot_boundaries": "exact_frame_index_match",
+    "scene_boundaries": "exact_shot_ids_and_integer_time_ranges",
+    "depth_maps": {
+      "mean_absolute_error_max": 0.002,
+      "p99_absolute_error_max": 0.01,
+      "spearman_rank_correlation_min": 0.995
+    },
+    "embeddings": {
+      "cosine_similarity_min": 0.999
+    },
+    "masks": {
+      "iou_min": 0.995,
+      "p95_boundary_displacement_px_max": 1.0
+    },
+    "entity_tracks": {
+      "bbox_iou_min": 0.995,
+      "centroid_displacement_px_max": 1.0
+    },
+    "kalman_coordinates": {
+      "absolute_error_px_max": 1.0
+    },
+    "confidence_fields": {
+      "absolute_difference_max": 0.001
+    }
+  },
+  "hash_rule": "BLAKE3 hashes are exact. Hash mismatches may be allowed only when the hash column references a tolerance-governed source payload that passes its source-layer equivalence rule."
+}

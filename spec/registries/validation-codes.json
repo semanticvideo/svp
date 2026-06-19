@@ -1,0 +1,277 @@
+{
+  "schema_version": "svp-validation-codes-1",
+  "svp_version": "1.0-rc.1",
+  "status_computation": "Core status and default validator exit code are computed only from entries whose affects_core_status is true.",
+  "codes": [
+    {
+      "code": "ERR_CORE_MISSING_MANIFEST",
+      "severity": "fatal",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "18.2",
+      "description": "manifest.json is absent or unreadable.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_MISSING_SECTION",
+      "severity": "fatal",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23",
+      "description": "A required core section is absent.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_UNKNOWN_ROOT_SECTION",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "6",
+      "description": "A root-level section other than allowed core sections or /labels exists.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_MISSING_TRANSCRIPT",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "11",
+      "description": "Transcript files are missing or invalid.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_WORD_MISSING_SPEAKER",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "11.3",
+      "description": "A word record lacks exactly one primary speaker_id when word_count is nonzero.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_TIMESTAMP_NONCANONICAL",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "7",
+      "description": "A stored timestamp does not match exact-rational round-half-to-even derivation.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_RASTER_EXTENT_MISMATCH",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "12.1",
+      "description": "Mask or depth extents do not match the package canonical analysis raster.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_MISSING_DEPTH",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "14.4",
+      "description": "Required depth index or block stream is missing.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_MISSING_MASKS",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "14.3",
+      "description": "Required mask index or block stream is missing.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_INVALID_BLOCK_HEADER",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "14.5",
+      "description": "An SVP binary block header is malformed or unsupported.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_INVALID_BLOCK_HASH",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "14.5",
+      "description": "A block payload, header, or block hash does not verify.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_FORBIDDEN_BLOCK_TYPE",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "14.5",
+      "description": "A reserved, experimental, sentinel, or unknown block type appears in a strict v1.0 package.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_INDEX_SCHEMA_INVALID",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "17",
+      "description": "index.sqlite does not contain the required schema.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_INDEX_MANIFEST_INVALID",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "17.6",
+      "description": "index/index_manifest.json is missing, malformed, missing a required field, or fails schema validation.",
+      "introduced": "1.0-rc.1"
+    },
+    {
+      "code": "ERR_CORE_INDEX_LOGICAL_MISMATCH",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "17.5",
+      "description": "SQLite single-package logical integrity failed, or exact-governed SQLite values failed during equivalence validation.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_HASH_MISMATCH",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "5.15",
+      "description": "A required BLAKE3 digest does not match.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_PATH_TRAVERSAL",
+      "severity": "fatal",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "24",
+      "description": "A ZIP entry path escapes the package root or is not normalized.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_SIGNATURE_MISMATCH",
+      "severity": "error",
+      "report_bucket": "authenticity",
+      "affects_core_status": false,
+      "status_effect": "authenticity_failed",
+      "section": "18.2",
+      "description": "A provided .svpsig sidecar does not verify against the finalized .svp bytes.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_SIGNATURE_UNREADABLE",
+      "severity": "error",
+      "report_bucket": "authenticity",
+      "affects_core_status": false,
+      "status_effect": "authenticity_unreadable",
+      "section": "18.2",
+      "description": "A provided .svpsig sidecar cannot be parsed or uses unsupported required fields.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "WARN_UNSUPPORTED_LABEL_SCHEMA",
+      "severity": "warning",
+      "report_bucket": "warnings",
+      "affects_core_status": true,
+      "status_effect": "valid_with_warnings",
+      "section": "19.1",
+      "description": "/labels contains a future schema version the reader or validator does not support.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "WARN_CACHE_DISABLED",
+      "severity": "warning",
+      "report_bucket": "warnings",
+      "affects_core_status": true,
+      "status_effect": "valid_with_warnings",
+      "section": "20.3",
+      "description": "The builder could not use the global cache and fell back to direct compute.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "WARN_JOURNAL_RETAINED_DIAGNOSTIC",
+      "severity": "warning",
+      "report_bucket": "warnings",
+      "affects_core_status": true,
+      "status_effect": "valid_with_warnings",
+      "section": "20.5",
+      "description": "The journal was retained because the user explicitly requested diagnostic retention.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "WARN_SIGNATURE_UNTRUSTED",
+      "severity": "warning",
+      "report_bucket": "authenticity",
+      "affects_core_status": false,
+      "status_effect": "authenticity_untrusted",
+      "section": "18.2",
+      "description": "A signature cryptographically verifies but trust could not be established.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "WARN_SIGNATURE_NOT_PROVIDED",
+      "severity": "warning",
+      "report_bucket": "authenticity",
+      "affects_core_status": false,
+      "status_effect": "signature_missing",
+      "section": "18.2",
+      "description": "No .svpsig was provided when authenticity verification was requested.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "INFO_DEGENERATE_VISUAL_SOURCE",
+      "severity": "info",
+      "report_bucket": "infos",
+      "affects_core_status": true,
+      "status_effect": "valid",
+      "section": "13.4",
+      "description": "Empty entity tracks or near-uniform depth are valid for a documented degenerate visual source.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "INFO_SQLITE_HASH_MISMATCH_ALLOWED_BY_SOURCE_LAYER_EQUIVALENCE",
+      "severity": "info",
+      "report_bucket": "infos",
+      "affects_core_status": true,
+      "status_effect": "numerically_equivalent",
+      "section": "17.5",
+      "description": "A SQLite BLAKE3 hash column differed during equivalence comparison, but the referenced tolerance-governed payload passed its source-layer numerical equivalence rule.",
+      "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "INFO_SIGNATURE_VERIFIED",
+      "severity": "info",
+      "report_bucket": "authenticity",
+      "affects_core_status": false,
+      "status_effect": "signature_verified",
+      "section": "18.2",
+      "description": "A provided .svpsig verified against the exact finalized .svp byte stream.",
+      "introduced": "1.0-draft.0.6"
+    }
+  ]
+}

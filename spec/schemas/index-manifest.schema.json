@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp.dev/schemas/index-manifest.schema.json",
+  "title": "SVP Index Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "index_schema_version",
+    "sqlite_file",
+    "sqlite_file_blake3",
+    "logical_row_stream_version",
+    "logical_rows_blake3",
+    "table_count",
+    "row_count",
+    "created_from"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "svp-index-manifest-v1"
+    },
+    "index_schema_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sqlite_file": {
+      "const": "index/index.sqlite"
+    },
+    "sqlite_file_blake3": {
+      "type": "string",
+      "pattern": "^blake3:[0-9a-f]{64}$"
+    },
+    "logical_row_stream_version": {
+      "const": "svp-logical-row-stream-v1"
+    },
+    "logical_rows_blake3": {
+      "type": "string",
+      "pattern": "^blake3:[0-9a-f]{64}$"
+    },
+    "table_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "row_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "created_from": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^blake3:[0-9a-f]{64}$"
+      },
+      "required": [
+        "manifest_blake3",
+        "binary_blocks_manifest_blake3",
+        "embedding_sets_blake3"
+      ],
+      "properties": {
+        "manifest_blake3": {
+          "type": "string",
+          "pattern": "^blake3:[0-9a-f]{64}$"
+        },
+        "binary_blocks_manifest_blake3": {
+          "type": "string",
+          "pattern": "^blake3:[0-9a-f]{64}$"
+        },
+        "embedding_sets_blake3": {
+          "type": "string",
+          "pattern": "^blake3:[0-9a-f]{64}$"
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "svp-index-manifest-v1",
+      "index_schema_version": "svp-index-v1",
+      "sqlite_file": "index/index.sqlite",
+      "sqlite_file_blake3": "blake3:0000000000000000000000000000000000000000000000000000000000000000",
+      "logical_row_stream_version": "svp-logical-row-stream-v1",
+      "logical_rows_blake3": "blake3:1111111111111111111111111111111111111111111111111111111111111111",
+      "table_count": 12,
+      "row_count": 184233,
+      "created_from": {
+        "manifest_blake3": "blake3:2222222222222222222222222222222222222222222222222222222222222222",
+        "binary_blocks_manifest_blake3": "blake3:3333333333333333333333333333333333333333333333333333333333333333",
+        "embedding_sets_blake3": "blake3:4444444444444444444444444444444444444444444444444444444444444444"
+      }
+    }
+  ]
+}

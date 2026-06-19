@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp.dev/schemas/v1/model-bundle.schema.json",
+  "title": "SVP Model Bundle Manifest v1 RC1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_bundle_id",
+    "model_id",
+    "model_version",
+    "bundle_blake3",
+    "runtime",
+    "format",
+    "license",
+    "supported_execution_providers",
+    "files",
+    "input_contract",
+    "output_contract",
+    "preprocessor_contract",
+    "postprocessor_contract"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "svp-model-bundle-1"
+    },
+    "model_bundle_id": {
+      "type": "string",
+      "pattern": "^model_[a-z0-9_]+@[^+]+\\+blake3_[0-9a-f]{12}$"
+    },
+    "model_id": {
+      "type": "string",
+      "pattern": "^model_[a-z0-9_]+$"
+    },
+    "model_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "bundle_blake3": {
+      "type": "string",
+      "pattern": "^blake3:[0-9a-f]{64}$"
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "source_registry": {
+      "type": "string"
+    },
+    "source_slug": {
+      "type": "string"
+    },
+    "source_revision": {
+      "type": "string"
+    },
+    "runtime": {
+      "type": "string",
+      "enum": [
+        "onnxruntime",
+        "whisper.cpp",
+        "native"
+      ]
+    },
+    "format": {
+      "type": "string",
+      "enum": [
+        "onnx",
+        "ort",
+        "gguf",
+        "native"
+      ]
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1
+    },
+    "supported_execution_providers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "cpu",
+          "coreml",
+          "cuda",
+          "directml",
+          "winml"
+        ]
+      }
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "role",
+          "blake3"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1
+          },
+          "blake3": {
+            "type": "string",
+            "pattern": "^blake3:[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "input_contract": {
+      "type": "object"
+    },
+    "output_contract": {
+      "type": "object"
+    },
+    "preprocessor_contract": {
+      "type": "object"
+    },
+    "postprocessor_contract": {
+      "type": "object"
+    }
+  }
+}

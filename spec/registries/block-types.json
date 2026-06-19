@@ -1,0 +1,72 @@
+{
+  "schema_version": "svp-block-types-1",
+  "svp_version": "1.0-rc.1",
+  "block_types": [
+    {
+      "value": "0x00",
+      "name": "Invalid",
+      "strict_v1_behavior": "forbidden"
+    },
+    {
+      "value": "0x01",
+      "name": "Depth tensor",
+      "strict_v1_behavior": "required_for_depth_blocks"
+    },
+    {
+      "value": "0x02",
+      "name": "Mask tensor",
+      "strict_v1_behavior": "required_for_mask_blocks"
+    },
+    {
+      "value": "0x03",
+      "name": "Embedding tensor",
+      "strict_v1_behavior": "required_for_embedding_blocks"
+    },
+    {
+      "value": "0x04",
+      "name": "Audio feature tensor",
+      "strict_v1_behavior": "reserved_future_forbidden_in_v1"
+    },
+    {
+      "value": "0x05-0x7F",
+      "name": "Future SVP core block types",
+      "strict_v1_behavior": "reserved_future_forbidden_in_v1"
+    },
+    {
+      "value": "0x80-0xFE",
+      "name": "Implementation-private experimental",
+      "strict_v1_behavior": "forbidden_in_core"
+    },
+    {
+      "value": "0xFF",
+      "name": "Sentinel",
+      "strict_v1_behavior": "forbidden_as_persisted_block_type"
+    }
+  ],
+  "dtype_enum": [
+    {
+      "value": 1,
+      "name": "uint8"
+    },
+    {
+      "value": 2,
+      "name": "uint16"
+    },
+    {
+      "value": 3,
+      "name": "float16"
+    },
+    {
+      "value": 4,
+      "name": "float32"
+    },
+    {
+      "value": 5,
+      "name": "bitpacked_lsb_first"
+    },
+    {
+      "value": 6,
+      "name": "svp-rle-v1"
+    }
+  ]
+}

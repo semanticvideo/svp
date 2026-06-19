@@ -1,0 +1,904 @@
+--- SVP_Standard_Draft_v0_6.md
++++ SVP_v1_0_RC1.md
+@@ -1,8 +1,8 @@
+-# Semantic Video Package (SVP) v1.0 Draft 0.6
++# Semantic Video Package (SVP) v1.0 Release Candidate 1
+ 
+ **A strict open standard for storing machine-readable observations of time-based media**
+ 
+-**Status:** Draft 0.6  
++**Status:** Release Candidate 1, derived from final external review pass  
+ **Date:** 2026-06-19  
+ **Editor:** SVP Working Draft  
+ **Specification license:** CC0-1.0  
+@@ -22,6 +22,7 @@
+ | 0.4 | 2026-06-18 | Resolves canonical raster policy for non-16:9 media, defines logical SQLite equivalence, adds cache and journal lifecycle rules, reserves binary block type codes, replaces transcript language strings with a stable language object, and standardizes machine-readable validation reports and codes. |
+ | 0.5 | 2026-06-19 | Resolves the SQLite equivalence contradiction for tolerance-governed payloads and vectors, requires even canonical raster dimensions, and expands cross-platform fixture testing to verify payload and SQLite equivalence together. |
+ | 0.6 | 2026-06-19 | Defines exact rational timestamp rounding, adds optional detached `.svpsig` authenticity sidecars, requires a machine-readable validation-code registry, requires per-layer equivalence metrics, keeps word-level language out of v1.0 Core, and defines native SVP Model Bundles for reference model distribution without Python runtime requirements. |
++| RC1 | 2026-06-19 | Resolves final release-candidate blockers: defines `index/index_manifest.json`, separates authenticity findings from Core status and exit codes, unifies canonical model IDs, expands the model-bundle manifest contract, and adds `index-manifest.schema.json`. |
+ 
+ ## Normative artifacts for v1.0
+ 
+@@ -43,32 +44,30 @@
+ /docs/
+ ```
+ 
+-This document is the seed for `/spec/svp-v1.md`.
+-
+-`/spec/validation-codes.json`, `/spec/equivalence-profile.json`, `/spec/block-types.json`, `/spec/svp-model-bundle-v1.md`, and `/spec/svp-signature-v1.md` are normative machine-readable companions to this document. If a registry file and the prose conflict, the release is defective and MUST be corrected before a final v1.0 tag.
+-
+-## Draft 0.6 change summary
+-
+-Draft 0.6 is additive and clarifying. It does not weaken SVP Core, remove any required core section, remove any required field, or relax any conformance class.
+-
+-Draft 0.6 makes six focused corrections:
+-
+-1. It defines exact rational timestamp derivation. Builders MUST use integer rational arithmetic and deterministic round-half-to-even when converting source presentation timestamps to integer microseconds. Floating-point math is forbidden for canonical `pts_us` derivation.
+-2. It defines optional detached `.svpsig` sidecars for package authenticity without mutating finalized `.svp` bytes. Signature verification is an authenticity result, not a Core conformance requirement.
+-3. It requires `/spec/validation-codes.json` as a normative machine-readable registry for standard `ERR_`, `WARN_`, and `INFO_` validation codes.
+-4. It requires per-layer equivalence metrics when `svp validate --equivalent` is run, so `numerically_equivalent` reports identify the layer, metric, measured delta, and threshold.
+-5. It keeps word-level language spans out of SVP v1.0 Core. The document-level language object remains the v1.0 mechanism for mixed, undetermined, and no-linguistic-content cases.
+-6. It defines SVP Model Bundles for reference model distribution. The reference builder MUST use pinned, signed, content-addressed model bundles and MUST NOT require a Python runtime for normal end-user operation.
++This document is the release-candidate seed for `/spec/svp-v1.md`.
++
++`/spec/validation-codes.json`, `/spec/equivalence-profile.json`, `/spec/block-types.json`, `/spec/svp-model-bundle-v1.md`, and `/spec/svp-signature-v1.md` are normative machine-readable companions to this document. `index-manifest.schema.json` is required in `/schemas`. If a registry file, schema file, and the prose conflict, the release is defective and MUST be corrected before a final v1.0 tag.
++
++## RC1 change summary
++
++RC1 is a release-candidate clarification pass. It does not weaken SVP Core, remove any required core section, remove any required field, or relax any conformance class.
++
++RC1 makes four focused corrections:
++
++1. It defines the required `index/index_manifest.json` file, including its required fields, its relationship to the Section 17.5 logical row-stream procedure, and the required `index-manifest.schema.json` schema artifact.
++2. It separates authenticity findings from Core validation status. Signature mismatch and unreadable-signature findings affect `authenticity_status` and the `authenticity[]` report bucket, but they MUST NOT by themselves make a structurally valid SVP Core package invalid or cause the default validator exit code to be non-zero.
++3. It unifies model identity. All normative cache keys, embedding sets, provenance references, bundle manifests, model locks, and equivalence procedures MUST use canonical SVP-native `model_` IDs. Registry slugs are source metadata only.
++4. It expands the SVP Model Bundle manifest example so it contains every required contract field, defines `model_bundle_id`, and defines the authority relationship between `model.svpmodel.json` and `model-lock.json`.
+ 
+ The core principle is unchanged:
+ 
+ ```text
+ SVP Core is strict.
+ Labels are interpretation.
+-Time is rational before it becomes microseconds.
+-Authenticity is optional sidecar metadata, not Core validity.
+-Validation vocabulary must be executable.
+-Reference models must install like tools, not like a haunted Python attic.
++Model identity is canonical inside SVP.
++Authenticity is reported separately from Core validity.
++Required files must have schemas.
++A validator must be able to implement the spec without guessing.
+ ```
+ 
+ ## 1. Executive summary
+@@ -381,7 +380,7 @@
+ 
+ SVP v1.0 requires embeddings. The reference processor uses Nomic text and vision embeddings because they are open, local, Apache-2.0, 768-dimensional, and designed to share a text and vision latent space.
+ 
+-Embeddings are stored as normalized float32 vectors. All embedding records MUST include `model_id`, `model_blake3`, `dim`, `normalization`, and `input_ref`.
++Embeddings are stored as normalized float32 vectors. All embedding records MUST include `model_id`, `model_bundle_id`, `model_blake3`, `dim`, `normalization`, and `input_ref`.
+ 
+ The reference model set MUST pin the exact model revision, exact files, BLAKE3 hashes, license text, preprocessing contract, postprocessing contract, and output dimensionality. The builder MUST NOT fetch a moving `latest` model during a build.
+ 
+@@ -404,7 +403,7 @@
+ 
+ #### 5.11.1 Reference Model Bundles
+ 
+-Draft 0.6 defines the **SVP Model Bundle** as the required distribution unit for models used by the reference builder. The goal is simple: developers should not need to create local Python environments, run arbitrary Hugging Face code, chase transitive package versions, or manually place weights in hidden folders merely to build an SVP package.
++RC1 defines the **SVP Model Bundle** as the required distribution unit for models used by the reference builder. The goal is simple: developers should not need to create local Python environments, run arbitrary model-provider code, chase transitive package versions, or manually place weights in hidden folders merely to build an SVP package.
+ 
+ A reference model bundle uses extension `.svpmodel` and is a ZIP64 package with this required layout:
+ 
+@@ -424,45 +423,152 @@
+ 
+ Only files actually required by a bundle need to exist, but `model.svpmodel.json`, `model-lock.json`, `LICENSE`, and `NOTICE` MUST exist.
+ 
+-A model bundle manifest MUST include:
++#### 5.11.1.1 Canonical model identity
++
++All normative SVP model references use canonical SVP-native model IDs with the `model_` prefix defined in Section 8.
++
++Examples:
++
++```text
++model_depth_anything_v2_small
++model_whisper_large_v3_turbo_q5_0
++model_nomic_embed_text_v1_5
++model_nomic_embed_vision_v1_5
++```
++
++The following fields MUST use canonical SVP model IDs:
++
++```text
++model.svpmodel.json.model_id
++model-lock.json model references
++embedding_sets.json.model_id
++provenance/model_hashes.jsonl.id
++provenance/processors.jsonl.model_refs[]
++DAG task model_refs[]
++cache-key model_id inputs
++validation and equivalence model identity fields
++```
++
++Registry slugs such as `nomic-ai/nomic-embed-text-v1.5`, repository names, download URLs, and provider-specific identifiers MAY be recorded only as source metadata. They MUST NOT be used as normative model IDs, cache-key model IDs, provenance references, or embedding-set IDs.
++
++#### 5.11.1.2 Model bundle ID
++
++A model bundle ID identifies one exact packaged model distribution, not just a model family. It is derived from the canonical model ID, model version, and the BLAKE3 of the canonical model bundle manifest plus referenced file hashes.
++
++The required form is:
++
++```text
++<model_id>@<model_version>+blake3_<first_12_hex_of_bundle_blake3>
++```
++
++Example:
++
++```text
++model_depth_anything_v2_small@2024-06-13+blake3_8f4c21aa93d0
++```
++
++The `bundle_blake3` field stores the full 64-character BLAKE3 digest. The shortened suffix in `model_bundle_id` is an identifier convenience and MUST NOT replace full hash verification.
++
++#### 5.11.1.3 Required model manifest example
++
++A model bundle manifest MUST include every field shown below unless a field is explicitly marked optional by the `model-bundle.schema.json` schema.
+ 
+ ```json
+ {
+-  "schema_version": "svp-model-bundle-1",
+-  "model_id": "depth-anything-v2-small",
+-  "model_version": "2024-06-13-pinned",
++  "schema_version": "svp-model-bundle-v1",
++  "model_bundle_id": "model_depth_anything_v2_small@2024-06-13+blake3_8f4c21aa93d0",
++  "model_id": "model_depth_anything_v2_small",
++  "model_version": "2024-06-13",
++  "bundle_blake3": "blake3:8f4c21aa93d0...",
++  "display_name": "Depth Anything V2 Small",
++  "source_registry": "github",
++  "source_slug": "DepthAnything/Depth-Anything-V2",
++  "source_revision": "2024-06-13-pinned",
+   "runtime": "onnxruntime",
+   "format": "onnx",
+   "license": "Apache-2.0",
++  "supported_execution_providers": [
++    "cpu",
++    "coreml",
++    "cuda",
++    "directml"
++  ],
+   "files": [
+     {
+       "path": "files/model.onnx",
+-      "blake3": "..."
++      "role": "weights",
++      "blake3": "blake3:..."
++    },
++    {
++      "path": "files/preprocessor.json",
++      "role": "preprocessor_contract",
++      "blake3": "blake3:..."
++    },
++    {
++      "path": "files/postprocessor.json",
++      "role": "postprocessor_contract",
++      "blake3": "blake3:..."
++    },
++    {
++      "path": "LICENSE",
++      "role": "license",
++      "blake3": "blake3:..."
++    },
++    {
++      "path": "NOTICE",
++      "role": "notice",
++      "blake3": "blake3:..."
+     }
+   ],
+   "input_contract": {
+     "canonical_raster_required": true,
++    "input_space": "canonical_analysis_raster",
++    "color_space": "rgb",
+     "dtype": "float32",
+     "layout": "NCHW"
+   },
+   "output_contract": {
+     "type": "depth",
+     "dtype": "float32",
+-    "shape": ["1", "1", "H", "W"]
++    "shape": ["1", "1", "H", "W"],
++    "canonical_output_extent": "canonical_analysis_raster"
++  },
++  "preprocessor_contract": {
++    "resize": "already_canonical_analysis_raster",
++    "color_order": "rgb",
++    "layout": "NCHW",
++    "normalization": {
++      "mean": [0.485, 0.456, 0.406],
++      "std": [0.229, 0.224, 0.225]
++    }
++  },
++  "postprocessor_contract": {
++    "output_type": "relative_depth",
++    "normalization": "svp_depth_v1_per_frame_normalized",
++    "dtype": "float32",
++    "extent": "canonical_analysis_raster"
+   }
+ }
+ ```
++
++#### 5.11.1.4 Model lock authority
++
++`model.svpmodel.json` is authoritative for the contents, identity, contracts, license, notice, and file hashes of a single model bundle.
++
++`model-lock.json` is authoritative for the selected reference model set used by a builder release or build invocation. It records which exact model bundles are selected together.
++
++If `model-lock.json` and any referenced `model.svpmodel.json` disagree on `model_id`, `model_version`, `model_bundle_id`, `bundle_blake3`, file paths, file roles, or file BLAKE3 values, the builder MUST reject the model set before processing media.
+ 
+ Reference Model Bundle rules:
+ 
+ 1. The reference builder MUST support installing, verifying, and using pinned `.svpmodel` bundles.
+ 2. The reference builder MUST NOT require Python for normal end-user operation.
+ 3. The reference builder MUST NOT execute remote model code during normal operation.
+-4. Every model file MUST be content-addressed with BLAKE3 in `model-lock.json`.
++4. Every model file MUST be content-addressed with BLAKE3 in `model.svpmodel.json` and `model-lock.json`.
+ 5. Every model bundle MUST include complete license and notice files.
+ 6. Every model bundle MUST declare runtime, format, input contract, output contract, preprocessor contract, postprocessor contract, and supported execution providers.
+ 7. The builder MUST verify bundle hashes before use.
+-8. The builder MUST record the model bundle ID, bundle BLAKE3, individual file BLAKE3 values, runtime, and execution provider in provenance.
++8. The builder MUST record `model_bundle_id`, `bundle_blake3`, individual file BLAKE3 values, runtime, execution provider, and canonical `model_id` in provenance.
+ 9. The builder MUST NOT auto-update a bundle during a build.
+ 10. Offline installers MAY include the complete required reference model set.
+ 
+@@ -484,7 +590,7 @@
+ 
+ 1. `mimetype` MUST use ZIP method `STORE`.
+ 2. `spatial/*.svpdz`, `spatial/*.svpmz`, and `embeddings/*.svpez` MUST use ZIP method `STORE`.
+-3. The SVP binary block payload inside those files MUST use the compression declared in the SVP block header. Draft 0.6 defines Zstandard as compression code `0x01`.
++3. The SVP binary block payload inside those files MUST use the compression declared in the SVP block header. RC1 defines Zstandard as compression code `0x01`.
+ 4. JSON, JSONL, and manifest entries MAY use ordinary ZIP compression.
+ 5. `index/index.sqlite` SHOULD use ZIP method `STORE` so readers can extract or memory-map it without redundant decompression.
+ 6. A file whose bytes begin with the SVP binary block magic `SVPB` MUST NOT use a `.zst` extension.
+@@ -527,7 +633,7 @@
+ 
+ **Choice:** BLAKE3, 256-bit digest, lowercase hexadecimal encoding.
+ 
+-All SVP-native integrity hashes, cache keys, block hashes, package hashes, artifact hashes, model-bundle hashes, detached-signature package hashes, and processor output hashes MUST use BLAKE3. The canonical field name is `blake3`. Draft 0.6 continues to avoid mixing `sha256` into core records.
++All SVP-native integrity hashes, cache keys, block hashes, package hashes, artifact hashes, model-bundle hashes, detached-signature package hashes, and processor output hashes MUST use BLAKE3. The canonical field name is `blake3`. RC1 continues to avoid mixing `sha256` into core records.
+ 
+ External ecosystems sometimes publish SHA-256 checksums for model weights or source downloads. SVP MAY record those values under `alternate_hashes`, but they are not normative for SVP integrity.
+ 
+@@ -551,7 +657,7 @@
+ 
+ #### 5.16.1 Equivalent package contents
+ 
+-Draft 0.6 defines **equivalent package contents** because bit-exact equality is not realistic for every derived observation across threads, CPUs, GPUs, accelerators, math libraries, and ONNX Execution Providers.
++RC1 defines **equivalent package contents** because bit-exact equality is not realistic for every derived observation across threads, CPUs, GPUs, accelerators, math libraries, and ONNX Execution Providers.
+ 
+ Two packages are eligible for equivalence comparison only when they are produced from the same canonical source media, the same SVP schema version, the same processor contracts, the same model artifacts, the same processor parameters, and the same normalized inputs. A package produced by a different processor contract, a different model artifact, a different transcript output, or different source media is not equivalent merely because it looks similar.
+ 
+@@ -583,7 +689,7 @@
+ 
+ For logical data equivalence, physical storage details that do not affect query results are ignored. SQLite page size, free lists, insertion history, vacuum state, journal history, rowid allocation side effects, and byte order of unrelated internal pages are not package-equivalence facts. The normative comparison input is the SVP canonical logical comparison procedure defined in Section 17.5.
+ 
+-Draft 0.6 adds one additional rule: the SQLite equivalence path MUST preserve the same equivalence class as the source value represented by each SQLite column. Exact-match source values remain exact-match inside SQLite. Tolerance-governed source values remain tolerance-governed inside SQLite. A validator MUST NOT accidentally convert a numerically equivalent depth, mask, embedding, or floating-point observation into `not_equivalent` merely because an index table stores a hash or vector derived from that observation.
++RC1 adds one additional rule: the SQLite equivalence path MUST preserve the same equivalence class as the source value represented by each SQLite column. Exact-match source values remain exact-match inside SQLite. Tolerance-governed source values remain tolerance-governed inside SQLite. A validator MUST NOT accidentally convert a numerically equivalent depth, mask, embedding, or floating-point observation into `not_equivalent` merely because an index table stores a hash or vector derived from that observation.
+ 
+ For numerical observation equivalence, the package structure, IDs, references, time ranges, frame ranges, dimensions, dtype declarations, provenance references, and record counts MUST match exactly. The numeric payloads then MUST satisfy the Default Equivalence Profile defined below.
+ 
+@@ -791,6 +897,34 @@
+ 
+ IDs are lowercase ASCII strings. IDs MUST be unique within the package. IDs MUST NOT be reused for different objects across package rebuilds unless the object identity is stable and provenance records the reuse strategy.
+ 
++### 8.1 Canonical model IDs
++
++A canonical SVP model ID is an ID with the `model_` prefix. It identifies the model artifact as SVP knows it, independent of registry, hosting provider, filename, download URL, or source repository slug.
++
++Examples:
++
++```text
++model_depth_anything_v2_small
++model_whisper_large_v3_turbo_q5_0
++model_nomic_embed_text_v1_5
++model_nomic_embed_vision_v1_5
++```
++
++The canonical model ID MUST be used for all normative references inside an SVP package or reference-builder artifact, including:
++
++```text
++embedding_sets.json.model_id
++provenance/model_hashes.jsonl.id
++provenance/processors.jsonl.model_refs[]
++DAG task model_refs[]
++cache-key model_id inputs
++model.svpmodel.json.model_id
++model-lock.json references
++validation and equivalence model identity fields
++```
++
++Provider-specific identifiers are source metadata only. A registry slug such as `nomic-ai/nomic-embed-text-v1.5` MAY be recorded as `source_slug`, but it MUST NOT be used as a normative `model_id`.
++
+ ## 9. Manifest
+ 
+ `manifest.json` is the package entrypoint.
+@@ -799,7 +933,7 @@
+ 
+ ```json
+ {
+-  "svp_version": "1.0-draft.0.6",
++  "svp_version": "1.0-rc.1",
+   "package_id": "svp_01jz4a6r8y8y3v2v9jhd5k3x4g",
+   "created_utc": "2026-06-18T00:00:00Z",
+   "primary_media_id": "media_0001",
+@@ -847,7 +981,7 @@
+ }
+ ```
+ 
+-Draft 0.6 defines package equivalence in Section 5.16. A manifest MAY include an `equivalence_policy` advisory object for reader discoverability, but it is not a conformance knob. If present, it MUST identify `svp-default-equivalence-v1` and MUST NOT declare looser thresholds than Section 5.16. If absent, Section 5.16 still applies.
++RC1 defines package equivalence in Section 5.16. A manifest MAY include an `equivalence_policy` advisory object for reader discoverability, but it is not a conformance knob. If present, it MUST identify `svp-default-equivalence-v1` and MUST NOT declare looser thresholds than Section 5.16. If absent, Section 5.16 still applies.
+ 
+ The `canonical_analysis_raster` object MUST reflect the computed display-aspect-preserving analysis raster defined in Section 12.1. All spatial block headers and index records for masks and depth MUST match these dimensions exactly unless a block type explicitly defines non-image extents, such as embeddings.
+ 
+@@ -1326,7 +1460,7 @@
+ 
+ ### 14.3 Masks
+ 
+-Masks are stored as compressed binary foreground observations at the computed canonical analysis raster. Draft 0.6 stores masks in an SVP mask block stream, not in a raw `.zst` file. If no regions exist, the mask index may be empty and the mask block stream may be zero bytes, as constrained by Section 13.4 and the validation rules.
++Masks are stored as compressed binary foreground observations at the computed canonical analysis raster. RC1 stores masks in an SVP mask block stream, not in a raw `.zst` file. If no regions exist, the mask index may be empty and the mask block stream may be zero bytes, as constrained by Section 13.4 and the validation rules.
+ 
+ `spatial/masks.index.jsonl`:
+ 
+@@ -1359,7 +1493,7 @@
+ 
+ ### 14.4 Depth
+ 
+-Depth is stored per frame at the computed canonical analysis raster as normalized relative inverse depth. Draft 0.6 stores depth in an SVP depth block stream, not in a raw `.zst` file. Near-uniform depth is valid for static, flat, blank, or otherwise degenerate visual sources when provenance records successful depth processing.
++Depth is stored per frame at the computed canonical analysis raster as normalized relative inverse depth. RC1 stores depth in an SVP depth block stream, not in a raw `.zst` file. Near-uniform depth is valid for static, flat, blank, or otherwise degenerate visual sources when provenance records successful depth processing.
+ 
+ `spatial/depth.index.jsonl`:
+ 
+@@ -1400,7 +1534,7 @@
+ [SVPBlockHeaderV1][compressed payload][SVPBlockHeaderV1][compressed payload]...
+ ```
+ 
+-Every block header is exactly 160 bytes in Draft 0.6. All integer fields are little-endian. Readers MUST reject blocks with unknown `version`, unsupported `compression`, invalid `header_size`, mismatched hashes, invalid block type for strict v1.0, or payload ranges outside the declared file length.
++Every block header is exactly 160 bytes in RC1. All integer fields are little-endian. Readers MUST reject blocks with unknown `version`, unsupported `compression`, invalid `header_size`, mismatched hashes, invalid block type for strict v1.0, or payload ranges outside the declared file length.
+ 
+ Header layout:
+ 
+@@ -1412,7 +1546,7 @@
+ | 8 | 1 | block_type | uint8 | `0x01` depth, `0x02` mask, `0x03` embedding. `0x04` is reserved for future audio feature tensors and MUST NOT appear in strict v1.0 packages. |
+ | 9 | 1 | compression | uint8 | `0x01` Zstandard |
+ | 10 | 1 | endian | uint8 | `0x01` little-endian |
+-| 11 | 1 | flags | uint8 | `0` in Draft 0.6 |
++| 11 | 1 | flags | uint8 | `0` in RC1 |
+ | 12 | 8 | uncompressed_size | uint64 | Decompressed payload byte count |
+ | 20 | 8 | compressed_size | uint64 | Compressed payload byte count |
+ | 28 | 4 | extent_0 | uint32 | Width for image blocks, vector count for embedding blocks |
+@@ -1540,20 +1674,22 @@
+     {
+       "id": "embedset_text_nomic_v15",
+       "modality": "text",
+-      "model_id": "nomic-ai/nomic-embed-text-v1.5",
++      "model_id": "model_nomic_embed_text_v1_5",
+       "model_blake3": "...",
+       "dimension": 768,
+       "dtype": "float32",
+-      "normalized": true
++      "normalized": true,
++      "source_slug": "nomic-ai/nomic-embed-text-v1.5"
+     },
+     {
+       "id": "embedset_vision_nomic_v15",
+       "modality": "vision",
+-      "model_id": "nomic-ai/nomic-embed-vision-v1.5",
++      "model_id": "model_nomic_embed_vision_v1_5",
+       "model_blake3": "...",
+       "dimension": 768,
+       "dtype": "float32",
+-      "normalized": true
++      "normalized": true,
++      "source_slug": "nomic-ai/nomic-embed-vision-v1.5"
+     }
+   ]
+ }
+@@ -1730,7 +1866,7 @@
+ 
+ There are two related but distinct checks:
+ 
+-1. **Single-package logical integrity.** A validator checks one package against its own `index_manifest.json`. The validator produces the canonical logical row stream from the package's actual `index.sqlite` contents and verifies `index_manifest.logical_rows_blake3`.
++1. **Single-package logical integrity.** A validator checks one package against its own `index/index_manifest.json`. The validator produces the canonical logical row stream from the package's actual `index/index.sqlite` contents and verifies `index_manifest.logical_rows_blake3`.
+ 2. **Cross-package equivalence.** A validator compares two valid packages using source-layer-aware SQLite equivalence. It MUST NOT require exact logical-row hash equality for columns whose source values are governed by the Default Equivalence Profile.
+ 
+ The validator MUST generate the canonical logical row stream for single-package integrity as follows:
+@@ -1746,7 +1882,7 @@
+ 9. Serialize values using SVP canonical JSON scalar rules.
+ 10. Hash the resulting UTF-8 logical row stream with BLAKE3.
+ 
+-The raw bytes of `index.sqlite` MAY differ across equivalent builds. For single-package integrity, the canonical logical row-stream BLAKE3 MUST match the package's own `index_manifest.logical_rows_blake3`.
++The raw bytes of `index/index.sqlite` MAY differ across equivalent builds. For single-package integrity, the canonical logical row-stream BLAKE3 MUST match the package's own `index/index_manifest.json` field `logical_rows_blake3`.
+ 
+ For cross-package equivalence, SQLite columns are assigned to one of three equivalence classes.
+ 
+@@ -1805,6 +1941,66 @@
+ 
+ All columns not explicitly assigned to numerical or source-payload-hash handling are exact-match columns.
+ 
++### 17.6 Index manifest
++
++`index/index_manifest.json` is a required Core file. It records the logical integrity of `index/index.sqlite` and gives validators enough information to verify the SQLite index without comparing raw SQLite database bytes.
++
++Required example:
++
++```json
++{
++  "schema_version": "svp-index-manifest-v1",
++  "index_schema_version": "svp-index-v1",
++  "sqlite_file": "index/index.sqlite",
++  "sqlite_file_blake3": "blake3:...",
++  "logical_row_stream_version": "svp-logical-row-stream-v1",
++  "logical_rows_blake3": "blake3:...",
++  "table_count": 12,
++  "row_count": 184233,
++  "created_from": {
++    "manifest_blake3": "blake3:...",
++    "binary_blocks_manifest_blake3": "blake3:...",
++    "embedding_sets_blake3": "blake3:..."
++  }
++}
++```
++
++Required fields:
++
++```text
++schema_version
++index_schema_version
++sqlite_file
++sqlite_file_blake3
++logical_row_stream_version
++logical_rows_blake3
++table_count
++row_count
++created_from
++```
++
++`schema_version` MUST be `svp-index-manifest-v1` for SVP v1.0.
++
++`sqlite_file` MUST be `index/index.sqlite`.
++
++`sqlite_file_blake3` is the exact BLAKE3 of the physical SQLite database file. It is an integrity fact for the package as built. It is not used for cross-package equivalence because physical SQLite bytes are not required to be reproducible.
++
++`logical_row_stream_version` MUST identify the canonical logical row-stream procedure. For SVP v1.0 it MUST be `svp-logical-row-stream-v1`.
++
++`logical_rows_blake3` MUST be the BLAKE3 of the canonical logical row stream generated by Section 17.5 steps 1 through 10 from the package's actual `index/index.sqlite` contents. This value is used for single-package logical integrity.
++
++`table_count` and `row_count` record the number of user-defined logical tables and rows included in the canonical logical row stream. They are validator sanity checks and MUST match the stream used to compute `logical_rows_blake3`.
++
++`created_from` MUST include BLAKE3 references to the package records that materially define the index. At minimum it MUST include `manifest_blake3`, `binary_blocks_manifest_blake3`, and `embedding_sets_blake3`. Builders MAY include additional exact BLAKE3 references when the schema defines them.
++
++The required schema file is:
++
++```text
++/schemas/index-manifest.schema.json
++```
++
++A strict validator MUST fail the package if `index/index_manifest.json` is absent, malformed, missing a required field, or if the generated Section 17.5 logical row stream does not match `logical_rows_blake3`.
++
+ ## 18. Provenance
+ 
+ ### 18.1 Processor and model provenance
+@@ -1832,17 +2028,21 @@
+ ```json
+ {
+   "id": "model_depth_anything_v2_small",
++  "model_bundle_id": "model_depth_anything_v2_small@2024-06-13+blake3_8f4c21aa93d0",
+   "name": "Depth Anything V2 Small",
+-  "source": "DepthAnything/Depth-Anything-V2",
++  "source_registry": "github",
++  "source_slug": "DepthAnything/Depth-Anything-V2",
++  "source_revision": "2024-06-13-pinned",
+   "license": "Apache-2.0",
+   "blake3": "...",
++  "bundle_blake3": "...",
+   "alternate_hashes": {
+     "sha256": "..."
+   }
+ }
+ ```
+ 
+-Processor records MUST identify the exact input references, output references, processor version, model references, parameter set, runtime, execution provider, and task IDs used to generate each artifact.
++Processor records MUST identify the exact input references, output references, processor version, canonical model references, model bundle IDs, parameter set, runtime, execution provider, and task IDs used to generate each artifact.
+ 
+ ### 18.2 Validation report
+ 
+@@ -1850,19 +2050,30 @@
+ 
+ A completed reference-builder package MUST include `provenance/validation.json`. The validation report is provenance about conformance; it is not an observation layer and it MUST NOT be used to override core records.
+ 
+-Draft 0.6 requires `/spec/validation-codes.json` as a normative machine-readable registry published alongside the JSON schemas. Validators MUST use registered standard codes for standard conditions. Implementation-specific codes MAY exist only under an implementation namespace beginning with `X_`, and MUST NOT redefine the meaning of standard `ERR_`, `WARN_`, or `INFO_` codes.
+-
+-Example strict-validation report:
++RC1 requires `/spec/validation-codes.json` as a normative machine-readable registry published alongside the JSON schemas. Validators MUST use registered standard codes for standard conditions. Implementation-specific codes MAY exist only under an implementation namespace beginning with `X_`, and MUST NOT redefine the meaning of standard `ERR_`, `WARN_`, or `INFO_` codes.
++
++#### 18.2.1 Core status and authenticity status
++
++Validation reports have separate Core and authenticity result channels.
++
++`status` and validator default exit code are computed only from Core validation findings. A Core-valid package remains Core-valid even when a provided detached signature is missing, unreadable, untrusted, or mismatched.
++
++`authenticity_status` is computed only from detached-signature verification when authenticity verification is requested. Authenticity findings MUST be placed in the `authenticity` array. They MAY have severity `error`, but they are excluded from Core `status` computation and the default validator exit code.
++
++A validator MAY provide an explicit signature-enforcement mode, such as `svp validate --require-valid-signature`. In that mode, signature mismatch MAY produce a non-zero process exit for the command. This is an invocation policy and MUST NOT redefine SVP Core validity.
++
++Example strict-validation report with separate authenticity findings:
+ 
+ ```json
+ {
+-  "schema_version": "1.0-draft.0.6",
++  "schema_version": "1.0-rc.1",
+   "validator": {
+     "name": "svp-validator",
+-    "version": "0.6.0"
++    "version": "1.0.0-rc.1"
+   },
+   "status": "valid_with_warnings",
+-  "authenticity_status": "not_checked",
++  "core_status": "valid_with_warnings",
++  "authenticity_status": "signature_mismatch",
+   "checked_utc": "2026-06-19T00:00:00Z",
+   "package_hash": "blake3:...",
+   "errors": [],
+@@ -1881,6 +2092,14 @@
+       "path": "/entities/entity_tracks.jsonl",
+       "message": "No persistent visual entity tracks were observed. Required visual sections are present and valid."
+     }
++  ],
++  "authenticity": [
++    {
++      "code": "ERR_SIGNATURE_MISMATCH",
++      "severity": "error",
++      "path": "video.svpsig",
++      "message": "Detached signature did not verify against the exact finalized .svp package bytes. Core validation is unaffected."
++    }
+   ]
+ }
+ ```
+@@ -1889,10 +2108,10 @@
+ 
+ ```json
+ {
+-  "schema_version": "1.0-draft.0.6",
++  "schema_version": "1.0-rc.1",
+   "validator": {
+     "name": "svp-validator",
+-    "version": "0.6.0"
++    "version": "1.0.0-rc.1"
+   },
+   "status": "numerically_equivalent",
+   "checked_utc": "2026-06-19T00:00:00Z",
+@@ -1936,7 +2155,8 @@
+       "path": "/index/index.sqlite",
+       "message": "SQLite hash columns differed exactly, but referenced payloads passed source-layer numerical equivalence."
+     }
+-  ]
++  ],
++  "authenticity": []
+ }
+ ```
+ 
+@@ -1979,9 +2199,18 @@
+ fatal
+ ```
+ 
+-When `svp validate --equivalent` is run, the report MUST include a `metrics` object. If the result is `numerically_equivalent`, the metrics object MUST identify every tolerance-governed layer that differed, the metric used, the measured value, the threshold, and whether the layer passed or failed. A top-level `numerically_equivalent` result without per-layer metrics is not a conforming Draft 0.6 equivalence report.
+-
+-Draft 0.6 defines this initial validation code registry. The authoritative machine-readable version MUST be published at `/spec/validation-codes.json`:
++Allowed report buckets:
++
++```text
++errors        Core validation failures and fatal Core unreadability findings
++warnings      Core warnings that do not invalidate the package
++infos         Informational Core or equivalence findings
++authenticity  Detached-signature findings excluded from Core status computation
++```
++
++When `svp validate --equivalent` is run, the report MUST include a `metrics` object. If the result is `numerically_equivalent`, the metrics object MUST identify every tolerance-governed layer that differed, the metric used, the measured value, the threshold, and whether the layer passed or failed. A top-level `numerically_equivalent` result without per-layer metrics is not a conforming RC1 equivalence report.
++
++RC1 defines this initial validation code registry. The authoritative machine-readable version MUST be published at `/spec/validation-codes.json`:
+ 
+ - `ERR_CORE_MISSING_MANIFEST` (`fatal`): `manifest.json` is absent or unreadable.
+ - `ERR_CORE_MISSING_SECTION` (`fatal`): a required core section is absent.
+@@ -1995,22 +2224,23 @@
+ - `ERR_CORE_INVALID_BLOCK_HEADER` (`error`): an SVP binary block header is malformed or unsupported.
+ - `ERR_CORE_INVALID_BLOCK_HASH` (`error`): a block payload, header, or block hash does not verify.
+ - `ERR_CORE_FORBIDDEN_BLOCK_TYPE` (`error`): a reserved, experimental, sentinel, or unknown block type appears in a strict v1.0 package.
+-- `ERR_CORE_INDEX_SCHEMA_INVALID` (`error`): `index.sqlite` does not contain the required schema.
++- `ERR_CORE_INDEX_SCHEMA_INVALID` (`error`): `index/index.sqlite` does not contain the required schema.
++- `ERR_CORE_INDEX_MANIFEST_INVALID` (`error`): `index/index_manifest.json` is missing, malformed, or fails schema validation.
+ - `ERR_CORE_INDEX_LOGICAL_MISMATCH` (`error`): SQLite single-package logical integrity failed, or exact-governed SQLite values failed during equivalence validation.
+ - `ERR_CORE_HASH_MISMATCH` (`error`): a required BLAKE3 digest does not match.
+ - `ERR_CORE_PATH_TRAVERSAL` (`fatal`): a ZIP entry path escapes the package root or is not normalized.
+-- `ERR_SIGNATURE_MISMATCH` (`error`): a provided `.svpsig` sidecar does not verify against the finalized `.svp` bytes.
+-- `ERR_SIGNATURE_UNREADABLE` (`error`): a provided `.svpsig` sidecar cannot be parsed or uses an unsupported required field.
++- `ERR_SIGNATURE_MISMATCH` (`error`, authenticity bucket): a provided `.svpsig` sidecar does not verify against the finalized `.svp` bytes.
++- `ERR_SIGNATURE_UNREADABLE` (`error`, authenticity bucket): a provided `.svpsig` sidecar cannot be parsed or uses an unsupported required field.
+ - `WARN_UNSUPPORTED_LABEL_SCHEMA` (`warning`): `/labels` contains a future schema version the reader or validator does not support.
+ - `WARN_CACHE_DISABLED` (`warning`): the builder could not use the global cache and fell back to direct compute.
+ - `WARN_JOURNAL_RETAINED_DIAGNOSTIC` (`warning`): the journal was retained because the user explicitly requested diagnostic retention.
+-- `WARN_SIGNATURE_UNTRUSTED` (`warning`): a signature cryptographically verifies but the validator cannot establish trust in the provided key chain.
+-- `WARN_SIGNATURE_NOT_PROVIDED` (`warning`): no `.svpsig` was provided when authenticity verification was requested.
++- `WARN_SIGNATURE_UNTRUSTED` (`warning`, authenticity bucket): a signature cryptographically verifies but the validator cannot establish trust in the provided key chain.
++- `WARN_SIGNATURE_NOT_PROVIDED` (`warning`, authenticity bucket): no `.svpsig` was provided when authenticity verification was requested.
+ - `INFO_DEGENERATE_VISUAL_SOURCE` (`info`): empty entity tracks or near-uniform depth are valid for a documented degenerate visual source.
+ - `INFO_SQLITE_HASH_MISMATCH_ALLOWED_BY_SOURCE_LAYER_EQUIVALENCE` (`info`): a SQLite BLAKE3 hash column differed during equivalence comparison, but the referenced tolerance-governed payload passed its source-layer numerical equivalence rule.
+-- `INFO_SIGNATURE_VERIFIED` (`info`): a provided `.svpsig` verified against the exact finalized `.svp` byte stream.
+-
+-Signature-related `ERR_SIGNATURE_*` findings affect `authenticity_status`. They MUST NOT by themselves change a structurally valid SVP Core package from `valid` to `invalid`. A signed invalid package remains invalid, and an unsigned valid package remains valid.
++- `INFO_SIGNATURE_VERIFIED` (`info`, authenticity bucket): a provided `.svpsig` verified against the exact finalized `.svp` byte stream.
++
++Signature-related findings affect `authenticity_status`. They MUST NOT by themselves change a structurally valid SVP Core package from `valid` to `invalid`. A signed invalid package remains invalid, and an unsigned valid package remains valid.
+ 
+ ## 19. Labels
+ 
+@@ -2021,7 +2251,7 @@
+ ```json
+ {
+   "id": "label_000001",
+-  "schema_version": "1.0-draft.0.6",
++  "schema_version": "1.0-rc.1",
+   "target_id": "entity_000084",
+   "label_type": "object_name",
+   "value": "iPhone",
+@@ -2039,7 +2269,7 @@
+ 2. Labels MUST NOT overwrite core entity records.
+ 3. Labels MUST include provenance.
+ 4. Human identity labels MUST NOT be written without explicit user action or an import source that records provenance.
+-5. `schema_version` is optional in Draft 0.6 label records. If absent, a reader MUST treat the label record as using the package `svp_version` label schema. If present and newer than the reader supports, Section 19.1 applies.
++5. `schema_version` is optional in RC1 label records. If absent, a reader MUST treat the label record as using the package `svp_version` label schema. If present and newer than the reader supports, Section 19.1 applies.
+ 
+ ### 19.1 Forward compatibility for future label schemas
+ 
+@@ -2164,7 +2394,7 @@
+ 
+ `SVP_CACHE_DIR` MAY override the root for development, CI, and render-farm operation.
+ 
+-A visual cache key MUST include at least:
++A visual cache key MUST include at least the canonical SVP `model_id`, `model_bundle_id`, and `bundle_blake3`, not a registry slug or provider-specific name:
+ 
+ ```text
+ BLAKE3(
+@@ -2173,6 +2403,8 @@
+   processor_id,
+   processor_version,
+   model_id,
++  model_bundle_id,
++  bundle_blake3,
+   model_blake3,
+   model_runtime,
+   execution_provider,
+@@ -2184,7 +2416,7 @@
+ )
+ ```
+ 
+-An audio cache key MUST include at least:
++An audio cache key MUST include at least the canonical SVP `model_id`, `model_bundle_id`, and `bundle_blake3`, not a registry slug or provider-specific name:
+ 
+ ```text
+ BLAKE3(
+@@ -2193,6 +2425,8 @@
+   processor_id,
+   processor_version,
+   model_id,
++  model_bundle_id,
++  bundle_blake3,
+   model_blake3,
+   model_runtime,
+   execution_provider,
+@@ -2427,7 +2661,7 @@
+ 
+ `--fresh` ignores any existing recovery journal for the output path, but it MAY still use the global content-addressed cache if cache hits verify.
+ 
+-`svp validate --strict --report` MUST emit the Draft 0.6 validation report schema defined in Section 18.2.
++`svp validate --strict --report` MUST emit the RC1 validation report schema defined in Section 18.2.
+ 
+ `svp serve` exposes a local JSON-RPC API for apps and agents. It MUST default to `localhost` only.
+ 
+@@ -2510,14 +2744,14 @@
+ 33. All `.svpdz`, `.svpmz`, and `.svpez` package entries use ZIP method `STORE`.
+ 34. The SQLite index exists and contains required tables for words, shots, scenes, entities, regions, relationships, embeddings, and binary blocks. Degenerate visual packages MAY have zero rows in visual entity tables.
+ 35. SQLite extension loading is disabled at read time.
+-36. The SQLite index can produce the canonical logical row stream for single-package integrity and participate in the source-layer-aware comparison procedure defined in Section 17.5.
++36. `index/index_manifest.json` exists, validates against `index-manifest.schema.json`, and its `logical_rows_blake3` matches the canonical logical row stream produced from `index/index.sqlite` by the Section 17.5 procedure. The SQLite index must also participate in the source-layer-aware comparison procedure defined in Section 17.5.
+ 37. Provenance exists for every generated section.
+ 38. `provenance/validation.json` exists in packages produced by the reference builder and follows Section 18.2.
+ 39. BLAKE3 hashes match.
+ 40. ZIP paths are normalized and cannot escape the package root.
+ 41. The package contains no recovery journal, cache directory, temporary task outputs, scheduler state, or `.svpsig` sidecar inside the archive.
+ 42. `/labels`, when present, is validated only if the label schema version is supported. Unsupported future label schemas produce `WARN_UNSUPPORTED_LABEL_SCHEMA`, not a core validation failure.
+-43. A detached `.svpsig` sidecar, when provided to the validator for authenticity verification, MUST verify against the exact finalized `.svp` package bytes or produce the appropriate signature validation code. Missing `.svpsig` files MUST NOT fail SVP Core validation.
++43. A detached `.svpsig` sidecar, when provided to the validator for authenticity verification, MUST verify against the exact finalized `.svp` package bytes or produce the appropriate authenticity validation code in the `authenticity` report bucket. Missing, unreadable, untrusted, or mismatched `.svpsig` files MUST NOT fail SVP Core validation.
+ 
+ `svp validate --equivalent package_a.svp package_b.svp` MUST use Section 5.16. It MUST report one of `byte_identical`, `structurally_equivalent`, `numerically_equivalent`, or `not_equivalent`.
+ 
+@@ -2533,7 +2767,7 @@
+ 4. SQLite hash columns that reference exact-governed bytes must match exactly.
+ 5. A validator MUST include machine-readable details for any SQLite hash mismatch allowed by source-layer equivalence.
+ 
+-Validation output MUST follow the report schema and code registry defined in Section 18.2. Validation output is written to `provenance/validation.json` for reference-builder package builds and to stdout or a caller-selected report path for external validation commands.
++Validation output MUST follow the report schema and code registry defined in Section 18.2. Core `status` and default validator exit code MUST be computed only from Core findings, not from `authenticity` findings. Validation output is written to `provenance/validation.json` for reference-builder package builds and to stdout or a caller-selected report path for external validation commands.
+ 
+ ## 24. Security and privacy requirements
+ 
+@@ -2553,7 +2787,7 @@
+ 
+ ### 24.1 Detached signature sidecars
+ 
+-Draft 0.6 defines `.svpsig` as an optional detached authenticity sidecar. A `.svpsig` file signs or otherwise authenticates the exact finalized bytes of a `.svp` package without modifying the ZIP archive.
++RC1 defines `.svpsig` as an optional detached authenticity sidecar. A `.svpsig` file signs or otherwise authenticates the exact finalized bytes of a `.svp` package without modifying the ZIP archive.
+ 
+ The sidecar is intentionally outside SVP Core:
+ 
+@@ -2569,9 +2803,10 @@
+ 3. A `.svpsig` MUST bind to the exact finalized `.svp` byte stream using `package_blake3`.
+ 4. A `.svpsig` MUST NOT affect SVP Core structural validity.
+ 5. If an `.svpsig` is present and authenticity verification is requested, a strict validator MAY verify it against a provided trust store or public key chain.
+-6. Signature verification MUST emit machine-readable validation codes defined in Section 18.2.
+-7. A valid signature over an invalid SVP package proves only that the invalid bytes were signed. It does not make the package conformant.
+-8. An invalid or untrusted signature over a valid SVP package affects authenticity reporting, not Core validity.
++6. Signature verification MUST emit machine-readable authenticity validation codes defined in Section 18.2.
++7. Signature findings MUST be reported in the `authenticity` report bucket and MUST NOT change Core `status` or the default validator exit code.
++8. A valid signature over an invalid SVP package proves only that the invalid bytes were signed. It does not make the package conformant.
++9. An invalid or untrusted signature over a valid SVP package affects authenticity reporting, not Core validity.
+ 
+ Minimum `.svpsig` JSON envelope:
+ 
+@@ -2589,7 +2824,7 @@
+ }
+ ```
+ 
+-Allowed `type` values in Draft 0.6:
++Allowed `type` values in RC1:
+ 
+ ```text
+ raw-detached-signature
+@@ -2600,7 +2835,7 @@
+ 
+ `c2pa-manifest-sidecar` is reserved for C2PA-compatible manifest sidecar workflows. SVP does not redefine C2PA. It only defines how a reader or validator relates a sidecar to the exact `.svp` package bytes.
+ 
+-A strict validator SHOULD report:
++A strict validator SHOULD report the following authenticity codes as applicable:
+ 
+ ```text
+ INFO_SIGNATURE_VERIFIED
+@@ -2609,8 +2844,6 @@
+ WARN_SIGNATURE_UNTRUSTED
+ WARN_SIGNATURE_NOT_PROVIDED
+ ```
+-
+-as applicable.
+ 
+ ## 25. Licensing decisions
+ 
+@@ -2677,7 +2910,11 @@
+ 
+ ### 26.4 SVP Validator
+ 
+-An SVP validator conforms if it implements all strict validation rules and exits non-zero for invalid packages. A validator that implements package equivalence comparison MUST use Section 5.16 and report `byte_identical`, `structurally_equivalent`, `numerically_equivalent`, or `not_equivalent`.
++An SVP validator conforms if it implements all strict validation rules and exits non-zero for invalid packages. Default invalid-package exit behavior is based on SVP Core validity only. Authenticity findings from detached `.svpsig` sidecars MUST NOT cause a non-zero default exit when SVP Core is valid.
++
++A validator MAY expose an explicit signature-enforcement mode that exits non-zero for signature mismatch, unreadable signature, or untrusted signature. Such a mode is not Core validation and MUST be documented as authenticity enforcement.
++
++A validator that implements package equivalence comparison MUST use Section 5.16 and report `byte_identical`, `structurally_equivalent`, `numerically_equivalent`, or `not_equivalent`.
+ 
+ ### 26.5 Release sequencing note
+ 
+@@ -2703,7 +2940,7 @@
+ 
+ SVP v1.0 schemas MUST use JSON Schema 2020-12.
+ 
+-Draft 0.6 also requires normative machine-readable registry files under `/spec`:
++RC1 also requires normative machine-readable registry files under `/spec`:
+ 
+ ```text
+ /spec/validation-codes.json
+@@ -2739,6 +2976,7 @@
+ embedding-index-record.schema.json
+ processor-record.schema.json
+ validation-report.schema.json
++index-manifest.schema.json
+ model-bundle.schema.json
+ model-lock.schema.json
+ signature-sidecar.schema.json
+@@ -2823,23 +3061,23 @@
+ 
+ ### 29.8 Cache poisoning and stale artifacts
+ 
+-Content-addressable memoization creates a new security and correctness surface. Draft 0.6 requires cache keys to include processor version, model identity, model hash, runtime, execution provider, normalized input format, time range, source chunk hash, and parameters. Cache hits MUST verify artifact hashes before reuse.
++Content-addressable memoization creates a new security and correctness surface. RC1 requires cache keys to include processor version, model identity, model hash, runtime, execution provider, normalized input format, time range, source chunk hash, and parameters. Cache hits MUST verify artifact hashes before reuse.
+ 
+ ### 29.9 DAG nondeterminism and floating-point variance
+ 
+-Parallel execution can produce nondeterministic completion order, and accelerator-backed floating-point processors can produce numerically tiny but byte-visible differences. Draft 0.6 requires canonical output ordering, deterministic task IDs, exact BLAKE3 reuse for cached artifacts, and a Default Equivalence Profile for comparing completed packages without pretending all derived arrays will be bit-identical.
++Parallel execution can produce nondeterministic completion order, and accelerator-backed floating-point processors can produce numerically tiny but byte-visible differences. RC1 requires canonical output ordering, deterministic task IDs, exact BLAKE3 reuse for cached artifacts, and a Default Equivalence Profile for comparing completed packages without pretending all derived arrays will be bit-identical.
+ 
+ ### 29.10 Interrupted builds
+ 
+-Long builds can be interrupted. Draft 0.6 requires recovery journals so a failed build can resume from verified completed tasks rather than restarting the whole processing run.
++Long builds can be interrupted. RC1 requires recovery journals so a failed build can resume from verified completed tasks rather than restarting the whole processing run.
+ 
+ ### 29.11 Degenerate visual sources
+ 
+-Static cards, slates, and near-zero-motion footage can honestly produce no entity tracks. Draft 0.6 requires validators to distinguish between omitted processing and valid empty observations. Empty visual entity outputs are acceptable only when required files, depth outputs, provenance, and indexes still exist and validate.
++Static cards, slates, and near-zero-motion footage can honestly produce no entity tracks. RC1 requires validators to distinguish between omitted processing and valid empty observations. Empty visual entity outputs are acceptable only when required files, depth outputs, provenance, and indexes still exist and validate.
+ 
+ ### 29.12 Cache and journal disk growth
+ 
+-Strict processing can create large temporary and reusable artifacts. Draft 0.6 requires default journal cleanup after successful builds, a 50 GiB default LRU cache limit, active-build cache locks, and graceful fallback to direct compute when cache storage fails.
++Strict processing can create large temporary and reusable artifacts. RC1 requires default journal cleanup after successful builds, a 50 GiB default LRU cache limit, active-build cache locks, and graceful fallback to direct compute when cache storage fails.
+ 
+ 
+ ### 29.13 Detached signatures do not imply correctness
+@@ -2848,11 +3086,11 @@
+ 
+ ### 29.14 Model bundle supply chain
+ 
+-Reference Model Bundles reduce Python and dependency friction, but they create a supply-chain surface. Draft 0.6 requires signed, pinned, BLAKE3-verified bundles with included licenses and notices. Builders MUST NOT auto-update bundles during a build.
++Reference Model Bundles reduce Python and dependency friction, but they create a supply-chain surface. RC1 requires signed, pinned, BLAKE3-verified bundles with included licenses and notices. Builders MUST NOT auto-update bundles during a build.
+ 
+ ### 29.15 Timestamp drift
+ 
+-Long media files and fractional frame rates can expose timestamp drift if builders use floating-point math. Draft 0.6 forbids floating-point timestamp derivation and requires exact rational arithmetic with round-half-to-even conversion.
++Long media files and fractional frame rates can expose timestamp drift if builders use floating-point math. RC1 forbids floating-point timestamp derivation and requires exact rational arithmetic with round-half-to-even conversion.
+ 
+ ## 30. Why this direction works
+ 
+@@ -2942,23 +3180,33 @@
+ 
+ The Reader, Validator, Inspector, and fixture corpus SHOULD ship before or alongside the first full Builder preview so implementers can test packages even while the heaviest processing stack matures.
+ 
+-## 32. Open issues for Draft 0.7 / RC1
+-
+-Draft 0.6 resolves the timing precision, detached signature, validation-code registry, per-layer equivalence metrics, word-level language-span, and model-distribution questions from Draft 0.5.
+-
+-Draft 0.7 should be treated as a release-candidate pass unless external review finds a contradiction, validator-blocking ambiguity, or implementation impossibility.
+-
+-Remaining questions before RC1:
+-
+-1. Exact JSON Schema files for all record types and registry artifacts.
+-2. Exact minimum confidence reporting requirements per processor.
+-3. Golden fixture package corpus, including static-card, silent-video, overlapping-speech, screen-recording, moving-object, empty-visual-tracks, mixed-language, undetermined-speech, no-linguistic-content, uniform-depth, vertical-video, square-video, ultrawide-video, non-square-pixel, fractional-timebase, signed-sidecar, signature-mismatch, and model-bundle fixtures.
+-4. Semantic versioning policy for index schema changes.
+-5. Exact signature algorithms and trust-store requirements for `.svpsig` beyond the Draft 0.6 minimum envelope.
+-6. Packaging, notarization, and signing process for Windows and macOS binaries.
+-7. Whether Default Equivalence Profile v1 thresholds should be adjusted after cross-platform fixture testing on CPU, CoreML, DirectML, CUDA, and CPU-fallback builds. This testing MUST validate direct payload comparison and the SQLite equivalence path together, including `binary_blocks` hash columns and `vector_index` embedding/vector-hash columns, so the index cannot produce false `not_equivalent` results when source payloads satisfy Section 5.16.2.
+-8. Whether the reference model registry should use static release assets, OCI artifacts, or both for `.svpmodel` distribution.
+-9. Exact schema for `model-lock.json` and whether it should be shared with reference binary release manifests.
++## 32. Release-candidate open issues
++
++RC1 resolves the final known validator-blocking ambiguities from Draft 0.6: `index/index_manifest.json`, signature status computation, canonical model-ID namespace, and model-bundle manifest completeness.
++
++At RC1, further changes should be restricted to:
++
++```text
++contradiction fixes
++validator-blocking ambiguity fixes
++schema defects
++fixture-driven conformance corrections
++security footgun fixes
++implementation impossibility fixes
++editorial clarity and typo fixes
++```
++
++Remaining work before final v1.0:
++
++1. Complete JSON Schema files for all record types and registry artifacts, including `index-manifest.schema.json`.
++2. Build the golden fixture package corpus: static-card, silent-video, overlapping-speech, screen-recording, moving-object, empty-visual-tracks, mixed-language, undetermined-speech, no-linguistic-content, uniform-depth, vertical-video, square-video, ultrawide-video, non-square-pixel, fractional-timebase, signed-sidecar, signature-mismatch, model-bundle, and index-manifest fixtures.
++3. Implement `svp validate --strict` against the fixture corpus.
++4. Implement `svp validate --equivalent` against CPU, CoreML, DirectML, CUDA, and CPU-fallback fixture pairs where available.
++5. Verify that direct payload equivalence and SQLite logical equivalence agree for `binary_blocks` hash columns and `vector_index` embedding values.
++6. Finalize semantic versioning policy for index schema changes.
++7. Finalize signature algorithms and trust-store requirements beyond the RC1 minimum sidecar envelope.
++8. Decide whether the reference model registry uses static release assets, OCI artifacts, or both for `.svpmodel` distribution.
++9. Finalize the exact `model-lock.json` schema and test disagreement handling against `model.svpmodel.json`.
+ 
+ No remaining open issue is allowed to weaken SVP Core for v1.0. If an issue requires weakening a required core section or field, it is deferred to a future major version.
+ 

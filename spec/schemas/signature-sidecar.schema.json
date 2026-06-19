@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp-standard.org/schemas/v1/signature-sidecar.schema.json",
+  "title": "SVP Detached Signature Sidecar",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "type",
+    "package_filename",
+    "package_blake3",
+    "signature_algorithm",
+    "signature_value",
+    "signed_utc",
+    "key_id"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "svp-signature-1"
+    },
+    "type": {
+      "enum": [
+        "raw-detached-signature",
+        "c2pa-manifest-sidecar"
+      ]
+    },
+    "package_filename": {
+      "type": "string",
+      "minLength": 1
+    },
+    "package_blake3": {
+      "type": "string",
+      "pattern": "^blake3:[0-9a-f]{64}$"
+    },
+    "signature_algorithm": {
+      "type": "string",
+      "minLength": 1
+    },
+    "signature_value": {
+      "type": "string",
+      "minLength": 1
+    },
+    "signed_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "key_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "certificate_chain": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

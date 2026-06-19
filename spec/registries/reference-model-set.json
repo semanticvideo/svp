@@ -1,0 +1,57 @@
+{
+  "schema_version": "svp-reference-model-set-1",
+  "svp_version": "1.0-rc.1",
+  "model_id_policy": "All model_id fields are canonical SVP model IDs with model_ prefix. source_slug is metadata only.",
+  "models": [
+    {
+      "model_id": "model_silero_vad_v5",
+      "display_name": "Silero VAD",
+      "source_slug": "snakers4/silero-vad",
+      "required_for": [
+        "speech_regions"
+      ]
+    },
+    {
+      "model_id": "model_whisper_large_v3_turbo_q5_0",
+      "display_name": "Whisper Large v3 Turbo Q5_0",
+      "source_slug": "openai/whisper-large-v3-turbo",
+      "required_for": [
+        "transcript",
+        "words"
+      ]
+    },
+    {
+      "model_id": "model_sherpa_onnx_speaker_diarization",
+      "display_name": "sherpa-onnx Speaker Diarization",
+      "source_slug": "k2-fsa/sherpa-onnx",
+      "required_for": [
+        "speakers",
+        "speaker_segments"
+      ]
+    },
+    {
+      "model_id": "model_depth_anything_v2_small",
+      "display_name": "Depth Anything V2 Small",
+      "source_slug": "DepthAnything/Depth-Anything-V2",
+      "required_for": [
+        "depth"
+      ]
+    },
+    {
+      "model_id": "model_nomic_embed_text_v1_5",
+      "display_name": "Nomic Embed Text v1.5",
+      "source_slug": "nomic-ai/nomic-embed-text-v1.5",
+      "required_for": [
+        "text_embeddings"
+      ]
+    },
+    {
+      "model_id": "model_nomic_embed_vision_v1_5",
+      "display_name": "Nomic Embed Vision v1.5",
+      "source_slug": "nomic-ai/nomic-embed-vision-v1.5",
+      "required_for": [
+        "vision_embeddings"
+      ]
+    }
+  ]
+}
