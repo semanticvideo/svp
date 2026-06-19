@@ -1,0 +1,1103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SVP RC1 Agent Orchestration Plan</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --ink: #1d2433;
+      --muted: #5d687a;
+      --line: #d9dfeb;
+      --accent: #2563eb;
+      --accent-2: #0f766e;
+      --warn: #b45309;
+      --danger: #b91c1c;
+      --soft: #eef4ff;
+      --soft-green: #eef7f5;
+      --soft-warn: #fff7ed;
+      --code: #172033;
+      --shadow: 0 18px 42px rgba(26, 34, 51, 0.12);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101318;
+        --panel: #171b22;
+        --ink: #eef2f8;
+        --muted: #a8b2c2;
+        --line: #2a3140;
+        --accent: #7aa7ff;
+        --accent-2: #2dd4bf;
+        --warn: #fbbf24;
+        --danger: #f87171;
+        --soft: #121e33;
+        --soft-green: #122622;
+        --soft-warn: #2b2114;
+        --code: #eef2f8;
+        --shadow: 0 18px 42px rgba(0, 0, 0, 0.32);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    header {
+      padding: 56px 24px 28px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 28px auto 80px;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.12;
+      margin: 0;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      font-size: clamp(2.2rem, 5vw, 4.4rem);
+      max-width: 980px;
+    }
+
+    h2 {
+      font-size: clamp(1.45rem, 2.3vw, 2.1rem);
+      margin-bottom: 14px;
+    }
+
+    h3 {
+      font-size: 1.08rem;
+      margin-bottom: 10px;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    ul, ol {
+      margin: 10px 0 0;
+      padding-left: 22px;
+    }
+
+    li {
+      margin: 7px 0;
+    }
+
+    code {
+      color: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.94em;
+      background: rgba(125, 135, 155, 0.14);
+      padding: 2px 5px;
+      border-radius: 5px;
+    }
+
+    .lede {
+      max-width: 960px;
+      margin-top: 18px;
+      font-size: 1.12rem;
+      color: var(--muted);
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 26px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 5px 11px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      background: var(--bg);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 18px;
+    }
+
+    .card {
+      grid-column: span 12;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px;
+      box-shadow: var(--shadow);
+    }
+
+    .compact {
+      box-shadow: none;
+    }
+
+    .half {
+      grid-column: span 6;
+    }
+
+    .third {
+      grid-column: span 4;
+    }
+
+    .two-third {
+      grid-column: span 8;
+    }
+
+    .note {
+      border-left: 4px solid var(--accent);
+      background: var(--soft);
+      padding: 14px 16px;
+      border-radius: 6px;
+      margin: 14px 0;
+    }
+
+    .note.green {
+      border-left-color: var(--accent-2);
+      background: var(--soft-green);
+    }
+
+    .warning {
+      border-left-color: var(--warn);
+      background: var(--soft-warn);
+    }
+
+    .danger {
+      border-left-color: var(--danger);
+    }
+
+    .phase {
+      margin: 18px 0;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--panel) 92%, var(--bg));
+    }
+
+    .phase-header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 10px 0;
+    }
+
+    .tag {
+      display: inline-flex;
+      border-radius: 6px;
+      padding: 3px 7px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--accent);
+      background: var(--soft);
+      border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+    }
+
+    .tag.green-tag {
+      color: var(--accent-2);
+      background: var(--soft-green);
+      border-color: color-mix(in srgb, var(--accent-2) 30%, var(--line));
+    }
+
+    .tag.warn-tag {
+      color: var(--warn);
+      background: var(--soft-warn);
+      border-color: color-mix(in srgb, var(--warn) 30%, var(--line));
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      overflow: hidden;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: color-mix(in srgb, var(--bg) 70%, var(--panel));
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .timeline {
+      counter-reset: step;
+      display: grid;
+      gap: 14px;
+    }
+
+    .step {
+      position: relative;
+      padding: 18px 18px 18px 58px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      position: absolute;
+      left: 18px;
+      top: 18px;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: var(--accent);
+      color: white;
+      font-weight: 800;
+      font-size: 0.9rem;
+    }
+
+    .small {
+      font-size: 0.92rem;
+      color: var(--muted);
+    }
+
+    .diagram {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+      background: color-mix(in srgb, var(--panel) 70%, var(--bg));
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      overflow-x: auto;
+    }
+
+    @media (max-width: 860px) {
+      .half, .third, .two-third {
+        grid-column: span 12;
+      }
+
+      header {
+        padding-top: 34px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SVP RC1 Agent Orchestration Plan</h1>
+    <p class="lede">A staged, branch-based plan for taking SVP from the RC1 spec foundation to a real 30-second video package, while keeping builders, reviewers, and the orchestrator in a tight wake-up loop.</p>
+    <div class="meta">
+      <span class="pill">Repo: <code>/Users/domesposito/Projects/svp</code></span>
+      <span class="pill">Branch prefix: <code>codex/</code></span>
+      <span class="pill">Builders active: max 2</span>
+      <span class="pill">Work style: fresh worktree per branch</span>
+      <span class="pill">Status: plan ready, execution not started</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="grid">
+      <article class="card two-third">
+        <h2>North Star</h2>
+        <p>SVP is a strict package format for machine-readable observations over time-based media. The goal of this project is to build enough real infrastructure to process one simple 20 to 30 second video into an inspectable `.svp` package.</p>
+        <p>Observation layers are core. Interpretive labels are non-core unless explicitly required by the RC1 spec.</p>
+        <div class="note">
+          <strong>Core rule:</strong> build the validator and package foundation first. The builder may produce partial packages along the way, but it cannot claim success until the validator can inspect and report on the output.
+        </div>
+        <p>Validator-first sequencing prevents the project from producing impressive-looking packages that cannot be independently inspected, trusted, or debugged.</p>
+        <p>The roadmap already contains the phase details. This file explains how the orchestrator should dispatch agents, review PRs, sequence dependencies, and keep the project moving without letting parallel work collide.</p>
+      </article>
+
+      <aside class="card third compact">
+        <h2>Source Docs</h2>
+        <ul>
+          <li><a href="../../AGENTS.md"><code>AGENTS.md</code></a></li>
+          <li><a href="./00_START_HERE.md"><code>00_START_HERE.md</code></a></li>
+          <li><a href="./01_PARALLEL_WORK_MAP.md"><code>01_PARALLEL_WORK_MAP.md</code></a></li>
+          <li><a href="./03_TECHNICAL_DECISIONS.md"><code>03_TECHNICAL_DECISIONS.md</code></a></li>
+          <li><a href="./agent_rules/AGENT_RULES.md"><code>agent_rules/AGENT_RULES.md</code></a></li>
+          <li><a href="./checklists/commands.md"><code>checklists/commands.md</code></a></li>
+          <li><a href="./checklists/validation_report_contract.md"><code>validation_report_contract.md</code></a></li>
+        </ul>
+      </aside>
+
+      <article class="card">
+        <h2>Current Implementation State</h2>
+        <p>The SVP v1.0 RC1 spec package and implementation roadmap are present in the repository. The next work is not more spec drafting. The next work is establishing the baseline, then creating the native C++20 build and CLI foundation.</p>
+        <ul>
+          <li><code>AGENTS.md</code> now defines agent permissions, worktree rules, branch/push/PR permission, test discipline, and no-god-file expectations.</li>
+          <li>The roadmap lives under <code>docs/SVP_Implementation_Phases_RC1/</code>.</li>
+          <li>Implementation should follow the phase docs, not free-form invention.</li>
+          <li>The orchestrator thread owns sequencing and must be woken by builders and reviewers when they finish.</li>
+        </ul>
+      </article>
+
+      <article class="card half">
+        <h2>What We Are Not Doing</h2>
+        <ul>
+          <li>No full video builder before the validator spine exists.</li>
+          <li>No more than two builder agents active at once.</li>
+          <li>No builder reviews or merges its own work.</li>
+          <li>No direct edits in another agent's active worktree.</li>
+          <li>No vague "works for me" package validity claims.</li>
+          <li>No god files or catch-all dumping grounds.</li>
+          <li>No tests just for ceremony when no code or behavior changed.</li>
+          <li>No NLE plugin, editor integration, GUI application, or external tool integration during this RC1 infrastructure pass.</li>
+        </ul>
+      </article>
+
+      <article class="card half">
+        <h2>What Success Looks Like</h2>
+        <ul>
+          <li><code>svp-validator</code> emits structured reports and meaningful validation codes.</li>
+          <li>Fixtures prove valid and invalid package behavior.</li>
+          <li><code>svp-reader</code> and <code>svp-inspector</code> make packages understandable.</li>
+          <li>The builder creates partial packages first, then a complete package later.</li>
+          <li>One simple 20 to 30 second video produces a `.svp` file, validation JSON, inspector output, and a trial report.</li>
+          <li>Each file has one clear job, and shared contracts have one source of truth.</li>
+        </ul>
+      </article>
+    </section>
+
+    <section class="card">
+      <h2>Minimum Valid RC1 Package For First Video Trial</h2>
+      <p>For the first 20 to 30 second video trial, a package may be considered milestone-valid only if it passes the validator according to the RC1 rules and contains the minimum required package structure defined by the spec.</p>
+      <p>The first milestone package must include, at minimum:</p>
+      <ul>
+        <li>Original media reference or embedded source media according to the RC1 package rules.</li>
+        <li>Required manifest files.</li>
+        <li>Required package metadata.</li>
+        <li>Required provenance records for generated outputs.</li>
+        <li>Canonical timing representation.</li>
+        <li>At least one valid media timeline.</li>
+        <li>Transcript structures when audio is present, or explicit valid zero-word behavior when the source is silent.</li>
+        <li>Shot or scene structure if required by the RC1 package rules.</li>
+        <li>Validation report output generated by <code>svp-validator</code>.</li>
+        <li>Inspector-readable package summary.</li>
+      </ul>
+      <div class="note warning">
+        <strong>Spec fidelity rule:</strong> if any listed requirement conflicts with the RC1 spec, the spec wins. Agents must adjust implementation and validation behavior to the spec rather than inventing new package requirements.
+      </div>
+      <p>Optional layers such as masks, depth, embeddings, labels, relationships, or model-generated observations may be absent, sparse, empty, or marked unsupported only when the RC1 spec allows that state.</p>
+      <p>No builder may claim a complete package unless the validator confirms it. Partial builder output must be marked honestly as incomplete.</p>
+    </section>
+
+    <section class="card">
+      <h2>No Silent Spec Decisions</h2>
+      <p>Agents must not silently resolve ambiguous RC1 behavior by inventing implementation behavior. If the spec is unclear, contradictory, or underspecified, the agent must document the ambiguity and escalate to the orchestrator or human owner.</p>
+      <p>Implementation may use temporary behavior only when:</p>
+      <ul>
+        <li>It is clearly marked as temporary.</li>
+        <li>It uses documented temporary validation codes where relevant.</li>
+        <li>It does not change RC1 semantics.</li>
+        <li>It includes a follow-up recommendation.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Branch And Worktree Model</h2>
+      <p>All agent work happens on scoped branches with fresh worktrees. The orchestrator decides the branch base for each assignment after checking current repo state.</p>
+      <div class="diagram">main or current integration branch
+  |
+  +-- codex/phase-00-repo-baseline
+  +-- codex/phase-01-build-system-cli
+  +-- codex/phase-02-validator-core
+  +-- codex/phase-08-model-runtime
+  +-- codex/phase-06-media-ingest
+  +-- codex/phase-04-fixture-lab</div>
+      <div class="note warning">
+        <strong>Important:</strong> every builder gets a new worktree and a scoped branch. Builders may commit, push, and open PRs for their assigned scope. Reviewers may review and approve or request changes. The orchestrator coordinates merge readiness and the next assignment.
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Shared Source Of Truth Rules</h2>
+      <p>The following concepts must have one source of truth:</p>
+      <ul>
+        <li>Validation code registry.</li>
+        <li>Validation report schema.</li>
+        <li>Package manifest field names.</li>
+        <li>Canonical timing and rational time conversion.</li>
+        <li>Hash algorithms and hash formatting.</li>
+        <li>SVPB block type identifiers.</li>
+        <li>Model bundle identifiers.</li>
+        <li>SQLite index schema.</li>
+        <li>Exit code behavior.</li>
+      </ul>
+      <div class="note warning">
+        <strong>Review rule:</strong> builders must import or reuse shared definitions instead of copying strings, constants, or schema fragments into tool-specific files. Duplicate constants should be treated as review findings unless the duplication is explicitly generated from the canonical source.
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Agent Loop</h2>
+      <p>This is the operating loop for the whole project. It is intentionally repetitive, because repetition keeps a large multi-agent project boring in the best way. Wake-up loop means each builder or reviewer explicitly reports completion back to the orchestrator, including status and next recommended task.</p>
+      <div class="note">
+        <strong>Default approval rule:</strong> a builder PR may be considered ready after a separate reviewer thread approves it and the orchestrator confirms scope, proof, and dependency safety. Human escalation is reserved for product intent, ambiguous spec judgment, credentials, local environment decisions, and destructive git permission.
+      </div>
+      <div class="note warning">
+        <strong>File responsibility guardrail:</strong> line count is a signal, not the real rule. Files should be easy to reason through and have one clear responsibility. Split code into packages, tools, formatters, parsers, report models, readers, writers, and policies according to ownership. Do not create new god files while building the foundation.
+      </div>
+      <div class="timeline">
+        <div class="step">
+          <h3>Orchestrator Selects The Next Phase</h3>
+          <p>The orchestrator checks dependency gates, open PRs, blocked shared files, and the two-builder limit. It assigns only the next safe phase or review.</p>
+        </div>
+        <div class="step">
+          <h3>Builder Thread Creates Branch And Worktree</h3>
+          <p>The builder reads <code>AGENTS.md</code>, the common roadmap docs, and only the assigned phase doc. It creates a fresh worktree, implements the scoped work, verifies appropriately, commits, pushes, opens a PR, and wakes the orchestrator.</p>
+        </div>
+        <div class="step">
+          <h3>Reviewer Thread Reviews The PR</h3>
+          <p>The reviewer checks behavior, source-of-truth ownership, shared contract safety, file responsibility, and proof. Reviewers run commands only when needed to prove or disprove something.</p>
+        </div>
+        <div class="step">
+          <h3>Builder Handles Required Changes</h3>
+          <p>If the reviewer requests changes, the builder stays on the same branch and fixes only the requested issues. The builder wakes the orchestrator again when ready.</p>
+        </div>
+        <div class="step">
+          <h3>Orchestrator Advances The Dependency Graph</h3>
+          <p>After approval and merge readiness, the orchestrator marks the phase complete, unblocks dependent work, and starts the next builder or reviewer thread.</p>
+        </div>
+      </div>
+      <div class="note green">
+        <strong>Wake-up rule:</strong> every builder and reviewer must wake the orchestrator thread when finished. The final handoff must include <code>Next recommended task</code> so the loop can continue without guessing.
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Builder PR Definition Of Done</h2>
+      <p>A builder PR is not ready for review until it includes:</p>
+      <ul>
+        <li>Scoped implementation matching the assigned phase.</li>
+        <li>No unrelated cleanup or later-phase implementation.</li>
+        <li>Clear file ownership with no new god files.</li>
+        <li>Updated docs only when behavior or usage changed.</li>
+        <li>Relevant verification output, or a clear reason verification could not run.</li>
+        <li>Honest status of partial or incomplete outputs.</li>
+        <li>A final handoff comment containing summary of changes, files changed, verification performed, known limitations, and next recommended task.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Subagent Roles</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Role</th>
+            <th>Responsibility</th>
+            <th>Allowed Output</th>
+            <th>Not Allowed</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Orchestrator</td>
+            <td>Maintains phase order, assigns builders/reviewers, watches PRs, routes wake-ups, and protects shared contracts.</td>
+            <td>Assignments, prompts, merge-readiness decisions, status updates.</td>
+            <td>Letting builders self-review or running more than two builders.</td>
+          </tr>
+          <tr>
+            <td>Builder</td>
+            <td>Implements one scoped phase or subphase in one branch/worktree.</td>
+            <td>Code/docs for assigned scope, commits, pushed branch, PR, verification report.</td>
+            <td>Scope creep, unrelated cleanup, changing later phases, creating god files.</td>
+          </tr>
+          <tr>
+            <td>Reviewer</td>
+            <td>Reviews one PR from a code-review stance.</td>
+            <td>Findings, approval, required changes, or escalation.</td>
+            <td>Rewriting the branch unless reassigned as a builder.</td>
+          </tr>
+          <tr>
+            <td>Scout</td>
+            <td>Read-only inspection before high-risk work or unclear dependencies.</td>
+            <td>Maps, risks, file ownership notes, builder-ready directions.</td>
+            <td>Editing files or opening implementation PRs.</td>
+          </tr>
+          <tr>
+            <td>Audit Agent</td>
+            <td>Periodically scans for drift: duplicate constants, shared contract sprawl, large files, missing validation codes.</td>
+            <td>Audit report and backlog recommendations.</td>
+            <td>Changing code without a scoped assignment.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Reviewer Definition Of Done</h2>
+      <p>A reviewer thread must finish with one of these statuses:</p>
+      <ul>
+        <li>Approved.</li>
+        <li>Changes requested.</li>
+        <li>Blocked pending human or orchestrator decision.</li>
+      </ul>
+      <p>Reviewer output must include:</p>
+      <ul>
+        <li>Findings first, ordered by severity.</li>
+        <li>Whether the PR stayed inside scope.</li>
+        <li>Whether changed behavior had adequate proof.</li>
+        <li>Whether shared contracts were modified safely.</li>
+        <li>Whether any god-file or mixed-responsibility risk was introduced.</li>
+        <li>Exact required changes if not approved.</li>
+        <li>Next recommended task for the orchestrator.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Ordered Work Plan</h2>
+
+      <div class="phase">
+        <div class="phase-header">
+          <h3>0. Repo Baseline And RC1 Lock</h3>
+          <span class="tag warn-tag">gate</span>
+        </div>
+        <p><strong>Branch:</strong> <code>codex/phase-00-repo-baseline</code></p>
+        <p><strong>Scope:</strong> verify the RC1 package foundation, confirm repo state, and commit the baseline if assigned.</p>
+        <ul>
+          <li>Run <code>scripts/verify-spec-files.sh</code>.</li>
+          <li>Inspect <code>git status</code> and unexpected root or temp files.</li>
+          <li>Do not start implementation code in this phase.</li>
+        </ul>
+        <p><strong>Reviewer focus:</strong> baseline completeness, no implementation drift, no missing spec artifacts.</p>
+        <p class="small">Parallelizable: no. This gates everything.</p>
+      </div>
+
+      <div class="phase">
+        <div class="phase-header">
+          <h3>1. Build System, Dependency Manifest, And CLI Skeleton</h3>
+          <span class="tag warn-tag">shared contract</span>
+        </div>
+        <p><strong>Branch:</strong> <code>codex/phase-01-build-system-cli</code></p>
+        <p><strong>Scope:</strong> add the native C++20 project foundation: CMake, vcpkg, packages, and CLI executable skeletons.</p>
+        <ul>
+          <li>Add <code>CMakeLists.txt</code> and <code>vcpkg.json</code>.</li>
+          <li>Create initial package targets for core, package, and validation ownership.</li>
+          <li>Add <code>svp-validator --help</code> and <code>--version</code>.</li>
+          <li>Create reader, inspector, and builder target shells only if useful.</li>
+        </ul>
+        <p><strong>Reviewer focus:</strong> dependency choices match roadmap, no media processing yet, files have clear jobs.</p>
+        <p class="small">Parallelizable: no. Many later branches depend on this shape.</p>
+      </div>
+
+      <div class="phase">
+        <div class="phase-header">
+          <h3>2. Validator Core And Machine-Readable Reports</h3>
+          <span class="tag">validator spine</span>
+        </div>
+        <p><strong>Branch:</strong> <code>codex/phase-02-validator-core</code></p>
+        <p><strong>Scope:</strong> implement the first validator path: input handling, registry loading, report shape, layout checks, and exit codes.</p>
+        <ul>
+          <li>Load <code>spec/registries/validation-codes.json</code>.</li>
+          <li>Emit the validation report contract for <code>--json</code>.</li>
+          <li>Handle missing files, wrong extensions, non-ZIP inputs, and empty ZIPs without crashing.</li>
+          <li>Use registered validation codes or documented <code>X_VALIDATOR_</code> temporary codes.</li>
+        </ul>
+        <p><strong>Reviewer focus:</strong> structured failures, exit code behavior, report ownership, no vague validation messages.</p>
+        <p class="small">Parallelizable: after Phase 1. Avoid concurrent edits to <code>packages/svp-validation</code>.</p>
+      </div>
+
+      <div class="phase">
+        <div class="phase-header">
+          <h3>3. Deep Validator Checks</h3>
+          <span class="tag">validator spine</span>
+          <span class="tag green-tag">fixture enabler</span>
+        </div>
+        <p><strong>Branch:</strong> <code>codex/phase-03-validator-deep-checks</code></p>
+        <p><strong>Scope:</strong> add deep validation through focused subpasses, not one giant validator blob.</p>
+        <p>Phase 3 should be executed through focused validator subpasses:</p>
+        <ol>
+          <li>Schema and manifest validation.</li>
+          <li>SVPB block parsing and structural validation.</li>
+          <li>BLAKE3 and package hash verification.</li>
+          <li>SQLite index presence and structural checks.</li>
+          <li>Logical row hash and equivalence checks.</li>
+          <li>Cross-reference checks between manifest, SVPB blocks, indexes, and package metadata.</li>
+        </ol>
+        <ul>
+          <li>Each subpass should have clear ownership, focused tests, and registered validation codes.</li>
+          <li>Add focused owners for schemas, SVPB blocks, hashes, index logic, and cross-reference checks.</li>
+          <li>Keep authenticity findings separate from core validity.</li>
+          <li>Do not silently change RC1 equivalence semantics.</li>
+        </ul>
+        <p><strong>Reviewer focus:</strong> confirm that each deep validator concern has a clear owner and does not collapse into a catch-all validation file. Reject vague validation errors when a registered or temporary code should exist. Also verify source-of-truth fidelity to the spec, no hash/tolerance confusion, and clear validation codes.</p>
+        <p class="small">Parallelizable: after Phase 2. Coordinate with fixture work.</p>
+      </div>
+
+      <div class="phase">
+        <div class="phase-header">
+          <h3>4. Fixture Lab</h3>
+          <span class="tag green-tag">fixtures</span>
+        </div>
+        <p><strong>Branch:</strong> <code>codex/phase-04-fixture-lab</code></p>
+        <p><strong>Scope:</strong> create tiny valid and invalid `.svp` fixtures that prove validator behavior.</p>
+        <ul>
+          <li>Add reproducible fixture generation helpers.</li>
+          <li>Create static-card, silent-video, and vertical-video valid fixtures.</li>
+          <li>Create invalid fixtures for missing sections, bad block hashes, index problems, and unsupported label schema warnings.</li>
+          <li>Document expected validator statuses.</li>
+        </ul>
+        <p><strong>Reviewer focus:</strong> fixture reproducibility, small files, expected statuses, no builder masquerading as fixture work.</p>
+        <p class="small">Parallelizable: after Phase 2 report shape exists; best with Phase 3 nearly ready.</p>
+      </div>
+
+      <div class="phase">
+        <div class="phase-header">
+          <h3>5. Reader And Inspector</h3>
+          <span class="tag">debug layer</span>
+        </div>
+        <p><strong>Branch:</strong> <code>codex/phase-05-reader-inspector</code></p>
+        <p><strong>Scope:</strong> build tools that open packages and explain their contents without validating everything.</p>
+        <ul>
+          <li>Implement package open/read APIs.</li>
+          <li>Read manifests, transcript counts, shot/scene counts, block metadata, and index summaries.</li>
+          <li>Keep invalid package handling graceful.</li>
+        </ul>
+        <p><strong>Reviewer focus:</strong> reader ownership versus validator ownership, useful partial-read behavior.</p>
+        <p class="small">Parallelizable: after Phase 2 and at least one fixture.</p>
+      </div>
+
+      <div class="phase">
+        <div class="phase-header">
+          <h3>6. Builder Media Ingest And Canonical Timing</h3>
+          <span class="tag">builder foundation</span>
+        </div>
+        <p><strong>Branch:</strong> <code>codex/phase-06-media-ingest</code></p>
+        <p><strong>Scope:</strong> start the builder with probing, source copy, audio extraction, canonical raster, and rational timestamp conversion.</p>
+        <ul>
+          <li>Add <code>packages/svp-media</code>.</li>
+          <li>Integrate FFmpeg or ffprobe for deterministic probing.</li>
+          <li>Write partial package skeletons marked honestly as incomplete.</li>
+          <li>Add timestamp tests for required frame rates.</li>
+        </ul>
+        <p><strong>Reviewer focus:</strong> no full-builder claims, exact timestamp behavior, partial output honesty.</p>
+        <p class="small">Parallelizable: after Phase 1 and Phase 2; can run alongside model runtime if builder slots allow.</p>
+      </div>
+
+      <div class="phase">
+        <div class="phase-header">
+          <h3>7. Audio, VAD, Transcript, Word Timings, And Speakers</h3>
+          <span class="tag">audio</span>
+          <span class="tag warn-tag">model-dependent</span>
+        </div>
+        <p><strong>Branch:</strong> <code>codex/phase-07-audio-transcript</code></p>
+        <p><strong>Scope:</strong> emit transcript files, word timings, speaker records, and audio provenance.</p>
+        <ul>
+          <li>Use native transcription path selected by the model-runtime work.</li>
+          <li>Support honest one-speaker mode for the first trial if diarization is not ready.</li>
+          <li>Handle silent video as valid zero-word behavior according to the spec.</li>
+        </ul>
+        <p><strong>Reviewer focus:</strong> timestamp units, provenance honesty, no hidden Python runtime requirement.</p>
+        <p class="small">Parallelizable: after Phase 6 and model path selection.</p>
+      </div>
+
+      <div class="phase">
+        <div class="phase-header">
+          <h3>8. Native Model Bundle Runtime</h3>
+          <span class="tag green-tag">model runtime</span>
+        </div>
+        <p><strong>Branch:</strong> <code>codex/phase-08-model-runtime</code></p>
+        <p><strong>Scope:</strong> implement native model-bundle parsing, lock parsing, BLAKE3 verification, cache discovery, and ONNX Runtime session loading.</p>
+        <ul>
+          <li>Add <code>packages/svp-models</code>.</li>
+          <li>Use canonical <code>model_...</code> IDs for normative references.</li>
+          <li>Treat registry slugs as metadata only.</li>
+          <li>Make missing model errors clear and non-crashing.</li>
+        </ul>
+        <p><strong>Reviewer focus:</strong> no Python runtime, content-addressed behavior, clear ownership boundaries.</p>
+        <p class="small">Parallelizable: after Phase 1. Good second builder lane while validator work proceeds.</p>
+      </div>
+
+      <div class="phase">
+        <div class="phase-header">
+          <h3>9. Vision Observations</h3>
+          <span class="tag">vision</span>
+          <span class="tag warn-tag">high risk</span>
+        </div>
+        <p><strong>Branch:</strong> <code>codex/phase-09-vision-observations</code></p>
+        <p><strong>Scope:</strong> generate shots, scenes, tracks, regions, depth blocks, masks, and vision provenance.</p>
+        <ul>
+          <li>Start with deterministic classical CV where possible.</li>
+          <li>Use conservative tracks and masks; labels are non-core.</li>
+          <li>Write SVPB streams that the validator can parse.</li>
+        </ul>
+        <p><strong>Reviewer focus:</strong> no over-promising, block validity, degenerate/static video behavior.</p>
+        <p class="small">Parallelizable: after Phase 6, Phase 8, and Phase 3 SVPB support.</p>
+      </div>
+
+      <div class="phase">
+        <div class="phase-header">
+          <h3>10. Relationships, Embeddings, SQLite Index, And Final Package Writer</h3>
+          <span class="tag warn-tag">integration</span>
+        </div>
+        <p><strong>Branch:</strong> <code>codex/phase-10-index-package-writer</code></p>
+        <p><strong>Scope:</strong> assemble the complete package with relationships, embeddings, SQLite index, index manifest, provenance, and validation output.</p>
+        <p>Phase 10 is an integration phase, but it should still be checkpointed internally. Preferred checkpoints:</p>
+        <ol>
+          <li>Package writer skeleton and atomic finalization behavior.</li>
+          <li>Relationship generation from existing audio and vision observations.</li>
+          <li>Embedding output integration where available.</li>
+          <li>SQLite index generation.</li>
+          <li>Index manifest and logical row hash generation.</li>
+          <li>Builder-to-validator integration.</li>
+          <li>Final validation output storage.</li>
+          <li>End-to-end package assembly smoke test.</li>
+        </ol>
+        <ul>
+          <li>Generate required relationships from audio and vision observations.</li>
+          <li>Build the SQLite index and logical row hash.</li>
+          <li>Run the validator at the end of build and store validation output.</li>
+          <li>Ensure package finalization is atomic.</li>
+          <li>The branch may remain a single integration branch, but commits and review notes should make these checkpoints easy to inspect.</li>
+        </ul>
+        <p><strong>Reviewer focus:</strong> do not approve Phase 10 if package writing, index generation, relationships, provenance, validation output, and atomic finalization are all mixed together without clear ownership boundaries. Also verify atomic writer behavior, logical hash correctness, and builder/validator integration.</p>
+        <p class="small">Parallelizable: no. This is an integration phase after Phase 7, 8, 9, and deep validator support.</p>
+      </div>
+
+      <div class="phase">
+        <div class="phase-header">
+          <h3>11. First 30-Second Video Trial</h3>
+          <span class="tag green-tag">milestone</span>
+        </div>
+        <p><strong>Branch:</strong> <code>codex/phase-11-first-video-trial</code></p>
+        <p><strong>Scope:</strong> run one simple real video through the pipeline and capture builder logs, validation JSON, inspector output, and a report.</p>
+        <p>The first video trial must produce:</p>
+        <ul>
+          <li>Source video path and basic media properties.</li>
+          <li>Builder command used.</li>
+          <li>Builder log.</li>
+          <li>Generated <code>.svp</code> package.</li>
+          <li>Validation JSON.</li>
+          <li>Validator exit code.</li>
+          <li>Inspector output.</li>
+          <li>Package size.</li>
+          <li>List of generated package sections.</li>
+          <li>Known invalid, warning, or unsupported findings.</li>
+          <li>Specific next fix for every invalid finding.</li>
+          <li>Human-readable trial report under <code>runs/first-video-trial/</code>.</li>
+        </ul>
+        <ul>
+          <li>Use a clean 20 to 30 second source video.</li>
+          <li>Save outputs under <code>runs/first-video-trial/</code>.</li>
+          <li>Explain every invalid finding with a specific next fix.</li>
+          <li>Do not hand-build or manually repair the first trial package. The trial must exercise the real builder path.</li>
+        </ul>
+        <p><strong>Reviewer focus:</strong> trial evidence, actionable findings, no hand-built package shortcuts.</p>
+        <p class="small">Parallelizable: no. This is the milestone.</p>
+      </div>
+
+      <div class="phase">
+        <div class="phase-header">
+          <h3>12. Hardening, RC Feedback, And Next Standard Pass</h3>
+          <span class="tag">closeout</span>
+        </div>
+        <p><strong>Branch:</strong> <code>codex/phase-12-hardening-feedback</code></p>
+        <p><strong>Scope:</strong> separate implementation bugs from spec ambiguity and decide whether RC2 is needed.</p>
+        <ul>
+          <li>Review trial warnings and failures.</li>
+          <li>Add fixture coverage for discovered bugs when appropriate.</li>
+          <li>Document spec contradictions instead of silently changing RC1 behavior.</li>
+        </ul>
+        <p><strong>Reviewer focus:</strong> clear triage, no architecture creep, honest recommendation.</p>
+        <p class="small">Parallelizable: after Phase 11.</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Parallelization Groups</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Group</th>
+            <th>Can Run Together</th>
+            <th>Must Wait For</th>
+            <th>Why</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>A. Foundation Gates</td>
+            <td>Nothing</td>
+            <td>Phase 00, then Phase 01</td>
+            <td>The repo baseline and build system shape are shared by every later branch.</td>
+          </tr>
+          <tr>
+            <td>B. Validator And Model Runtime</td>
+            <td>Phase 02/03 validator lane and Phase 08 model runtime</td>
+            <td>Phase 01</td>
+            <td>They touch different primary packages and unblock later builder work.</td>
+          </tr>
+          <tr>
+            <td>C. Fixtures And Media Ingest</td>
+            <td>Phase 04 fixture lab and Phase 06 media ingest</td>
+            <td>Phase 02; Phase 03 preferred for fixtures</td>
+            <td>Fixtures prove validator behavior while media ingest starts partial builder output.</td>
+          </tr>
+          <tr>
+            <td>D. Audio And Vision</td>
+            <td>Phase 07 and Phase 09</td>
+            <td>Phase 06 and Phase 08; Phase 03 for block validation</td>
+            <td>Audio and vision can develop in separate packages once media and model foundations exist.</td>
+          </tr>
+          <tr>
+            <td>E. Integration And Trial</td>
+            <td>Nothing</td>
+            <td>Phase 07, 09, 10, then 11</td>
+            <td>Package writer and first video trial need all prior outputs to converge.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="note warning">
+        <strong>Do not parallelize shared contract zones:</strong> <code>CMakeLists.txt</code>, <code>vcpkg.json</code>, <code>packages/svp-core</code>, <code>packages/svp-validation</code>, or <code>spec/registries/validation-codes.json</code> without explicit orchestrator coordination.
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Risk Register</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Risk</th>
+            <th>Why It Matters</th>
+            <th>Mitigation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>FFmpeg and probing drift</td>
+            <td>Media duration, frame rate, timebase, and audio stream behavior can vary by file and platform.</td>
+            <td>Require deterministic probe output, canonical rational timestamp conversion, and timestamp tests for common frame rates.</td>
+          </tr>
+          <tr>
+            <td>Timestamp correctness</td>
+            <td>Small timing errors can poison transcript alignment, shots, scenes, tracks, indexes, and validator results.</td>
+            <td>Treat rational time conversion as shared core logic with focused tests. Do not duplicate timestamp math across packages.</td>
+          </tr>
+          <tr>
+            <td>Validator scope creep</td>
+            <td>Phase 3 can become too large if schema, SVPB, hashes, SQLite, and logical row checks are all implemented as one blob.</td>
+            <td>Split validator deep checks internally into focused owners and review checkpoints.</td>
+          </tr>
+          <tr>
+            <td>Model runtime instability</td>
+            <td>ONNX Runtime, model bundles, cache discovery, and missing model behavior can block builder progress.</td>
+            <td>Keep model runtime isolated in <code>packages/svp-models</code>; missing models must produce clear non-crashing errors.</td>
+          </tr>
+          <tr>
+            <td>SVPB parsing complexity</td>
+            <td>Binary stream parsing can become fragile and hard to debug.</td>
+            <td>Give SVPB parsing its own focused module, tests, and validation codes.</td>
+          </tr>
+          <tr>
+            <td>SQLite/index correctness</td>
+            <td>A package can look structurally valid while its index is stale, incomplete, or logically inconsistent.</td>
+            <td>Validate index manifest, expected tables, logical row hashes, and package-to-index consistency.</td>
+          </tr>
+          <tr>
+            <td>Package size growth</td>
+            <td>Masks, depth, embeddings, and indexes can make packages large quickly.</td>
+            <td>Permit sparse outputs where valid; defer heavy layers until basic package validity is proven.</td>
+          </tr>
+          <tr>
+            <td>Agent scope creep</td>
+            <td>Builders may wander into later phases or perform unrelated cleanup.</td>
+            <td>Keep scoped branch assignments strict; reviewers must reject unrelated changes.</td>
+          </tr>
+          <tr>
+            <td>Shared contract collisions</td>
+            <td>Multiple agents editing build files, validation codes, or core contracts can create merge conflict sludge.</td>
+            <td>Orchestrator must explicitly coordinate shared contract files and avoid parallel edits in those zones.</td>
+          </tr>
+          <tr>
+            <td>Spec ambiguity</td>
+            <td>Agents may silently resolve unclear RC1 behavior in code.</td>
+            <td>Ambiguities must be documented and escalated instead of silently changing RC1 semantics.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Testing And Verification Discipline</h2>
+      <p>Tests and verification commands should prove the work that changed. They are not a ritual tax.</p>
+      <div class="note warning">
+        <strong>Verification skip rule:</strong> skipping verification is acceptable only when the PR did not change code, scripts, schemas, generated fixtures, CLI behavior, package bytes, validation behavior, or build configuration. If any of those changed, the builder must either run the relevant proof command or report the exact blocker.
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Work Type</th>
+            <th>Expected Proof</th>
+            <th>When To Skip</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Docs-only plan updates</td>
+            <td>Readback or browser check when layout matters.</td>
+            <td>When no code, script, schema, or behavior changed.</td>
+          </tr>
+          <tr>
+            <td>Build system or C++ code</td>
+            <td>Configure/build command from the phase doc, plus relevant CLI smoke command.</td>
+            <td>Do not skip unless blocked by dependency or environment; report the blocker.</td>
+          </tr>
+          <tr>
+            <td>Validator behavior</td>
+            <td>JSON output and exit behavior for valid, invalid, and unreadable inputs.</td>
+            <td>Only skip commands a previous PR already proved and this PR did not affect.</td>
+          </tr>
+          <tr>
+            <td>Fixtures</td>
+            <td>Fixture generation command and validator status checks.</td>
+            <td>Do not skip if fixture bytes or generator logic changed.</td>
+          </tr>
+          <tr>
+            <td>Reviewer pass</td>
+            <td>Code-review findings first. Run commands only if needed to verify a concern.</td>
+            <td>When prior builder proof is relevant and the reviewer has no reason to doubt it.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Thread Prompt Templates</h2>
+      <p>These are templates for future Codex desktop threads. They are not commands to run now.</p>
+
+      <h3>Builder Thread Prompt</h3>
+      <div class="diagram">You are working in /Users/domesposito/Projects/svp.
+Read AGENTS.md first.
+Read:
+- docs/SVP_Implementation_Phases_RC1/00_START_HERE.md
+- docs/SVP_Implementation_Phases_RC1/01_PARALLEL_WORK_MAP.md
+- docs/SVP_Implementation_Phases_RC1/03_TECHNICAL_DECISIONS.md
+- docs/SVP_Implementation_Phases_RC1/agent_rules/AGENT_RULES.md
+- &lt;assigned phase doc&gt;
+
+Create a fresh worktree and branch:
+- Branch: codex/&lt;phase-name&gt;
+- Worktree: &lt;new worktree path&gt;
+
+Task:
+- &lt;precise phase goal&gt;
+
+Scope:
+- Files allowed: &lt;list&gt;
+- Files to inspect: &lt;list&gt;
+- Non-goals: &lt;list&gt;
+
+Rules:
+- Stay inside the assigned phase.
+- Prefer one-job files. No god files.
+- Commit, push, and open a PR when complete.
+- Run tests or verification only when code/behavior changed or proof is needed.
+- Wake the orchestrator thread when done.</div>
+
+      <h3>Reviewer Thread Prompt</h3>
+      <div class="diagram">Review PR &lt;url-or-branch&gt; for /Users/domesposito/Projects/svp.
+Read AGENTS.md first.
+
+Focus:
+- Behavior regressions.
+- RC1 spec/source-of-truth drift.
+- Shared contract changes.
+- Missing proof for changed code.
+- God files or mixed responsibilities.
+- Scope creep beyond the assigned phase.
+
+Output:
+- Findings first, ordered by severity.
+- Approval when clean enough.
+- Exact required changes when not clean.
+- Tests only when needed to prove or disprove something.
+- Wake the orchestrator thread when review is complete.</div>
+
+      <h3>Orchestrator Poll Prompt</h3>
+      <div class="diagram">You are the SVP implementation orchestrator.
+
+Poll:
+- Active builder threads.
+- Active reviewer threads.
+- Open PRs.
+- Unresolved requested changes.
+- Blocked shared contract files.
+- Dependency gates for the next phase.
+
+Act:
+- Keep no more than two builder agents active.
+- Wake builders with required changes.
+- Wake reviewers when PRs are ready.
+- Assign the next safe phase after approval/merge readiness.
+- Escalate to the human only for ambiguous spec intent, destructive git permission, credentials, or product judgment.</div>
+    </section>
+
+    <section class="card">
+      <h2>Immediate Next Work</h2>
+      <ol>
+        <li><strong>Confirm repo baseline:</strong> run the Phase 00 verification path and decide whether the current untracked roadmap docs should be included in the baseline branch.</li>
+        <li><strong>Create the first builder assignment:</strong> Phase 00 if the baseline is not committed, otherwise Phase 01 for build system and CLI skeleton.</li>
+        <li><strong>Create the first reviewer assignment:</strong> review the Phase 00 or Phase 01 PR after the builder wakes the orchestrator.</li>
+        <li><strong>Start parallel work only after Phase 01:</strong> pair validator core with model runtime or media ingest, depending on shared file pressure.</li>
+      </ol>
+      <p>The orchestration loop is ready, but execution should begin only after the orchestrator explicitly assigns the first branch.</p>
+    </section>
+
+    <section class="card">
+      <h2>Final Review Gates Before The First Video Trial</h2>
+      <ul>
+        <li>Phase 01 build and CLI skeleton are complete.</li>
+        <li>Validator core and deep checks can emit useful structured reports.</li>
+        <li>Fixtures include valid and invalid package examples with expected statuses.</li>
+        <li>Reader and inspector can explain package contents.</li>
+        <li>Model runtime does not require Python for normal builder operation.</li>
+        <li>Builder partial outputs are honest until validator-proven complete packages exist.</li>
+        <li>Every merged PR had separate builder and reviewer ownership.</li>
+        <li>The first video trial produces `.svp`, validation JSON, inspector output, logs, and a report.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
