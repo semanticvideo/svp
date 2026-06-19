@@ -1,2 +1,14 @@
-# Reserved for the Phase 05 inspector executable.
+find_package(CLI11 CONFIG REQUIRED)
 
+add_executable(svp-inspector
+  src/main.cpp
+)
+
+target_compile_features(svp-inspector PRIVATE cxx_std_20)
+
+target_link_libraries(svp-inspector
+  PRIVATE
+    CLI11::CLI11
+    svp::core
+    svp::package
+)
