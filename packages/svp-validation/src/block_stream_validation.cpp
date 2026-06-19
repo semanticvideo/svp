@@ -148,6 +148,10 @@ std::string_view code_for_issue(svp::blocks::IssueKind issue) noexcept {
   switch (issue) {
     case svp::blocks::IssueKind::invalid_header:
       return kCodeInvalidBlockHeader;
+    case svp::blocks::IssueKind::invalid_hash:
+      return kCodeInvalidBlockHash;
+    case svp::blocks::IssueKind::decompression_failed:
+      return kTempCodeBlockPayloadDecodeFailed;
     case svp::blocks::IssueKind::forbidden_block_type:
       return kCodeForbiddenBlockType;
     case svp::blocks::IssueKind::raster_extent_mismatch:

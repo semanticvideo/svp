@@ -19,6 +19,8 @@ inline constexpr std::string_view kCodeMissingDepth = "ERR_CORE_MISSING_DEPTH";
 inline constexpr std::string_view kCodeMissingMasks = "ERR_CORE_MISSING_MASKS";
 inline constexpr std::string_view kCodeInvalidBlockHeader =
     "ERR_CORE_INVALID_BLOCK_HEADER";
+inline constexpr std::string_view kCodeInvalidBlockHash =
+    "ERR_CORE_INVALID_BLOCK_HASH";
 inline constexpr std::string_view kCodeForbiddenBlockType =
     "ERR_CORE_FORBIDDEN_BLOCK_TYPE";
 inline constexpr std::string_view kCodeIndexSchemaInvalid =
@@ -69,6 +71,8 @@ inline constexpr std::string_view kTempCodeColorInvalidBucketRegistryVersion =
     "X_VALIDATOR_COLOR_INVALID_BUCKET_REGISTRY_VERSION";
 inline constexpr std::string_view kTempCodeBlockEntryNotStored =
     "X_VALIDATOR_BLOCK_ENTRY_NOT_STORED";
+inline constexpr std::string_view kTempCodeBlockPayloadDecodeFailed =
+    "X_VALIDATOR_BLOCK_PAYLOAD_DECODE_FAILED";
 inline constexpr std::string_view kTempCodeMissingEmbeddingsEntry =
     "X_VALIDATOR_MISSING_EMBEDDINGS_ENTRY";
 

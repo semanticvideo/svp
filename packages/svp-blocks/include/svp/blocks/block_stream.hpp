@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -29,6 +30,8 @@ enum class DType : std::uint32_t {
 
 enum class IssueKind {
   invalid_header,
+  invalid_hash,
+  decompression_failed,
   forbidden_block_type,
   raster_extent_mismatch,
 };
@@ -56,6 +59,8 @@ struct BlockHeaderV1 {
   std::uint64_t frame_count = 0;
   std::int64_t start_us = 0;
   std::int64_t end_us = 0;
+  std::array<std::uint8_t, 32> payload_blake3{};
+  std::array<std::uint8_t, 32> header_blake3{};
 };
 
 struct BlockStreamIssue {
@@ -68,6 +73,9 @@ struct ParseOptions {
   std::optional<BlockType> required_block_type;
   std::optional<RasterExtent> required_raster_extent;
   std::uint64_t max_compressed_payload_bytes = kMaxBlockPayloadBytes;
+  std::uint64_t max_uncompressed_payload_bytes = kMaxBlockPayloadBytes;
+  bool verify_hashes = true;
+  bool verify_zstd_decompression = true;
   bool allow_empty = false;
 };
 
