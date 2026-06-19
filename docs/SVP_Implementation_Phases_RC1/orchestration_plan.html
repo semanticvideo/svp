@@ -1147,9 +1147,9 @@ Act:
       <h2>Immediate Next Work</h2>
       <ol>
         <li><strong>Confirm RC2 import:</strong> run <code>scripts/verify-spec-files.sh</code> and verify the new OCR/color registries and schemas parse.</li>
-        <li><strong>Update active roadmap:</strong> ensure Phase 03+, fixtures, builder, index, inspector, and first-trial docs include `/text/` and `/colors/` work.</li>
-        <li><strong>Dispatch only the RC2 unblock review:</strong> do not start deeper buildout until the unblock checklist is satisfied.</li>
-        <li><strong>Next implementation after unblock:</strong> update validator required-path checks for `/text/` and `/colors/`, then resume Phase 03 with OCR/color deep validation.</li>
+        <li><strong>Update active roadmap:</strong> ensure Phase 03+, fixtures, builder, index, inspector, and first-trial docs include <code>/text/</code> and <code>/colors/</code> work.</li>
+        <li><strong>Dispatch only the RC2 unblock review:</strong> do not start deeper buildout until the unblock checklist is satisfied and reviewed.</li>
+        <li><strong>Next implementation after unblock:</strong> resume Phase 03 with OCR/color deep validation, then continue the remaining downstream fixture, builder, index/query, inspector, and first-video-trial work.</li>
       </ol>
       <p>The orchestration loop is paused for Phase 03+ until RC2 OCR/color planning is represented and reviewed.</p>
     </section>
@@ -1164,7 +1164,7 @@ Act:
         <li>Reader and inspector can explain package contents, including text region counts and color observation counts.</li>
         <li>Model runtime does not require Python for normal builder operation.</li>
         <li>Builder partial outputs are honest until validator-proven complete packages exist.</li>
-        <li>Index/query support includes visible text, normalized text, numeric values, text region targets, scene/shot/frame/region/text-region color bucket percentages, and logical row hash inputs.</li>
+        <li>Index/query support includes visible text, normalized text, numeric values, text region targets, scene/shot/frame/keyframe/region/entity/text-region color bucket percentages, and logical row hash inputs.</li>
         <li>Queries like "find all orange scenes" are supported by structured color observations, not just embeddings.</li>
         <li>Every merged PR had separate builder and reviewer ownership.</li>
         <li>The first video trial produces `.svp`, validation JSON, inspector output, logs, text/color evidence, and a report.</li>
