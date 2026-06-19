@@ -332,6 +332,12 @@ def write_package(name, mutate, text_regions_payload=None, index_case="valid"):
             sqlite_bytes, table_count = create_index_bytes()
             package.writestr("index/index.sqlite", sqlite_bytes)
             package.writestr("index/index_manifest.json", "{not json")
+        elif index_case == "empty_index_schema_version":
+            sqlite_bytes, table_count = create_index_bytes()
+            manifest_value = index_manifest(table_count)
+            manifest_value["index_schema_version"] = ""
+            package.writestr("index/index.sqlite", sqlite_bytes)
+            package.writestr("index/index_manifest.json", json.dumps(manifest_value, separators=(",", ":")))
         elif index_case == "missing_sqlite":
             _, table_count = create_index_bytes()
             package.writestr("index/index_manifest.json", json.dumps(index_manifest(table_count), separators=(",", ":")))
@@ -372,6 +378,7 @@ write_package(
 )
 write_package("missing-index-manifest", no_change, index_case="missing_manifest")
 write_package("malformed-index-manifest", no_change, index_case="malformed_manifest")
+write_package("empty-index-schema-version", no_change, index_case="empty_index_schema_version")
 write_package("missing-index-sqlite", no_change, index_case="missing_sqlite")
 write_package("unreadable-index-sqlite", no_change, index_case="unreadable_sqlite")
 write_package("missing-color-index-table", no_change, index_case="missing_color_table")
@@ -443,6 +450,11 @@ malformed_manifest_report="$workdir/malformed-index-manifest.json"
 malformed_manifest_status="$(run_validator "$workdir/malformed-index-manifest.svp" "$malformed_manifest_report")"
 expect_status "$malformed_manifest_status" "1" "malformed index manifest package"
 expect_code "$malformed_manifest_report" "ERR_CORE_INDEX_MANIFEST_INVALID"
+
+empty_index_schema_version_report="$workdir/empty-index-schema-version.json"
+empty_index_schema_version_status="$(run_validator "$workdir/empty-index-schema-version.svp" "$empty_index_schema_version_report")"
+expect_status "$empty_index_schema_version_status" "1" "empty index schema version package"
+expect_code "$empty_index_schema_version_report" "ERR_CORE_INDEX_MANIFEST_INVALID"
 
 missing_sqlite_report="$workdir/missing-index-sqlite.json"
 missing_sqlite_status="$(run_validator "$workdir/missing-index-sqlite.svp" "$missing_sqlite_report")"

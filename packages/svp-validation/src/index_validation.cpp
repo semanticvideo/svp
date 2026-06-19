@@ -248,6 +248,12 @@ void validate_exact_manifest_fields(ValidationReport& report,
   expect_string("sqlite_file", "index/index.sqlite");
   expect_string("logical_row_stream_version", "svp-logical-row-stream-v1");
 
+  const auto index_schema_version = manifest.find("index_schema_version");
+  if (index_schema_version != manifest.end() && index_schema_version->is_string() &&
+      index_schema_version->get<std::string>().empty()) {
+    add_manifest_issue(report, registry, "index_schema_version must not be empty.");
+  }
+
   for (const auto* field : {"sqlite_file_blake3", "logical_rows_blake3"}) {
     const auto iterator = manifest.find(field);
     if (iterator != manifest.end() && !valid_blake3_digest(*iterator)) {
