@@ -13,6 +13,8 @@ inline constexpr std::string_view kCodeMissingManifest = "ERR_CORE_MISSING_MANIF
 inline constexpr std::string_view kCodeMissingSection = "ERR_CORE_MISSING_SECTION";
 inline constexpr std::string_view kCodeUnknownRootSection = "ERR_CORE_UNKNOWN_ROOT_SECTION";
 inline constexpr std::string_view kCodePathTraversal = "ERR_CORE_PATH_TRAVERSAL";
+inline constexpr std::string_view kCodeMissingTextSection = "ERR_CORE_MISSING_TEXT_SECTION";
+inline constexpr std::string_view kCodeMissingColorSection = "ERR_CORE_MISSING_COLOR_SECTION";
 
 inline constexpr std::string_view kTempCodeInputMissing = "X_VALIDATOR_INPUT_MISSING";
 inline constexpr std::string_view kTempCodeInputNotRegularFile = "X_VALIDATOR_INPUT_NOT_REGULAR_FILE";
@@ -20,6 +22,8 @@ inline constexpr std::string_view kTempCodeWrongExtension = "X_VALIDATOR_INPUT_E
 inline constexpr std::string_view kTempCodeZipUnreadable = "X_VALIDATOR_ZIP_UNREADABLE";
 inline constexpr std::string_view kTempCodeRegistryUnreadable = "X_VALIDATOR_REGISTRY_UNREADABLE";
 inline constexpr std::string_view kTempCodeRegistryInvalid = "X_VALIDATOR_REGISTRY_INVALID";
+inline constexpr std::string_view kTempCodeSchemaUnreadable = "X_VALIDATOR_SCHEMA_UNREADABLE";
+inline constexpr std::string_view kTempCodeSchemaInvalid = "X_VALIDATOR_SCHEMA_INVALID";
 
 struct ValidationCode {
   std::string code;

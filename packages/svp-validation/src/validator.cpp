@@ -1,19 +1,21 @@
 #include "svp/validation/validator.hpp"
 
 #include "svp/core/version.hpp"
+#include "svp/package/package_contract.hpp"
 #include "svp/package/package_layout.hpp"
 #include "svp/package/package_probe.hpp"
 #include "svp/validation/code_registry.hpp"
 
-#include <array>
+#include "spec_assets.hpp"
+
+#include <nlohmann/json.hpp>
+
 #include <exception>
+#include <string>
+#include <string_view>
 
 namespace svp::validation {
 namespace {
-
-constexpr std::array<std::string_view, 9> kRequiredTopLevelSections{
-    "media", "transcript", "timeline",      "entities", "spatial",
-    "relationships", "embeddings", "index", "provenance"};
 
 ValidationReport make_report(const std::filesystem::path& package_path) {
   ValidationReport report;
@@ -35,6 +37,87 @@ std::string package_path_for_report(const std::filesystem::path& path) {
 void mark_unreadable(ValidationReport& report) noexcept {
   report.status = ValidationStatus::unreadable;
   report.core_status = ValidationStatus::unreadable;
+}
+
+std::filesystem::path registry_root_for(const ValidatorOptions& options) {
+  if (!options.registry_root_path.empty()) {
+    return options.registry_root_path;
+  }
+
+  return options.validation_codes_path.parent_path();
+}
+
+std::filesystem::path schema_root_for(const ValidatorOptions& options,
+                                      const std::filesystem::path& registry_root) {
+  if (!options.schema_root_path.empty()) {
+    return options.schema_root_path;
+  }
+
+  return registry_root.parent_path() / "schemas";
+}
+
+std::filesystem::path asset_path_for(const SpecAsset& asset,
+                                     const std::filesystem::path& registry_root,
+                                     const std::filesystem::path& schema_root) {
+  switch (asset.kind) {
+    case SpecAssetKind::registry:
+      return registry_root / std::string{asset.relative_path};
+    case SpecAssetKind::schema:
+      return schema_root / std::string{asset.relative_path};
+  }
+
+  return registry_root / std::string{asset.relative_path};
+}
+
+std::string_view unreadable_code_for(SpecAssetKind kind) noexcept {
+  switch (kind) {
+    case SpecAssetKind::registry:
+      return kTempCodeRegistryUnreadable;
+    case SpecAssetKind::schema:
+      return kTempCodeSchemaUnreadable;
+  }
+
+  return kTempCodeRegistryUnreadable;
+}
+
+std::string_view invalid_code_for(SpecAssetKind kind) noexcept {
+  switch (kind) {
+    case SpecAssetKind::registry:
+      return kTempCodeRegistryInvalid;
+    case SpecAssetKind::schema:
+      return kTempCodeSchemaInvalid;
+  }
+
+  return kTempCodeRegistryInvalid;
+}
+
+bool add_spec_asset_findings(ValidationReport& report,
+                             const ValidationCodeRegistry& registry,
+                             const ValidatorOptions& options) {
+  bool assets_loaded = true;
+  const auto registry_root = registry_root_for(options);
+  const auto schema_root = schema_root_for(options, registry_root);
+
+  for (const auto& asset : required_rc2_spec_assets()) {
+    const auto asset_path = asset_path_for(asset, registry_root, schema_root);
+    try {
+      load_json_spec_asset(asset_path);
+    } catch (const nlohmann::json::exception& error) {
+      add_finding(report, make_finding(registry, invalid_code_for(asset.kind),
+                                       asset_path.string(), error.what()));
+      assets_loaded = false;
+    } catch (const std::exception& error) {
+      add_finding(report, make_finding(registry, unreadable_code_for(asset.kind),
+                                       asset_path.string(), error.what()));
+      assets_loaded = false;
+    }
+  }
+
+  if (!assets_loaded) {
+    mark_unreadable(report);
+  }
+
+  return assets_loaded;
 }
 
 bool add_input_findings(ValidationReport& report,
@@ -67,6 +150,49 @@ bool add_input_findings(ValidationReport& report,
   return true;
 }
 
+std::string report_path_for(const svp::package::PackageLayoutRequirement& requirement) {
+  return "/" + std::string{requirement.path} +
+         (requirement.kind == svp::package::PackageLayoutRequirementKind::required_top_level_section
+              ? "/"
+              : "");
+}
+
+std::string_view missing_layout_code_for(
+    svp::package::PackageLayoutRequirementArea area) noexcept {
+  switch (area) {
+    case svp::package::PackageLayoutRequirementArea::text:
+      return kCodeMissingTextSection;
+    case svp::package::PackageLayoutRequirementArea::colors:
+      return kCodeMissingColorSection;
+    case svp::package::PackageLayoutRequirementArea::core:
+      return kCodeMissingSection;
+  }
+
+  return kCodeMissingSection;
+}
+
+bool has_layout_requirement(const svp::package::PackageLayout& layout,
+                            const svp::package::PackageLayoutRequirement& requirement) {
+  switch (requirement.kind) {
+    case svp::package::PackageLayoutRequirementKind::required_entry:
+      return layout.has_entry(std::string{requirement.path});
+    case svp::package::PackageLayoutRequirementKind::required_top_level_section:
+      return layout.has_top_level_section(std::string{requirement.path});
+  }
+
+  return false;
+}
+
+std::string missing_layout_message_for(
+    const svp::package::PackageLayoutRequirement& requirement) {
+  if (requirement.kind ==
+      svp::package::PackageLayoutRequirementKind::required_top_level_section) {
+    return "Required top-level package section is absent.";
+  }
+
+  return "Required package entry is absent.";
+}
+
 void add_layout_findings(ValidationReport& report,
                          const ValidationCodeRegistry& registry,
                          const svp::package::PackageLayout& layout) {
@@ -75,38 +201,24 @@ void add_layout_findings(ValidationReport& report,
                                      "ZIP entry path is not normalized inside the package."));
   }
 
-  if (!layout.has_entry("manifest.json")) {
-    add_finding(report, make_finding(registry, kCodeMissingManifest, "/manifest.json",
-                                     "manifest.json is absent."));
-  }
-
-  if (!layout.has_entry("mimetype")) {
-    add_finding(report, make_finding(registry, kCodeMissingSection, "/mimetype",
-                                     "Required top-level package entry is absent."));
-  }
-
-  for (const auto section : kRequiredTopLevelSections) {
-    if (!layout.has_top_level_section(std::string{section})) {
-      add_finding(report, make_finding(registry, kCodeMissingSection,
-                                       "/" + std::string{section} + "/",
-                                       "Required top-level package section is absent."));
-    }
-  }
-
-  for (const auto& root : layout.root_entries) {
-    if (root == "mimetype" || root == "manifest.json" || root == "labels") {
+  for (const auto& requirement : svp::package::required_package_layout()) {
+    if (has_layout_requirement(layout, requirement)) {
       continue;
     }
 
-    bool known_section = false;
-    for (const auto section : kRequiredTopLevelSections) {
-      if (root == section) {
-        known_section = true;
-        break;
-      }
+    if (requirement.path == "manifest.json") {
+      add_finding(report, make_finding(registry, kCodeMissingManifest, "/manifest.json",
+                                       "manifest.json is absent."));
+      continue;
     }
 
-    if (!known_section) {
+    add_finding(report, make_finding(registry, missing_layout_code_for(requirement.area),
+                                     report_path_for(requirement),
+                                     missing_layout_message_for(requirement)));
+  }
+
+  for (const auto& root : layout.root_entries) {
+    if (!svp::package::is_allowed_root_entry(root)) {
       add_finding(report, make_finding(registry, kCodeUnknownRootSection,
                                        "/" + root,
                                        "Unknown root-level package section is not allowed."));
@@ -128,6 +240,10 @@ ValidationReport validate_package(const std::filesystem::path& package_path,
                                              options.validation_codes_path.string(),
                                              error.what()));
     mark_unreadable(report);
+    return report;
+  }
+
+  if (!add_spec_asset_findings(report, registry, options)) {
     return report;
   }
 
