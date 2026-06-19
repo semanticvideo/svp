@@ -10,5 +10,5 @@ target_link_libraries(svp-validator
   PRIVATE
     CLI11::CLI11
     svp::core
+    svp::validation
 )
-

@@ -1,4 +1,7 @@
+find_package(libzip CONFIG REQUIRED)
+
 add_library(svp-package
+  src/package_layout.cpp
   src/package_probe.cpp
 )
 
@@ -14,5 +17,6 @@ target_compile_features(svp-package PUBLIC cxx_std_20)
 target_link_libraries(svp-package
   PUBLIC
     svp::core
+  PRIVATE
+    libzip::zip
 )
-
