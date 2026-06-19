@@ -1,11 +1,14 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <set>
 #include <string>
 #include <vector>
 
 namespace svp::package {
+
+inline constexpr std::uint64_t kMaxPackageEntryReadBytes = 32ULL * 1024ULL * 1024ULL;
 
 struct PackageLayout {
   std::set<std::string> entries;
@@ -31,6 +34,25 @@ class PackageLayoutResult {
   bool has_value_ = false;
 };
 
+class PackageEntryReadResult {
+ public:
+  [[nodiscard]] static PackageEntryReadResult success(std::string content);
+  [[nodiscard]] static PackageEntryReadResult failure(std::string message);
+
+  [[nodiscard]] bool has_value() const noexcept;
+  [[nodiscard]] const std::string& value() const;
+  [[nodiscard]] const std::string& error_message() const noexcept;
+
+ private:
+  std::string content_;
+  std::string error_message_;
+  bool has_value_ = false;
+};
+
 [[nodiscard]] PackageLayoutResult read_package_layout(const std::filesystem::path& path);
+[[nodiscard]] PackageEntryReadResult read_package_entry(const std::filesystem::path& path,
+                                                        const std::string& entry,
+                                                        std::uint64_t max_uncompressed_bytes =
+                                                            kMaxPackageEntryReadBytes);
 
 }  // namespace svp::package

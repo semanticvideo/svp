@@ -1,10 +1,15 @@
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(svp-validation
+  src/color_record_validation.cpp
   src/code_registry.cpp
+  src/json_schema_subset.cpp
+  src/ocr_color_spec.cpp
+  src/record_file_reader.cpp
   src/report.cpp
   src/report_json.cpp
   src/spec_assets.cpp
+  src/text_record_validation.cpp
   src/validator.cpp
 )
 
