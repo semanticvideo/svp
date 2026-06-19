@@ -1,6 +1,6 @@
 {
   "schema_version": "svp-equivalence-profile-1",
-  "svp_version": "1.0-rc.1",
+  "svp_version": "1.0-rc.2",
   "status_values": [
     "byte_identical",
     "structurally_equivalent",
@@ -38,5 +38,32 @@
       "absolute_difference_max": 0.001
     }
   },
-  "hash_rule": "BLAKE3 hashes are exact. Hash mismatches may be allowed only when the hash column references a tolerance-governed source payload that passes its source-layer equivalence rule."
+  "hash_rule": "BLAKE3 hashes are exact. Hash mismatches may be allowed only when the hash column references a tolerance-governed source payload that passes its source-layer equivalence rule.",
+  "layer_rules": [
+    {
+      "layer": "text_regions",
+      "comparison": "structural_exact_plus_bbox_tolerance",
+      "bbox_iou_min": 0.995,
+      "timing": "exact_us",
+      "text_reference_ids": "exact"
+    },
+    {
+      "layer": "text_observations",
+      "comparison": "raw_text_exact_normalized_text_exact_when_same_model_set",
+      "confidence": "numeric_tolerance",
+      "confidence_abs_tolerance": 0.001
+    },
+    {
+      "layer": "numeric_values",
+      "comparison": "decimal_string_exact",
+      "timing": "exact_us"
+    },
+    {
+      "layer": "color_observations",
+      "comparison": "bucket_percentage_tolerance",
+      "bucket_abs_tolerance": 0.005,
+      "coverage_total_tolerance": 0.001,
+      "dominant_bucket": "exact_unless_tied_within_tolerance"
+    }
+  ]
 }

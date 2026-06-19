@@ -1,6 +1,6 @@
 {
   "schema_version": "svp-validation-codes-1",
-  "svp_version": "1.0-rc.1",
+  "svp_version": "1.0-rc.2",
   "status_computation": "Core status and default validator exit code are computed only from entries whose affects_core_status is true.",
   "codes": [
     {
@@ -272,6 +272,226 @@
       "section": "18.2",
       "description": "A provided .svpsig verified against the exact finalized .svp byte stream.",
       "introduced": "1.0-draft.0.6"
+    },
+    {
+      "code": "ERR_CORE_MISSING_TEXT_SECTION",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "The required /text section or one of its required files is missing.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_TEXT_INVALID_REGION_RECORD",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A text region record does not validate against text-region.schema.json.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_TEXT_INVALID_OBSERVATION_RECORD",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A text observation record does not validate against text-observation.schema.json.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_TEXT_INVALID_BOUNDING_BOX",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A text bounding box is outside normalized bounds or canonical analysis raster bounds.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_TEXT_INVALID_TIMING",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A text record has invalid timing or frame range.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_TEXT_INVALID_REFERENCE",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A text record references a missing frame, shot, scene, region, entity, or text region.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_TEXT_INVALID_CONFIDENCE",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A text confidence value is not a finite number in [0,1].",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_TEXT_INVALID_NORMALIZED_TEXT",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A text observation has invalid or missing normalized_text.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_TEXT_INVALID_NUMERIC_EXTRACTION",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A numeric value record cannot be safely parsed or violates decimal string rules.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_TEXT_INVALID_PROVENANCE",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A text record references missing or invalid OCR provenance.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_TEXT_INDEX_MISMATCH",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "The SQLite index does not match /text package records.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_CORE_MISSING_COLOR_SECTION",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "The required /colors section or one of its required files is missing.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_COLOR_INVALID_OBSERVATION_RECORD",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A color observation record does not validate against color-observation.schema.json.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_COLOR_INVALID_BUCKET_ID",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A color observation uses an unregistered color bucket ID.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_COLOR_INVALID_COLOR_SPACE",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A color observation uses an unsupported color space.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_COLOR_INVALID_PERCENTAGE_TOTAL",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "Color bucket percentages do not sum to 1.0 within tolerance.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_COLOR_INVALID_PERCENTAGE_BOUNDS",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A color bucket percentage is outside [0,1].",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_COLOR_INVALID_DOMINANT_BUCKET",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "dominant_bucket is missing or does not match the maximum coverage bucket.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_COLOR_INVALID_SAMPLING_BASIS",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A color observation uses an unsupported sampling basis.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_COLOR_INVALID_TARGET_REFERENCE",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A color observation target does not reference a valid scene, shot, frame, region, entity, or text_region.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_COLOR_INVALID_PROVENANCE",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "A color observation references missing or invalid color provenance.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_COLOR_INDEX_MISMATCH",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.1-23.2",
+      "description": "The SQLite index does not match /colors package records.",
+      "introduced": "1.0-rc.2"
     }
   ]
 }

@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp.dev/schemas/text-region.schema.json",
+  "title": "text-region",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "text_region_id",
+    "observation_type",
+    "start_us",
+    "end_us",
+    "bbox_norm",
+    "bbox_px",
+    "confidence",
+    "provenance_id"
+  ],
+  "properties": {
+    "text_region_id": {
+      "type": "string",
+      "pattern": "^text_region_[0-9]{6,}$"
+    },
+    "observation_type": {
+      "type": "string"
+    },
+    "start_us": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "end_us": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "frame_start": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "frame_end": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "shot_id": {
+      "type": "string"
+    },
+    "scene_id": {
+      "type": "string"
+    },
+    "region_id": {
+      "type": "string"
+    },
+    "entity_id": {
+      "type": "string"
+    },
+    "bbox_norm": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "bbox_px": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "orientation_deg": {
+      "type": "number"
+    },
+    "text_direction": {
+      "type": "string",
+      "enum": [
+        "ltr",
+        "rtl",
+        "ttb",
+        "btt",
+        "unknown"
+      ]
+    },
+    "script": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "foreground_color_observation_id": {
+      "type": "string"
+    },
+    "background_color_observation_id": {
+      "type": "string"
+    },
+    "contrast_ratio": {
+      "type": "number",
+      "minimum": 0
+    },
+    "legibility_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "provenance_id": {
+      "type": "string"
+    }
+  }
+}

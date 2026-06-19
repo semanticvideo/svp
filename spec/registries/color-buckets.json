@@ -1,0 +1,62 @@
+{
+  "schema_version": "svp-color-buckets-1",
+  "svp_version": "1.0-rc.2",
+  "registry_version": "svp-color-buckets-v1",
+  "canonical_color_space": "svp_oklch_v1",
+  "percentage_sum_tolerance": 0.001,
+  "notes": "Buckets define measured encoded-pixel color distribution, not real-world material color.",
+  "buckets": [
+    {
+      "bucket_id": "black",
+      "rule": "L < 0.12"
+    },
+    {
+      "bucket_id": "white",
+      "rule": "L > 0.92 and C < 0.08"
+    },
+    {
+      "bucket_id": "gray",
+      "rule": "C < 0.05 and not black/white"
+    },
+    {
+      "bucket_id": "red",
+      "rule": "C >= 0.05 and (h < 25 or h >= 345)"
+    },
+    {
+      "bucket_id": "orange",
+      "rule": "C >= 0.05 and 25 <= h < 55"
+    },
+    {
+      "bucket_id": "yellow",
+      "rule": "C >= 0.05 and 55 <= h < 85"
+    },
+    {
+      "bucket_id": "green",
+      "rule": "C >= 0.05 and 85 <= h < 165"
+    },
+    {
+      "bucket_id": "cyan",
+      "rule": "C >= 0.05 and 165 <= h < 215"
+    },
+    {
+      "bucket_id": "blue",
+      "rule": "C >= 0.05 and 215 <= h < 270"
+    },
+    {
+      "bucket_id": "purple",
+      "rule": "C >= 0.05 and 270 <= h < 310"
+    },
+    {
+      "bucket_id": "pink",
+      "rule": "C >= 0.05 and 310 <= h < 345"
+    },
+    {
+      "bucket_id": "brown",
+      "rule": "C >= 0.05 and 20 <= h < 75 and 0.12 <= L <= 0.60"
+    },
+    {
+      "bucket_id": "other",
+      "rule": "fallback for pixels not assigned to another bucket"
+    }
+  ]
+}

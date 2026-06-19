@@ -1,6 +1,6 @@
 {
   "schema_version": "svp-block-types-1",
-  "svp_version": "1.0-rc.1",
+  "svp_version": "1.0-rc.2",
   "block_types": [
     {
       "value": "0x00",

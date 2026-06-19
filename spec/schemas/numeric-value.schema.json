@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp.dev/schemas/numeric-value.schema.json",
+  "title": "numeric-value",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "numeric_value_id",
+    "text_observation_id",
+    "text_region_id",
+    "raw_text",
+    "normalized_text",
+    "number_kind",
+    "numeric_value",
+    "confidence",
+    "parse_rule",
+    "provenance_id"
+  ],
+  "properties": {
+    "numeric_value_id": {
+      "type": "string",
+      "pattern": "^numeric_value_[0-9]{6,}$"
+    },
+    "text_observation_id": {
+      "type": "string"
+    },
+    "text_region_id": {
+      "type": "string"
+    },
+    "raw_text": {
+      "type": "string"
+    },
+    "normalized_text": {
+      "type": "string"
+    },
+    "number_kind": {
+      "type": "string",
+      "enum": [
+        "integer",
+        "decimal",
+        "fraction",
+        "percentage",
+        "currency",
+        "timestamp",
+        "counter",
+        "unknown"
+      ]
+    },
+    "numeric_value": {
+      "type": "string",
+      "pattern": "^-?[0-9]+(\\.[0-9]+)?$"
+    },
+    "unit": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "parse_rule": {
+      "type": "string"
+    },
+    "provenance_id": {
+      "type": "string"
+    }
+  }
+}

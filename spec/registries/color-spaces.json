@@ -1,0 +1,22 @@
+{
+  "schema_version": "svp-color-spaces-1",
+  "svp_version": "1.0-rc.2",
+  "color_spaces": [
+    {
+      "color_space_id": "srgb_8bit",
+      "description": "Gamma-encoded sRGB 8-bit per channel after canonical video-to-SDR conversion."
+    },
+    {
+      "color_space_id": "linear_srgb_v1",
+      "description": "Linearized sRGB derived from srgb_8bit."
+    },
+    {
+      "color_space_id": "svp_oklab_v1",
+      "description": "SVP canonical Oklab coordinates derived from linear_srgb_v1."
+    },
+    {
+      "color_space_id": "svp_oklch_v1",
+      "description": "SVP canonical OKLCH coordinates derived from svp_oklab_v1; bucket hue h is degrees [0,360)."
+    }
+  ]
+}

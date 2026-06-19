@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp.dev/schemas/color-summary.schema.json",
+  "title": "color-summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "color_observation_count",
+    "color_space",
+    "color_bucket_registry_version",
+    "percentage_sum_tolerance",
+    "provenance_id"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "color_observation_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "color_space": {
+      "type": "string"
+    },
+    "color_bucket_registry_version": {
+      "type": "string"
+    },
+    "percentage_sum_tolerance": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 0.01
+    },
+    "provenance_id": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp.dev/schemas/color-absence.schema.json",
+  "title": "color-absence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "color_required",
+    "color_completed",
+    "color_observation_count",
+    "reason",
+    "provenance_id"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "color_required": {
+      "type": "boolean"
+    },
+    "color_completed": {
+      "type": "boolean"
+    },
+    "color_observation_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "color_observed",
+        "uniform_color_observed",
+        "processor_completed",
+        "unsupported_media",
+        "processor_failed"
+      ]
+    },
+    "provenance_id": {
+      "type": "string"
+    }
+  }
+}

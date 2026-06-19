@@ -1,0 +1,670 @@
+--- SVP_v1_0_RC1.md
++++ SVP_v1_0_RC2.md
+@@ -1,8 +1,8 @@
+-# Semantic Video Package (SVP) v1.0 Release Candidate 1
++# Semantic Video Package (SVP) v1.0 Release Candidate 2
+ 
+ **A strict open standard for storing machine-readable observations of time-based media**
+ 
+-**Status:** Release Candidate 1, derived from final external review pass  
++**Status:** Release Candidate 2, OCR and structured color observation revision  
+ **Date:** 2026-06-19  
+ **Editor:** SVP Working Draft  
+ **Specification license:** CC0-1.0  
+@@ -23,6 +23,7 @@
+ | 0.5 | 2026-06-19 | Resolves the SQLite equivalence contradiction for tolerance-governed payloads and vectors, requires even canonical raster dimensions, and expands cross-platform fixture testing to verify payload and SQLite equivalence together. |
+ | 0.6 | 2026-06-19 | Defines exact rational timestamp rounding, adds optional detached `.svpsig` authenticity sidecars, requires a machine-readable validation-code registry, requires per-layer equivalence metrics, keeps word-level language out of v1.0 Core, and defines native SVP Model Bundles for reference model distribution without Python runtime requirements. |
+ | RC1 | 2026-06-19 | Resolves final release-candidate blockers: defines `index/index_manifest.json`, separates authenticity findings from Core status and exit codes, unifies canonical model IDs, expands the model-bundle manifest contract, and adds `index-manifest.schema.json`. |
++| RC2 | 2026-06-19 | Adds first-class OCR/visible-text observations and structured color observations to SVP Core; defines package paths, schemas, registries, validation codes, index/query tables, provenance rules, builder roadmap changes, fixture requirements, and implementation pause guidance before Phase 03+. |
+ 
+ ## Normative artifacts for v1.0
+ 
+@@ -33,6 +34,9 @@
+ /spec/validation-codes.json
+ /spec/equivalence-profile.json
+ /spec/block-types.json
++/spec/color-buckets.json
++/spec/color-spaces.json
++/spec/ocr-observation-types.json
+ /spec/svp-model-bundle-v1.md
+ /spec/svp-signature-v1.md
+ /schemas/*.schema.json
+@@ -46,27 +50,30 @@
+ 
+ This document is the release-candidate seed for `/spec/svp-v1.md`.
+ 
+-`/spec/validation-codes.json`, `/spec/equivalence-profile.json`, `/spec/block-types.json`, `/spec/svp-model-bundle-v1.md`, and `/spec/svp-signature-v1.md` are normative machine-readable companions to this document. `index-manifest.schema.json` is required in `/schemas`. If a registry file, schema file, and the prose conflict, the release is defective and MUST be corrected before a final v1.0 tag.
+-
+-## RC1 change summary
+-
+-RC1 is a release-candidate clarification pass. It does not weaken SVP Core, remove any required core section, remove any required field, or relax any conformance class.
+-
+-RC1 makes four focused corrections:
+-
+-1. It defines the required `index/index_manifest.json` file, including its required fields, its relationship to the Section 17.5 logical row-stream procedure, and the required `index-manifest.schema.json` schema artifact.
+-2. It separates authenticity findings from Core validation status. Signature mismatch and unreadable-signature findings affect `authenticity_status` and the `authenticity[]` report bucket, but they MUST NOT by themselves make a structurally valid SVP Core package invalid or cause the default validator exit code to be non-zero.
+-3. It unifies model identity. All normative cache keys, embedding sets, provenance references, bundle manifests, model locks, and equivalence procedures MUST use canonical SVP-native `model_` IDs. Registry slugs are source metadata only.
+-4. It expands the SVP Model Bundle manifest example so it contains every required contract field, defines `model_bundle_id`, and defines the authority relationship between `model.svpmodel.json` and `model-lock.json`.
++`/spec/validation-codes.json`, `/spec/equivalence-profile.json`, `/spec/block-types.json`, `/spec/color-buckets.json`, `/spec/color-spaces.json`, `/spec/ocr-observation-types.json`, `/spec/svp-model-bundle-v1.md`, and `/spec/svp-signature-v1.md` are normative machine-readable companions to this document. `index-manifest.schema.json`, `text-region.schema.json`, `text-observation.schema.json`, `numeric-value.schema.json`, `text-absence.schema.json`, `color-observation.schema.json`, `color-summary.schema.json`, and `color-absence.schema.json` are required in `/schemas`. If a registry file, schema file, and the prose conflict, the release is defective and MUST be corrected before a final v1.0 tag.
++
++## RC2 change summary
++
++RC2 is a release-candidate revision that adds two observation layers to SVP Core: OCR/visible text and structured color observations. It does not weaken any existing required section, required field, validator behavior, conformance class, timestamp rule, binary block rule, equivalence rule, or provenance rule.
++
++RC2 makes six focused changes:
++
++1. It makes visible text, OCR text regions, recognized text, and safely parseable numeric values first-class observations rather than labels.
++2. It makes measurable color distributions first-class observations for scenes, shots, frames, regions, entities, and text regions.
++3. It defines required package paths under `/text/` and `/colors/`, plus required schemas and registries for OCR observation types, color spaces, and color buckets.
++4. It expands the SQLite index and query model so readers can search visible text, normalized visible text, numeric values, color bucket coverage, text-region foreground/background colors, and color coverage over time.
++5. It expands validation behavior and validation-code registries so OCR and color records are schema-valid, reference-valid, provenance-backed, indexed, and queryable.
++6. It updates the builder and implementation roadmap so Phase 03+ work pauses until OCR and color are wired into the validator, fixtures, index model, builder stages, and first-video trial acceptance checks.
+ 
+ The core principle is unchanged:
+ 
+ ```text
+ SVP Core is strict.
++OCR text is observation.
++Measured color distribution is observation.
+ Labels are interpretation.
+-Model identity is canonical inside SVP.
+-Authenticity is reported separately from Core validity.
+-Required files must have schemas.
++A visible string is not a semantic label.
++A color percentage is not a claim about real-world material color.
+ A validator must be able to implement the spec without guessing.
+ ```
+ 
+@@ -80,7 +87,8 @@
+ MP4 = pixels and audio over time
+ SRT = words over time
+ SVP = words, speakers, shots, scenes, entities, masks,
+-      depth, embeddings, relationships, and indexes over time
++      depth, OCR text, color observations, embeddings,
++      relationships, and indexes over time
+ ```
+ 
+ SVP is not an AI product. SVP is not a video editor. SVP is not a folder of helper files. SVP is a standard package format.
+@@ -108,6 +116,9 @@
+ Depth
+ Masks
+ Embeddings
++OCR / Visible Text
++Numeric Values
++Structured Color Observations
+ Manifest
+ ```
+ 
+@@ -145,6 +156,8 @@
+ Entity overlaps another entity.
+ Speaker 0001 is active during this interval.
+ Word 538 starts at 84.120 seconds.
++Text region 92 reads "$12.99" during shot 14.
++Scene 004 has orange bucket coverage of 0.70 under the registered color-bucket rules.
+ ```
+ 
+ SVP Labels store interpretations:
+@@ -153,6 +166,8 @@
+ Entity 84 is an iPhone.
+ Speaker 0001 is Dom.
+ This shot is a product beauty shot.
++The visible string "$12.99" means this is an advertisement.
++This scene feels warm.
+ ```
+ 
+ The first group is core. The second group is labels.
+@@ -187,6 +202,8 @@
+ ### 3.7 Labels are the only non-core section
+ 
+ SVP v1.0 has no core extension system and no plugin mechanism. A valid file contains the required core. Unknown root-level sections cause strict validation failure, except `/labels`.
++
++RC2 clarifies that `/text/` and `/colors/` are not labels. A visible string in a frame and a measured color distribution over pixels are observations. The package MUST NOT require a semantic interpretation such as "advertisement", "sunset", "warning", "brand", or "danger" for Core validity.
+ 
+ ## 4. Scope and non-goals
+ 
+@@ -202,11 +219,13 @@
+ 8. Required depth and mask encodings.
+ 9. Required relationship graph schema.
+ 10. Required embedding schema.
+-11. Required search index schema.
++11. Required OCR and visible-text schema.
++12. Required structured color-observation schema.
++13. Required search index schema.
+ 12. Required provenance and validation rules.
+ 13. A fixed reference processing stack.
+ 14. A read-only query interface for apps and agents.
+-15. Open source governance and conformance expectations.
++17. Open source governance and conformance expectations.
+ 
+ SVP v1.0 does not define:
+ 
+@@ -712,6 +731,10 @@
+ | Entity tracks | Same track IDs, keyframe frame indices, and region references. Corresponding bounding boxes MUST have IoU >= `0.995`; centroid displacement MUST be <= `1.0` canonical analysis raster pixel. |
+ | Kalman-smoothed coordinates | Same keyframe structure. Coordinate absolute error MUST be <= `1.0` canonical analysis raster pixel. |
+ | Confidence fields | Absolute difference MUST be <= `0.001` unless the processor record declares a tighter tolerance. |
++| OCR text regions | Same IDs, timing, target references, and schema structure. Bounding boxes MUST have IoU >= `0.995`; confidence fields use the confidence tolerance. |
++| Text observations | `raw_text` and `normalized_text` MUST match exactly when produced from the same reference model set and OCR normalization rules. Confidence fields use the confidence tolerance. |
++| Numeric values | Decimal-string numeric values MUST match exactly. Raw source text MUST match exactly. |
++| Color observations | Same target type, target ID, sampling basis, color space, and bucket registry version. Corresponding bucket coverage values MUST differ by <= `0.005`; coverage totals MUST sum within `0.001`; dominant bucket MUST match unless buckets are tied within tolerance. |
+ 
+ The reference validator MUST report whether two packages are:
+ 
+@@ -736,6 +759,31 @@
+ #### 5.16.3 Cache determinism is stricter than package equivalence
+ 
+ Package equivalence MUST NOT be used to justify unsafe cache reuse. Cache reuse remains exact. A cached artifact may be reused only when its cache key and artifact BLAKE3 verify exactly. Numerical equivalence is for comparing finished packages, not for accepting stale cache artifacts.
++
++### 5.17 OCR and visible text
++
++SVP RC2 makes OCR and visible text a required observation layer for video packages. The reference builder MUST include a text detection, text recognition, layout classification, and numeric extraction stage.
++
++The reference stack SHOULD implement OCR through native model bundles, not ad-hoc Python runtime environments. The pipeline is divided into these processor boundaries:
++
++```text
++text_detection
++text_recognition
++text_layout_classification
++numeric_extraction
++text_region_color_sampling
++text_indexing
++```
++
++A conforming package does not claim that visible text is semantically meaningful. It only records that text-like pixels were detected, recognized, normalized, timed, located, and indexed.
++
++### 5.18 Structured color observations
++
++SVP RC2 makes structured color observations required for video packages. Color processing is a deterministic observation layer and does not require an AI model.
++
++The reference builder MUST compute color distributions from the canonical analysis raster and from registered sampling targets. It MUST use a registered color space and a registered color-bucket version. It MUST record the sampling basis, target record, bucket coverage ratios, dominant bucket, quality score, and provenance.
++
++The reference stack MUST treat color as measured pixel distribution only. It MUST NOT claim real-world material color. Lighting, compression, HDR transforms, white balance, shadows, transparency, and reflections can all shift measured pixel color.
+ 
+ ## 6. Package layout
+ 
+@@ -778,6 +826,17 @@
+     depth.index.jsonl
+     depth.blocks.svpdz
+ 
++  text/
++    text_regions.jsonl
++    text_observations.jsonl
++    numeric_values.jsonl
++    text_absence.json
++
++  colors/
++    color_observations.jsonl
++    color_summary.json
++    color_absence.json
++
+   relationships/
+     relationships.jsonl
+ 
+@@ -803,7 +862,7 @@
+ 
+ `labels/labels.jsonl` is the only non-core file tree. It MAY be absent. If present with a supported label schema version, it MUST validate against that label schema. If present with an unsupported future label schema version, it MUST be treated according to Section 19.1 and MUST NOT invalidate SVP Core.
+ 
+-`audio_absence.json` MUST exist. For normal media it records `source_audio_present: true`. For silent source media it records `source_audio_present: false`, and `original_stream_000.flac` MUST be a canonical silent FLAC asset with provenance. This keeps the audio section required without making silent video impossible.
++`text_absence.json` and `color_absence.json` MUST exist. For normal video media, they record that OCR and color processors ran even if no text regions were found or if color observations are near-uniform. `audio_absence.json` MUST exist. For normal media it records `source_audio_present: true`. For silent source media it records `source_audio_present: false`, and `original_stream_000.flac` MUST be a canonical silent FLAC asset with provenance. This keeps the audio section required without making silent video impossible.
+ 
+ The recovery journal, global cache, temporary task outputs, and scheduler state are not package sections. They MUST NOT appear inside the final `.svp` archive.
+ 
+@@ -1738,6 +1797,257 @@
+ 3. Chunk boundaries MUST align to word IDs.
+ 4. Chunk records MUST be written to the search index.
+ 
++## 16A. OCR and visible-text observations
++
++SVP RC2 makes visible text and numbers first-class observations. The package MUST contain `/text/` for any SVP package with video media.
++
++Observed visible text is not a label. The string `SALE $9.99` visible in a frame is an observation. Interpreting the frame as an advertisement is a label or higher-level interpretation.
++
++### 16A.1 Required text files
++
++```text
++text/
++  text_regions.jsonl
++  text_observations.jsonl
++  numeric_values.jsonl
++  text_absence.json
++```
++
++Rules:
++
++1. `/text/text_regions.jsonl` MUST exist. It MAY be empty only when the OCR processor completed and found no text regions.
++2. `/text/text_observations.jsonl` MUST exist. It MAY be empty only when there are no recognized text observations.
++3. `/text/numeric_values.jsonl` MUST exist. It MAY be empty when no safely parseable numeric values are observed.
++4. `/text/text_absence.json` MUST exist and MUST state whether no text was detected, OCR was skipped due to unsupported media, or OCR completed with zero results. For normal video, OCR MUST NOT be skipped by a conforming builder.
++5. Every text record MUST map to time and SHOULD reference the most specific applicable target: frame, shot, scene, region, entity, or text region.
++
++### 16A.2 Text region record
++
++A text region is a detected region of the canonical analysis raster that likely contains visible text.
++
++```json
++{
++  "text_region_id": "text_region_000001",
++  "observation_type": "text_detection",
++  "start_us": 1200000,
++  "end_us": 2400000,
++  "frame_start": 36,
++  "frame_end": 72,
++  "shot_id": "shot_000003",
++  "scene_id": "scene_000001",
++  "region_id": "region_000912",
++  "entity_id": "entity_000044",
++  "bbox_norm": [0.4125, 0.2014, 0.6812, 0.2528],
++  "bbox_px": [264, 73, 436, 91],
++  "orientation_deg": 0.0,
++  "text_direction": "ltr",
++  "script": "Latn",
++  "confidence": 0.944,
++  "foreground_color_observation_id": "color_obs_000331",
++  "background_color_observation_id": "color_obs_000332",
++  "contrast_ratio": 7.4,
++  "legibility_score": 0.88,
++  "provenance_id": "processor_ocr_detector_0001"
++}
++```
++
++`bbox_norm` is `[x_min, y_min, x_max, y_max]` in normalized coordinates over the canonical analysis raster. `bbox_px` is the same box in canonical analysis raster pixels.
++
++### 16A.3 Text observation record
++
++A text observation is the recognition result attached to a text region.
++
++```json
++{
++  "text_observation_id": "text_obs_000001",
++  "text_region_id": "text_region_000001",
++  "observation_type": "text_recognition",
++  "raw_text": "SALE $9.99",
++  "normalized_text": "sale 9.99",
++  "language": {
++    "primary": "en",
++    "script": "Latn",
++    "mode": "single",
++    "confidence": 0.81
++  },
++  "confidence": 0.902,
++  "layout_class": "ui_text",
++  "source_frame_ids": ["frame_000036", "frame_000048", "frame_000060"],
++  "provenance_id": "processor_ocr_recognizer_0001"
++}
++```
++
++`raw_text` stores what the recognizer returned. `normalized_text` stores the canonical query string after Unicode normalization, case folding where applicable, whitespace normalization, and removal of purely decorative control characters. Normalization MUST NOT erase the raw observed string.
++
++### 16A.4 Numeric value record
++
++A numeric value record exists only when the builder can safely parse a number from a text observation without inventing semantics.
++
++```json
++{
++  "numeric_value_id": "numeric_value_000001",
++  "text_observation_id": "text_obs_000001",
++  "text_region_id": "text_region_000001",
++  "raw_text": "$9.99",
++  "normalized_text": "9.99",
++  "number_kind": "decimal",
++  "numeric_value": "9.99",
++  "unit": "currency_unknown",
++  "confidence": 0.89,
++  "parse_rule": "svp-number-parser-v1",
++  "provenance_id": "processor_numeric_parser_0001"
++}
++```
++
++Numeric values are stored as decimal strings, not binary floating-point values. Currency symbols, counters, timestamps, chart labels, and UI values MUST preserve the raw text and MUST NOT be interpreted beyond safe parsing.
++
++### 16A.5 OCR observation type registry
++
++The following observation types are registered in `/spec/ocr-observation-types.json`:
++
++```text
++text_detection
++text_recognition
++number_extraction
++layout_analysis
++subtitle_caption
++ui_text
++scene_text_signage
++chart_graph_number
++timestamp_counter
++```
++
++A strict v1.0 package MUST NOT use unregistered OCR observation types in Core records.
++
++### 16A.6 OCR absence
++
++`text_absence.json` records completed OCR state:
++
++```json
++{
++  "schema_version": "svp-text-absence-v1",
++  "ocr_required": true,
++  "ocr_completed": true,
++  "text_region_count": 0,
++  "text_observation_count": 0,
++  "numeric_value_count": 0,
++  "reason": "no_text_detected",
++  "provenance_id": "processor_ocr_detector_0001"
++}
++```
++
++A package with no visible text is still Core-valid if the required text files exist, the absence record shows successful completion, and the index agrees with the text records.
++
++## 16B. Structured color observations
++
++SVP RC2 makes measurable color distribution a first-class observation layer. Color observations are required for video packages and MUST be stored in `/colors/`.
++
++Color records describe sampled pixel distributions under a registered color space and registered bucket rules. They do not claim real-world material color. They are measurements of encoded pixels after the builder's defined color normalization pipeline.
++
++### 16B.1 Required color files
++
++```text
++colors/
++  color_observations.jsonl
++  color_summary.json
++  color_absence.json
++```
++
++Rules:
++
++1. `/colors/color_observations.jsonl` MUST exist.
++2. `/colors/color_summary.json` MUST exist and MUST summarize counts, bucket registry version, color space, and sampling policies used.
++3. `/colors/color_absence.json` MUST exist and MUST state whether color observation processing completed.
++4. Color observations MUST be emitted for every scene and every shot.
++5. Color observations SHOULD be emitted for frames/keyframes, regions, entities, and text regions when those targets exist.
++6. Text-region foreground and background color observations SHOULD be emitted when OCR text regions exist and quality is sufficient.
++
++### 16B.2 Color observation record
++
++```json
++{
++  "color_observation_id": "color_obs_000001",
++  "target_type": "shot",
++  "target_id": "shot_000003",
++  "start_us": 1200000,
++  "end_us": 2400000,
++  "frame_ids": ["frame_000036", "frame_000048", "frame_000060"],
++  "sampling_basis": "keyframe_full_frame",
++  "color_space": "svp_oklch_v1",
++  "color_bucket_registry_version": "svp-color-buckets-v1",
++  "bucket_coverage": {
++    "orange": 0.7000,
++    "yellow": 0.0300,
++    "black": 0.1200,
++    "white": 0.0800,
++    "other": 0.0700
++  },
++  "dominant_bucket": "orange",
++  "palette": [
++    {"space": "srgb", "hex": "#f47a21", "coverage": 0.41},
++    {"space": "srgb", "hex": "#121212", "coverage": 0.10}
++  ],
++  "coverage_total": 1.0000,
++  "quality_score": 0.96,
++  "provenance_id": "processor_color_quantizer_0001"
++}
++```
++
++### 16B.3 Target types
++
++`target_type` MUST be one of:
++
++```text
++scene
++shot
++frame
++region
++entity
++text_region
++```
++
++The `target_id` MUST reference a valid record of the declared target type.
++
++### 16B.4 Sampling basis
++
++`sampling_basis` MUST be one of:
++
++```text
++full_frame
++keyframe_full_frame
++mask
++region_crop
++entity_mask
++text_box
++text_foreground
++text_background
++```
++
++The sampling basis determines which pixels contribute to the bucket distribution.
++
++### 16B.5 Color bucket registry
++
++The authoritative color bucket definitions live in `/spec/color-buckets.json`. The package records the registry version used by each observation. A strict v1.0 package MUST NOT use unregistered bucket IDs in Core color observations.
++
++RC2 uses numeric bucket coverage ratios. A query such as `orange > 0.5` means that more than half of sampled pixels fell into the registered orange bucket under the registered color-space and quantization rule.
++
++### 16B.6 Color summary and absence
++
++`color_summary.json` records package-level color processing state:
++
++```json
++{
++  "schema_version": "svp-color-summary-v1",
++  "color_observation_count": 842,
++  "color_space": "svp_oklch_v1",
++  "color_bucket_registry_version": "svp-color-buckets-v1",
++  "percentage_sum_tolerance": 0.001,
++  "provenance_id": "processor_color_quantizer_0001"
++}
++```
++
++`color_absence.json` records whether processing completed. Unlike `text_absence.json`, color observations should normally not be absent for video. If the source video has only black frames, white frames, or uniform cards, color observations are still valid and should report the measured distribution.
++
+ ## 17. Search index
+ 
+ `index/index.sqlite` is mandatory. It is not a cache.
+@@ -2001,7 +2311,87 @@
+ 
+ A strict validator MUST fail the package if `index/index_manifest.json` is absent, malformed, missing a required field, or if the generated Section 17.5 logical row stream does not match `logical_rows_blake3`.
+ 
++### 17.7 Required OCR and visible-text index tables
++
++The SQLite index MUST include tables that support visible text, normalized visible text, numeric values, and time/shot/scene lookups.
++
++Required logical tables:
++
++```text
++text_regions
++text_observations
++numeric_values
++text_fts
++```
++
++Minimum query support:
++
++```text
++visible text by raw_text
++visible text by normalized_text
++numeric values by exact decimal string
++text by time range
++text by scene_id
++text by shot_id
++text by region_id
++text by entity_id
++text by layout_class
++```
++
++Example query targets:
++
++```text
++all scenes containing visible text "SALE"
++all shots with numeric value "99"
++all UI text regions containing green foreground text
++all chart/graph numbers during a selected scene
++```
++
++### 17.8 Required color index tables
++
++The SQLite index MUST include tables that support color bucket coverage queries by scene, shot, frame, region, entity, and text region.
++
++Required logical tables:
++
++```text
++color_observations
++color_bucket_coverage
++color_targets
++```
++
++Minimum query support:
++
++```text
++color bucket percentage by scene
++color bucket percentage by shot
++color bucket percentage by frame or keyframe
++color bucket percentage by region
++color bucket percentage by entity
++color bucket percentage by text_region
++foreground/background color lookup for text regions
++```
++
++Example query targets:
++
++```text
++all scenes where orange coverage > 0.5
++all shots where yellow coverage >= 0.03
++all frames with red warning text
++all text regions with red foreground and high contrast
++all UI regions with green numbers
++```
++
++### 17.9 OCR/color index consistency
++
++Records in `/text/` and `/colors/` MUST be reflected in `index/index.sqlite`. A validator MUST compare package records against the corresponding SQLite logical rows. A mismatch is a Core validation failure.
++
+ ## 18. Provenance
++
++### 18.0 OCR and color provenance requirements
++
++OCR provenance MUST record processor ID, processor version, model ID when model-backed, model bundle ID, bundle BLAKE3, runtime, execution provider, detection thresholds, recognition thresholds, language/script assumptions, source frame references, and text postprocessing rules.
++
++Color provenance MUST record processor ID, processor version, color space, color bucket registry version, quantization method, sampling basis, canonical raster basis, rounding and precision rules, target type, and quality metrics. Color processing may be deterministic classical processing and need not reference a model ID.
+ 
+ ### 18.1 Processor and model provenance
+ 
+@@ -2627,6 +3017,45 @@
+ 
+ All thresholds are written to provenance.
+ 
++### 20.9 OCR and visible-text processing
++
++The reference builder MUST implement OCR as a distinct pipeline branch and MUST NOT hide OCR inside unrelated embedding, tracking, or label stages.
++
++Required processor boundaries:
++
++```text
++ocr_text_detection
++ocr_text_recognition
++ocr_layout_classification
++ocr_numeric_extraction
++ocr_text_region_color_sampling
++ocr_index_integration
++```
++
++The OCR branch consumes frames, shots, scenes, regions, and entities as available. It emits text regions, text observations, numeric values, foreground/background color references when available, provenance, and index rows.
++
++The builder MUST distinguish text detection, text recognition, number extraction, layout analysis, subtitles/captions, UI text, scene text/signage, chart/graph numbers, and timestamps/counters.
++
++### 20.10 Structured color processing
++
++The reference builder MUST implement color observations as a deterministic branch.
++
++Required processor boundaries:
++
++```text
++color_space_normalization
++color_bucket_quantization
++shot_color_summary
++scene_color_summary
++frame_color_summary
++region_color_summary
++entity_color_summary
++text_region_foreground_background_color
++color_index_integration
++```
++
++Color processing SHOULD run as soon as canonical raster frames, shot boundaries, scene boundaries, regions, entities, and text regions become available. Full-frame shot and scene summaries can run before OCR. Text-region foreground/background color extraction runs after OCR text regions exist.
++
+ ## 21. Command-line surface
+ 
+ The first public artifact is a CLI. The CLI is the reference compiler, validator, inspector, query tool, and exporter.
+@@ -2769,6 +3198,42 @@
+ 
+ Validation output MUST follow the report schema and code registry defined in Section 18.2. Core `status` and default validator exit code MUST be computed only from Core findings, not from `authenticity` findings. Validation output is written to `provenance/validation.json` for reference-builder package builds and to stdout or a caller-selected report path for external validation commands.
+ 
++### 23.1 OCR validation rules
++
++A strict validator MUST validate OCR and visible-text records with these checks:
++
++1. `/text/` exists for video packages.
++2. `text_regions.jsonl`, `text_observations.jsonl`, `numeric_values.jsonl`, and `text_absence.json` exist.
++3. Every text region validates against `text-region.schema.json`.
++4. Every text observation validates against `text-observation.schema.json`.
++5. Every numeric value validates against `numeric-value.schema.json`.
++6. Every OCR `observation_type` exists in `/spec/ocr-observation-types.json`.
++7. Every bounding box is numeric, normalized bounds are within `[0, 1]`, pixel bounds are within the canonical analysis raster, and `x_min < x_max`, `y_min < y_max`.
++8. Every text time range is valid and references existing frames, shots, scenes, regions, entities, or text regions when those references are present.
++9. Confidence values are finite numbers in `[0, 1]`.
++10. `normalized_text` MUST NOT be absent when `raw_text` is non-empty.
++11. Numeric extraction MUST preserve the source text and MUST store numeric values as decimal strings.
++12. OCR provenance IDs MUST reference valid processor provenance records.
++13. The SQLite index MUST contain rows corresponding to text regions, text observations, and numeric values.
++
++### 23.2 Color validation rules
++
++A strict validator MUST validate color observations with these checks:
++
++1. `/colors/` exists for video packages.
++2. `color_observations.jsonl`, `color_summary.json`, and `color_absence.json` exist.
++3. Every color observation validates against `color-observation.schema.json`.
++4. `target_type` is registered and `target_id` references an existing scene, shot, frame, region, entity, or text region as declared.
++5. `sampling_basis` is registered.
++6. `color_space` exists in `/spec/color-spaces.json`.
++7. `color_bucket_registry_version` exists in `/spec/color-buckets.json`.
++8. Every bucket ID in `bucket_coverage` exists in the active color bucket registry.
++9. Every bucket percentage is finite and within `[0, 1]`.
++10. Bucket percentages MUST sum to `1.0` within the registry-defined tolerance.
++11. `dominant_bucket` MUST be present in `bucket_coverage` and MUST be one of the maximum-coverage buckets after tolerance handling.
++12. Color provenance IDs MUST reference valid processor provenance records.
++13. The SQLite index MUST contain rows corresponding to color observations and bucket coverage values.
++
+ ## 24. Security and privacy requirements
+ 
+ SVP packages are untrusted input.
+@@ -2946,6 +3411,9 @@
+ /spec/validation-codes.json
+ /spec/equivalence-profile.json
+ /spec/block-types.json
++/spec/color-buckets.json
++/spec/color-spaces.json
++/spec/ocr-observation-types.json
+ /spec/svp-model-bundle-v1.md
+ /spec/svp-signature-v1.md
+ ```
+@@ -3182,9 +3650,11 @@
+ 
+ ## 32. Release-candidate open issues
+ 
+-RC1 resolves the final known validator-blocking ambiguities from Draft 0.6: `index/index_manifest.json`, signature status computation, canonical model-ID namespace, and model-bundle manifest completeness.
+-
+-At RC1, further changes should be restricted to:
++RC2 pauses Phase 03+ implementation until OCR and structured color observations are represented in schemas, registries, validation, index tables, fixtures, builder roadmap, and first-video-trial acceptance criteria. Remaining RC2 open issues should be treated as validator-blocking only if they prevent implementation of those artifacts.
++
++RC1 resolved the final known validator-blocking ambiguities from Draft 0.6. RC2 adds OCR and structured color observations as Core layers and pauses downstream implementation until those layers are represented in validator, fixtures, index, builder roadmap, and first-video acceptance checks.
++
++At RC2, further changes should be restricted to:
+ 
+ ```text
+ contradiction fixes

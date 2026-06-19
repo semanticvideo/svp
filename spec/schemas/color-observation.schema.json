@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp.dev/schemas/color-observation.schema.json",
+  "title": "color-observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "color_observation_id",
+    "target_type",
+    "target_id",
+    "sampling_basis",
+    "color_space",
+    "color_bucket_registry_version",
+    "bucket_coverage",
+    "dominant_bucket",
+    "coverage_total",
+    "quality_score",
+    "provenance_id"
+  ],
+  "properties": {
+    "color_observation_id": {
+      "type": "string",
+      "pattern": "^color_obs_[0-9]{6,}$"
+    },
+    "target_type": {
+      "type": "string",
+      "enum": [
+        "scene",
+        "shot",
+        "frame",
+        "region",
+        "entity",
+        "text_region"
+      ]
+    },
+    "target_id": {
+      "type": "string"
+    },
+    "start_us": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "end_us": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "frame_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "sampling_basis": {
+      "type": "string",
+      "enum": [
+        "full_frame",
+        "keyframe_full_frame",
+        "mask",
+        "region_crop",
+        "entity_mask",
+        "text_box",
+        "text_foreground",
+        "text_background"
+      ]
+    },
+    "color_space": {
+      "type": "string"
+    },
+    "color_bucket_registry_version": {
+      "type": "string"
+    },
+    "bucket_coverage": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "dominant_bucket": {
+      "type": "string"
+    },
+    "palette": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "coverage_total": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1.001
+    },
+    "quality_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "provenance_id": {
+      "type": "string"
+    }
+  }
+}

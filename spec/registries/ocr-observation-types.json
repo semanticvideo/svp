@@ -1,0 +1,42 @@
+{
+  "schema_version": "svp-ocr-observation-types-1",
+  "svp_version": "1.0-rc.2",
+  "observation_types": [
+    {
+      "id": "text_detection",
+      "description": "A region likely containing visible text was detected."
+    },
+    {
+      "id": "text_recognition",
+      "description": "Visible text characters were recognized from a text region."
+    },
+    {
+      "id": "number_extraction",
+      "description": "A safely parseable numeric value was extracted from recognized text."
+    },
+    {
+      "id": "layout_analysis",
+      "description": "Text region layout or class was analyzed."
+    },
+    {
+      "id": "subtitle_caption",
+      "description": "Text appears to be a subtitle, caption, or title overlay."
+    },
+    {
+      "id": "ui_text",
+      "description": "Text appears in a user interface or screen recording context."
+    },
+    {
+      "id": "scene_text_signage",
+      "description": "Text appears in the filmed scene, signage, packaging, or physical environment."
+    },
+    {
+      "id": "chart_graph_number",
+      "description": "Text or number appears in a chart, graph, dashboard, or data visualization."
+    },
+    {
+      "id": "timestamp_counter",
+      "description": "Text appears to be a timestamp, counter, timer, or running time display."
+    }
+  ]
+}

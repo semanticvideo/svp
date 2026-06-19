@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp.dev/schemas/text-absence.schema.json",
+  "title": "text-absence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "ocr_required",
+    "ocr_completed",
+    "text_region_count",
+    "text_observation_count",
+    "numeric_value_count",
+    "reason",
+    "provenance_id"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "ocr_required": {
+      "type": "boolean"
+    },
+    "ocr_completed": {
+      "type": "boolean"
+    },
+    "text_region_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "text_observation_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "numeric_value_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "no_text_detected",
+        "text_detected",
+        "ocr_completed",
+        "unsupported_media",
+        "processor_failed"
+      ]
+    },
+    "provenance_id": {
+      "type": "string"
+    }
+  }
+}
