@@ -63,6 +63,8 @@ void add_temporary_validator_codes(ValidationCodeRegistry& registry) {
       "A color observation uses an unsupported color bucket registry version."));
   registry.add(make_temp_code(kTempCodeBlockEntryNotStored, FindingSeverity::error,
                               "A binary block stream package entry does not use ZIP STORE."));
+  registry.add(make_temp_code(kTempCodeMissingEmbeddingsEntry, FindingSeverity::error,
+                              "A required embeddings package entry is absent."));
 }
 
 }  // namespace

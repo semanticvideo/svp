@@ -22,6 +22,8 @@ constexpr std::string_view kDepthIndexEntry = "spatial/depth.index.jsonl";
 constexpr std::string_view kDepthBlocksEntry = "spatial/depth.blocks.svpdz";
 constexpr std::string_view kMaskIndexEntry = "spatial/masks.index.jsonl";
 constexpr std::string_view kMaskBlocksEntry = "spatial/masks.blocks.svpmz";
+constexpr std::string_view kEmbeddingSetsEntry = "embeddings/embedding_sets.json";
+constexpr std::string_view kEmbeddingIndexEntry = "embeddings/embeddings.index.jsonl";
 constexpr std::string_view kEmbeddingBlocksEntry = "embeddings/embeddings.blocks.svpez";
 
 struct ZipDeleter {
@@ -226,7 +228,18 @@ void add_block_stream_findings(ValidationReport& report,
     validate_block_stream_entry(report, registry, package_path, kMaskBlocksEntry, options);
   }
 
-  if (layout.has_entry(std::string{kEmbeddingBlocksEntry})) {
+  if (!layout.has_entry(std::string{kEmbeddingSetsEntry})) {
+    add_missing_required_entry(report, registry, kTempCodeMissingEmbeddingsEntry,
+                               kEmbeddingSetsEntry);
+  }
+  if (!layout.has_entry(std::string{kEmbeddingIndexEntry})) {
+    add_missing_required_entry(report, registry, kTempCodeMissingEmbeddingsEntry,
+                               kEmbeddingIndexEntry);
+  }
+  if (!layout.has_entry(std::string{kEmbeddingBlocksEntry})) {
+    add_missing_required_entry(report, registry, kTempCodeMissingEmbeddingsEntry,
+                               kEmbeddingBlocksEntry);
+  } else {
     svp::blocks::ParseOptions options;
     options.required_block_type = svp::blocks::BlockType::embedding;
     validate_block_stream_entry(report, registry, package_path, kEmbeddingBlocksEntry,

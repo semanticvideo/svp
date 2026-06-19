@@ -366,6 +366,7 @@ def write_package(
     text_regions_payload=None,
     index_case="valid",
     depth_block_case="valid",
+    include_embedding_entries=True,
 ):
     region = copy.deepcopy(text_region)
     observation = copy.deepcopy(text_observation)
@@ -417,7 +418,10 @@ def write_package(
         package.writestr("spatial/depth.blocks.svpdz", depth_block, compress_type=depth_compress_type)
         package.writestr("spatial/masks.index.jsonl", "", compress_type=zipfile.ZIP_DEFLATED)
         package.writestr("spatial/masks.blocks.svpmz", b"", compress_type=zipfile.ZIP_STORED)
-        package.writestr("embeddings/embeddings.blocks.svpez", tiny_embedding_block(), compress_type=zipfile.ZIP_STORED)
+        if include_embedding_entries:
+            package.writestr("embeddings/embedding_sets.json", "{\"sets\":[]}", compress_type=zipfile.ZIP_DEFLATED)
+            package.writestr("embeddings/embeddings.index.jsonl", "", compress_type=zipfile.ZIP_DEFLATED)
+            package.writestr("embeddings/embeddings.blocks.svpez", tiny_embedding_block(), compress_type=zipfile.ZIP_STORED)
         if index_case == "missing_manifest":
             sqlite_bytes, table_count = create_index_bytes()
             package.writestr("index/index.sqlite", sqlite_bytes)
@@ -479,6 +483,7 @@ write_package("invalid-svpb-magic", no_change, depth_block_case="bad_magic")
 write_package("forbidden-svpb-type", no_change, depth_block_case="forbidden_type")
 write_package("svpb-raster-mismatch", no_change, depth_block_case="raster_mismatch")
 write_package("deflated-svpb-entry", no_change, depth_block_case="zip_deflated")
+write_package("missing-embedding-entries", no_change, include_embedding_entries=False)
 PY
 
 run_validator() {
@@ -587,5 +592,10 @@ deflated_svpb_entry_report="$workdir/deflated-svpb-entry.json"
 deflated_svpb_entry_status="$(run_validator "$workdir/deflated-svpb-entry.svp" "$deflated_svpb_entry_report")"
 expect_status "$deflated_svpb_entry_status" "1" "deflated SVPB entry package"
 expect_code "$deflated_svpb_entry_report" "X_VALIDATOR_BLOCK_ENTRY_NOT_STORED"
+
+missing_embedding_entries_report="$workdir/missing-embedding-entries.json"
+missing_embedding_entries_status="$(run_validator "$workdir/missing-embedding-entries.svp" "$missing_embedding_entries_report")"
+expect_status "$missing_embedding_entries_status" "1" "missing embedding entries package"
+expect_code "$missing_embedding_entries_report" "X_VALIDATOR_MISSING_EMBEDDINGS_ENTRY"
 
 echo "OCR/color and SVPB validator smoke checks passed."

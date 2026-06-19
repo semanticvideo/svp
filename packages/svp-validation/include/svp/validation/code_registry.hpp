@@ -69,6 +69,8 @@ inline constexpr std::string_view kTempCodeColorInvalidBucketRegistryVersion =
     "X_VALIDATOR_COLOR_INVALID_BUCKET_REGISTRY_VERSION";
 inline constexpr std::string_view kTempCodeBlockEntryNotStored =
     "X_VALIDATOR_BLOCK_ENTRY_NOT_STORED";
+inline constexpr std::string_view kTempCodeMissingEmbeddingsEntry =
+    "X_VALIDATOR_MISSING_EMBEDDINGS_ENTRY";
 
 struct ValidationCode {
   std::string code;
