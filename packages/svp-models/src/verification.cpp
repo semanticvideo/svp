@@ -81,6 +81,14 @@ void add_lock_manifest_identity_checks(VerificationReport& report,
   }
 }
 
+void add_bundle_digest_not_verified_error(VerificationReport& report,
+                                          const ModelBundleManifest& manifest) {
+  report.add_error(
+      "bundle_blake3 for " + manifest.model_bundle_id +
+      " was not verified: RC1 requires authoritative bundle_blake3 verification, "
+      "but does not yet specify the canonical bundle digest byte algorithm");
+}
+
 void merge_report(VerificationReport& target, const VerificationReport& source) {
   target.issues.insert(target.issues.end(), source.issues.begin(), source.issues.end());
 }
@@ -158,6 +166,7 @@ VerificationReport verify_extracted_bundle(const std::filesystem::path& bundle_r
     const ModelLock lock = load_model_lock(bundle_root / kLockFileName);
     add_lock_manifest_identity_checks(report, lock, manifest);
     merge_report(report, verify_manifest_files(manifest, bundle_root));
+    add_bundle_digest_not_verified_error(report, manifest);
   } catch (const ModelError& error) {
     report.add_error(error.what());
     return report;
@@ -185,6 +194,7 @@ VerificationReport verify_lock_against_cache(const ModelLock& lock,
       ModelBundleManifest manifest = load_model_bundle_manifest(match->second);
       add_lock_manifest_identity_checks(report, lock, manifest);
       merge_report(report, verify_manifest_files(manifest, bundle_root));
+      add_bundle_digest_not_verified_error(report, manifest);
     } catch (const ModelError& error) {
       report.add_error(error.what());
     }
