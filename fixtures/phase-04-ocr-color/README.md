@@ -27,6 +27,8 @@ The valid fixtures include the current required SQLite table set. The invalid fi
 | `valid/text_absence_no_visible_text.svp` | No visible text with completed OCR absence. | `valid` | Empty text JSONL files and `text_absence.json` with zero counts. | Scene and shot color observations plus summary and absence. |
 | `valid/visible_ui_text.svp` | Visible UI text observation. | `valid` | One text region and one text observation. | Scene, shot, text foreground, and text background color observations. |
 | `valid/numeric_text_price.svp` | Safely parseable numeric text. | `valid` | One text region, one text observation, and one numeric value. | Scene, shot, and green text-region foreground color observations. |
+| `valid/subtitle_caption_text.svp` | Subtitle/caption visible text observation. | `valid` | One text region and one text observation with `layout_class: subtitle_caption`. | Scene, shot, text foreground, and text background color observations. |
+| `valid/dashboard_number.svp` | Chart/dashboard number with safe numeric extraction. | `valid` | One text region, one `chart_graph_number` text observation, and one percentage numeric value. | Scene, shot, text foreground, and text background color observations. |
 | `valid/orange_scene_color.svp` | Searchable orange scene coverage. | `valid` | Empty text JSONL files and valid text absence. | Orange scene and shot color observations. |
 | `valid/yellow_shot_color.svp` | Searchable yellow shot coverage. | `valid` | Empty text JSONL files and valid text absence. | Gray scene and yellow shot color observations. |
 | `valid/uniform_black_frame.svp` | Uniform black frame coverage. | `valid` | Empty text JSONL files and valid text absence. | Black scene, shot, and frame color observations. |
@@ -46,3 +48,5 @@ The valid fixtures include the current required SQLite table set. The invalid fi
 - Visible text, numeric values, and color coverage are modeled as Core observations, not labels.
 - The generator writes fixed ZIP timestamps and stable entry ordering.
 - The SQLite index is intentionally minimal. It satisfies the current structural validator by providing the required table set and row counts in `index/index_manifest.json`.
+- Current-validator caveat: `valid/color_absence_no_observations.svp` is accepted today because it has the required `/colors/` files and a completed absence record. A stricter future validator may require scene and shot color observations for normal video packages.
+- Current-validator caveat: these fixtures provide minimal OCR/color index rows for structural and reference checks. They do not implement the future full logical row-stream hash path for SQLite.

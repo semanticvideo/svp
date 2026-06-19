@@ -768,6 +768,52 @@ def fixture_cases() -> list[FixtureCase]:
     ]
     numeric_region = text_region("text_region_000001", "color_obs_000003")
 
+    caption_colors = baseline_color_observations("black") + [
+        color_observation(
+            "color_obs_000003",
+            "text_region",
+            "text_region_000001",
+            {"white": 0.84, "gray": 0.1, "other": 0.06},
+            "white",
+            "text_foreground",
+        ),
+        color_observation(
+            "color_obs_000004",
+            "text_region",
+            "text_region_000001",
+            {"black": 0.88, "gray": 0.08, "other": 0.04},
+            "black",
+            "text_background",
+        ),
+    ]
+    caption_region = text_region("text_region_000001", "color_obs_000003", "color_obs_000004")
+    caption_region["bbox_norm"] = [0.14, 0.78, 0.86, 0.9]
+    caption_region["bbox_px"] = [90, 281, 550, 324]
+
+    dashboard_colors = baseline_color_observations("blue") + [
+        color_observation(
+            "color_obs_000003",
+            "text_region",
+            "text_region_000001",
+            {"green": 0.76, "white": 0.14, "other": 0.1},
+            "green",
+            "text_foreground",
+        ),
+        color_observation(
+            "color_obs_000004",
+            "text_region",
+            "text_region_000001",
+            {"blue": 0.68, "black": 0.22, "other": 0.1},
+            "blue",
+            "text_background",
+        ),
+    ]
+    dashboard_region = text_region(
+        "text_region_000001", "color_obs_000003", "color_obs_000004"
+    )
+    dashboard_region["bbox_norm"] = [0.58, 0.18, 0.84, 0.32]
+    dashboard_region["bbox_px"] = [371, 65, 538, 115]
+
     invalid_reference_text = TextCase(
         regions=[text_region("text_region_000001")],
         observations=[
@@ -831,6 +877,47 @@ def fixture_cases() -> list[FixtureCase]:
                 absence_reason="text_detected",
             ),
             ColorCase(numeric_colors, "color_observed"),
+        ),
+        FixtureCase(
+            "valid/subtitle_caption_text.svp",
+            "svp_fixture_subtitle_caption_text",
+            TextCase(
+                regions=[caption_region],
+                observations=[
+                    text_observation(
+                        "Tonight we begin",
+                        "tonight we begin",
+                        layout_class="subtitle_caption",
+                    )
+                ],
+                absence_reason="text_detected",
+            ),
+            ColorCase(caption_colors, "color_observed"),
+        ),
+        FixtureCase(
+            "valid/dashboard_number.svp",
+            "svp_fixture_dashboard_number",
+            TextCase(
+                regions=[dashboard_region],
+                observations=[
+                    text_observation(
+                        "Revenue 42%",
+                        "revenue 42",
+                        layout_class="chart_graph_number",
+                    )
+                ],
+                numeric_values=[
+                    numeric_value(
+                        "42%",
+                        "42",
+                        "42",
+                        number_kind="percentage",
+                        unit="percent",
+                    )
+                ],
+                absence_reason="text_detected",
+            ),
+            ColorCase(dashboard_colors, "color_observed"),
         ),
         FixtureCase(
             "valid/orange_scene_color.svp",
