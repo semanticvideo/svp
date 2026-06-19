@@ -19,6 +19,7 @@ Before coding or reviewing, read:
 - `docs/SVP_Implementation_Phases_RC1/01_PARALLEL_WORK_MAP.md`
 - `docs/SVP_Implementation_Phases_RC1/03_TECHNICAL_DECISIONS.md`
 - `docs/SVP_Implementation_Phases_RC1/agent_rules/AGENT_RULES.md`
+- `docs/SVP_Implementation_Phases_RC2_Update/00_PAUSE_PHASE_03_PLUS.md`
 - The specific phase, track, or review instructions assigned by the orchestrator.
 
 Read only what is needed for the assignment. Do not wander into unrelated phases.
@@ -111,11 +112,14 @@ If the PR is acceptable, say so plainly. If it needs changes, list the required 
 
 ## SVP Project Priorities
 
+- SVP v1.0 RC2 is the active implementation target.
 - The validator path is the spine of the project.
 - The full builder comes after validator and fixtures are useful.
 - The spec is the source of truth.
-- Do not silently change RC1 semantics. Document true spec issues for later review.
+- Do not silently change RC2 semantics. Document true spec issues for later review.
 - Normal `svp build` operation must not require Python.
+- Do not continue Phase 03+, fixture lab, media ingest, vision pipeline, relationships/index packaging, or first-video-trial work until OCR and structured color observations are represented in the validator, fixtures, builder roadmap, index/query model, and first-trial acceptance criteria.
+- Visible text, numeric values extracted from visible text, and measured color coverage are Core observations in RC2. Do not treat them as labels.
 
 ## Handoff Format
 

@@ -7,7 +7,7 @@ Implement the native model-bundle machinery needed by audio, depth, masks, and e
 ## Prerequisites
 
 - Phase 01 complete.
-- RC1 model bundle docs and schemas exist under `spec/`.
+- Active model bundle docs and schemas exist under `spec/`.
 
 ## Primary outputs
 

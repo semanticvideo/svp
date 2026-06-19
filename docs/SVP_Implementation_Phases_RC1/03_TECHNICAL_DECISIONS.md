@@ -1,4 +1,4 @@
-# Technical Decisions for RC1 Implementation
+# Technical Decisions for RC2 Implementation
 
 These are the implementation choices for the first serious implementation pass.
 
@@ -31,6 +31,8 @@ ONNX Runtime       local model execution
 ```
 
 Add `whisper.cpp` as a vendored third-party dependency or submodule for transcription if the team chooses not to shell out to a bundled executable. Normal operation must not require Python.
+
+RC2 adds first-class OCR / visible-text observations and structured color observations. OCR may use model-backed detection and recognition through SVP Model Bundles. Structured color should start as deterministic classical processing: color-space normalization, registry-backed bucket quantization, and numeric coverage summaries for scenes, shots, frames/keyframes, regions/entities, and text regions.
 
 ## Executable naming
 
@@ -66,10 +68,12 @@ packages/svp-media
 packages/svp-audio
 packages/svp-vision
 packages/svp-models
+packages/svp-text
+packages/svp-color
 packages/svp-builder-core
 ```
 
-The repo already has the first six folders. Add the last four when builder work begins.
+The repo already has the foundation folders. Add later packages only when their owning phase begins and the RC2 OCR/color unblock checklist is satisfied.
 
 ## First implementation priority
 
@@ -79,7 +83,9 @@ The builder must not be the first serious code because a builder without a valid
 
 ## File format rule
 
-The spec is the source of truth. Do not change RC1 semantics while implementing unless a true spec bug is discovered. Spec bugs should be filed as issues or notes for RC2, not silently patched in code.
+The spec is the source of truth. Do not change RC2 semantics while implementing unless a true spec bug is discovered. Spec bugs should be filed as issues or notes for a later clarification, not silently patched in code.
+
+Visible text, numeric values extracted from visible text, and measured color distributions are Core observations in RC2. Do not implement them as labels.
 
 ## No Python runtime rule
 

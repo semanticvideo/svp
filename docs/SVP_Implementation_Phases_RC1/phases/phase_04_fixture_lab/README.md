@@ -47,6 +47,27 @@ python3 fixtures/tools/make_minimal_fixtures.py
 - Fixture generation is reproducible.
 - Fixture files are small enough to commit.
 
+## RC2 OCR and color delta
+
+Fixture work must include OCR and structured color coverage cases before Phase 04 can be complete.
+
+Add fixtures for:
+
+- no visible text with valid `text_absence.json`
+- visible UI text
+- safely parseable numeric value
+- subtitle or caption text
+- chart or dashboard number
+- red foreground text
+- orange scene
+- yellow shot
+- green number
+- uniform black frame
+- uniform white frame
+- invalid color bucket totals
+- invalid color bucket ID
+- invalid OCR/text reference
+
 ## Handoff report format
 
 At the end of this phase, report:

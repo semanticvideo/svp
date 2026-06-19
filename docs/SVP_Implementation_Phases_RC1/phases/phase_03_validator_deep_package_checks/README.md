@@ -50,6 +50,23 @@ cmake --build build
 - Validator reports specific registered errors for missing/corrupt depth, masks, embeddings, index manifest, and SQLite mismatches.
 - Authenticity findings do not affect core status by default.
 
+## RC2 OCR and color delta
+
+Deep validation must include `/text/` and `/colors/` once Phase 03 resumes.
+
+Required subpasses:
+
+1. Validate OCR JSONL records against text schemas.
+2. Validate text bounding boxes, timing, frame references, shot references, scene references, region/entity references, confidence values, normalized text, numeric values, and OCR provenance.
+3. Validate color records against color schemas.
+4. Validate color bucket IDs against `color-buckets.json`.
+5. Validate color spaces against `color-spaces.json`.
+6. Validate percentage bounds and percentage totals with the RC2 tolerance rules.
+7. Validate dominant bucket references, sampling basis, target references, and color provenance.
+8. Validate package-to-index consistency for visible text, numeric values, color bucket coverage, and scene/shot color summaries.
+
+Add tests for all new OCR and color validation codes before declaring Phase 03 complete.
+
 ## Handoff report format
 
 At the end of this phase, report:

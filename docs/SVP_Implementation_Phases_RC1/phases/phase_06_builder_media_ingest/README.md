@@ -30,7 +30,7 @@ partial package skeleton writer
 4. Implement exact rational timestamp conversion to integer microseconds with round-half-to-even.
 5. Compute canonical analysis raster with longest displayed dimension 640 and shorter dimension rounded to nearest even.
 6. Extract audio to required WAV format for downstream audio pipeline.
-7. Copy or store original media according to RC1 package layout.
+7. Copy or store original media according to RC2 package layout.
 8. Write a partial package skeleton with manifest and media files.
 9. Mark incomplete packages clearly during build. Do not claim full core validity yet.
 

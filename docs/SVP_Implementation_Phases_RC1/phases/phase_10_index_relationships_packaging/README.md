@@ -56,6 +56,27 @@ cmake --build build
 - Relationships exist and are inspectable.
 - Build does not require Python runtime.
 
+## RC2 OCR and color delta
+
+Phase 10 must include SQLite and query paths for:
+
+- text regions
+- recognized raw text
+- normalized text
+- numeric values
+- OCR target references
+- color observations
+- color bucket coverage
+- scene color summaries
+- shot color summaries
+- frame/keyframe color summaries
+- region/entity color summaries
+- text-region foreground/background color
+
+Update `index_manifest.logical_rows_blake3` and the canonical logical row stream procedure to include the new OCR/color tables.
+
+Queries like "find all orange scenes" must be supported by indexed scene or shot color bucket percentages.
+
 ## Handoff report format
 
 At the end of this phase, report:

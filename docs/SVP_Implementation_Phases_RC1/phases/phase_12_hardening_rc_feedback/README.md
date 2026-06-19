@@ -2,7 +2,7 @@
 
 ## Phase purpose
 
-Use implementation results to identify true spec bugs, validator gaps, and builder issues. This is where RC1 becomes either RC2 or v1.0 final candidate.
+Use implementation results to identify true spec bugs, validator gaps, and builder issues. This is where RC2 either becomes a v1.0 final candidate or receives a later clarification pass.
 
 ## Prerequisites
 
@@ -15,8 +15,8 @@ Use implementation results to identify true spec bugs, validator gaps, and build
 implementation gap list
 validator gap list
 fixture gap list
-RC1 spec issue list
-RC2 or v1.0 final recommendation
+RC2 spec issue list
+v1.0 final or post-RC2 clarification recommendation
 ```
 
 ## Work items
@@ -25,8 +25,8 @@ RC2 or v1.0 final recommendation
 2. Separate implementation bugs from spec ambiguities.
 3. Add fixture coverage for each discovered bug.
 4. Add validation codes only if truly needed.
-5. Document any RC1 spec contradiction or ambiguity.
-6. Decide whether RC2 is required or RC1 can proceed toward v1.0 final.
+5. Document any RC2 spec contradiction or ambiguity.
+6. Decide whether a post-RC2 clarification is required or RC2 can proceed toward v1.0 final.
 7. Prepare a concise human-readable project status report.
 
 ## Required commands
@@ -41,7 +41,7 @@ git status
 - Trial findings are triaged.
 - New issues are filed or documented.
 - No architecture creep is introduced.
-- Clear recommendation exists: fix implementation, draft RC2, or finalize v1.0.
+- Clear recommendation exists: fix implementation, draft a clarification, or finalize v1.0.
 
 ## Handoff report format
 

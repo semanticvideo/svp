@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SVP RC1 Agent Orchestration Plan</title>
+  <title>SVP RC2 Agent Orchestration Plan</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -325,14 +325,14 @@
 </head>
 <body>
   <header>
-    <h1>SVP RC1 Agent Orchestration Plan</h1>
-    <p class="lede">A staged, branch-based plan for taking SVP from the RC1 spec foundation to a real 30-second video package, while keeping builders, reviewers, and the orchestrator in a tight wake-up loop.</p>
+    <h1>SVP RC2 Agent Orchestration Plan</h1>
+    <p class="lede">A staged, branch-based plan for taking SVP from the RC2 spec foundation to a real 30-second video package with first-class OCR and structured color observations, while keeping builders, reviewers, and the orchestrator in a tight wake-up loop.</p>
     <div class="meta">
       <span class="pill">Repo: <code>/Users/domesposito/Projects/svp</code></span>
       <span class="pill">Branch prefix: <code>codex/</code></span>
       <span class="pill">Builders active: max 2</span>
       <span class="pill">Work style: fresh worktree per branch</span>
-      <span class="pill">Status: plan ready, execution not started</span>
+      <span class="pill">Status: RC2 active, Phase 03+ paused until OCR/color unblock</span>
     </div>
   </header>
 
@@ -340,8 +340,8 @@
     <section class="grid">
       <article class="card two-third">
         <h2>North Star</h2>
-        <p>SVP is a strict package format for machine-readable observations over time-based media. The goal of this project is to build enough real infrastructure to process one simple 20 to 30 second video into an inspectable `.svp` package.</p>
-        <p>Observation layers are core. Interpretive labels are non-core unless explicitly required by the RC1 spec.</p>
+        <p>SVP is a strict package format for machine-readable observations over time-based media. The goal of this project is to build enough real infrastructure to process one simple 20 to 30 second video into an inspectable RC2 `.svp` package.</p>
+        <p>Observation layers are core. Interpretive labels are non-core unless explicitly required by the RC2 spec. Visible text, numeric values extracted from visible text, and measured color coverage are Core observations.</p>
         <div class="note">
           <strong>Core rule:</strong> build the validator and package foundation first. The builder may produce partial packages along the way, but it cannot claim success until the validator can inspect and report on the output.
         </div>
@@ -359,15 +359,17 @@
           <li><a href="./agent_rules/AGENT_RULES.md"><code>agent_rules/AGENT_RULES.md</code></a></li>
           <li><a href="./checklists/commands.md"><code>checklists/commands.md</code></a></li>
           <li><a href="./checklists/validation_report_contract.md"><code>validation_report_contract.md</code></a></li>
+          <li><a href="../SVP_Implementation_Phases_RC2_Update/00_PAUSE_PHASE_03_PLUS.md"><code>RC2 pause rule</code></a></li>
+          <li><a href="../SVP_Implementation_Phases_RC2_Update/checklists/ocr_color_unblock_checklist.md"><code>OCR/color unblock checklist</code></a></li>
         </ul>
       </aside>
 
       <article class="card">
         <h2>Current Implementation State</h2>
-        <p>The SVP v1.0 RC1 spec package and implementation roadmap are present in the repository. The next work is not more spec drafting. The next work is establishing the baseline, then creating the native C++20 build and CLI foundation.</p>
+        <p>The SVP v1.0 RC2 spec package is present in the repository. Phase 01, Phase 02, and Phase 08 foundation work have landed. The next work is not deeper buildout; it is integrating RC2 OCR and structured color requirements into validator, fixtures, index/query, builder roadmap, inspector, and first-trial acceptance.</p>
         <ul>
           <li><code>AGENTS.md</code> now defines agent permissions, worktree rules, branch/push/PR permission, test discipline, and no-god-file expectations.</li>
-          <li>The roadmap lives under <code>docs/SVP_Implementation_Phases_RC1/</code>.</li>
+          <li>The base roadmap lives under <code>docs/SVP_Implementation_Phases_RC1/</code> with active RC2 deltas under <code>docs/SVP_Implementation_Phases_RC2_Update/</code>.</li>
           <li>Implementation should follow the phase docs, not free-form invention.</li>
           <li>The orchestrator thread owns sequencing and must be woken by builders and reviewers when they finish.</li>
         </ul>
@@ -383,7 +385,8 @@
           <li>No vague "works for me" package validity claims.</li>
           <li>No god files or catch-all dumping grounds.</li>
           <li>No tests just for ceremony when no code or behavior changed.</li>
-          <li>No NLE plugin, editor integration, GUI application, or external tool integration during this RC1 infrastructure pass.</li>
+          <li>No NLE plugin, editor integration, GUI application, or external tool integration during this RC2 infrastructure pass.</li>
+          <li>No Phase 03+, fixture lab, media ingest, vision, index/package, or first-trial dispatch until OCR/color unblock criteria are represented.</li>
         </ul>
       </article>
 
@@ -395,42 +398,46 @@
           <li><code>svp-reader</code> and <code>svp-inspector</code> make packages understandable.</li>
           <li>The builder creates partial packages first, then a complete package later.</li>
           <li>One simple 20 to 30 second video produces a `.svp` file, validation JSON, inspector output, and a trial report.</li>
+          <li>Visible text and numeric values are stored as Core observations.</li>
+          <li>Scene, shot, frame, region/entity, and text-region color distributions are numeric and searchable, including queries like "find all orange scenes."</li>
           <li>Each file has one clear job, and shared contracts have one source of truth.</li>
         </ul>
       </article>
     </section>
 
     <section class="card">
-      <h2>Minimum Valid RC1 Package For First Video Trial</h2>
-      <p>For the first 20 to 30 second video trial, a package may be considered milestone-valid only if it passes the validator according to the RC1 rules and contains the minimum required package structure defined by the spec.</p>
+      <h2>Minimum Valid RC2 Package For First Video Trial</h2>
+      <p>For the first 20 to 30 second video trial, a package may be considered milestone-valid only if it passes the validator according to the RC2 rules and contains the minimum required package structure defined by the spec.</p>
       <p>The first milestone package must include, at minimum:</p>
       <ul>
-        <li>Original media reference or embedded source media according to the RC1 package rules.</li>
+        <li>Original media reference or embedded source media according to the RC2 package rules.</li>
         <li>Required manifest files.</li>
         <li>Required package metadata.</li>
         <li>Required provenance records for generated outputs.</li>
         <li>Canonical timing representation.</li>
         <li>At least one valid media timeline.</li>
         <li>Transcript structures when audio is present, or explicit valid zero-word behavior when the source is silent.</li>
-        <li>Shot or scene structure if required by the RC1 package rules.</li>
+        <li>Required <code>/text/</code> section with text observations or honest text absence.</li>
+        <li>Required <code>/colors/</code> section with numeric color observations and summaries.</li>
+        <li>Shot or scene structure if required by the RC2 package rules.</li>
         <li>Validation report output generated by <code>svp-validator</code>.</li>
         <li>Inspector-readable package summary.</li>
       </ul>
       <div class="note warning">
-        <strong>Spec fidelity rule:</strong> if any listed requirement conflicts with the RC1 spec, the spec wins. Agents must adjust implementation and validation behavior to the spec rather than inventing new package requirements.
+        <strong>Spec fidelity rule:</strong> if any listed requirement conflicts with the RC2 spec, the spec wins. Agents must adjust implementation and validation behavior to the spec rather than inventing new package requirements.
       </div>
-      <p>Optional layers such as masks, depth, embeddings, labels, relationships, or model-generated observations may be absent, sparse, empty, or marked unsupported only when the RC1 spec allows that state.</p>
+      <p>Optional layers such as labels or model-generated observations may be absent, sparse, empty, or marked unsupported only when the RC2 spec allows that state. Text and color are not labels in RC2; they are Core observations.</p>
       <p>No builder may claim a complete package unless the validator confirms it. Partial builder output must be marked honestly as incomplete.</p>
     </section>
 
     <section class="card">
       <h2>No Silent Spec Decisions</h2>
-      <p>Agents must not silently resolve ambiguous RC1 behavior by inventing implementation behavior. If the spec is unclear, contradictory, or underspecified, the agent must document the ambiguity and escalate to the orchestrator or human owner.</p>
+      <p>Agents must not silently resolve ambiguous RC2 behavior by inventing implementation behavior. If the spec is unclear, contradictory, or underspecified, the agent must document the ambiguity and escalate to the orchestrator or human owner.</p>
       <p>Implementation may use temporary behavior only when:</p>
       <ul>
         <li>It is clearly marked as temporary.</li>
         <li>It uses documented temporary validation codes where relevant.</li>
-        <li>It does not change RC1 semantics.</li>
+        <li>It does not change RC2 semantics.</li>
         <li>It includes a follow-up recommendation.</li>
       </ul>
     </section>
@@ -591,11 +598,11 @@
 
       <div class="phase">
         <div class="phase-header">
-          <h3>0. Repo Baseline And RC1 Lock</h3>
+          <h3>0. Repo Baseline And RC2 Lock</h3>
           <span class="tag warn-tag">gate</span>
         </div>
         <p><strong>Branch:</strong> <code>codex/phase-00-repo-baseline</code></p>
-        <p><strong>Scope:</strong> verify the RC1 package foundation, confirm repo state, and commit the baseline if assigned.</p>
+        <p><strong>Scope:</strong> verify the RC1 history and RC2 active package foundation, confirm repo state, and commit the baseline if assigned.</p>
         <ul>
           <li>Run <code>scripts/verify-spec-files.sh</code>.</li>
           <li>Inspect <code>git status</code> and unexpected root or temp files.</li>
@@ -636,7 +643,29 @@
           <li>Use registered validation codes or documented <code>X_VALIDATOR_</code> temporary codes.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> structured failures, exit code behavior, report ownership, no vague validation messages.</p>
+        <div class="note warning">
+          <strong>RC2 update:</strong> validator core must know `/text/` and `/colors/` are Core sections, load OCR/color registries, and know the OCR/color schemas exist for deep validation.
+        </div>
         <p class="small">Parallelizable: after Phase 1. Avoid concurrent edits to <code>packages/svp-validation</code>.</p>
+      </div>
+
+      <div class="phase">
+        <div class="phase-header">
+          <h3>2.5. RC2 OCR And Color Unblock</h3>
+          <span class="tag warn-tag">required gate</span>
+        </div>
+        <p><strong>Branch:</strong> <code>codex/rc2-ocr-color-unblock-plan</code></p>
+        <p><strong>Scope:</strong> update validator, fixture, builder, index/query, inspector, and first-video-trial plans so Phase 03+ implements RC2 instead of the older RC1 visual package shape.</p>
+        <ul>
+          <li>Represent required <code>/text/</code> and <code>/colors/</code> paths in validator planning.</li>
+          <li>Represent OCR/color schemas and registries in deep validation planning.</li>
+          <li>Add fixture cases for visible text, numeric text, and color coverage.</li>
+          <li>Add index/query requirements for text and numeric color percentages.</li>
+          <li>Add builder stages for OCR, numeric extraction, color quantization, and scene/shot/region/text-region summaries.</li>
+          <li>Add first-trial acceptance for text observations and searchable color summaries.</li>
+        </ul>
+        <p><strong>Reviewer focus:</strong> this gate must be complete before Phase 03, fixtures, media ingest, vision, index/package, or first-trial work resumes.</p>
+        <p class="small">Parallelizable: no. This is the active pause gate.</p>
       </div>
 
       <div class="phase">
@@ -655,13 +684,18 @@
           <li>SQLite index presence and structural checks.</li>
           <li>Logical row hash and equivalence checks.</li>
           <li>Cross-reference checks between manifest, SVPB blocks, indexes, and package metadata.</li>
+          <li>OCR schema, reference, provenance, and index consistency checks.</li>
+          <li>Color schema, bucket, percentage, target, provenance, and index consistency checks.</li>
         </ol>
         <ul>
           <li>Each subpass should have clear ownership, focused tests, and registered validation codes.</li>
           <li>Add focused owners for schemas, SVPB blocks, hashes, index logic, and cross-reference checks.</li>
           <li>Keep authenticity findings separate from core validity.</li>
-          <li>Do not silently change RC1 equivalence semantics.</li>
+          <li>Do not silently change RC2 equivalence semantics.</li>
         </ul>
+        <div class="note warning">
+          <strong>RC2 update:</strong> Phase 03 cannot be complete without `/text/` and `/colors/` deep validation, including color bucket percentages and visible text/numeric value records.
+        </div>
         <p><strong>Reviewer focus:</strong> confirm that each deep validator concern has a clear owner and does not collapse into a catch-all validation file. Reject vague validation errors when a registered or temporary code should exist. Also verify source-of-truth fidelity to the spec, no hash/tolerance confusion, and clear validation codes.</p>
         <p class="small">Parallelizable: after Phase 2. Coordinate with fixture work.</p>
       </div>
@@ -677,6 +711,7 @@
           <li>Add reproducible fixture generation helpers.</li>
           <li>Create static-card, silent-video, and vertical-video valid fixtures.</li>
           <li>Create invalid fixtures for missing sections, bad block hashes, index problems, and unsupported label schema warnings.</li>
+          <li>Create OCR/color fixtures for no visible text, visible UI text, numeric values, orange scenes, yellow shots, green numbers, text foreground/background colors, and invalid color totals.</li>
           <li>Document expected validator statuses.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> fixture reproducibility, small files, expected statuses, no builder masquerading as fixture work.</p>
@@ -692,7 +727,7 @@
         <p><strong>Scope:</strong> build tools that open packages and explain their contents without validating everything.</p>
         <ul>
           <li>Implement package open/read APIs.</li>
-          <li>Read manifests, transcript counts, shot/scene counts, block metadata, and index summaries.</li>
+          <li>Read manifests, transcript counts, text region counts, color observation counts, shot/scene counts, block metadata, and index summaries.</li>
           <li>Keep invalid package handling graceful.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> reader ownership versus validator ownership, useful partial-read behavior.</p>
@@ -713,7 +748,7 @@
           <li>Add timestamp tests for required frame rates.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> no full-builder claims, exact timestamp behavior, partial output honesty.</p>
-        <p class="small">Parallelizable: after Phase 1 and Phase 2; can run alongside model runtime if builder slots allow.</p>
+        <p class="small">Parallelizable: after Phase 1, Phase 2, and the RC2 OCR/color unblock plan.</p>
       </div>
 
       <div class="phase">
@@ -762,6 +797,9 @@
           <li>Start with deterministic classical CV where possible.</li>
           <li>Use conservative tracks and masks; labels are non-core.</li>
           <li>Write SVPB streams that the validator can parse.</li>
+          <li>Add OCR/text detection, recognition, layout classification, and numeric extraction as separate stages.</li>
+          <li>Add deterministic color quantization and numeric color summaries for scenes, shots, frames/keyframes, regions/entities, and text regions.</li>
+          <li>Support queries like "find all orange scenes" through scene/shot color summaries.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> no over-promising, block validity, degenerate/static video behavior.</p>
         <p class="small">Parallelizable: after Phase 6, Phase 8, and Phase 3 SVPB support.</p>
@@ -780,6 +818,8 @@
           <li>Relationship generation from existing audio and vision observations.</li>
           <li>Embedding output integration where available.</li>
           <li>SQLite index generation.</li>
+          <li>OCR text and numeric value index integration.</li>
+          <li>Color bucket coverage index integration for scenes, shots, frames/keyframes, regions/entities, and text regions.</li>
           <li>Index manifest and logical row hash generation.</li>
           <li>Builder-to-validator integration.</li>
           <li>Final validation output storage.</li>
@@ -788,6 +828,7 @@
         <ul>
           <li>Generate required relationships from audio and vision observations.</li>
           <li>Build the SQLite index and logical row hash.</li>
+          <li>Build text and color query tables.</li>
           <li>Run the validator at the end of build and store validation output.</li>
           <li>Ensure package finalization is atomic.</li>
           <li>The branch may remain a single integration branch, but commits and review notes should make these checkpoints easy to inspect.</li>
@@ -814,6 +855,9 @@
           <li>Inspector output.</li>
           <li>Package size.</li>
           <li>List of generated package sections.</li>
+          <li>Text region count and text observation count.</li>
+          <li>Color observation count and scene/shot color summary count.</li>
+          <li>Proof that at least one scene/shot color summary is queryable.</li>
           <li>Known invalid, warning, or unsupported findings.</li>
           <li>Specific next fix for every invalid finding.</li>
           <li>Human-readable trial report under <code>runs/first-video-trial/</code>.</li>
@@ -823,6 +867,8 @@
           <li>Save outputs under <code>runs/first-video-trial/</code>.</li>
           <li>Explain every invalid finding with a specific next fix.</li>
           <li>Do not hand-build or manually repair the first trial package. The trial must exercise the real builder path.</li>
+          <li>If visible text exists, it must appear in <code>text_observations</code> and the index.</li>
+          <li>If no visible text exists, <code>text_absence.json</code> must honestly record that absence.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> trial evidence, actionable findings, no hand-built package shortcuts.</p>
         <p class="small">Parallelizable: no. This is the milestone.</p>
@@ -834,11 +880,11 @@
           <span class="tag">closeout</span>
         </div>
         <p><strong>Branch:</strong> <code>codex/phase-12-hardening-feedback</code></p>
-        <p><strong>Scope:</strong> separate implementation bugs from spec ambiguity and decide whether RC2 is needed.</p>
+        <p><strong>Scope:</strong> separate implementation bugs from spec ambiguity and decide whether a post-RC2 spec clarification is needed.</p>
         <ul>
           <li>Review trial warnings and failures.</li>
           <li>Add fixture coverage for discovered bugs when appropriate.</li>
-          <li>Document spec contradictions instead of silently changing RC1 behavior.</li>
+          <li>Document spec contradictions instead of silently changing RC2 behavior.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> clear triage, no architecture creep, honest recommendation.</p>
         <p class="small">Parallelizable: after Phase 11.</p>
@@ -865,24 +911,30 @@
           </tr>
           <tr>
             <td>B. Validator And Model Runtime</td>
-            <td>Phase 02/03 validator lane and Phase 08 model runtime</td>
+            <td>Phase 02 validator lane and Phase 08 model runtime</td>
             <td>Phase 01</td>
             <td>They touch different primary packages and unblock later builder work.</td>
           </tr>
           <tr>
-            <td>C. Fixtures And Media Ingest</td>
-            <td>Phase 04 fixture lab and Phase 06 media ingest</td>
-            <td>Phase 02; Phase 03 preferred for fixtures</td>
-            <td>Fixtures prove validator behavior while media ingest starts partial builder output.</td>
+            <td>C. RC2 OCR/Color Unblock</td>
+            <td>Nothing</td>
+            <td>Phase 02 and RC2 spec import</td>
+            <td>Phase 03+ must not resume until OCR and structured color are represented in validator, fixtures, builder, index/query, and trial acceptance.</td>
           </tr>
           <tr>
-            <td>D. Audio And Vision</td>
+            <td>D. Fixtures And Media Ingest</td>
+            <td>Phase 04 fixture lab and Phase 06 media ingest</td>
+            <td>RC2 OCR/color unblock; Phase 03 preferred for fixtures</td>
+            <td>Fixtures must prove OCR/color behavior while media ingest starts partial builder output.</td>
+          </tr>
+          <tr>
+            <td>E. Audio, Vision, OCR, And Color</td>
             <td>Phase 07 and Phase 09</td>
             <td>Phase 06 and Phase 08; Phase 03 for block validation</td>
-            <td>Audio and vision can develop in separate packages once media and model foundations exist.</td>
+            <td>Audio and vision can develop in separate packages once media, model, OCR, and color plans exist.</td>
           </tr>
           <tr>
-            <td>E. Integration And Trial</td>
+            <td>F. Integration And Trial</td>
             <td>Nothing</td>
             <td>Phase 07, 09, 10, then 11</td>
             <td>Package writer and first video trial need all prior outputs to converge.</td>
@@ -890,7 +942,7 @@
         </tbody>
       </table>
       <div class="note warning">
-        <strong>Do not parallelize shared contract zones:</strong> <code>CMakeLists.txt</code>, <code>vcpkg.json</code>, <code>packages/svp-core</code>, <code>packages/svp-validation</code>, or <code>spec/registries/validation-codes.json</code> without explicit orchestrator coordination.
+        <strong>Do not parallelize shared contract zones:</strong> <code>CMakeLists.txt</code>, <code>vcpkg.json</code>, <code>packages/svp-core</code>, <code>packages/svp-validation</code>, <code>spec/registries/validation-codes.json</code>, <code>spec/registries/color-buckets.json</code>, <code>spec/registries/color-spaces.json</code>, or <code>spec/registries/ocr-observation-types.json</code> without explicit orchestrator coordination.
       </div>
     </section>
 
@@ -952,8 +1004,18 @@
           </tr>
           <tr>
             <td>Spec ambiguity</td>
-            <td>Agents may silently resolve unclear RC1 behavior in code.</td>
-            <td>Ambiguities must be documented and escalated instead of silently changing RC1 semantics.</td>
+            <td>Agents may silently resolve unclear RC2 behavior in code.</td>
+            <td>Ambiguities must be documented and escalated instead of silently changing RC2 semantics.</td>
+          </tr>
+          <tr>
+            <td>OCR/color under-specification</td>
+            <td>Text and color are now Core observations. If agents treat them as labels or optional add-ons, validator, fixtures, builder, index, and trial work will drift immediately.</td>
+            <td>Keep Phase 03+ paused until OCR/color paths, schemas, registries, validation codes, index tables, builder stages, and first-trial checks are represented.</td>
+          </tr>
+          <tr>
+            <td>Color query mismatch</td>
+            <td>Scene/shot color search such as "find all orange scenes" requires numeric color coverage in the package and index, not only visual embeddings or text color.</td>
+            <td>Store registry-backed color bucket percentages for scenes, shots, frames/keyframes, regions/entities, and text regions where applicable.</td>
           </tr>
         </tbody>
       </table>
@@ -1015,6 +1077,8 @@ Read:
 - docs/SVP_Implementation_Phases_RC1/01_PARALLEL_WORK_MAP.md
 - docs/SVP_Implementation_Phases_RC1/03_TECHNICAL_DECISIONS.md
 - docs/SVP_Implementation_Phases_RC1/agent_rules/AGENT_RULES.md
+- docs/SVP_Implementation_Phases_RC2_Update/00_PAUSE_PHASE_03_PLUS.md
+- docs/SVP_Implementation_Phases_RC2_Update/checklists/ocr_color_unblock_checklist.md
 - &lt;assigned phase doc&gt;
 
 Create a fresh worktree and branch:
@@ -1030,6 +1094,8 @@ Scope:
 - Non-goals: &lt;list&gt;
 
 Rules:
+- Treat SVP v1.0 RC2 as the active implementation target.
+- Do not start Phase 03+ unless the RC2 OCR/color unblock checklist is satisfied.
 - Stay inside the assigned phase.
 - Prefer one-job files. No god files.
 - Commit, push, and open a PR when complete.
@@ -1042,7 +1108,8 @@ Read AGENTS.md first.
 
 Focus:
 - Behavior regressions.
-- RC1 spec/source-of-truth drift.
+- RC2 spec/source-of-truth drift.
+- OCR/color Core observation drift.
 - Shared contract changes.
 - Missing proof for changed code.
 - God files or mixed responsibilities.
@@ -1077,12 +1144,12 @@ Act:
     <section class="card">
       <h2>Immediate Next Work</h2>
       <ol>
-        <li><strong>Confirm repo baseline:</strong> run the Phase 00 verification path and decide whether the current untracked roadmap docs should be included in the baseline branch.</li>
-        <li><strong>Create the first builder assignment:</strong> Phase 00 if the baseline is not committed, otherwise Phase 01 for build system and CLI skeleton.</li>
-        <li><strong>Create the first reviewer assignment:</strong> review the Phase 00 or Phase 01 PR after the builder wakes the orchestrator.</li>
-        <li><strong>Start parallel work only after Phase 01:</strong> pair validator core with model runtime or media ingest, depending on shared file pressure.</li>
+        <li><strong>Confirm RC2 import:</strong> run <code>scripts/verify-spec-files.sh</code> and verify the new OCR/color registries and schemas parse.</li>
+        <li><strong>Update active roadmap:</strong> ensure Phase 03+, fixtures, builder, index, inspector, and first-trial docs include `/text/` and `/colors/` work.</li>
+        <li><strong>Dispatch only the RC2 unblock review:</strong> do not start deeper buildout until the unblock checklist is satisfied.</li>
+        <li><strong>Next implementation after unblock:</strong> update validator required-path checks for `/text/` and `/colors/`, then resume Phase 03 with OCR/color deep validation.</li>
       </ol>
-      <p>The orchestration loop is ready, but execution should begin only after the orchestrator explicitly assigns the first branch.</p>
+      <p>The orchestration loop is paused for Phase 03+ until RC2 OCR/color planning is represented and reviewed.</p>
     </section>
 
     <section class="card">
@@ -1090,12 +1157,15 @@ Act:
       <ul>
         <li>Phase 01 build and CLI skeleton are complete.</li>
         <li>Validator core and deep checks can emit useful structured reports.</li>
-        <li>Fixtures include valid and invalid package examples with expected statuses.</li>
-        <li>Reader and inspector can explain package contents.</li>
+        <li>Validator required-path and deep checks include RC2 `/text/` and `/colors/` sections.</li>
+        <li>Fixtures include valid and invalid package examples with expected statuses, including visible text, numeric text, orange scenes, yellow shots, green numbers, text absence, color absence, and invalid color totals.</li>
+        <li>Reader and inspector can explain package contents, including text region counts and color observation counts.</li>
         <li>Model runtime does not require Python for normal builder operation.</li>
         <li>Builder partial outputs are honest until validator-proven complete packages exist.</li>
+        <li>Index/query support includes visible text, numeric values, and scene/shot color bucket percentages.</li>
+        <li>Queries like "find all orange scenes" are supported by structured color observations, not just embeddings.</li>
         <li>Every merged PR had separate builder and reviewer ownership.</li>
-        <li>The first video trial produces `.svp`, validation JSON, inspector output, logs, and a report.</li>
+        <li>The first video trial produces `.svp`, validation JSON, inspector output, logs, text/color evidence, and a report.</li>
       </ul>
     </section>
   </main>

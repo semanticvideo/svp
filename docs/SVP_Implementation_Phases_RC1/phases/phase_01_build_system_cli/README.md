@@ -47,7 +47,7 @@ cmake --build build
 - CMake configures.
 - Project builds.
 - `svp-validator --help` works.
-- `svp-validator --version` prints RC1-compatible tool version.
+- `svp-validator --version` prints the active SVP spec/tool version.
 - No media processing code is added.
 
 ## Handoff report format

@@ -30,6 +30,17 @@ cmake --build build
 ./build/tools/svp-validator/svp-validator validate fixtures/invalid/missing-depth.svp --json
 ```
 
+## RC2 OCR/color unblock
+
+```bash
+scripts/verify-spec-files.sh
+python3 -m json.tool spec/registries/color-buckets.json >/dev/null
+python3 -m json.tool spec/registries/color-spaces.json >/dev/null
+python3 -m json.tool spec/registries/ocr-observation-types.json >/dev/null
+python3 -m json.tool spec/schemas/text-region.schema.json >/dev/null
+python3 -m json.tool spec/schemas/color-observation.schema.json >/dev/null
+```
+
 ## First video trial
 
 ```bash
@@ -38,3 +49,5 @@ mkdir -p runs/first-video-trial
 ./build/tools/svp-validator/svp-validator validate runs/first-video-trial/dom-30s.svp --json > runs/first-video-trial/validation.json
 ./build/tools/svp-inspector/svp-inspector inspect runs/first-video-trial/dom-30s.svp > runs/first-video-trial/inspect.txt
 ```
+
+The RC2 trial report must include text region counts, color observation counts, and proof that at least one scene or shot color summary is queryable.

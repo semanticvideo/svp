@@ -1,6 +1,6 @@
-# SVP Implementation Phases - RC1 to First Video Package
+# SVP Implementation Phases - RC2 to First Video Package
 
-This package is a repo-ready implementation plan for taking the existing SVP v1.0 RC1 repository from "spec organized" to "I can run a 30-second video through a builder and get a `.svp` package on the other side."
+This package is a repo-ready implementation plan for taking the existing SVP repository from "spec organized" to "I can run a 30-second video through a builder and get a `.svp` package on the other side."
 
 It is written for agents working inside the repository at:
 
@@ -8,7 +8,15 @@ It is written for agents working inside the repository at:
 /Users/domesposito/Projects/svp
 ```
 
-The RC1 repo foundation is already complete. The next work is real implementation work, not more spec drafting.
+The RC1 repo foundation is complete, and SVP v1.0 RC2 is now the active implementation target. RC2 adds first-class OCR / visible-text observations and structured color observations to Core.
+
+The folder name still says `RC1` because this package began as the RC1 implementation plan. Active RC2 deltas live in:
+
+```text
+docs/SVP_Implementation_Phases_RC2_Update/
+```
+
+Do not continue Phase 03+ work until those deltas are represented in the active implementation plan.
 
 ## What this package contains
 
@@ -42,7 +50,7 @@ SVP_Implementation_Phases_RC1/
 
 ## The one-sentence strategy
 
-Build the validator and package infrastructure first, then build the reader/inspector, then build the media/audio/vision pipelines, then integrate the full builder and run a 30-second video through it.
+Build the validator and package infrastructure first, integrate RC2 OCR/color requirements into validator, fixtures, index/query, builder roadmap, and inspector, then build the media/audio/vision/OCR/color pipelines, then integrate the full builder and run a 30-second video through it.
 
 ## The milestone that matters
 
@@ -54,4 +62,4 @@ svp validate out/dom-30s.svp --json
 svp inspect out/dom-30s.svp
 ```
 
-The resulting `.svp` does not have to be perfect yet, but it must be structurally valid, inspectable, and produced by the actual pipeline rather than assembled by hand.
+The resulting `.svp` does not have to be perfect yet, but it must be structurally valid, inspectable, and produced by the actual pipeline rather than assembled by hand. For RC2, it must include valid `/text/` and `/colors/` Core sections, with scene/shot color summaries that can support queries such as "find all orange scenes."

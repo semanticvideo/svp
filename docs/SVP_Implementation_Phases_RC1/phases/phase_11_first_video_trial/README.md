@@ -47,6 +47,20 @@ mkdir -p runs/first-video-trial
 - Trial report exists.
 - Any invalid status is explained by specific actionable findings.
 
+## RC2 OCR and color acceptance
+
+The first real video trial must produce a Core-valid RC2 package that includes `/text/` and `/colors/`.
+
+Acceptance checks:
+
+- `svp validate` passes.
+- `svp inspect` reports text region counts and color observation counts.
+- At least one scene or shot color summary is queryable.
+- Scene/shot color percentages support queries like "find all orange scenes."
+- If the test video contains visible text, it appears in `text_observations` and the index.
+- If visible text contains a safely parseable number, a numeric value record is produced when safe.
+- If no visible text exists, `text_absence.json` honestly records that absence.
+
 ## Handoff report format
 
 At the end of this phase, report:

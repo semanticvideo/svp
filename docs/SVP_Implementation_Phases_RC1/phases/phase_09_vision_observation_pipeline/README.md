@@ -56,6 +56,30 @@ cmake --build build
 - Entity track and region files exist.
 - Degenerate/static video produces valid empty tracks and near-uniform depth/mask behavior where appropriate.
 
+## RC2 OCR and color delta
+
+Phase 09 now includes independent OCR and structured color builder stages:
+
+```text
+ocr_text_detection
+ocr_text_recognition
+ocr_layout_classification
+ocr_numeric_extraction
+ocr_text_region_color_sampling
+color_space_normalization
+color_bucket_quantization
+shot_color_summary
+scene_color_summary
+frame_color_summary
+region_color_summary
+entity_color_summary
+text_region_foreground_background_color
+```
+
+Color processing should be deterministic classical processing first. It should produce numeric bucket coverage for scenes, shots, frames or keyframes, regions/entities, and text regions where applicable.
+
+OCR may be model-backed through SVP Model Bundles. Do not hardcode OCR into unrelated vision stages; keep text detection, recognition, layout classification, and numeric extraction separately owned.
+
 ## Handoff report format
 
 At the end of this phase, report:
