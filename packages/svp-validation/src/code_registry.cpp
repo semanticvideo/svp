@@ -54,6 +54,10 @@ void add_temporary_validator_codes(ValidationCodeRegistry& registry) {
                               "The validation-code registry could not be read."));
   registry.add(make_temp_code(kTempCodeRegistryInvalid, FindingSeverity::fatal,
                               "The validation-code registry is malformed."));
+  registry.add(make_temp_code(kTempCodeSchemaUnreadable, FindingSeverity::fatal,
+                              "A required schema asset could not be read."));
+  registry.add(make_temp_code(kTempCodeSchemaInvalid, FindingSeverity::fatal,
+                              "A required schema asset is malformed."));
 }
 
 }  // namespace

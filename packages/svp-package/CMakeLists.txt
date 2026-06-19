@@ -1,6 +1,7 @@
 find_package(libzip CONFIG REQUIRED)
 
 add_library(svp-package
+  src/package_contract.cpp
   src/package_layout.cpp
   src/package_probe.cpp
 )

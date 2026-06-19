@@ -4,6 +4,7 @@ add_library(svp-validation
   src/code_registry.cpp
   src/report.cpp
   src/report_json.cpp
+  src/spec_assets.cpp
   src/validator.cpp
 )
 
