@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "svp",
+  "version-string": "1.0.0-rc1",
+  "description": "Semantic Video Package reference tools",
+  "license": "MIT",
+  "dependencies": [
+    "cli11",
+    "nlohmann-json",
+    "sqlite3",
+    "libzip",
+    "blake3",
+    "zstd"
+  ]
+}
+
