@@ -7,18 +7,29 @@ void to_json(nlohmann::json& json, const ValidationFinding& finding) {
       {"code", finding.code},
       {"severity", to_string(finding.severity)},
       {"message", finding.message},
-      {"location", finding.location},
+      {"path", finding.path},
+  };
+}
+
+void to_json(nlohmann::json& json, const ValidatorIdentity& validator) {
+  json = nlohmann::json{
+      {"name", validator.name},
+      {"version", validator.version},
   };
 }
 
 void to_json(nlohmann::json& json, const ValidationReport& report) {
   json = nlohmann::json{
-      {"validatorVersion", report.validator_version},
-      {"packagePath", report.package_path},
-      {"passed", passed(report)},
-      {"findings", report.findings},
+      {"schema_version", report.schema_version},
+      {"validator", report.validator},
+      {"status", to_string(report.status)},
+      {"core_status", to_string(report.core_status)},
+      {"authenticity_status", to_string(report.authenticity_status)},
+      {"errors", report.errors},
+      {"warnings", report.warnings},
+      {"infos", report.infos},
+      {"authenticity", report.authenticity},
   };
 }
 
 }  // namespace svp::validation
-
