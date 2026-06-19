@@ -285,7 +285,6 @@ std::unique_ptr<sqlite3, SqliteDeleter> open_read_only_database(
     throw std::runtime_error(message);
   }
 
-  sqlite3_enable_load_extension(database.get(), 0);
   sqlite3_db_config(database.get(), SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION, 0, nullptr);
   return database;
 }

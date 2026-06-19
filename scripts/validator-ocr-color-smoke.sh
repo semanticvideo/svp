@@ -12,6 +12,8 @@ workdir="$(mktemp -d "${TMPDIR:-/tmp}/svp-ocr-color-smoke.XXXXXX")"
 trap 'rm -rf "$workdir"' EXIT
 
 python3 - "$workdir" <<'PY'
+import ctypes
+import ctypes.util
 import copy
 import json
 import pathlib
@@ -137,6 +139,85 @@ HASH_TWO = "blake3:" + "2" * 64
 HASH_THREE = "blake3:" + "3" * 64
 HASH_FOUR = "blake3:" + "4" * 64
 UINT64_MAX = (1 << 64) - 1
+BLAKE3_OUT_LEN = 32
+BLAKE3_BLOCK_LEN = 64
+BLAKE3_MAX_DEPTH = 54
+
+def load_native_library(name):
+    path = ctypes.util.find_library(name)
+    if path is None:
+        fallback = pathlib.Path("/opt/homebrew/lib") / f"lib{name}.dylib"
+        if fallback.exists():
+            path = str(fallback)
+    if path is None:
+        raise RuntimeError(f"could not find native library {name}")
+    return ctypes.CDLL(path)
+
+libblake3 = load_native_library("blake3")
+libzstd = load_native_library("zstd")
+
+class Blake3ChunkState(ctypes.Structure):
+    _fields_ = [
+        ("cv", ctypes.c_uint32 * 8),
+        ("chunk_counter", ctypes.c_uint64),
+        ("buf", ctypes.c_uint8 * BLAKE3_BLOCK_LEN),
+        ("buf_len", ctypes.c_uint8),
+        ("blocks_compressed", ctypes.c_uint8),
+        ("flags", ctypes.c_uint8),
+    ]
+
+class Blake3Hasher(ctypes.Structure):
+    _fields_ = [
+        ("key", ctypes.c_uint32 * 8),
+        ("chunk", Blake3ChunkState),
+        ("cv_stack_len", ctypes.c_uint8),
+        ("cv_stack", ctypes.c_uint8 * ((BLAKE3_MAX_DEPTH + 1) * BLAKE3_OUT_LEN)),
+    ]
+
+libblake3.blake3_hasher_init.argtypes = [ctypes.POINTER(Blake3Hasher)]
+libblake3.blake3_hasher_update.argtypes = [
+    ctypes.POINTER(Blake3Hasher),
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+]
+libblake3.blake3_hasher_finalize.argtypes = [
+    ctypes.POINTER(Blake3Hasher),
+    ctypes.POINTER(ctypes.c_uint8),
+    ctypes.c_size_t,
+]
+libzstd.ZSTD_compressBound.argtypes = [ctypes.c_size_t]
+libzstd.ZSTD_compressBound.restype = ctypes.c_size_t
+libzstd.ZSTD_compress.argtypes = [
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+    ctypes.c_int,
+]
+libzstd.ZSTD_compress.restype = ctypes.c_size_t
+libzstd.ZSTD_isError.argtypes = [ctypes.c_size_t]
+libzstd.ZSTD_isError.restype = ctypes.c_uint
+libzstd.ZSTD_getErrorName.argtypes = [ctypes.c_size_t]
+libzstd.ZSTD_getErrorName.restype = ctypes.c_char_p
+
+def blake3_digest(data):
+    hasher = Blake3Hasher()
+    libblake3.blake3_hasher_init(ctypes.byref(hasher))
+    if data:
+        source = ctypes.create_string_buffer(data)
+        libblake3.blake3_hasher_update(ctypes.byref(hasher), source, len(data))
+    digest = (ctypes.c_uint8 * BLAKE3_OUT_LEN)()
+    libblake3.blake3_hasher_finalize(ctypes.byref(hasher), digest, BLAKE3_OUT_LEN)
+    return bytes(digest)
+
+def zstd_compress(data):
+    bound = libzstd.ZSTD_compressBound(len(data))
+    output = ctypes.create_string_buffer(bound)
+    source = ctypes.create_string_buffer(data)
+    size = libzstd.ZSTD_compress(output, bound, source, len(data), 1)
+    if libzstd.ZSTD_isError(size):
+        raise RuntimeError(libzstd.ZSTD_getErrorName(size).decode("utf-8"))
+    return output.raw[:size]
 
 def block_header(
     *,
@@ -152,7 +233,11 @@ def block_header(
     frame_count,
     start_us,
     end_us,
+    payload_blake3,
+    header_blake3=None,
 ):
+    if header_blake3 is None:
+        header_blake3 = b"\x00" * 32
     return struct.pack(
         "<4sHHBBBBQQIIIIQQqq32s32s20s",
         magic,
@@ -172,17 +257,79 @@ def block_header(
         frame_count,
         start_us,
         end_us,
-        b"\x00" * 32,
-        b"\x00" * 32,
+        payload_blake3,
+        header_blake3,
         b"\x00" * 20,
     )
 
-def tiny_depth_block(*, magic=b"SVPB", block_type=1, width=640):
+def svpb_block(
+    *,
+    magic=b"SVPB",
+    block_type,
+    payload,
+    compressed_payload=None,
+    payload_blake3=None,
+    extent_0,
+    extent_1,
+    extent_2,
+    dtype,
+    start_frame,
+    frame_count,
+    start_us,
+    end_us,
+):
+    if compressed_payload is None:
+        compressed_payload = zstd_compress(payload)
+    if payload_blake3 is None:
+        payload_blake3 = blake3_digest(compressed_payload)
+    header_without_header_hash = block_header(
+        magic=magic,
+        block_type=block_type,
+        uncompressed_size=len(payload),
+        compressed_size=len(compressed_payload),
+        extent_0=extent_0,
+        extent_1=extent_1,
+        extent_2=extent_2,
+        dtype=dtype,
+        start_frame=start_frame,
+        frame_count=frame_count,
+        start_us=start_us,
+        end_us=end_us,
+        payload_blake3=payload_blake3,
+    )
+    header_blake3 = blake3_digest(header_without_header_hash)
     return block_header(
         magic=magic,
         block_type=block_type,
-        uncompressed_size=width * 360 * 2,
-        compressed_size=1,
+        uncompressed_size=len(payload),
+        compressed_size=len(compressed_payload),
+        extent_0=extent_0,
+        extent_1=extent_1,
+        extent_2=extent_2,
+        dtype=dtype,
+        start_frame=start_frame,
+        frame_count=frame_count,
+        start_us=start_us,
+        end_us=end_us,
+        payload_blake3=payload_blake3,
+        header_blake3=header_blake3,
+    ) + compressed_payload
+
+def tiny_depth_block(
+    *,
+    magic=b"SVPB",
+    block_type=1,
+    width=640,
+    payload_blake3=None,
+    compressed_payload=None,
+):
+    payload = b"\x00" * (width * 360 * 2)
+    return svpb_block(
+        magic=magic,
+        block_type=block_type,
+        payload=payload,
+        compressed_payload=compressed_payload,
+        payload_blake3=payload_blake3,
         extent_0=width,
         extent_1=360,
         extent_2=1,
@@ -191,13 +338,12 @@ def tiny_depth_block(*, magic=b"SVPB", block_type=1, width=640):
         frame_count=1,
         start_us=0,
         end_us=33333,
-    ) + b"d"
+    )
 
 def tiny_embedding_block():
-    return block_header(
+    return svpb_block(
         block_type=3,
-        uncompressed_size=4,
-        compressed_size=1,
+        payload=b"\x00\x00\x00\x00",
         extent_0=1,
         extent_1=1,
         extent_2=1,
@@ -206,7 +352,7 @@ def tiny_embedding_block():
         frame_count=0,
         start_us=-1,
         end_us=-1,
-    ) + b"e"
+    )
 
 INDEX_TABLES = [
     """
@@ -415,6 +561,10 @@ def write_package(
             depth_block = tiny_depth_block(width=320)
         elif depth_block_case == "zip_deflated":
             depth_compress_type = zipfile.ZIP_DEFLATED
+        elif depth_block_case == "bad_payload_hash":
+            depth_block = tiny_depth_block(payload_blake3=b"\xff" * 32)
+        elif depth_block_case == "bad_zstd_payload":
+            depth_block = tiny_depth_block(compressed_payload=b"not-zstd")
         package.writestr("spatial/depth.blocks.svpdz", depth_block, compress_type=depth_compress_type)
         package.writestr("spatial/masks.index.jsonl", "", compress_type=zipfile.ZIP_DEFLATED)
         package.writestr("spatial/masks.blocks.svpmz", b"", compress_type=zipfile.ZIP_STORED)
@@ -483,6 +633,8 @@ write_package("invalid-svpb-magic", no_change, depth_block_case="bad_magic")
 write_package("forbidden-svpb-type", no_change, depth_block_case="forbidden_type")
 write_package("svpb-raster-mismatch", no_change, depth_block_case="raster_mismatch")
 write_package("deflated-svpb-entry", no_change, depth_block_case="zip_deflated")
+write_package("svpb-payload-hash-mismatch", no_change, depth_block_case="bad_payload_hash")
+write_package("svpb-payload-decode-failed", no_change, depth_block_case="bad_zstd_payload")
 write_package("missing-embedding-entries", no_change, include_embedding_entries=False)
 PY
 
@@ -592,6 +744,16 @@ deflated_svpb_entry_report="$workdir/deflated-svpb-entry.json"
 deflated_svpb_entry_status="$(run_validator "$workdir/deflated-svpb-entry.svp" "$deflated_svpb_entry_report")"
 expect_status "$deflated_svpb_entry_status" "1" "deflated SVPB entry package"
 expect_code "$deflated_svpb_entry_report" "X_VALIDATOR_BLOCK_ENTRY_NOT_STORED"
+
+svpb_payload_hash_mismatch_report="$workdir/svpb-payload-hash-mismatch.json"
+svpb_payload_hash_mismatch_status="$(run_validator "$workdir/svpb-payload-hash-mismatch.svp" "$svpb_payload_hash_mismatch_report")"
+expect_status "$svpb_payload_hash_mismatch_status" "1" "SVPB payload hash mismatch package"
+expect_code "$svpb_payload_hash_mismatch_report" "ERR_CORE_INVALID_BLOCK_HASH"
+
+svpb_payload_decode_failed_report="$workdir/svpb-payload-decode-failed.json"
+svpb_payload_decode_failed_status="$(run_validator "$workdir/svpb-payload-decode-failed.svp" "$svpb_payload_decode_failed_report")"
+expect_status "$svpb_payload_decode_failed_status" "1" "SVPB payload decode failed package"
+expect_code "$svpb_payload_decode_failed_report" "X_VALIDATOR_BLOCK_PAYLOAD_DECODE_FAILED"
 
 missing_embedding_entries_report="$workdir/missing-embedding-entries.json"
 missing_embedding_entries_status="$(run_validator "$workdir/missing-embedding-entries.svp" "$missing_embedding_entries_report")"

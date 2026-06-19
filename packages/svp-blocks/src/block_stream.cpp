@@ -1,9 +1,13 @@
 #include "svp/blocks/block_stream.hpp"
 
+#include <blake3.h>
+#include <zstd.h>
+
 #include <algorithm>
 #include <array>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <utility>
 
 namespace svp::blocks {
@@ -12,6 +16,8 @@ namespace {
 constexpr std::uint8_t kCompressionZstd = 0x01;
 constexpr std::uint8_t kEndianLittle = 0x01;
 constexpr std::uint64_t kNonFrameStart = std::numeric_limits<std::uint64_t>::max();
+constexpr std::size_t kHashSize = 32;
+constexpr std::size_t kPayloadChunkSize = 64 * 1024;
 
 std::uint16_t read_u16_le(const std::array<std::byte, kBlockHeaderSize>& bytes,
                           std::size_t offset) noexcept {
@@ -50,6 +56,16 @@ std::int64_t read_i64_le(const std::array<std::byte, kBlockHeaderSize>& bytes,
   static_assert(sizeof(signed_value) == sizeof(unsigned_value));
   std::memcpy(&signed_value, &unsigned_value, sizeof(signed_value));
   return signed_value;
+}
+
+std::array<std::uint8_t, kHashSize> read_hash(
+    const std::array<std::byte, kBlockHeaderSize>& bytes,
+    std::size_t offset) noexcept {
+  std::array<std::uint8_t, kHashSize> value{};
+  for (std::size_t index = 0; index < value.size(); ++index) {
+    value[index] = std::to_integer<std::uint8_t>(bytes[offset + index]);
+  }
+  return value;
 }
 
 bool checked_multiply(std::uint64_t lhs,
@@ -103,6 +119,8 @@ BlockHeaderV1 parse_header(const std::array<std::byte, kBlockHeaderSize>& bytes,
       .frame_count = read_u64_le(bytes, 52),
       .start_us = read_i64_le(bytes, 60),
       .end_us = read_i64_le(bytes, 68),
+      .payload_blake3 = read_hash(bytes, 76),
+      .header_blake3 = read_hash(bytes, 108),
   };
 }
 
@@ -120,6 +138,20 @@ bool reserved_bytes_are_zero(const std::array<std::byte, kBlockHeaderSize>& byte
     }
   }
   return true;
+}
+
+std::array<std::uint8_t, kHashSize> blake3_digest_for_header(
+    std::array<std::byte, kBlockHeaderSize> bytes) noexcept {
+  for (std::size_t index = 108; index < 140; ++index) {
+    bytes[index] = std::byte{0};
+  }
+
+  std::array<std::uint8_t, kHashSize> digest{};
+  blake3_hasher hasher;
+  blake3_hasher_init(&hasher);
+  blake3_hasher_update(&hasher, bytes.data(), bytes.size());
+  blake3_hasher_finalize(&hasher, digest.data(), digest.size());
+  return digest;
 }
 
 bool is_strict_block_type(std::uint8_t block_type) noexcept {
@@ -236,6 +268,11 @@ void validate_header(ParseResult& result,
               "Block compressed payload exceeds validator size guard.");
   }
 
+  if (header.uncompressed_size > options.max_uncompressed_payload_bytes) {
+    add_issue(result, IssueKind::invalid_header, header.offset,
+              "Block uncompressed payload exceeds validator size guard.");
+  }
+
   if (!is_time_range_valid(header)) {
     add_issue(result, IssueKind::invalid_header, header.offset,
               "Block time range must be absent or have end_us greater than start_us.");
@@ -280,19 +317,112 @@ void validate_header(ParseResult& result,
   }
 }
 
-bool skip_payload(const ReadExact& read_exact,
-                  std::uint64_t byte_count,
-                  std::string& error_message) {
-  std::array<std::byte, 64 * 1024> buffer{};
-  auto remaining = byte_count;
+struct ZstdDStreamDeleter {
+  void operator()(ZSTD_DStream* stream) const noexcept {
+    ZSTD_freeDStream(stream);
+  }
+};
+
+bool validate_payload(ParseResult& result,
+                      const ReadExact& read_exact,
+                      const BlockHeaderV1& header,
+                      const ParseOptions& options,
+                      std::uint64_t payload_offset,
+                      std::string& error_message) {
+  std::array<std::byte, kPayloadChunkSize> input_buffer{};
+  std::array<std::byte, kPayloadChunkSize> output_buffer{};
+  blake3_hasher hasher;
+  blake3_hasher_init(&hasher);
+
+  std::unique_ptr<ZSTD_DStream, ZstdDStreamDeleter> zstd_stream;
+  if (options.verify_zstd_decompression) {
+    zstd_stream.reset(ZSTD_createDStream());
+    if (!zstd_stream) {
+      add_issue(result, IssueKind::decompression_failed, payload_offset,
+                "Could not allocate Zstandard decompression stream.");
+    } else {
+      const auto init_result = ZSTD_initDStream(zstd_stream.get());
+      if (ZSTD_isError(init_result) != 0U) {
+        add_issue(result, IssueKind::decompression_failed, payload_offset,
+                  std::string{"Could not initialize Zstandard decompression: "} +
+                      ZSTD_getErrorName(init_result));
+        zstd_stream.reset();
+      }
+    }
+  }
+
+  bool zstd_failed = false;
+  bool zstd_frame_complete = !options.verify_zstd_decompression || !zstd_stream;
+  std::uint64_t decompressed_size = 0;
+  auto remaining = header.compressed_size;
   while (remaining > 0) {
     const auto chunk = static_cast<std::size_t>(
-        std::min<std::uint64_t>(remaining, buffer.size()));
-    if (!read_exact(buffer.data(), chunk, error_message)) {
+        std::min<std::uint64_t>(remaining, input_buffer.size()));
+    if (!read_exact(input_buffer.data(), chunk, error_message)) {
       return false;
     }
+    blake3_hasher_update(&hasher, input_buffer.data(), chunk);
+
+    if (zstd_stream && !zstd_failed) {
+      ZSTD_inBuffer input{
+          .src = input_buffer.data(),
+          .size = chunk,
+          .pos = 0,
+      };
+      while (input.pos < input.size) {
+        ZSTD_outBuffer output{
+            .dst = output_buffer.data(),
+            .size = output_buffer.size(),
+            .pos = 0,
+        };
+        const auto decompress_result =
+            ZSTD_decompressStream(zstd_stream.get(), &output, &input);
+        if (ZSTD_isError(decompress_result) != 0U) {
+          add_issue(result, IssueKind::decompression_failed, payload_offset,
+                    std::string{"Block compressed payload is not valid Zstandard: "} +
+                        ZSTD_getErrorName(decompress_result));
+          zstd_failed = true;
+          break;
+        }
+        if (output.pos > std::numeric_limits<std::uint64_t>::max() -
+                             decompressed_size) {
+          add_issue(result, IssueKind::decompression_failed, payload_offset,
+                    "Block decompressed payload size overflowed.");
+          zstd_failed = true;
+          break;
+        }
+        decompressed_size += static_cast<std::uint64_t>(output.pos);
+        if (decompressed_size > header.uncompressed_size) {
+          add_issue(result, IssueKind::decompression_failed, payload_offset,
+                    "Block decompressed payload exceeds declared uncompressed_size.");
+          zstd_failed = true;
+          break;
+        }
+        zstd_frame_complete = decompress_result == 0;
+      }
+    }
+
     remaining -= chunk;
   }
+
+  std::array<std::uint8_t, kHashSize> payload_digest{};
+  blake3_hasher_finalize(&hasher, payload_digest.data(), payload_digest.size());
+  if (options.verify_hashes && payload_digest != header.payload_blake3) {
+    add_issue(result, IssueKind::invalid_hash, payload_offset,
+              "Block payload_blake3 does not match compressed payload bytes.");
+  }
+
+  if (zstd_stream && !zstd_failed) {
+    if (!zstd_frame_complete) {
+      add_issue(result, IssueKind::decompression_failed, payload_offset,
+                "Block compressed payload ended before the Zstandard frame completed.");
+    }
+    if (decompressed_size != header.uncompressed_size) {
+      add_issue(result, IssueKind::decompression_failed, payload_offset,
+                "Block decompressed payload size does not match uncompressed_size.");
+    }
+  }
+
   return true;
 }
 
@@ -326,6 +456,11 @@ ParseResult parse_block_stream(std::uint64_t stream_size,
 
     auto header = parse_header(header_bytes, offset);
     validate_header(result, header_bytes, header, options);
+    if (options.verify_hashes &&
+        blake3_digest_for_header(header_bytes) != header.header_blake3) {
+      add_issue(result, IssueKind::invalid_hash, offset,
+                "Block header_blake3 does not match header bytes.");
+    }
     result.blocks.push_back(header);
 
     std::uint64_t payload_start = 0;
@@ -347,11 +482,13 @@ ParseResult parse_block_stream(std::uint64_t stream_size,
       break;
     }
 
-    if (header.compressed_size > options.max_compressed_payload_bytes) {
+    if (header.compressed_size > options.max_compressed_payload_bytes ||
+        header.uncompressed_size > options.max_uncompressed_payload_bytes) {
       break;
     }
 
-    if (!skip_payload(read_exact, header.compressed_size, read_error)) {
+    if (!validate_payload(result, read_exact, header, options, payload_start,
+                          read_error)) {
       add_issue(result, IssueKind::invalid_header, payload_start, std::move(read_error));
       break;
     }
