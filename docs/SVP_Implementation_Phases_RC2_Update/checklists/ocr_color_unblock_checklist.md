@@ -7,7 +7,7 @@
 - [ ] OCR registries present.
 - [ ] Color registries present.
 - [ ] Validation codes mapped.
-- [ ] Fixture plan updated.
-- [ ] Index plan updated.
-- [ ] Builder roadmap updated.
-- [ ] First-video-trial acceptance updated.
+- [x] Fixture plan updated.
+- [x] Index plan updated.
+- [x] Builder roadmap updated.
+- [x] First-video-trial acceptance updated.

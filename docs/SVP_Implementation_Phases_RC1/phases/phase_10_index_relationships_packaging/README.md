@@ -64,18 +64,20 @@ Phase 10 must include SQLite and query paths for:
 - recognized raw text
 - normalized text
 - numeric values
-- OCR target references
+- text region targets and OCR target references
 - color observations
-- color bucket coverage
-- scene color summaries
-- shot color summaries
-- frame/keyframe color summaries
-- region/entity color summaries
+- scene color bucket percentages
+- shot color bucket percentages
+- frame/keyframe color bucket percentages
+- region/entity color bucket percentages
+- text-region color bucket percentages
 - text-region foreground/background color
 
 Update `index_manifest.logical_rows_blake3` and the canonical logical row stream procedure to include the new OCR/color tables.
 
 Queries like "find all orange scenes" must be supported by indexed scene or shot color bucket percentages.
+
+Visible text, normalized text, numeric values, and measured color coverage are Core observation index inputs. Do not index them only as labels, captions, embeddings, or display-only inspector strings.
 
 ## Handoff report format
 

@@ -64,9 +64,12 @@ Add fixtures for:
 - green number
 - uniform black frame
 - uniform white frame
+- no measurable color with valid `color_absence.json`
 - invalid color bucket totals
 - invalid color bucket ID
 - invalid OCR/text reference
+
+These fixtures must prove visible text, numeric values extracted from visible text, and measured color coverage as Core observations. Do not model them as labels. Fixture documentation must state which `/text/` and `/colors/` files are expected for each case, including text absence, color absence, and invalid color total cases.
 
 ## Handoff report format
 
