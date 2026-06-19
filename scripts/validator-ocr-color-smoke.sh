@@ -16,6 +16,7 @@ import copy
 import json
 import pathlib
 import sqlite3
+import struct
 import sys
 import zipfile
 
@@ -135,6 +136,77 @@ HASH_ONE = "blake3:" + "1" * 64
 HASH_TWO = "blake3:" + "2" * 64
 HASH_THREE = "blake3:" + "3" * 64
 HASH_FOUR = "blake3:" + "4" * 64
+UINT64_MAX = (1 << 64) - 1
+
+def block_header(
+    *,
+    magic=b"SVPB",
+    block_type,
+    uncompressed_size,
+    compressed_size,
+    extent_0,
+    extent_1,
+    extent_2,
+    dtype,
+    start_frame,
+    frame_count,
+    start_us,
+    end_us,
+):
+    return struct.pack(
+        "<4sHHBBBBQQIIIIQQqq32s32s20s",
+        magic,
+        1,
+        160,
+        block_type,
+        1,
+        1,
+        0,
+        uncompressed_size,
+        compressed_size,
+        extent_0,
+        extent_1,
+        extent_2,
+        dtype,
+        start_frame,
+        frame_count,
+        start_us,
+        end_us,
+        b"\x00" * 32,
+        b"\x00" * 32,
+        b"\x00" * 20,
+    )
+
+def tiny_depth_block(*, magic=b"SVPB", block_type=1, width=640):
+    return block_header(
+        magic=magic,
+        block_type=block_type,
+        uncompressed_size=width * 360 * 2,
+        compressed_size=1,
+        extent_0=width,
+        extent_1=360,
+        extent_2=1,
+        dtype=2,
+        start_frame=0,
+        frame_count=1,
+        start_us=0,
+        end_us=33333,
+    ) + b"d"
+
+def tiny_embedding_block():
+    return block_header(
+        block_type=3,
+        uncompressed_size=4,
+        compressed_size=1,
+        extent_0=1,
+        extent_1=1,
+        extent_2=1,
+        dtype=4,
+        start_frame=UINT64_MAX,
+        frame_count=0,
+        start_us=-1,
+        end_us=-1,
+    ) + b"e"
 
 INDEX_TABLES = [
     """
@@ -288,7 +360,14 @@ def create_index_bytes(missing_table=None):
     sqlite_path.unlink()
     return data, table_count
 
-def write_package(name, mutate, text_regions_payload=None, index_case="valid"):
+def write_package(
+    name,
+    mutate,
+    text_regions_payload=None,
+    index_case="valid",
+    depth_block_case="valid",
+    include_embedding_entries=True,
+):
     region = copy.deepcopy(text_region)
     observation = copy.deepcopy(text_observation)
     numeric = copy.deepcopy(numeric_value)
@@ -325,6 +404,24 @@ def write_package(name, mutate, text_regions_payload=None, index_case="valid"):
         package.writestr("colors/color_observations.jsonl", json.dumps(color, separators=(",", ":")) + "\n")
         package.writestr("colors/color_summary.json", json.dumps(color_summary, separators=(",", ":")))
         package.writestr("colors/color_absence.json", json.dumps(color_absence, separators=(",", ":")))
+        package.writestr("spatial/depth.index.jsonl", "", compress_type=zipfile.ZIP_DEFLATED)
+        depth_block = tiny_depth_block()
+        depth_compress_type = zipfile.ZIP_STORED
+        if depth_block_case == "bad_magic":
+            depth_block = tiny_depth_block(magic=b"NOPE")
+        elif depth_block_case == "forbidden_type":
+            depth_block = tiny_depth_block(block_type=4)
+        elif depth_block_case == "raster_mismatch":
+            depth_block = tiny_depth_block(width=320)
+        elif depth_block_case == "zip_deflated":
+            depth_compress_type = zipfile.ZIP_DEFLATED
+        package.writestr("spatial/depth.blocks.svpdz", depth_block, compress_type=depth_compress_type)
+        package.writestr("spatial/masks.index.jsonl", "", compress_type=zipfile.ZIP_DEFLATED)
+        package.writestr("spatial/masks.blocks.svpmz", b"", compress_type=zipfile.ZIP_STORED)
+        if include_embedding_entries:
+            package.writestr("embeddings/embedding_sets.json", "{\"sets\":[]}", compress_type=zipfile.ZIP_DEFLATED)
+            package.writestr("embeddings/embeddings.index.jsonl", "", compress_type=zipfile.ZIP_DEFLATED)
+            package.writestr("embeddings/embeddings.blocks.svpez", tiny_embedding_block(), compress_type=zipfile.ZIP_STORED)
         if index_case == "missing_manifest":
             sqlite_bytes, table_count = create_index_bytes()
             package.writestr("index/index.sqlite", sqlite_bytes)
@@ -382,6 +479,11 @@ write_package("empty-index-schema-version", no_change, index_case="empty_index_s
 write_package("missing-index-sqlite", no_change, index_case="missing_sqlite")
 write_package("unreadable-index-sqlite", no_change, index_case="unreadable_sqlite")
 write_package("missing-color-index-table", no_change, index_case="missing_color_table")
+write_package("invalid-svpb-magic", no_change, depth_block_case="bad_magic")
+write_package("forbidden-svpb-type", no_change, depth_block_case="forbidden_type")
+write_package("svpb-raster-mismatch", no_change, depth_block_case="raster_mismatch")
+write_package("deflated-svpb-entry", no_change, depth_block_case="zip_deflated")
+write_package("missing-embedding-entries", no_change, include_embedding_entries=False)
 PY
 
 run_validator() {
@@ -471,4 +573,29 @@ missing_color_table_status="$(run_validator "$workdir/missing-color-index-table.
 expect_status "$missing_color_table_status" "1" "missing color index table package"
 expect_code "$missing_color_table_report" "ERR_CORE_INDEX_SCHEMA_INVALID"
 
-echo "OCR/color validator smoke checks passed."
+invalid_svpb_magic_report="$workdir/invalid-svpb-magic.json"
+invalid_svpb_magic_status="$(run_validator "$workdir/invalid-svpb-magic.svp" "$invalid_svpb_magic_report")"
+expect_status "$invalid_svpb_magic_status" "1" "invalid SVPB magic package"
+expect_code "$invalid_svpb_magic_report" "ERR_CORE_INVALID_BLOCK_HEADER"
+
+forbidden_svpb_type_report="$workdir/forbidden-svpb-type.json"
+forbidden_svpb_type_status="$(run_validator "$workdir/forbidden-svpb-type.svp" "$forbidden_svpb_type_report")"
+expect_status "$forbidden_svpb_type_status" "1" "forbidden SVPB block type package"
+expect_code "$forbidden_svpb_type_report" "ERR_CORE_FORBIDDEN_BLOCK_TYPE"
+
+svpb_raster_mismatch_report="$workdir/svpb-raster-mismatch.json"
+svpb_raster_mismatch_status="$(run_validator "$workdir/svpb-raster-mismatch.svp" "$svpb_raster_mismatch_report")"
+expect_status "$svpb_raster_mismatch_status" "1" "SVPB raster mismatch package"
+expect_code "$svpb_raster_mismatch_report" "ERR_CORE_RASTER_EXTENT_MISMATCH"
+
+deflated_svpb_entry_report="$workdir/deflated-svpb-entry.json"
+deflated_svpb_entry_status="$(run_validator "$workdir/deflated-svpb-entry.svp" "$deflated_svpb_entry_report")"
+expect_status "$deflated_svpb_entry_status" "1" "deflated SVPB entry package"
+expect_code "$deflated_svpb_entry_report" "X_VALIDATOR_BLOCK_ENTRY_NOT_STORED"
+
+missing_embedding_entries_report="$workdir/missing-embedding-entries.json"
+missing_embedding_entries_status="$(run_validator "$workdir/missing-embedding-entries.svp" "$missing_embedding_entries_report")"
+expect_status "$missing_embedding_entries_status" "1" "missing embedding entries package"
+expect_code "$missing_embedding_entries_report" "X_VALIDATOR_MISSING_EMBEDDINGS_ENTRY"
+
+echo "OCR/color and SVPB validator smoke checks passed."
