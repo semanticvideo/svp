@@ -654,15 +654,15 @@
           <h3>2.5. RC2 OCR And Color Unblock</h3>
           <span class="tag warn-tag">required gate</span>
         </div>
-        <p><strong>Branch:</strong> <code>codex/rc2-ocr-color-unblock-plan</code></p>
+        <p><strong>Branch:</strong> <code>codex/rc2-ocr-color-unblock-planning</code></p>
         <p><strong>Scope:</strong> update validator, fixture, builder, index/query, inspector, and first-video-trial plans so Phase 03+ implements RC2 instead of the older RC1 visual package shape.</p>
         <ul>
           <li>Represent required <code>/text/</code> and <code>/colors/</code> paths in validator planning.</li>
           <li>Represent OCR/color schemas and registries in deep validation planning.</li>
-          <li>Add fixture cases for visible text, numeric text, and color coverage.</li>
-          <li>Add index/query requirements for text and numeric color percentages.</li>
-          <li>Add builder stages for OCR, numeric extraction, color quantization, and scene/shot/region/text-region summaries.</li>
-          <li>Add first-trial acceptance for text observations and searchable color summaries.</li>
+          <li>Add fixture cases for visible text, numeric text, color coverage, text absence, color absence, and invalid color totals.</li>
+          <li>Add index/query requirements for visible text, normalized text, numeric values, text region targets, color bucket percentages, and logical row hash inputs.</li>
+          <li>Add builder stages for OCR text detection, recognition, layout classification, numeric extraction, color quantization, scene/shot/frame/region/entity/text-region summaries, and text-region foreground/background colors.</li>
+          <li>Add first-trial acceptance for <code>/text/</code>, <code>/colors/</code>, text/count evidence, color/count evidence, and queryable scene/shot color proof.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> this gate must be complete before Phase 03, fixtures, media ingest, vision, index/package, or first-trial work resumes.</p>
         <p class="small">Parallelizable: no. This is the active pause gate.</p>
@@ -711,7 +711,7 @@
           <li>Add reproducible fixture generation helpers.</li>
           <li>Create static-card, silent-video, and vertical-video valid fixtures.</li>
           <li>Create invalid fixtures for missing sections, bad block hashes, index problems, and unsupported label schema warnings.</li>
-          <li>Create OCR/color fixtures for no visible text, visible UI text, numeric values, orange scenes, yellow shots, green numbers, text foreground/background colors, and invalid color totals.</li>
+          <li>Create OCR/color fixtures for no visible text, visible UI text, numeric values, orange scenes, yellow shots, green numbers, text foreground/background colors, color absence, and invalid color totals.</li>
           <li>Document expected validator statuses.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> fixture reproducibility, small files, expected statuses, no builder masquerading as fixture work.</p>
@@ -857,6 +857,8 @@
           <li>List of generated package sections.</li>
           <li>Text region count and text observation count.</li>
           <li>Color observation count and scene/shot color summary count.</li>
+          <li>Text/count evidence from generated <code>/text/</code> files.</li>
+          <li>Color/count evidence from generated <code>/colors/</code> files.</li>
           <li>Proof that at least one scene/shot color summary is queryable.</li>
           <li>Known invalid, warning, or unsupported findings.</li>
           <li>Specific next fix for every invalid finding.</li>
@@ -1145,9 +1147,9 @@ Act:
       <h2>Immediate Next Work</h2>
       <ol>
         <li><strong>Confirm RC2 import:</strong> run <code>scripts/verify-spec-files.sh</code> and verify the new OCR/color registries and schemas parse.</li>
-        <li><strong>Update active roadmap:</strong> ensure Phase 03+, fixtures, builder, index, inspector, and first-trial docs include `/text/` and `/colors/` work.</li>
-        <li><strong>Dispatch only the RC2 unblock review:</strong> do not start deeper buildout until the unblock checklist is satisfied.</li>
-        <li><strong>Next implementation after unblock:</strong> update validator required-path checks for `/text/` and `/colors/`, then resume Phase 03 with OCR/color deep validation.</li>
+        <li><strong>Update active roadmap:</strong> ensure Phase 03+, fixtures, builder, index, inspector, and first-trial docs include <code>/text/</code> and <code>/colors/</code> work.</li>
+        <li><strong>Dispatch only the RC2 unblock review:</strong> do not start deeper buildout until the unblock checklist is satisfied and reviewed.</li>
+        <li><strong>Next implementation after unblock:</strong> resume Phase 03 with OCR/color deep validation, then continue the remaining downstream fixture, builder, index/query, inspector, and first-video-trial work.</li>
       </ol>
       <p>The orchestration loop is paused for Phase 03+ until RC2 OCR/color planning is represented and reviewed.</p>
     </section>
@@ -1162,7 +1164,7 @@ Act:
         <li>Reader and inspector can explain package contents, including text region counts and color observation counts.</li>
         <li>Model runtime does not require Python for normal builder operation.</li>
         <li>Builder partial outputs are honest until validator-proven complete packages exist.</li>
-        <li>Index/query support includes visible text, numeric values, and scene/shot color bucket percentages.</li>
+        <li>Index/query support includes visible text, normalized text, numeric values, text region targets, scene/shot/frame/keyframe/region/entity/text-region color bucket percentages, and logical row hash inputs.</li>
         <li>Queries like "find all orange scenes" are supported by structured color observations, not just embeddings.</li>
         <li>Every merged PR had separate builder and reviewer ownership.</li>
         <li>The first video trial produces `.svp`, validation JSON, inspector output, logs, text/color evidence, and a report.</li>

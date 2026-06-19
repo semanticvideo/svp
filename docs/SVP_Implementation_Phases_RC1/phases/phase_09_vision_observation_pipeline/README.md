@@ -73,12 +73,15 @@ scene_color_summary
 frame_color_summary
 region_color_summary
 entity_color_summary
+text_region_color_summary
 text_region_foreground_background_color
 ```
 
 Color processing should be deterministic classical processing first. It should produce numeric bucket coverage for scenes, shots, frames or keyframes, regions/entities, and text regions where applicable.
 
 OCR may be model-backed through SVP Model Bundles. Do not hardcode OCR into unrelated vision stages; keep text detection, recognition, layout classification, and numeric extraction separately owned.
+
+Phase 09 output must feed RC2 Core `/text/` and `/colors/` records: detected text regions, recognized visible text, normalized text, numeric values, honest text absence, registry-backed color observations, scene/shot/frame/region/entity/text-region color bucket percentages, text-region foreground/background colors, and honest color absence when coverage cannot be measured.
 
 ## Handoff report format
 
