@@ -7,6 +7,7 @@
 #include "svp/validation/code_registry.hpp"
 
 #include "color_record_validation.hpp"
+#include "index_validation.hpp"
 #include "ocr_color_spec.hpp"
 #include "spec_assets.hpp"
 #include "text_record_validation.hpp"
@@ -269,6 +270,7 @@ ValidationReport validate_package(const std::filesystem::path& package_path,
   try {
     const auto registry_root = registry_root_for(options);
     const auto schema_root = schema_root_for(options, registry_root);
+    add_index_findings(report, registry, probe.path, layout_result.value(), schema_root);
     const auto ocr_color_spec = load_ocr_color_spec(registry_root, schema_root);
     add_text_record_findings(report, registry, probe.path, layout_result.value(),
                              ocr_color_spec);
