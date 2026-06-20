@@ -438,7 +438,7 @@ EmbeddingGenerationResult generate_embedding_blocks(
     spec.extent_1 = options.embedding_dim;
     spec.extent_2 = 1;
     spec.dtype = svp::blocks::DType::float32;
-    spec.start_frame = 0;
+    spec.start_frame = std::numeric_limits<std::uint64_t>::max();
     spec.frame_count = 0;
     spec.start_us = -1;
     spec.end_us = -1;

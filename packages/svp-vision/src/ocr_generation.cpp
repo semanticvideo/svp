@@ -206,7 +206,8 @@ bool run_ffmpeg_extract(
     const std::filesystem::path& source_path,
     const std::string& seek,
     const std::string& vf_filter,
-    const std::filesystem::path& output_png) {
+    const std::filesystem::path& output_png,
+    std::string& error) {
   std::string cmd =
       shell_quote(ffmpeg_path) +
       " -v error"
@@ -215,16 +216,32 @@ bool run_ffmpeg_extract(
       " -vf " + shell_quote_str(vf_filter) +
       " -vframes 1"
       " -y " + shell_quote(output_png) +
-      " 2>/dev/null";
+      " 2>&1";
 
   FILE* pipe = popen(cmd.c_str(), "r");
-  if (!pipe) return false;
+  if (!pipe) {
+    error = "popen failed: " + std::string(std::strerror(errno));
+    return false;
+  }
 
+  std::string output;
   char buffer[4096];
-  while (fread(buffer, 1, sizeof(buffer), pipe) > 0) {}
+  while (true) {
+    const std::size_t n = fread(buffer, 1, sizeof(buffer), pipe);
+    if (n == 0) break;
+    output.append(buffer, n);
+  }
   const int status = pclose(pipe);
-  return WIFEXITED(status) && WEXITSTATUS(status) == 0 &&
+  const bool ok = WIFEXITED(status) && WEXITSTATUS(status) == 0 &&
       std::filesystem::exists(output_png);
+  if (!ok) {
+    error = trim(output);
+    if (error.empty()) {
+      error = "ffmpeg exited with status " +
+              std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : status);
+    }
+  }
+  return ok;
 }
 
 // Extract a frame from the source video as a PNG file at a given timestamp.
@@ -238,31 +255,38 @@ bool extract_frame_png_from_source(
     int target_width,
     int target_height,
     const std::filesystem::path& output_png,
-    std::string& error) {
+    std::string& error,
+    std::string& selected_fallback) {
   const std::string seek = microseconds_to_seek_string(seek_us);
   const std::string scale_filter =
       "scale=" + std::to_string(target_width) + ":" +
       std::to_string(target_height);
 
+  std::string last_ffmpeg_err;
+
   // Try with full preprocessing: scale + grayscale + histeq + unsharp
   const std::string full_filter =
       scale_filter + ",format=gray,histeq,unsharp=5:5:1.0";
-  if (run_ffmpeg_extract(ffmpeg_path, source_path, seek, full_filter, output_png)) {
+  if (run_ffmpeg_extract(ffmpeg_path, source_path, seek, full_filter, output_png, last_ffmpeg_err)) {
+    selected_fallback = "scale_grayscale_histeq_unsharp";
     return true;
   }
 
   // Fallback 1: scale + grayscale only (histeq/unsharp may be unavailable)
   const std::string gray_filter = scale_filter + ",format=gray";
-  if (run_ffmpeg_extract(ffmpeg_path, source_path, seek, gray_filter, output_png)) {
+  if (run_ffmpeg_extract(ffmpeg_path, source_path, seek, gray_filter, output_png, last_ffmpeg_err)) {
+    selected_fallback = "scale_grayscale";
     return true;
   }
 
   // Fallback 2: plain scale (no preprocessing at all)
-  if (run_ffmpeg_extract(ffmpeg_path, source_path, seek, scale_filter, output_png)) {
+  if (run_ffmpeg_extract(ffmpeg_path, source_path, seek, scale_filter, output_png, last_ffmpeg_err)) {
+    selected_fallback = "scale_only";
     return true;
   }
 
-  error = "ffmpeg failed to extract frame with all filter chains";
+  error = "ffmpeg failed to extract frame with all filter chains. Last error: " + last_ffmpeg_err;
+  selected_fallback = "failed";
   return false;
 }
 
@@ -336,15 +360,30 @@ std::vector<TesseractWord> parse_tesseract_tsv(const std::string& output) {
   return words;
 }
 
+struct TesseractRunDiagnostics {
+  int psm = 0;
+  bool exit_ok = false;
+  int exit_status = -1;
+  std::string error;
+  std::size_t word_count = 0;
+  bool tsv_available = false;
+  std::string stderr_msg;
+};
+
 // Run tesseract with a specific PSM mode and parse TSV output.
 std::vector<TesseractWord> run_tesseract_psm(
     const std::filesystem::path& tesseract_path,
     const std::filesystem::path& image_path,
     const std::string& language,
     int psm,
-    std::string& error) {
+    std::string& error,
+    int& exit_status,
+    bool& exit_ok,
+    bool& tsv_available,
+    std::string& stderr_msg) {
   std::vector<TesseractWord> words;
 
+  std::string err_file = image_path.string() + ".err";
   std::string cmd =
       shell_quote(tesseract_path) +
       " " + shell_quote(image_path) +
@@ -352,11 +391,14 @@ std::vector<TesseractWord> run_tesseract_psm(
       " --psm " + std::to_string(psm) +
       " -l " + language +
       " tsv"
-      " 2>/dev/null";
+      " 2>" + shell_quote(err_file);
 
   FILE* pipe = popen(cmd.c_str(), "r");
   if (!pipe) {
     error = "popen failed: " + std::string(std::strerror(errno));
+    exit_ok = false;
+    exit_status = -1;
+    tsv_available = false;
     return words;
   }
 
@@ -368,11 +410,25 @@ std::vector<TesseractWord> run_tesseract_psm(
     output.append(buffer, n);
   }
   const int status = pclose(pipe);
-  const bool exited_ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  exit_ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  exit_status = WIFEXITED(status) ? WEXITSTATUS(status) : status;
+  tsv_available = !output.empty();
 
-  if (!exited_ok) {
+  if (std::filesystem::exists(err_file)) {
+    std::ifstream err_in(err_file);
+    std::stringstream err_ss;
+    err_ss << err_in.rdbuf();
+    stderr_msg = trim(err_ss.str());
+    std::error_code ec;
+    std::filesystem::remove(err_file, ec);
+  }
+
+  if (!exit_ok) {
     error = "tesseract exited with status " +
-            std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : status);
+            std::to_string(exit_status);
+    if (!stderr_msg.empty()) {
+      error += ": " + stderr_msg;
+    }
   }
 
   return parse_tesseract_tsv(output);
@@ -385,7 +441,8 @@ std::vector<TesseractWord> run_tesseract_tsv(
     const std::filesystem::path& tesseract_path,
     const std::filesystem::path& image_path,
     const std::string& language,
-    std::string& error) {
+    std::string& error,
+    std::vector<TesseractRunDiagnostics>& diag_runs) {
   std::vector<TesseractWord> all_words;
 
   // PSM modes to try in order: sparse, uniform block, fully automatic
@@ -394,8 +451,24 @@ std::vector<TesseractWord> run_tesseract_tsv(
 
   for (int psm : psm_modes) {
     std::string psm_error;
+    int exit_status = -1;
+    bool exit_ok = false;
+    bool tsv_available = false;
+    std::string stderr_msg;
     auto psm_words = run_tesseract_psm(
-        tesseract_path, image_path, language, psm, psm_error);
+        tesseract_path, image_path, language, psm, psm_error,
+        exit_status, exit_ok, tsv_available, stderr_msg);
+
+    TesseractRunDiagnostics r_diag;
+    r_diag.psm = psm;
+    r_diag.exit_ok = exit_ok;
+    r_diag.exit_status = exit_status;
+    r_diag.error = psm_error;
+    r_diag.word_count = psm_words.size();
+    r_diag.tsv_available = tsv_available;
+    r_diag.stderr_msg = stderr_msg;
+    diag_runs.push_back(r_diag);
+
     if (!psm_error.empty()) last_error = psm_error;
 
     for (auto& w : psm_words) {
@@ -885,6 +958,9 @@ OcrGenerationResult generate_ocr_observations(
 
   // Phase 1: Collect per-frame detections
   std::vector<FrameDetection> all_detections;
+  std::vector<nlohmann::json> frame_diagnostics;
+  bool any_frame_failed = false;
+  std::string failure_reason_details;
 
   for (std::size_t frame_idx = 0; frame_idx < effective_frames.frames.size(); ++frame_idx) {
     const ColorRasterFrame& frame = effective_frames.frames[frame_idx];
@@ -894,28 +970,90 @@ OcrGenerationResult generate_ocr_observations(
         temp_dir / (frame.frame_id + ".png");
     std::string write_error;
     bool png_ok = false;
+    std::string selected_fallback = "none";
     if (options.media_plan != nullptr && using_high_res_frames) {
       png_ok = extract_frame_png_from_source(
           options.ffmpeg_path, options.media_plan->source_path,
           frame.timestamp_us,
           options.ocr_frame_width, options.ocr_frame_height,
-          png_path, write_error);
+          png_path, write_error, selected_fallback);
     } else {
       png_ok = write_frame_to_png(
           frame, options.ffmpeg_path, png_path, write_error);
+      if (png_ok) {
+        selected_fallback = "write_frame_to_png";
+      }
     }
     if (!png_ok) {
+      nlohmann::json diag = {
+          {"frame_id", frame.frame_id},
+          {"timestamp_us", frame.timestamp_us},
+          {"extraction_succeeded", false},
+          {"extraction_error", write_error},
+          {"extraction_path", png_path.string()},
+          {"preprocessing_fallback", selected_fallback},
+          {"tesseract_attempted", false}
+      };
+      frame_diagnostics.push_back(diag);
+      any_frame_failed = true;
+      if (failure_reason_details.empty()) {
+        failure_reason_details = "Frame extraction failed for " + frame.frame_id + ": " + write_error;
+      }
       continue;
     }
 
     // Run tesseract on the PNG with PSM fallback
+    std::vector<TesseractRunDiagnostics> diag_runs;
     std::string tesseract_error;
     std::vector<TesseractWord> words = run_tesseract_tsv(
-        options.tesseract_path, png_path, options.language, tesseract_error);
+        options.tesseract_path, png_path, options.language, tesseract_error, diag_runs);
 
     // Clean up temp PNG
     std::error_code ec;
     std::filesystem::remove(png_path, ec);
+
+    // Check if Tesseract failed on all runs
+    bool tesseract_failed_on_all = true;
+    for (const auto& r : diag_runs) {
+      if (r.exit_ok) {
+        tesseract_failed_on_all = false;
+        break;
+      }
+    }
+
+    nlohmann::json t_runs_json = nlohmann::json::array();
+    for (const auto& r : diag_runs) {
+      t_runs_json.push_back({
+          {"psm", r.psm},
+          {"exit_ok", r.exit_ok},
+          {"exit_status", r.exit_status},
+          {"error", r.error},
+          {"word_count", r.word_count},
+          {"tsv_available", r.tsv_available},
+          {"stderr_msg", r.stderr_msg}
+      });
+    }
+
+    nlohmann::json diag = {
+        {"frame_id", frame.frame_id},
+        {"timestamp_us", frame.timestamp_us},
+        {"extraction_succeeded", true},
+        {"extraction_path", png_path.string()},
+        {"preprocessing_fallback", selected_fallback},
+        {"tesseract_attempted", true},
+        {"tesseract_succeeded", !tesseract_failed_on_all},
+        {"tesseract_error", tesseract_error},
+        {"psm_runs", t_runs_json}
+    };
+    frame_diagnostics.push_back(diag);
+
+    if (tesseract_failed_on_all) {
+      any_frame_failed = true;
+      if (failure_reason_details.empty()) {
+        failure_reason_details = "Tesseract failed on frame " + frame.frame_id + ": " + tesseract_error;
+      }
+      continue;
+    }
 
     if (words.empty()) continue;
 
@@ -972,6 +1110,69 @@ OcrGenerationResult generate_ocr_observations(
   // Clean up temp directory
   std::error_code ec;
   std::filesystem::remove_all(temp_dir, ec);
+
+  // Surface any extraction/Tesseract failure as a blocker/error
+  if (any_frame_failed) {
+    result.blocker = "OCR processing failed: " + failure_reason_details;
+    result.text_absence.schema_version = "svp-text-absence-v1";
+    result.text_absence.ocr_required = true;
+    result.text_absence.ocr_completed = false;
+    result.text_absence.reason = "processor_failed";
+    result.text_absence.provenance_id = "processor_ocr_detector_0001";
+    result.text_absence.text_region_count = 0;
+    result.text_absence.text_observation_count = 0;
+    result.text_absence.numeric_value_count = 0;
+
+    nlohmann::json detector_proc = make_ocr_processor_provenance(
+        "processor_ocr_detector_0001", "ocr_detector",
+        "svp-vision-ocr-generation-v1", "tesseract_subprocess",
+        "failed",
+        "Text detection failed: " + failure_reason_details);
+    detector_proc["diagnostics"] = frame_diagnostics;
+    result.processors.push_back(detector_proc);
+
+    nlohmann::json recognizer_proc = make_ocr_processor_provenance(
+        "processor_ocr_recognizer_0001", "ocr_recognizer",
+        "svp-vision-ocr-generation-v1", "tesseract_subprocess",
+        "failed",
+        "Text recognition failed: " + failure_reason_details);
+    recognizer_proc["diagnostics"] = frame_diagnostics;
+    result.processors.push_back(recognizer_proc);
+
+    result.processors.push_back(make_ocr_processor_provenance(
+        "processor_numeric_parser_0001", "numeric_parser",
+        "svp-vision-ocr-generation-v1", "deterministic_cpp",
+        "not_run", "No OCR text to parse due to OCR execution failure"));
+
+    // Write empty files to staging
+    const std::filesystem::path text_dir = staging_dir / "text";
+    std::filesystem::create_directories(text_dir);
+
+    {
+      std::ofstream out(text_dir / "text_regions.jsonl");
+    }
+    result.text_regions_written = true;
+
+    {
+      std::ofstream out(text_dir / "text_observations.jsonl");
+    }
+    result.text_observations_written = true;
+
+    {
+      std::ofstream out(text_dir / "numeric_values.jsonl");
+    }
+    result.numeric_values_written = true;
+
+    {
+      std::ofstream out(text_dir / "text_absence.json");
+      if (out) {
+        out << text_absence_to_json(result.text_absence).dump(2) << "\n";
+      }
+    }
+    result.text_absence_written = true;
+
+    return result;
+  }
 
   // Phase 2: Reconcile detections across frames
   const int total_frames = static_cast<int>(effective_frames.frames.size());
@@ -1074,7 +1275,7 @@ OcrGenerationResult generate_ocr_observations(
   result.text_absence.provenance_id = "processor_ocr_detector_0001";
 
   // Build processor provenance
-  result.processors.push_back(make_ocr_processor_provenance(
+  nlohmann::json detector_proc = make_ocr_processor_provenance(
       "processor_ocr_detector_0001", "ocr_detector",
       "svp-vision-ocr-generation-v1", "tesseract_subprocess",
       "completed",
@@ -1085,8 +1286,11 @@ OcrGenerationResult generate_ocr_observations(
           "x" +
           std::to_string(effective_frames.frames.empty() ? 0 : effective_frames.frames[0].height) +
           " resolution; collected " +
-          std::to_string(all_detections.size()) + " per-frame detection(s)"));
-  result.processors.push_back(make_ocr_processor_provenance(
+          std::to_string(all_detections.size()) + " per-frame detection(s)");
+  detector_proc["diagnostics"] = frame_diagnostics;
+  result.processors.push_back(detector_proc);
+
+  nlohmann::json recognizer_proc = make_ocr_processor_provenance(
       "processor_ocr_recognizer_0001", "ocr_recognizer",
       "svp-vision-ocr-generation-v1", "tesseract_subprocess",
       "completed",
@@ -1094,7 +1298,10 @@ OcrGenerationResult generate_ocr_observations(
       "produced " +
           std::to_string(result.text_observation_count) +
           " reconciled text observation(s) from " +
-          std::to_string(all_detections.size()) + " per-frame detection(s)"));
+          std::to_string(all_detections.size()) + " per-frame detection(s)");
+  recognizer_proc["diagnostics"] = frame_diagnostics;
+  result.processors.push_back(recognizer_proc);
+
   result.processors.push_back(make_ocr_processor_provenance(
       "processor_numeric_parser_0001", "numeric_parser",
       "svp-vision-ocr-generation-v1", "deterministic_cpp",
