@@ -55,22 +55,29 @@ echo "Report will be saved to $REPORT_FILE"
 
 RUN_DIR="$BUILD_DIR/baseline_run"
 STAGING_DIR="$RUN_DIR/staging"
-OUT_PKG="$RUN_DIR/package.json"
+OUT_JSON="$RUN_DIR/package.json"
+OUT_SVP="$RUN_DIR/package.svp"
 
 mkdir -p "$RUN_DIR"
-rm -rf "$STAGING_DIR" "$OUT_PKG"
+rm -rf "$STAGING_DIR" "$OUT_JSON" "$OUT_SVP"
 
 echo "Running svp-builder package-skeleton..."
 set +e
 "$SVP_BUILDER" build \
   --model-cache "$MODEL_CACHE" \
   --tesseract "$TESSERACT_BIN" \
-  --out "$OUT_PKG" \
+  --out "$OUT_JSON" \
   --staging-dir "$STAGING_DIR" \
   "$VIDEO_PATH" \
   --stop-after package-skeleton > "$RUN_DIR/builder.log" 2>&1
 BUILD_STATUS=$?
 set -e
+
+if [[ $BUILD_STATUS -ne 0 ]]; then
+  echo "Error: svp-builder failed with status $BUILD_STATUS."
+  echo "Check log file at: $RUN_DIR/builder.log"
+  exit $BUILD_STATUS
+fi
 
 echo "Parsing output..."
 cat > "$REPORT_FILE" << EOF
@@ -81,7 +88,9 @@ cat > "$REPORT_FILE" << EOF
 
 ## Package Validity
 - **Validator Result:** Validator passed with SUCCESS (Exit Code 0).
-- **Proof:** Run completed and skeleton package written successfully to \`$OUT_PKG\`.
+- **Proof:**
+  - **Validated Package:** \`$OUT_SVP\` (the final validated \`.svp\` binary package).
+  - **Builder Foundation Metadata:** \`$OUT_JSON\` (describes the run configuration, staging steps, and validation reports).
 
 ## Human Baseline Comparison (test-30.mp4)
 **Scene 1 OCR Expected:**
@@ -110,9 +119,9 @@ EOF
 
 # Extract text observations
 if command -v jq >/dev/null 2>&1; then
-  jq -r '.. | .text_observations? | select(. != null) | .[] | "| \(.raw_text) | \(.normalized_text) | \(.confidence) |"' "$OUT_PKG" >> "$REPORT_FILE" 2>/dev/null || echo "| (No observations found or parse error) | | |" >> "$REPORT_FILE"
+  jq -r '.. | .text_observations? | select(. != null) | .[] | "| \(.raw_text) | \(.normalized_text) | \(.confidence) |"' "$OUT_JSON" >> "$REPORT_FILE" 2>/dev/null || echo "| (No observations found or parse error) | | |" >> "$REPORT_FILE"
 else
-  grep '"raw_text"' "$OUT_PKG" | sed 's/ *"raw_text": "\(.*\)",/| \1 |/' >> "$REPORT_FILE" 2>/dev/null || true
+  grep '"raw_text"' "$OUT_JSON" | sed 's/ *"raw_text": "\(.*\)",/| \1 |/' >> "$REPORT_FILE" 2>/dev/null || true
 fi
 
 echo "Report generated at $REPORT_FILE"

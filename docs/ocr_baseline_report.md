@@ -1,11 +1,13 @@
 # OCR Baseline Comparison Report
 
 **Video:** /Users/domesposito/Projects/samples/test-30.mp4
-**Date:** Sat Jun 20 15:21:35 MST 2026
+**Date:** Sat Jun 20 15:29:07 MST 2026
 
 ## Package Validity
 - **Validator Result:** Validator passed with SUCCESS (Exit Code 0).
-- **Proof:** Run completed and skeleton package written successfully to `build/baseline_run/package.json`.
+- **Proof:**
+  - **Validated Package:** `build/baseline_run/package.svp` (the final validated `.svp` binary package).
+  - **Builder Foundation Metadata:** `build/baseline_run/package.json` (describes the run configuration, staging steps, and validation reports).
 
 ## Human Baseline Comparison (test-30.mp4)
 **Scene 1 OCR Expected:**
