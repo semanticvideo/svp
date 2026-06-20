@@ -11,11 +11,14 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+include(CTest)
+
 add_subdirectory(packages/svp-core)
 add_subdirectory(packages/svp-blocks)
 add_subdirectory(packages/svp-models)
 add_subdirectory(packages/svp-validation)
 add_subdirectory(packages/svp-package)
+add_subdirectory(packages/svp-media)
 
 add_subdirectory(tools/svp-validator)
 add_subdirectory(tools/svp-reader)
