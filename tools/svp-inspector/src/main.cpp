@@ -1,13 +1,17 @@
 #include "svp/core/version.hpp"
+#include "svp/package/package_layout.hpp"
 #include "svp/package/package_summary.hpp"
 
 #include <CLI/CLI.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -17,6 +21,21 @@ std::string yes_no(bool value) {
 
 std::string value_or_unknown(const std::string& value) {
   return value.empty() ? "unknown" : value;
+}
+
+std::string count_or_unknown(const svp::package::PackageJsonlCountSummary& count) {
+  if (!count.present || !count.readable) {
+    return "unknown";
+  }
+  return std::to_string(count.record_count);
+}
+
+std::string count_match_label(const svp::package::PackageJsonlCountSummary& count,
+                              const std::string& declared_count) {
+  if (!count.present || !count.readable || declared_count.empty()) {
+    return "unknown";
+  }
+  return declared_count == std::to_string(count.record_count) ? "yes" : "no";
 }
 
 std::string area_label(svp::package::PackageLayoutRequirementArea area) {
@@ -29,6 +48,28 @@ std::string area_label(svp::package::PackageLayoutRequirementArea area) {
       return "colors";
   }
   return "unknown";
+}
+
+struct DumpTarget {
+  std::string_view section;
+  std::string_view entry;
+};
+
+const std::vector<DumpTarget>& dump_targets() {
+  static const std::vector<DumpTarget> targets{
+      {"manifest", "manifest.json"},
+      {"index_manifest", "index/index_manifest.json"},
+  };
+  return targets;
+}
+
+const DumpTarget* find_dump_target(std::string_view section) {
+  for (const auto& target : dump_targets()) {
+    if (target.section == section) {
+      return &target;
+    }
+  }
+  return nullptr;
 }
 
 std::uint64_t count_present_required_items(const svp::package::PackageSummary& summary) {
@@ -126,6 +167,19 @@ void print_text(const svp::package::PackageSummary& summary) {
   if (summary.text.absence.parsed) {
     std::cout << "  ocr_required: " << value_or_unknown(summary.text.ocr_required) << "\n";
     std::cout << "  ocr_completed: " << value_or_unknown(summary.text.ocr_completed) << "\n";
+    std::cout << "  absence_counts: regions="
+              << value_or_unknown(summary.text.text_region_count)
+              << " observations=" << value_or_unknown(summary.text.text_observation_count)
+              << " numeric_values=" << value_or_unknown(summary.text.numeric_value_count)
+              << "\n";
+    std::cout << "  file_counts_match_absence: regions="
+              << count_match_label(summary.text.text_regions, summary.text.text_region_count)
+              << " observations="
+              << count_match_label(summary.text.text_observations,
+                                   summary.text.text_observation_count)
+              << " numeric_values="
+              << count_match_label(summary.text.numeric_values, summary.text.numeric_value_count)
+              << "\n";
     std::cout << "  reason: " << value_or_unknown(summary.text.absence_reason) << "\n";
   }
 }
@@ -137,6 +191,12 @@ void print_colors(const svp::package::PackageSummary& summary) {
   if (summary.colors.summary.parsed) {
     std::cout << "  summary_count: "
               << value_or_unknown(summary.colors.color_observation_count) << "\n";
+    std::cout << "  file_count: "
+              << count_or_unknown(summary.colors.color_observations) << "\n";
+    std::cout << "  file_count_matches_summary: "
+              << count_match_label(summary.colors.color_observations,
+                                   summary.colors.color_observation_count)
+              << "\n";
     std::cout << "  color_space: " << value_or_unknown(summary.colors.color_space) << "\n";
     std::cout << "  bucket_registry: "
               << value_or_unknown(summary.colors.color_bucket_registry_version) << "\n";
@@ -219,6 +279,50 @@ void print_summary(const svp::package::PackageSummary& summary) {
   print_validation_report(summary);
 }
 
+int dump_json_entry(const std::filesystem::path& package_path, const DumpTarget& target) {
+  const auto read_result = svp::package::read_package_entry(
+      package_path, std::string{target.entry});
+  if (!read_result.has_value()) {
+    std::cerr << "Unable to read " << target.entry << ": "
+              << read_result.error_message() << "\n";
+    return 1;
+  }
+
+  const auto parsed = nlohmann::json::parse(read_result.value(), nullptr, false);
+  if (parsed.is_discarded()) {
+    std::cerr << "Unable to parse " << target.entry << " as JSON\n";
+    return 1;
+  }
+
+  std::cout << parsed.dump(2) << "\n";
+  return 0;
+}
+
+int dump_sections(const std::filesystem::path& package_path, std::string_view section) {
+  if (section == "all") {
+    int status = 0;
+    bool first = true;
+    for (const auto& target : dump_targets()) {
+      if (!first) {
+        std::cout << "\n";
+      }
+      first = false;
+      std::cout << "# " << target.entry << "\n";
+      status = std::max(status, dump_json_entry(package_path, target));
+    }
+    return status;
+  }
+
+  const auto* target = find_dump_target(section);
+  if (target == nullptr) {
+    std::cerr << "Unsupported dump section: " << section
+              << " (expected manifest, index_manifest, or all)\n";
+    return 2;
+  }
+
+  return dump_json_entry(package_path, *target);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -231,12 +335,24 @@ int main(int argc, char** argv) {
   auto* inspect = app.add_subcommand("inspect", "Print a concise SVP package summary");
   inspect->add_option("package", package_path, "Path to a .svp package")->required();
 
+  std::string dump_package_path;
+  std::string dump_section = "manifest";
+  auto* dump = app.add_subcommand("dump", "Print manifest or index manifest JSON");
+  dump->add_option("package", dump_package_path, "Path to a .svp package")->required();
+  dump->add_option("--section", dump_section,
+                   "Section to dump: manifest, index_manifest, or all")
+      ->check(CLI::IsMember({"manifest", "index_manifest", "all"}));
+
   CLI11_PARSE(app, argc, argv);
 
   if (*inspect) {
     const auto summary = svp::package::read_package_summary(package_path);
     print_summary(summary);
     return summary.layout_readable ? 0 : 1;
+  }
+
+  if (*dump) {
+    return dump_sections(dump_package_path, dump_section);
   }
 
   return 0;

@@ -190,6 +190,9 @@ void populate_text(const std::filesystem::path& path,
 
   summary.text.ocr_required = object_scalar(absence, "ocr_required");
   summary.text.ocr_completed = object_scalar(absence, "ocr_completed");
+  summary.text.text_region_count = object_scalar(absence, "text_region_count");
+  summary.text.text_observation_count = object_scalar(absence, "text_observation_count");
+  summary.text.numeric_value_count = object_scalar(absence, "numeric_value_count");
   summary.text.absence_reason = object_scalar(absence, "reason");
 }
 
