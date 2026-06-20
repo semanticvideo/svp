@@ -10,7 +10,8 @@
     "sqlite3",
     "libzip",
     "blake3",
-    "zstd"
+    "zstd",
+    "onnxruntime"
   ]
 }
 
