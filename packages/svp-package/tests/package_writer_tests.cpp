@@ -330,25 +330,28 @@ void test_spatial_embedding_placeholders() {
       svp::package::write_spatial_and_embedding_placeholders(staging_dir);
 
   assert(summary.depth_index_written);
+  assert(summary.depth_blocks_written);
   assert(summary.masks_index_written);
   assert(summary.masks_blocks_written);
   assert(summary.embedding_sets_written);
   assert(summary.embeddings_index_written);
+  assert(summary.embeddings_blocks_written);
   assert(summary.provenance_records_added == 2);
 
   assert(std::filesystem::exists(staging_dir / "spatial" / "depth.index.jsonl"));
+  assert(std::filesystem::exists(staging_dir / "spatial" / "depth.blocks.svpdz"));
   assert(std::filesystem::exists(staging_dir / "spatial" / "masks.index.jsonl"));
   assert(std::filesystem::exists(staging_dir / "spatial" / "masks.blocks.svpmz"));
   assert(std::filesystem::exists(staging_dir / "embeddings" / "embedding_sets.json"));
   assert(std::filesystem::exists(staging_dir / "embeddings" / "embeddings.index.jsonl"));
+  assert(std::filesystem::exists(staging_dir / "embeddings" / "embeddings.blocks.svpez"));
 
-  assert(!std::filesystem::exists(staging_dir / "spatial" / "depth.blocks.svpdz"));
-  assert(!std::filesystem::exists(staging_dir / "embeddings" / "embeddings.blocks.svpez"));
-
+  assert(std::filesystem::file_size(staging_dir / "spatial" / "depth.blocks.svpdz") == 0);
   assert(std::filesystem::file_size(staging_dir / "spatial" / "masks.blocks.svpmz") == 0);
   assert(std::filesystem::file_size(staging_dir / "spatial" / "depth.index.jsonl") == 0);
   assert(std::filesystem::file_size(staging_dir / "spatial" / "masks.index.jsonl") == 0);
   assert(std::filesystem::file_size(staging_dir / "embeddings" / "embeddings.index.jsonl") == 0);
+  assert(std::filesystem::file_size(staging_dir / "embeddings" / "embeddings.blocks.svpez") == 0);
 
   std::ifstream sets_in(staging_dir / "embeddings" / "embedding_sets.json");
   nlohmann::json sets_json;
@@ -378,8 +381,10 @@ void test_spatial_embedding_placeholders() {
   const nlohmann::json summary_json =
       svp::package::spatial_embedding_placeholder_summary_to_json(summary);
   assert(summary_json["depth_index_written"] == true);
+  assert(summary_json["depth_blocks_written"] == true);
   assert(summary_json["masks_blocks_written"] == true);
   assert(summary_json["embedding_sets_written"] == true);
+  assert(summary_json["embeddings_blocks_written"] == true);
 
   std::filesystem::remove_all(root);
 }
@@ -457,14 +462,13 @@ void test_package_skeleton_includes_placeholders_and_validation_report() {
   const auto& layout = layout_result.value();
 
   assert(layout.has_entry("spatial/depth.index.jsonl"));
+  assert(layout.has_entry("spatial/depth.blocks.svpdz"));
   assert(layout.has_entry("spatial/masks.index.jsonl"));
   assert(layout.has_entry("spatial/masks.blocks.svpmz"));
   assert(layout.has_entry("embeddings/embedding_sets.json"));
   assert(layout.has_entry("embeddings/embeddings.index.jsonl"));
+  assert(layout.has_entry("embeddings/embeddings.blocks.svpez"));
   assert(layout.has_entry("provenance/validation.json"));
-
-  assert(!layout.has_entry("spatial/depth.blocks.svpdz"));
-  assert(!layout.has_entry("embeddings/embeddings.blocks.svpez"));
 
   std::filesystem::remove_all(root);
 }

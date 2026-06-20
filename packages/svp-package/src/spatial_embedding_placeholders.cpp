@@ -73,6 +73,7 @@ nlohmann::json make_spatial_placeholder_processor() {
       {"input_refs", nlohmann::json::array()},
       {"output_refs", {
           "spatial/depth.index.jsonl",
+          "spatial/depth.blocks.svpdz",
           "spatial/masks.index.jsonl",
           "spatial/masks.blocks.svpmz"
       }},
@@ -81,9 +82,11 @@ nlohmann::json make_spatial_placeholder_processor() {
       {"cache_keys", nlohmann::json::array()},
       {"status", "not_run"},
       {"note", "Depth estimation and mask generation have not been run. "
-               "Empty index files and a zero-length mask block stream are "
-               "written as honest placeholders. Depth blocks are omitted "
-               "because real depth data cannot be produced yet."}
+               "Empty index files, a zero-length mask block stream, and a "
+               "zero-length depth block stream are written as honest "
+               "placeholders. The validator requires real depth blocks "
+               "with frame ranges; the empty depth block stream will be "
+               "reported as invalid until real depth estimation is run."}
   };
 }
 
@@ -95,16 +98,19 @@ nlohmann::json make_embedding_placeholder_processor() {
       {"input_refs", nlohmann::json::array()},
       {"output_refs", {
           "embeddings/embedding_sets.json",
-          "embeddings/embeddings.index.jsonl"
+          "embeddings/embeddings.index.jsonl",
+          "embeddings/embeddings.blocks.svpez"
       }},
       {"model_refs", nlohmann::json::array()},
       {"task_ids", {"task.embeddings.placeholder"}},
       {"cache_keys", nlohmann::json::array()},
       {"status", "not_run"},
       {"note", "Embedding generation has not been run. An empty embedding "
-               "sets file and empty embedding index are written as honest "
-               "placeholders. Embedding blocks are omitted because real "
-               "model inference cannot be produced yet."}
+               "sets file, empty embedding index, and a zero-length "
+               "embedding block stream are written as honest placeholders. "
+               "The validator requires real embedding blocks with model "
+               "output; the empty embedding block stream will be reported "
+               "as invalid until real model inference is run."}
   };
 }
 
@@ -141,6 +147,9 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
   write_empty_file(staging_dir / "spatial" / "depth.index.jsonl");
   summary.depth_index_written = true;
 
+  write_empty_file(staging_dir / "spatial" / "depth.blocks.svpdz");
+  summary.depth_blocks_written = true;
+
   write_empty_file(staging_dir / "spatial" / "masks.index.jsonl");
   summary.masks_index_written = true;
 
@@ -153,6 +162,9 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
 
   write_empty_file(staging_dir / "embeddings" / "embeddings.index.jsonl");
   summary.embeddings_index_written = true;
+
+  write_empty_file(staging_dir / "embeddings" / "embeddings.blocks.svpez");
+  summary.embeddings_blocks_written = true;
 
   std::vector<nlohmann::json> placeholder_processors = {
       make_spatial_placeholder_processor(),
@@ -169,10 +181,12 @@ nlohmann::json spatial_embedding_placeholder_summary_to_json(
     const SpatialEmbeddingPlaceholderSummary& summary) {
   return {
       {"depth_index_written", summary.depth_index_written != 0},
+      {"depth_blocks_written", summary.depth_blocks_written != 0},
       {"masks_index_written", summary.masks_index_written != 0},
       {"masks_blocks_written", summary.masks_blocks_written != 0},
       {"embedding_sets_written", summary.embedding_sets_written != 0},
       {"embeddings_index_written", summary.embeddings_index_written != 0},
+      {"embeddings_blocks_written", summary.embeddings_blocks_written != 0},
       {"provenance_records_added", summary.provenance_records_added},
   };
 }
