@@ -371,6 +371,7 @@ int main(int argc, char** argv) {
 
       bool package_written = false;
       bool validator_passes = false;
+      bool validation_report_stored = false;
       int validator_exit_code = -1;
       nlohmann::json validation_report_json = nlohmann::json::object();
       std::filesystem::path package_path;
@@ -457,11 +458,15 @@ int main(int argc, char** argv) {
           validation_report_json = first_report;
 
           // Store validation report in staging for second package write
-          if (svp::package::write_validation_report_to_staging(staging_dir,
-                                                                validation_report_json)) {
+          validation_report_stored = svp::package::write_validation_report_to_staging(
+              staging_dir, validation_report_json);
+
+          if (validation_report_stored) {
             // Re-package with validation report included
             package_written = svp::package::write_package_skeleton(
                 package_path, staging_dir, build_source_path, manifest_json);
+          } else {
+            package_written = false;
           }
 
           if (package_written) {
@@ -484,10 +489,14 @@ int main(int argc, char** argv) {
         output["builder_command"]["package_path"] = package_path.string();
         output["builder_command"]["validator"] = {
           {"exit_code", validator_exit_code},
-          {"validation_report_path", "provenance/validation.json"},
+          {"validation_report_stored", validation_report_stored},
           {"validator_proven_valid", validator_passes},
           {"report", validation_report_json}
         };
+        if (validation_report_stored) {
+          output["builder_command"]["validator"]["validation_report_path"] =
+              "provenance/validation.json";
+        }
       }
 
       write_json_file(json_out_path, output);
@@ -539,7 +548,11 @@ int main(int argc, char** argv) {
                   << output.at("spatial_embedding_placeholders").at("embedding_sets_written")
                   << " embedding sets\n";
         std::cout << "Wrote skeleton .svp package to: " << package_path << "\n";
-        std::cout << "Validation report stored at: provenance/validation.json\n";
+        if (validation_report_stored) {
+          std::cout << "Validation report stored at: provenance/validation.json\n";
+        } else {
+          std::cout << "Validation report storage FAILED\n";
+        }
         std::cout << "Validator exit code: " << validator_exit_code << "\n";
         if (validator_passes) {
           std::cout << "Package validation: SUCCESS\n";

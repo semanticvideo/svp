@@ -398,10 +398,10 @@ void test_validation_report_storage() {
     {"status", "invalid"},
     {"core_status", "invalid"},
     {"errors", nlohmann::json::array({
-      {"code", "ERR_MISSING_DEPTH"},
-      {"severity", "error"},
-      {"path", "/spatial/depth.blocks.svpdz"},
-      {"message", "Required SVPB package entry is absent."}
+      nlohmann::json{{"code", "ERR_MISSING_DEPTH"},
+                    {"severity", "error"},
+                    {"path", "/spatial/depth.blocks.svpdz"},
+                    {"message", "Required SVPB package entry is absent."}}
     })}
   };
 
@@ -431,7 +431,8 @@ void test_package_skeleton_includes_placeholders_and_validation_report() {
   const std::filesystem::path staging_dir = root / "staging";
   std::filesystem::create_directories(staging_dir / "provenance");
 
-  svp::package::write_spatial_and_embedding_placeholders(staging_dir);
+  [[maybe_unused]] const auto placeholder_summary =
+      svp::package::write_spatial_and_embedding_placeholders(staging_dir);
 
   nlohmann::json report = {
     {"schema_version", "svp-validation-report-v1"},
@@ -439,7 +440,7 @@ void test_package_skeleton_includes_placeholders_and_validation_report() {
     {"core_status", "invalid"},
     {"errors", nlohmann::json::array()}
   };
-  svp::package::write_validation_report_to_staging(staging_dir, report);
+  assert(svp::package::write_validation_report_to_staging(staging_dir, report));
 
   nlohmann::json manifest = {
     {"svp_version", "1.0-rc.2"},
