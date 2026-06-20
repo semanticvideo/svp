@@ -7,6 +7,10 @@
 #include "svp/vision/foundation_color_staging.hpp"
 #include "svp/vision/foundation_ocr_staging.hpp"
 #include "svp/vision/observation_pipeline_plan.hpp"
+#include "svp/package/package_writer.hpp"
+#include "svp/validation/report_json.hpp"
+#include "svp/validation/validator.hpp"
+#include <ctime>
 
 #include <CLI/CLI.hpp>
 #include <nlohmann/json.hpp>
@@ -201,7 +205,7 @@ int main(int argc, char** argv) {
                     "Directory for staged builder outputs");
   build->add_option("--stop-after", stop_after,
                     "Supported foundation stages: media-ingest, audio, vision-plan, "
-                    "foundation-color, foundation-ocr");
+                    "foundation-color, foundation-ocr, package-skeleton");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -223,9 +227,9 @@ int main(int argc, char** argv) {
     if (*build) {
       if (stop_after != "media-ingest" && stop_after != "audio" &&
           stop_after != "vision-plan" && stop_after != "foundation-color" &&
-          stop_after != "foundation-ocr") {
+          stop_after != "foundation-ocr" && stop_after != "package-skeleton") {
         std::cerr << "svp-builder build currently supports --stop-after media-ingest, audio, "
-                     "vision-plan, foundation-color, or foundation-ocr\n";
+                     "vision-plan, foundation-color, foundation-ocr, or package-skeleton\n";
         return 2;
       }
 
@@ -235,8 +239,14 @@ int main(int argc, char** argv) {
                                                                 build_probe_json_path,
                                                                 build_ffprobe_path));
       nlohmann::json output = svp::media::media_ingest_plan_to_json(plan);
-      if (stop_after == "audio") {
-        const bool model_runtime_available = svp::models::OnnxSession::is_available();
+
+      const std::filesystem::path staging_dir =
+          build_staging_dir.empty()
+              ? default_staging_dir_for_output(build_output_path)
+              : std::filesystem::path(build_staging_dir);
+      const bool model_runtime_available = svp::models::OnnxSession::is_available();
+
+      if (stop_after == "audio" || stop_after == "package-skeleton") {
         const svp::audio::AudioStagePlan audio_plan =
             svp::audio::build_audio_stage_plan(build_source_path,
                                                plan.probe,
@@ -244,10 +254,6 @@ int main(int argc, char** argv) {
                                                build_ffmpeg_path,
                                                model_runtime_available);
         nlohmann::json audio_json = svp::audio::audio_stage_plan_to_json(audio_plan);
-        const std::filesystem::path staging_dir =
-            build_staging_dir.empty()
-                ? default_staging_dir_for_output(build_output_path)
-                : std::filesystem::path(build_staging_dir);
         const svp::audio::AudioExtractionRun extraction_run =
             svp::audio::execute_audio_extraction_plan(audio_plan.extraction_plan,
                                                       staging_dir);
@@ -285,16 +291,16 @@ int main(int argc, char** argv) {
         audio_json["vad_execution_boundary"] =
             svp::audio::vad_execution_boundary_to_json(executed_boundary);
         output["audio_foundation"] = audio_json;
-      } else if (stop_after == "vision-plan") {
+      }
+
+      if (stop_after == "vision-plan") {
         const svp::vision::VisionObservationPipelinePlan vision_plan =
             svp::vision::build_vision_observation_pipeline_plan(plan);
         output["vision_observation_pipeline"] =
             svp::vision::vision_observation_pipeline_plan_to_json(vision_plan);
-      } else if (stop_after == "foundation-color") {
-        const std::filesystem::path staging_dir =
-            build_staging_dir.empty()
-                ? default_staging_dir_for_output(build_output_path)
-                : std::filesystem::path(build_staging_dir);
+      }
+
+      if (stop_after == "foundation-color" || stop_after == "package-skeleton") {
         const svp::vision::FoundationColorStagingArtifact color_artifact =
             svp::vision::build_real_frame_color_staging_artifact(
                 plan, build_ffmpeg_path);
@@ -313,12 +319,9 @@ int main(int argc, char** argv) {
              (staging_dir / "provenance" / "processors.jsonl").string()},
         };
         output["foundation_color_staging"] = color_json;
-      } else if (stop_after == "foundation-ocr") {
-        const std::filesystem::path staging_dir =
-            build_staging_dir.empty()
-                ? default_staging_dir_for_output(build_output_path)
-                : std::filesystem::path(build_staging_dir);
-        const bool model_runtime_available = svp::models::OnnxSession::is_available();
+      }
+
+      if (stop_after == "foundation-ocr" || stop_after == "package-skeleton") {
         const svp::vision::FoundationOcrStagingArtifact ocr_artifact =
             svp::vision::build_real_ocr_staging_artifact(
                 plan, model_runtime_available);
@@ -340,13 +343,95 @@ int main(int argc, char** argv) {
         };
         output["foundation_ocr_staging"] = ocr_json;
       }
+
+      bool package_written = false;
+      bool validator_passes = false;
+      int validator_exit_code = -1;
+      nlohmann::json validation_report_json = nlohmann::json::object();
+      std::filesystem::path package_path;
+      std::filesystem::path json_out_path = build_output_path;
+
+      if (stop_after == "package-skeleton") {
+        if (std::filesystem::path(build_output_path).extension() == ".svp") {
+          package_path = build_output_path;
+          json_out_path = build_output_path + ".json";
+        } else {
+          package_path = std::filesystem::path(build_output_path).replace_extension(".svp");
+        }
+
+        std::time_t now = std::time(nullptr);
+        char buf[100];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&now));
+        std::string created_utc(buf);
+
+        nlohmann::json manifest_json = {
+          {"svp_version", "1.0-rc.2"},
+          {"package_id", "svp_" + std::filesystem::path(build_source_path).stem().string() + "_pkg"},
+          {"created_utc", created_utc},
+          {"primary_media_id", "media_000001"},
+          {"timebase", {
+            {"unit", "microseconds"},
+            {"origin", "primary_presentation_start"},
+            {"source_timebase_mode", "exact_rational"},
+            {"rounding", "round_half_to_even"}
+          }},
+          {"canonical_analysis_raster", output["canonical_analysis_raster"]},
+          {"binary_block_format", {
+            {"magic", "SVPB"},
+            {"version", 1},
+            {"header_size", 160},
+            {"compression", "zstd"}
+          }},
+          {"hashes", {
+            {"algorithm", "blake3"},
+            {"digest_bytes", 32},
+            {"encoding", "lowercase_hex"},
+            {"manifest_excluded", true}
+          }},
+          {"required_sections", {
+            {"media", true},
+            {"transcript", true},
+            {"timeline", true},
+            {"entities", true},
+            {"spatial", true},
+            {"relationships", true},
+            {"embeddings", true},
+            {"index", true},
+            {"provenance", true}
+          }}
+        };
+
+        package_written = svp::package::write_package_skeleton(
+            package_path, staging_dir, build_source_path, manifest_json);
+
+        if (package_written) {
+          svp::validation::ValidatorOptions validator_opts;
+          validator_opts.validation_codes_path = "spec/registries/validation-codes.json";
+
+          auto report = svp::validation::validate_package(package_path, validator_opts);
+          validator_exit_code = svp::validation::exit_code(report);
+          validator_passes = (validator_exit_code == 0);
+          validation_report_json = report;
+        }
+      }
+
       output["builder_command"] = {
           {"command", "build"},
           {"stop_after", stop_after},
-          {"valid_svp_package_written", false},
+          {"valid_svp_package_written", validator_passes},
       };
-      write_json_file(build_output_path, output);
-      std::cout << "Wrote builder foundation JSON: " << build_output_path << "\n";
+
+      if (stop_after == "package-skeleton") {
+        output["builder_command"]["package_path"] = package_path.string();
+        output["builder_command"]["validator"] = {
+          {"exit_code", validator_exit_code},
+          {"report", validation_report_json}
+        };
+      }
+
+      write_json_file(json_out_path, output);
+      std::cout << "Wrote builder foundation JSON: " << json_out_path << "\n";
+
       if (stop_after == "audio") {
         std::cout << "Audio task plan only; no transcription or diarization was generated.\n";
       }
@@ -354,10 +439,6 @@ int main(int argc, char** argv) {
         std::cout << "Vision/OCR/color task plan only; no observations were generated.\n";
       }
       if (stop_after == "foundation-color") {
-        const std::filesystem::path staging_dir =
-            build_staging_dir.empty()
-                ? default_staging_dir_for_output(build_output_path)
-                : std::filesystem::path(build_staging_dir);
         const bool real_run =
             output.at("foundation_color_staging").at("manifest").value(
                 "real_media_frame_decoding_run", false);
@@ -370,10 +451,6 @@ int main(int argc, char** argv) {
         }
       }
       if (stop_after == "foundation-ocr") {
-        const std::filesystem::path staging_dir =
-            build_staging_dir.empty()
-                ? default_staging_dir_for_output(build_output_path)
-                : std::filesystem::path(build_staging_dir);
         const bool ocr_detection_run =
             output.at("foundation_ocr_staging").at("manifest").value(
                 "ocr_detection_run", false);
@@ -385,7 +462,17 @@ int main(int argc, char** argv) {
           std::cout << "No real OCR models were executed; honest absence was reported.\n";
         }
       }
-      std::cout << "No .svp package was created by this foundation command.\n";
+      if (stop_after == "package-skeleton") {
+        std::cout << "Staged foundation files under: " << staging_dir << "\n";
+        std::cout << "Wrote skeleton .svp package to: " << package_path << "\n";
+        if (validator_passes) {
+          std::cout << "Package validation: SUCCESS\n";
+        } else {
+          std::cout << "Package validation: INCOMPLETE/INVALID (Expected for skeleton package)\n";
+        }
+      } else {
+        std::cout << "No .svp package was created by this foundation command.\n";
+      }
       return 0;
     }
   } catch (const std::exception& error) {

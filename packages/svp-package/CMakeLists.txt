@@ -6,6 +6,7 @@ add_library(svp-package
   src/package_layout.cpp
   src/package_probe.cpp
   src/package_summary.cpp
+  src/package_writer.cpp
 )
 
 add_library(svp::package ALIAS svp-package)
@@ -24,3 +25,18 @@ target_link_libraries(svp-package
   PRIVATE
     libzip::zip
 )
+
+if(BUILD_TESTING)
+  add_executable(svp-package-tests
+    tests/package_writer_tests.cpp
+  )
+
+  target_compile_features(svp-package-tests PRIVATE cxx_std_20)
+
+  target_link_libraries(svp-package-tests
+    PRIVATE
+      svp::package
+  )
+
+  add_test(NAME svp-package-tests COMMAND svp-package-tests)
+endif()
