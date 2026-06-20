@@ -2,24 +2,15 @@
 
 #include "svp/vision/canonical_frame_input.hpp"
 #include "svp/vision/foundation_color_staging.hpp"
-
-#include <iomanip>
-#include <sstream>
+#include "svp/vision/scene_segmentation.hpp"
 
 namespace svp::vision {
-namespace {
 
-std::vector<std::string> frame_ids_from_frames(
-    const std::vector<ColorRasterFrame>& frames) {
-  std::vector<std::string> ids;
-  ids.reserve(frames.size());
-  for (const ColorRasterFrame& f : frames) {
-    ids.push_back(f.frame_id);
-  }
-  return ids;
-}
-
-}  // namespace
+// Maximum number of canonical frames to decode for the color sampling path.
+// More frames than the default decode_canonical_frames() count (5) are used
+// here so that color-change-based scene segmentation has enough temporal
+// resolution to detect boundaries in a 30-second video.
+constexpr int kColorMaxDecodedFrames = 15;
 
 RealFrameSamplingResult build_real_frame_color_sampling_input(
     const media::MediaIngestPlan& plan,
@@ -27,7 +18,11 @@ RealFrameSamplingResult build_real_frame_color_sampling_input(
   RealFrameSamplingResult result;
 
   const DecodedCanonicalFrames decoded =
-      decode_canonical_frames(plan, ffmpeg_path);
+      decode_frames_at_resolution(
+          plan, ffmpeg_path,
+          plan.canonical_raster.width,
+          plan.canonical_raster.height,
+          kColorMaxDecodedFrames);
 
   result.real_decoding_attempted = decoded.decoding_attempted;
   result.real_decoding_succeeded = decoded.decoding_succeeded;
@@ -41,50 +36,30 @@ RealFrameSamplingResult build_real_frame_color_sampling_input(
     return result;
   }
 
-  // Build scenes and shots from the decoded frames.
-  // One scene spanning all decoded frames; one shot per adjacent frame pair
-  // (or a single shot if only one frame decoded).
-  std::vector<std::int64_t> decoded_timestamps;
-  decoded_timestamps.reserve(decoded.frames.size());
-  for (const ColorRasterFrame& f : decoded.frames) {
-    decoded_timestamps.push_back(f.timestamp_us);
-  }
+  // Segment decoded frames into scenes and shots using deterministic
+  // dominant-bucket-change detection.  min_scene_frames=1 allows
+  // single-frame scenes so that short color-block segments (e.g. a 2-second
+  // pink/green/blue block in a 30-second video) are not merged away.
+  const SceneSegmentationResult segmentation =
+      segment_frames_by_color_change(decoded.frames, 1);
 
-  const std::vector<std::string> all_frame_ids =
-      frame_ids_from_frames(decoded.frames);
-
-  ColorTimelineRange full_scene;
-  full_scene.target_id = "scene_000001";
-  full_scene.start_us = decoded_timestamps.front();
-  full_scene.end_us = decoded_timestamps.back();
-  full_scene.frame_ids = all_frame_ids;
-
-  std::vector<ColorTimelineRange> shots;
-  if (decoded.frames.size() == 1) {
-    ColorTimelineRange shot;
-    shot.target_id = "shot_000001";
-    shot.start_us = decoded_timestamps.front();
-    shot.end_us = decoded_timestamps.front();
-    shot.frame_ids = {decoded.frames[0].frame_id};
-    shots.push_back(std::move(shot));
-  } else {
-    for (std::size_t i = 0; i + 1 < decoded_timestamps.size(); ++i) {
-      ColorTimelineRange shot;
-      std::ostringstream id_oss;
-      id_oss << "shot_" << std::setw(6) << std::setfill('0') << (i + 1);
-      shot.target_id = id_oss.str();
-      shot.start_us = decoded_timestamps[i];
-      shot.end_us = decoded_timestamps[i + 1];
-      shot.frame_ids = {decoded.frames[i].frame_id, decoded.frames[i + 1].frame_id};
-      shots.push_back(std::move(shot));
-    }
+  // Convert SceneSegment objects to ColorTimelineRange for the color pipeline.
+  std::vector<ColorTimelineRange> scene_ranges;
+  scene_ranges.reserve(segmentation.scenes.size());
+  for (const SceneSegment& seg : segmentation.scenes) {
+    scene_ranges.push_back(ColorTimelineRange{
+        seg.scene_id,
+        seg.start_us,
+        seg.end_us,
+        seg.frame_ids,
+    });
   }
 
   result.real_decoding_succeeded = true;
   result.input = ColorFrameSamplingInput{
       std::move(decoded.frames),
-      {std::move(full_scene)},
-      std::move(shots),
+      std::move(scene_ranges),
+      std::move(segmentation.shots),
   };
   return result;
 }

@@ -13,6 +13,7 @@ add_library(svp-vision
   src/observation_pipeline_plan.cpp
   src/ocr_generation.cpp
   src/real_frame_color_sampling.cpp
+  src/scene_segmentation.cpp
   src/text_tokenizer.cpp
 )
 
@@ -139,6 +140,22 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-vision-real-frame-color-sampling-tests
            COMMAND svp-vision-real-frame-color-sampling-tests)
+
+  add_executable(svp-vision-scene-segmentation-tests
+    tests/scene_segmentation_tests.cpp
+  )
+
+  target_compile_features(svp-vision-scene-segmentation-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-scene-segmentation-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-scene-segmentation-tests
+           COMMAND svp-vision-scene-segmentation-tests)
 
   add_executable(svp-vision-foundation-ocr-staging-tests
     tests/foundation_ocr_staging_tests.cpp
