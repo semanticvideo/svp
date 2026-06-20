@@ -254,7 +254,8 @@ int main(int argc, char** argv) {
                 ? default_staging_dir_for_output(build_output_path)
                 : std::filesystem::path(build_staging_dir);
         const svp::vision::FoundationColorStagingArtifact color_artifact =
-            svp::vision::build_foundation_color_staging_artifact();
+            svp::vision::build_real_frame_color_staging_artifact(
+                plan, build_ffmpeg_path);
         write_foundation_color_staging_files(staging_dir, color_artifact);
 
         nlohmann::json color_json =
@@ -289,9 +290,16 @@ int main(int argc, char** argv) {
             build_staging_dir.empty()
                 ? default_staging_dir_for_output(build_output_path)
                 : std::filesystem::path(build_staging_dir);
-        std::cout << "Staged synthetic foundation color observations under: "
+        const bool real_run =
+            output.at("foundation_color_staging").at("manifest").value(
+                "real_media_frame_decoding_run", false);
+        std::cout << "Staged foundation color observations under: "
                   << staging_dir << "\n";
-        std::cout << "No real media frames were decoded for the color staging artifact.\n";
+        if (real_run) {
+          std::cout << "Real media frames were decoded for the color staging artifact.\n";
+        } else {
+          std::cout << "No real media frames were decoded; synthetic fallback was used.\n";
+        }
       }
       std::cout << "No .svp package was created by this foundation command.\n";
       return 0;
