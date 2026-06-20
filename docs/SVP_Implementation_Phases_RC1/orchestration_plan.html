@@ -366,7 +366,7 @@
 
       <article class="card">
         <h2>Current Implementation State</h2>
-        <p>The SVP v1.0 RC2 spec package is present in the repository, and the OCR/color unblock gate is complete. The validator spine, RC2 fixtures, inspector summaries/dumps, media probing foundation, model-runtime foundation, audio foundation, and vision/color foundations have landed. Phase 07 now stages audio extraction, audio absence, processor provenance, waveform envelopes, and an honest VAD runtime boundary. Phase 09 now stages color observations, real-frame/canonical-raster color sampling, and an honest OCR/text foundation. Phase 10 now has atomic package writing, SQLite index/index manifest generation, relationships/provenance wiring, stored validation output, honest required block stream placeholders, and tested SVPB writer infrastructure for depth and embeddings. The remaining validator blockers require real model-backed depth and embedding generation.</p>
+        <p>The SVP v1.0 RC2 spec package is present in the repository, and the OCR/color unblock gate is complete. The validator spine, RC2 fixtures, inspector summaries/dumps, media probing foundation, ONNX runtime boundary, audio foundation, and vision/color foundations have landed. Phase 07 now stages audio extraction, audio absence, processor provenance, waveform envelopes, and an honest VAD runtime boundary. Phase 09 now stages color observations, real-frame/canonical-raster color sampling, and an honest OCR/text foundation. Phase 10 now has atomic package writing, SQLite index/index manifest generation, relationships/provenance wiring, stored validation output, honest required block stream placeholders, tested SVPB writer infrastructure, and verified-model runtime gates for depth and embeddings. The remaining validator blockers require real source-derived inputs for model-backed depth and embedding generation.</p>
         <ul>
           <li><code>AGENTS.md</code> now defines agent permissions, worktree rules, branch/push/PR permission, test discipline, and no-god-file expectations.</li>
           <li>The base roadmap lives under <code>docs/SVP_Implementation_Phases_RC1/</code> with active RC2 deltas under <code>docs/SVP_Implementation_Phases_RC2_Update/</code>.</li>
@@ -783,7 +783,7 @@
           <li>Make missing model errors clear and non-crashing.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> no Python runtime, content-addressed behavior, clear ownership boundaries.</p>
-        <p class="small">Status: model bundle/cache foundation has landed. Real ONNX Runtime execution should arrive as a focused runtime integration slice when Phase 07 or Phase 09 is ready to consume sessions.</p>
+        <p class="small">Status: model bundle/cache foundation and ONNX Runtime session boundary have landed. Model bundles are verified with BLAKE3 before use, and depth/embedding generation remains honestly blocked until real decoded frames or source-derived embedding inputs are wired.</p>
       </div>
 
       <div class="phase">
@@ -803,7 +803,7 @@
           <li>Support queries like "find all orange scenes" through scene/shot color summaries.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> no over-promising, block validity, degenerate/static video behavior.</p>
-        <p class="small">Status: planned-only vision pipeline, deterministic color quantization, color observation record planning, frame/keyframe color sampling, foundation color staging, and real-frame/canonical-raster color sampling boundary have landed. OCR/text detection, model execution, and package/index integration remain separate follow-up slices.</p>
+        <p class="small">Status: planned-only vision pipeline, deterministic color quantization, color observation record planning, frame/keyframe color sampling, foundation color staging, real-frame/canonical-raster color sampling boundary, and honest depth-generation runtime gate have landed. OCR/text recognition, real depth frame input, embedding source input, and package/index integration remain separate follow-up slices.</p>
       </div>
 
       <div class="phase">
@@ -835,7 +835,7 @@
           <li>The branch may remain a single integration branch, but commits and review notes should make these checkpoints easy to inspect.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> do not approve Phase 10 if package writing, index generation, relationships, provenance, validation output, and atomic finalization are all mixed together without clear ownership boundaries. Also verify atomic writer behavior, logical hash correctness, and builder/validator integration.</p>
-        <p class="small">Status: atomic package writer skeleton, original media packaging, SQLite index generation, text/color query tables, index manifest, logical row hash output, relationships/provenance wiring, stored validation output, required block stream placeholders, and SVPB writer helpers have landed. Remaining validator failures are now precise: non-empty depth and embedding block streams require real model/runtime-backed processing.</p>
+        <p class="small">Status: atomic package writer skeleton, original media packaging, SQLite index generation, text/color query tables, index manifest, logical row hash output, relationships/provenance wiring, stored validation output, required block stream placeholders, SVPB writer helpers, and ONNX/model verification gates have landed. Remaining validator failures are now precise: non-empty depth and embedding block streams require real source-derived model inputs.</p>
       </div>
 
       <div class="phase">
@@ -1147,9 +1147,9 @@ Act:
     <section class="card">
       <h2>Immediate Next Work</h2>
       <ol>
-        <li><strong>Current merged baseline:</strong> PRs #22 through #38 are landed, covering staged audio extraction through VAD runtime boundary, OCR/color foundations, atomic package writing, SQLite index/index manifest generation, relationships/provenance wiring, validation report storage, required block placeholders, and SVPB writer infrastructure.</li>
+        <li><strong>Current merged baseline:</strong> PRs #22 through #39 are landed, covering staged audio extraction through VAD runtime boundary, OCR/color foundations, atomic package writing, SQLite index/index manifest generation, relationships/provenance wiring, validation report storage, required block placeholders, SVPB writer infrastructure, and ONNX/model verification gates.</li>
         <li><strong>Keep two-builder discipline:</strong> reviewers may run concurrently, but no more than two builder threads should be active at once.</li>
-        <li><strong>Continue Phase 08/09/10:</strong> wire ONNX Runtime/model bundles for depth and embeddings, then use the SVPB writer to replace empty placeholders with real non-empty streams.</li>
+        <li><strong>Continue Phase 09/10:</strong> feed real decoded/canonical video frames into depth generation first, then use the verified model runtime and SVPB writer to replace the empty depth placeholder with a real non-empty stream.</li>
         <li><strong>Continue Phase 07/09 only when assigned:</strong> real model-backed VAD and real OCR/text recognition still require the ONNX/model runtime path; do not block package validation work on them unless the trial requires those observations.</li>
         <li><strong>Prepare for Phase 11:</strong> once depth and embedding block streams validate, run the first real 20 to 30 second package trial and use validator output to drive fixes.</li>
       </ol>
