@@ -50,6 +50,9 @@ struct TextSummary {
   PackageJsonFileSummary absence;
   std::string ocr_required;
   std::string ocr_completed;
+  std::string text_region_count;
+  std::string text_observation_count;
+  std::string numeric_value_count;
   std::string absence_reason;
 };
 
