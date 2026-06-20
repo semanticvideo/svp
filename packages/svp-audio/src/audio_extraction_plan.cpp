@@ -99,7 +99,7 @@ nlohmann::json waveform_plan_to_json(const WaveformArtifactPlan& plan) {
       {"window_duration_us", plan.window_duration_us},
       {"waveform_run", false},
       {"waveform_written", false},
-      {"pending_reason", "waveform envelope generation is not wired in this foundation pass"},
+      {"pending_reason", "waveform envelope generation requires staged analysis audio"},
   };
 }
 
