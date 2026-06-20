@@ -332,7 +332,7 @@
       <span class="pill">Branch prefix: <code>codex/</code></span>
       <span class="pill">Builders active: max 2</span>
       <span class="pill">Work style: fresh worktree per branch</span>
-      <span class="pill">Status: RC2 active, Phase 07 and Phase 09 in progress</span>
+      <span class="pill">Status: Phase 11 hardening after validator-clean trial</span>
     </div>
   </header>
 
@@ -761,12 +761,14 @@
         <p><strong>Branch:</strong> <code>codex/phase-07-audio-transcript</code></p>
         <p><strong>Scope:</strong> emit transcript files, word timings, speaker records, and audio provenance.</p>
         <ul>
-          <li>Use native transcription path selected by the model-runtime work.</li>
+          <li>Use the native model-runtime path selected by Phase 08; the preferred first ASR target is an ONNX Whisper-family bundle, with whisper.cpp/Metal kept as a performance-oriented implementation option rather than the standard package contract.</li>
+          <li>Chunk canonical analysis audio with deterministic overlap, carry original source offsets through every chunk, and reconcile overlap words so boundary words are not dropped or duplicated.</li>
+          <li>Emit chunk provenance, model/runtime provenance, word/segment timestamps, and clear failure/absence records when transcription cannot run.</li>
           <li>Support honest one-speaker mode for the first trial if diarization is not ready.</li>
           <li>Handle silent video as valid zero-word behavior according to the spec.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> timestamp units, provenance honesty, no hidden Python runtime requirement.</p>
-        <p class="small">Status: audio/transcript data model, staged FFmpeg extraction, audio absence/provenance, waveform envelope generation, VAD task planning, and the VAD runtime boundary have landed. ONNX-backed VAD detection, ASR/transcription, diarization, speaker assignment, and package writing remain separate follow-up slices.</p>
+        <p class="small">Status: audio/transcript data model, staged FFmpeg extraction, audio absence/provenance, waveform envelope generation, VAD task planning, and the VAD runtime boundary have landed. ASR/transcription remains a future focused slice; plan it around ONNX Whisper-style local inference, chunking with overlap, timestamp reconciliation, and honest zero-word/failure behavior.</p>
       </div>
 
       <div class="phase">
@@ -1147,11 +1149,11 @@ Act:
     <section class="card">
       <h2>Immediate Next Work</h2>
       <ol>
-        <li><strong>Current merged baseline:</strong> PRs #22 through #43 are landed, covering staged audio extraction through VAD runtime boundary, OCR/color foundations, atomic package writing, SQLite index/index manifest generation, relationships/provenance wiring, validation report storage, required block streams, SVPB writer infrastructure, ONNX/model verification gates, real depth, real OCR, real embeddings, and a validator-clean <code>OCR.MOV</code> package path.</li>
+        <li><strong>Current merged baseline:</strong> PRs #22 through #48 are landed, covering staged audio extraction through VAD runtime boundary, OCR/color foundations, atomic package writing, SQLite index/index manifest generation, relationships/provenance wiring, validation report storage, required block streams, SVPB writer infrastructure, ONNX/model verification gates, real depth, real OCR, real embeddings, validator-clean package paths, OCR baseline reporting, color-distribution scene segmentation, and reproducible Tesseract temp-path handling.</li>
         <li><strong>Keep two-builder discipline:</strong> reviewers may run concurrently, but no more than two builder threads should be active at once.</li>
         <li><strong>Harden Phase 11 trial quality:</strong> keep <code>test-30.mp4</code> as the first human-baseline package trial and turn its findings into narrow fixes: OCR quality/noise filtering, richer scene/timeline segmentation, broader color sampling, transcript/ASR gap reporting, and reproducible trial evidence.</li>
-        <li><strong>Fix package/index polish:</strong> populate or intentionally explain <code>vector_index</code> for embedding records, correct the <code>embedding_sets_blake3</code> source path, and keep direct validator output at exit code 0.</li>
-        <li><strong>Continue Phase 07 only when assigned:</strong> ASR/transcript, real VAD speech regions, diarization, and speaker assignment remain separate quality/capability slices after the validator-clean visual package path.</li>
+        <li><strong>Run OCR mechanical evidence before the next OCR fix:</strong> sample the paper/text frames mechanically, inspect crops/preprocessing/PSM behavior, and produce objective targets for recognizing <code>SVP TEST</code>, <code>$19.99</code>, <code>Phoenix, AZ</code>, and <code>June 20, 2026</code> without hard-coding those strings into package output.</li>
+        <li><strong>Continue Phase 07 only when assigned:</strong> ASR/transcript, real VAD speech regions, diarization, and speaker assignment remain separate quality/capability slices after the validator-clean visual package path. The transcript slice should start with ONNX Whisper-family local inference and deterministic chunk/overlap reconciliation.</li>
       </ol>
       <p>The orchestration loop is no longer proving that a package can become valid; that milestone has been reached. It should now preserve validator-clean output while improving usefulness against the human baseline and tightening query/index fidelity.</p>
     </section>
