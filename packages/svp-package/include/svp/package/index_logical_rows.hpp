@@ -6,7 +6,7 @@
 
 struct sqlite3;
 
-namespace svp::validation {
+namespace svp::package {
 
 struct LogicalRowStreamSummary {
   std::string blake3;
@@ -18,4 +18,4 @@ struct LogicalRowStreamSummary {
     sqlite3& database,
     const std::set<std::string>& table_names);
 
-}  // namespace svp::validation
+}  // namespace svp::package

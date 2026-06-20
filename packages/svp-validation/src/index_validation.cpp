@@ -1,6 +1,6 @@
 #include "index_validation.hpp"
 
-#include "index_logical_rows.hpp"
+#include "svp/package/index_logical_rows.hpp"
 #include "json_schema_subset.hpp"
 #include "ocr_color_index_consistency.hpp"
 
@@ -396,7 +396,7 @@ void validate_required_tables(ValidationReport& report,
 void validate_table_count(ValidationReport& report,
                           const ValidationCodeRegistry& registry,
                           const nlohmann::json& manifest,
-                          const LogicalRowStreamSummary& stream) {
+                          const svp::package::LogicalRowStreamSummary& stream) {
   const auto iterator = manifest.find("table_count");
   if (iterator == manifest.end() || !iterator->is_number_integer() ||
       iterator->get<std::int64_t>() < 0) {
@@ -415,7 +415,7 @@ void validate_table_count(ValidationReport& report,
 void validate_row_count(ValidationReport& report,
                         const ValidationCodeRegistry& registry,
                         const nlohmann::json& manifest,
-                        const LogicalRowStreamSummary& stream) {
+                        const svp::package::LogicalRowStreamSummary& stream) {
   const auto iterator = manifest.find("row_count");
   if (iterator == manifest.end() || !iterator->is_number_integer() ||
       iterator->get<std::int64_t>() < 0) {
@@ -434,7 +434,7 @@ void validate_row_count(ValidationReport& report,
 void validate_logical_rows_blake3(ValidationReport& report,
                                   const ValidationCodeRegistry& registry,
                                   const nlohmann::json& manifest,
-                                  const LogicalRowStreamSummary& stream) {
+                                  const svp::package::LogicalRowStreamSummary& stream) {
   const auto iterator = manifest.find("logical_rows_blake3");
   if (iterator == manifest.end() || !iterator->is_string()) {
     return;
@@ -473,7 +473,7 @@ std::optional<nlohmann::json> validate_index_manifest(
   }
 }
 
-std::optional<LogicalRowStreamSummary> validate_sqlite_index(
+std::optional<svp::package::LogicalRowStreamSummary> validate_sqlite_index(
     ValidationReport& report,
     const ValidationCodeRegistry& registry,
     const std::filesystem::path& package_path,
@@ -492,7 +492,7 @@ std::optional<LogicalRowStreamSummary> validate_sqlite_index(
     validate_required_tables(report, registry, table_names);
     add_ocr_color_index_consistency_findings(report, registry, package_path, layout,
                                              *database);
-    return compute_logical_row_stream_summary(*database, table_names);
+    return svp::package::compute_logical_row_stream_summary(*database, table_names);
   } catch (const std::exception& error) {
     add_finding(report, make_finding(registry, kCodeIndexSchemaInvalid,
                                      package_entry_path(kIndexSqliteEntry), error.what()));
