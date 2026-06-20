@@ -70,4 +70,12 @@ struct DepthGenerationResult {
 [[nodiscard]] nlohmann::json depth_generation_result_to_json(
     const DepthGenerationResult& result);
 
+// Convert float depth output to uint16 payload for SVPB block writing.
+// Returns empty vector if the output size does not exactly match the expected
+// raster dimensions — mismatched output must not be zero-padded into a real block.
+[[nodiscard]] std::vector<std::uint16_t> float_depth_to_uint16(
+    const std::vector<float>& depth,
+    std::uint32_t width,
+    std::uint32_t height);
+
 }  // namespace svp::vision

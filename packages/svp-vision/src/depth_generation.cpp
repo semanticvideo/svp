@@ -93,16 +93,23 @@ std::vector<float> frame_to_normalized_chw(
   return output;
 }
 
+}  // namespace
+
 // Convert float depth output to uint16 payload for SVPB block writing.
 // The ONNX model outputs float depth; we quantize to uint16 relative inverse depth.
+// Returns empty vector if the output size does not exactly match the expected
+// raster dimensions — mismatched output must not be zero-padded into a real block.
 std::vector<std::uint16_t> float_depth_to_uint16(
     const std::vector<float>& depth,
     std::uint32_t width,
     std::uint32_t height) {
-  const std::size_t expected = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+  const std::size_t expected =
+      static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+  if (depth.size() != expected) {
+    return {};
+  }
   std::vector<std::uint16_t> output(expected, 0);
-  const std::size_t count = std::min(depth.size(), expected);
-  for (std::size_t i = 0; i < count; ++i) {
+  for (std::size_t i = 0; i < expected; ++i) {
     float v = depth[i];
     if (std::isnan(v) || std::isinf(v)) {
       v = 0.0f;
@@ -114,8 +121,6 @@ std::vector<std::uint16_t> float_depth_to_uint16(
   return output;
 }
 
-}  // namespace
-
 DepthGenerationResult generate_depth_blocks(
     const DepthGenerationOptions& options,
     const std::filesystem::path& staging_dir) {
@@ -123,6 +128,13 @@ DepthGenerationResult generate_depth_blocks(
   result.onnx_runtime_available = svp::models::OnnxSession::is_available();
   result.model_id = options.model_id;
   result.execution_provider = options.execution_provider;
+
+  // Report frame input availability honestly and independently of model gating.
+  // This is set before any model checks so it reflects the true state of
+  // frame decoding even when depth generation is blocked by missing models.
+  result.depth_frame_input_available =
+      options.frame_input.decoding_succeeded &&
+      !options.frame_input.frames.empty();
 
   if (!result.onnx_runtime_available) {
     result.blocker = "ONNX Runtime is not available in this build";
@@ -179,8 +191,8 @@ DepthGenerationResult generate_depth_blocks(
   result.depth_model_verified = true;
 
   // Check if real decoded canonical frame input is available
-  if (!options.frame_input.decoding_succeeded || options.frame_input.frames.empty()) {
-    result.depth_frame_input_available = false;
+  // (depth_frame_input_available was already set above, independent of model gating)
+  if (!result.depth_frame_input_available) {
     if (!options.frame_input.decoding_attempted) {
       result.blocker = "Real decoded/canonical video frame input was not attempted; "
           "depth generation is blocked: " + options.frame_input.skipped_reason;
@@ -196,8 +208,6 @@ DepthGenerationResult generate_depth_blocks(
         options.execution_provider, "not_run", result.blocker);
     return result;
   }
-
-  result.depth_frame_input_available = true;
 
   // Load ONNX session and run depth inference on each decoded frame
   svp::models::OnnxSession session;
@@ -246,10 +256,23 @@ DepthGenerationResult generate_depth_blocks(
     }
 
     // Convert float depth to uint16 payload
+    // Reject mismatched ONNX output sizes instead of zero-padding.
     std::vector<std::uint16_t> depth_uint16 = float_depth_to_uint16(
         depth_output,
         static_cast<std::uint32_t>(frame.width),
         static_cast<std::uint32_t>(frame.height));
+
+    if (depth_uint16.empty()) {
+      result.blocker = std::string("ONNX depth output size mismatch for frame ") +
+          frame.frame_id + ": expected " +
+          std::to_string(static_cast<std::size_t>(frame.width) * static_cast<std::size_t>(frame.height)) +
+          " elements but got " + std::to_string(depth_output.size()) +
+          "; depth generation blocked to prevent fake/partial depth";
+      result.processor_provenance = make_depth_processor_provenance(
+          manifest.model_id, manifest.model_bundle_id,
+          options.execution_provider, "error", result.blocker);
+      return result;
+    }
 
     // Write SVPB block
     svp::blocks::BlockWriteSpec spec;

@@ -11,6 +11,7 @@ namespace svp::package {
 struct SpatialEmbeddingPlaceholderSummary {
   std::size_t depth_index_written = false;
   std::size_t depth_blocks_written = false;
+  std::size_t depth_placeholder_written = false;
   std::size_t depth_generation_run = false;
   std::size_t masks_index_written = false;
   std::size_t masks_blocks_written = false;

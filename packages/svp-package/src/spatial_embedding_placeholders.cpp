@@ -199,7 +199,11 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     summary.depth_generation_run = depth_result.depth_generation_run;
     summary.depth_model_available = depth_result.depth_model_available;
     summary.depth_model_verified = depth_result.depth_model_verified;
-    summary.depth_frame_input_available = depth_result.depth_frame_input_available;
+    // Report frame input availability from the decoded frames directly,
+    // not from depth_result which may have returned early at model gating.
+    summary.depth_frame_input_available =
+        decoded_frames.decoding_succeeded &&
+        !decoded_frames.frames.empty();
     summary.depth_generation_detail =
         svp::vision::depth_generation_result_to_json(depth_result);
 
@@ -227,7 +231,9 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
       write_empty_file(staging_dir / "spatial" / "depth.index.jsonl");
       summary.depth_index_written = true;
       write_empty_file(staging_dir / "spatial" / "depth.blocks.svpdz");
-      summary.depth_blocks_written = true;
+      summary.depth_placeholder_written = true;
+      // Do NOT set depth_blocks_written — that field means real SVPB depth
+      // blocks were generated. The placeholder is an honest empty file.
     }
 
     write_empty_file(staging_dir / "spatial" / "masks.index.jsonl");
@@ -270,7 +276,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
   summary.depth_index_written = true;
 
   write_empty_file(staging_dir / "spatial" / "depth.blocks.svpdz");
-  summary.depth_blocks_written = true;
+  summary.depth_placeholder_written = true;
 
   write_empty_file(staging_dir / "spatial" / "masks.index.jsonl");
   summary.masks_index_written = true;
@@ -304,6 +310,7 @@ nlohmann::json spatial_embedding_placeholder_summary_to_json(
   return {
       {"depth_index_written", summary.depth_index_written != 0},
       {"depth_blocks_written", summary.depth_blocks_written != 0},
+      {"depth_placeholder_written", summary.depth_placeholder_written != 0},
       {"depth_generation_run", summary.depth_generation_run != 0},
       {"depth_model_available", summary.depth_model_available != 0},
       {"depth_model_verified", summary.depth_model_verified != 0},

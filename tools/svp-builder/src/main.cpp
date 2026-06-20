@@ -554,6 +554,8 @@ int main(int argc, char** argv) {
                   << " depth index, "
                   << output.at("spatial_embedding_placeholders").at("depth_blocks_written")
                   << " depth blocks, "
+                  << output.at("spatial_embedding_placeholders").value("depth_placeholder_written", false)
+                  << " depth placeholder, "
                   << output.at("spatial_embedding_placeholders").at("masks_blocks_written")
                   << " masks blocks, "
                   << output.at("spatial_embedding_placeholders").at("embedding_sets_written")
