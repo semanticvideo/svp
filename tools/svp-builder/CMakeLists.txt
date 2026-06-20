@@ -13,4 +13,5 @@ target_link_libraries(svp-builder
     nlohmann_json::nlohmann_json
     svp::core
     svp::media
+    svp::vision
 )
