@@ -579,7 +579,7 @@ struct ParsedNumber {
 // Check if the text looks like a date pattern (e.g. "June 20, 2026").
 bool looks_like_date_context(const std::string& text) {
   static const std::regex date_re(
-      R"((january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+\d{2,4})",
+      R"((january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:,\s*|\s+)\d{2,4})",
       std::regex_constants::icase);
   return std::regex_search(text, date_re);
 }
@@ -660,11 +660,10 @@ std::vector<ParsedNumber> parse_numeric_values(const std::string& raw_text,
     search_start = match[0].second;
   }
 
-  // Third pass: find standalone integers — only emit if in date context or
-  // the observation has multiple words (suppressing single-integer noise).
+  // Third pass: find standalone integers — only emit if in date context
+  // (suppressing standalone low-context integer noise).
   const bool is_date = looks_like_date_context(raw_text);
-  const int word_count = count_words(raw_text);
-  const bool allow_integers = is_date || word_count >= 3;
+  const bool allow_integers = is_date;
 
   if (allow_integers) {
     search_start = raw_text.cbegin();
@@ -864,6 +863,27 @@ std::vector<ReconciledObservation> reconcile_detections(
   return reconciled;
 }
 
+void write_failure_stage_files(const std::filesystem::path& staging_dir, const TextAbsenceRecord& text_absence) {
+  const std::filesystem::path text_dir = staging_dir / "text";
+  std::filesystem::create_directories(text_dir);
+
+  {
+    std::ofstream out(text_dir / "text_regions.jsonl");
+  }
+  {
+    std::ofstream out(text_dir / "text_observations.jsonl");
+  }
+  {
+    std::ofstream out(text_dir / "numeric_values.jsonl");
+  }
+  {
+    std::ofstream out(text_dir / "text_absence.json");
+    if (out) {
+      out << text_absence_to_json(text_absence).dump(2) << "\n";
+    }
+  }
+}
+
 }  // namespace
 
 OcrGenerationResult generate_ocr_observations(
@@ -917,6 +937,13 @@ OcrGenerationResult generate_ocr_observations(
         "processor_numeric_parser_0001", "numeric_parser",
         "svp-vision-ocr-generation-v1", "deterministic_cpp",
         "not_run", "No OCR text to parse"));
+
+    write_failure_stage_files(staging_dir, result.text_absence);
+    result.text_regions_written = true;
+    result.text_observations_written = true;
+    result.numeric_values_written = true;
+    result.text_absence_written = true;
+
     return result;
   }
 
@@ -947,6 +974,13 @@ OcrGenerationResult generate_ocr_observations(
         "processor_numeric_parser_0001", "numeric_parser",
         "svp-vision-ocr-generation-v1", "deterministic_cpp",
         "not_run", "No OCR text to parse"));
+
+    write_failure_stage_files(staging_dir, result.text_absence);
+    result.text_regions_written = true;
+    result.text_observations_written = true;
+    result.numeric_values_written = true;
+    result.text_absence_written = true;
+
     return result;
   }
 
