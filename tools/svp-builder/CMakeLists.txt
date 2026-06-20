@@ -16,4 +16,6 @@ target_link_libraries(svp-builder
     svp::media
     svp::models
     svp::vision
+    svp::package
+    svp::validation
 )
