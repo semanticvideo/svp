@@ -3,6 +3,8 @@
 #include "svp/package/package_probe.hpp"
 #include "svp/package/index_writer.hpp"
 #include "svp/package/relationship_provenance_writer.hpp"
+#include "svp/package/spatial_embedding_placeholders.hpp"
+#include "svp/package/validation_report_storage.hpp"
 #include <nlohmann/json.hpp>
 
 #include <cassert>
@@ -315,6 +317,158 @@ void test_write_index_foundation() {
   std::filesystem::remove_all(root);
 }
 
+void test_spatial_embedding_placeholders() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-spatial-embedding-placeholder-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  const svp::package::SpatialEmbeddingPlaceholderSummary summary =
+      svp::package::write_spatial_and_embedding_placeholders(staging_dir);
+
+  assert(summary.depth_index_written);
+  assert(summary.masks_index_written);
+  assert(summary.masks_blocks_written);
+  assert(summary.embedding_sets_written);
+  assert(summary.embeddings_index_written);
+  assert(summary.provenance_records_added == 2);
+
+  assert(std::filesystem::exists(staging_dir / "spatial" / "depth.index.jsonl"));
+  assert(std::filesystem::exists(staging_dir / "spatial" / "masks.index.jsonl"));
+  assert(std::filesystem::exists(staging_dir / "spatial" / "masks.blocks.svpmz"));
+  assert(std::filesystem::exists(staging_dir / "embeddings" / "embedding_sets.json"));
+  assert(std::filesystem::exists(staging_dir / "embeddings" / "embeddings.index.jsonl"));
+
+  assert(!std::filesystem::exists(staging_dir / "spatial" / "depth.blocks.svpdz"));
+  assert(!std::filesystem::exists(staging_dir / "embeddings" / "embeddings.blocks.svpez"));
+
+  assert(std::filesystem::file_size(staging_dir / "spatial" / "masks.blocks.svpmz") == 0);
+  assert(std::filesystem::file_size(staging_dir / "spatial" / "depth.index.jsonl") == 0);
+  assert(std::filesystem::file_size(staging_dir / "spatial" / "masks.index.jsonl") == 0);
+  assert(std::filesystem::file_size(staging_dir / "embeddings" / "embeddings.index.jsonl") == 0);
+
+  std::ifstream sets_in(staging_dir / "embeddings" / "embedding_sets.json");
+  nlohmann::json sets_json;
+  sets_in >> sets_json;
+  assert(sets_json["sets"].is_array());
+  assert(sets_json["sets"].empty());
+
+  const std::vector<nlohmann::json> processors =
+      read_jsonl_records(staging_dir / "provenance" / "processors.jsonl");
+  assert(processors.size() >= 2);
+  bool found_spatial = false;
+  bool found_embedding = false;
+  for (const auto& proc : processors) {
+    const std::string id = proc.value("id", "");
+    if (id == "processor_spatial_placeholder_0001") {
+      found_spatial = true;
+      assert(proc.value("status", "") == "not_run");
+    }
+    if (id == "processor_embedding_placeholder_0001") {
+      found_embedding = true;
+      assert(proc.value("status", "") == "not_run");
+    }
+  }
+  assert(found_spatial);
+  assert(found_embedding);
+
+  const nlohmann::json summary_json =
+      svp::package::spatial_embedding_placeholder_summary_to_json(summary);
+  assert(summary_json["depth_index_written"] == true);
+  assert(summary_json["masks_blocks_written"] == true);
+  assert(summary_json["embedding_sets_written"] == true);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_validation_report_storage() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-validation-report-storage-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir);
+
+  nlohmann::json report = {
+    {"schema_version", "svp-validation-report-v1"},
+    {"status", "invalid"},
+    {"core_status", "invalid"},
+    {"errors", nlohmann::json::array({
+      nlohmann::json{{"code", "ERR_MISSING_DEPTH"},
+                    {"severity", "error"},
+                    {"path", "/spatial/depth.blocks.svpdz"},
+                    {"message", "Required SVPB package entry is absent."}}
+    })}
+  };
+
+  bool success = svp::package::write_validation_report_to_staging(staging_dir, report);
+  assert(success);
+
+  const std::filesystem::path report_path = staging_dir / "provenance" / "validation.json";
+  assert(std::filesystem::exists(report_path));
+
+  std::ifstream in(report_path);
+  nlohmann::json read_back;
+  in >> read_back;
+  assert(read_back["schema_version"] == "svp-validation-report-v1");
+  assert(read_back["status"] == "invalid");
+  assert(read_back["errors"].size() == 1);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_package_skeleton_includes_placeholders_and_validation_report() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-package-skeleton-full-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path package_path = root / "output.svp";
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  [[maybe_unused]] const auto placeholder_summary =
+      svp::package::write_spatial_and_embedding_placeholders(staging_dir);
+
+  nlohmann::json report = {
+    {"schema_version", "svp-validation-report-v1"},
+    {"status", "invalid"},
+    {"core_status", "invalid"},
+    {"errors", nlohmann::json::array()}
+  };
+  assert(svp::package::write_validation_report_to_staging(staging_dir, report));
+
+  nlohmann::json manifest = {
+    {"svp_version", "1.0-rc.2"},
+    {"package_id", "svp_test_full_pkg"},
+    {"canonical_analysis_raster", {{"width", 640}, {"height", 360}}}
+  };
+
+  bool success = svp::package::write_package_skeleton(
+      package_path, staging_dir, "", manifest);
+  assert(success);
+
+  auto layout_result = svp::package::read_package_layout(package_path);
+  assert(layout_result.has_value());
+  const auto& layout = layout_result.value();
+
+  assert(layout.has_entry("spatial/depth.index.jsonl"));
+  assert(layout.has_entry("spatial/masks.index.jsonl"));
+  assert(layout.has_entry("spatial/masks.blocks.svpmz"));
+  assert(layout.has_entry("embeddings/embedding_sets.json"));
+  assert(layout.has_entry("embeddings/embeddings.index.jsonl"));
+  assert(layout.has_entry("provenance/validation.json"));
+
+  assert(!layout.has_entry("spatial/depth.blocks.svpdz"));
+  assert(!layout.has_entry("embeddings/embeddings.blocks.svpez"));
+
+  std::filesystem::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
@@ -323,6 +477,9 @@ int main() {
   test_writer_fails_on_rename_and_cleans_up_temp();
   test_write_relationships_and_provenance();
   test_write_index_foundation();
+  test_spatial_embedding_placeholders();
+  test_validation_report_storage();
+  test_package_skeleton_includes_placeholders_and_validation_report();
   std::cout << "All svp-package-tests passed!\n";
   return 0;
 }

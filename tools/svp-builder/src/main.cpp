@@ -10,6 +10,8 @@
 #include "svp/package/package_writer.hpp"
 #include "svp/package/index_writer.hpp"
 #include "svp/package/relationship_provenance_writer.hpp"
+#include "svp/package/spatial_embedding_placeholders.hpp"
+#include "svp/package/validation_report_storage.hpp"
 #include "svp/validation/report_json.hpp"
 #include "svp/validation/validator.hpp"
 #include <ctime>
@@ -369,6 +371,7 @@ int main(int argc, char** argv) {
 
       bool package_written = false;
       bool validator_passes = false;
+      bool validation_report_stored = false;
       int validator_exit_code = -1;
       nlohmann::json validation_report_json = nlohmann::json::object();
       std::filesystem::path package_path;
@@ -430,11 +433,19 @@ int main(int argc, char** argv) {
             svp::package::relationship_provenance_write_summary_to_json(
                 relationship_summary);
 
+        // Write honest spatial/embedding placeholder entries
+        const svp::package::SpatialEmbeddingPlaceholderSummary placeholder_summary =
+            svp::package::write_spatial_and_embedding_placeholders(staging_dir);
+        output["spatial_embedding_placeholders"] =
+            svp::package::spatial_embedding_placeholder_summary_to_json(
+                placeholder_summary);
+
         // Generate SQLite index foundation and manifest
         if (!svp::package::write_index_foundation(staging_dir, manifest_json)) {
           std::cerr << "Warning: failed to write SQLite index foundation.\n";
         }
 
+        // First package write (without validation report)
         package_written = svp::package::write_package_skeleton(
             package_path, staging_dir, build_source_path, manifest_json);
 
@@ -442,10 +453,29 @@ int main(int argc, char** argv) {
           svp::validation::ValidatorOptions validator_opts;
           validator_opts.validation_codes_path = "spec/registries/validation-codes.json";
 
-          auto report = svp::validation::validate_package(package_path, validator_opts);
-          validator_exit_code = svp::validation::exit_code(report);
-          validator_passes = (validator_exit_code == 0);
-          validation_report_json = report;
+          // Run validator on first package
+          auto first_report = svp::validation::validate_package(package_path, validator_opts);
+          validation_report_json = first_report;
+
+          // Store validation report in staging for second package write
+          validation_report_stored = svp::package::write_validation_report_to_staging(
+              staging_dir, validation_report_json);
+
+          if (validation_report_stored) {
+            // Re-package with validation report included
+            package_written = svp::package::write_package_skeleton(
+                package_path, staging_dir, build_source_path, manifest_json);
+          } else {
+            package_written = false;
+          }
+
+          if (package_written) {
+            // Run validator on final package
+            auto final_report = svp::validation::validate_package(package_path, validator_opts);
+            validator_exit_code = svp::validation::exit_code(final_report);
+            validator_passes = (validator_exit_code == 0);
+            validation_report_json = final_report;
+          }
         }
       }
 
@@ -459,8 +489,14 @@ int main(int argc, char** argv) {
         output["builder_command"]["package_path"] = package_path.string();
         output["builder_command"]["validator"] = {
           {"exit_code", validator_exit_code},
+          {"validation_report_stored", validation_report_stored},
+          {"validator_proven_valid", validator_passes},
           {"report", validation_report_json}
         };
+        if (validation_report_stored) {
+          output["builder_command"]["validator"]["validation_report_path"] =
+              "provenance/validation.json";
+        }
       }
 
       write_json_file(json_out_path, output);
@@ -504,7 +540,20 @@ int main(int argc, char** argv) {
         std::cout << "Processor provenance records written: "
                   << output.at("package_relationships_provenance").at("processors_written")
                   << "\n";
+        std::cout << "Spatial/embedding placeholders written: "
+                  << output.at("spatial_embedding_placeholders").at("depth_index_written")
+                  << " depth index, "
+                  << output.at("spatial_embedding_placeholders").at("masks_blocks_written")
+                  << " masks blocks, "
+                  << output.at("spatial_embedding_placeholders").at("embedding_sets_written")
+                  << " embedding sets\n";
         std::cout << "Wrote skeleton .svp package to: " << package_path << "\n";
+        if (validation_report_stored) {
+          std::cout << "Validation report stored at: provenance/validation.json\n";
+        } else {
+          std::cout << "Validation report storage FAILED\n";
+        }
+        std::cout << "Validator exit code: " << validator_exit_code << "\n";
         if (validator_passes) {
           std::cout << "Package validation: SUCCESS\n";
         } else {
