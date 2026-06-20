@@ -38,6 +38,8 @@ AudioStagePlan build_audio_stage_plan(const std::filesystem::path& source_path,
                                   ffmpeg_audio_extraction_available,
                                   ffmpeg_path);
   plan.vad_task_plan = build_vad_task_plan(probe, std::nullopt, false);
+  plan.vad_execution_boundary =
+      build_vad_execution_boundary(plan.vad_task_plan, false, false, false);
 
   plan.required_outputs = required_audio_outputs();
   plan.pending_processors = {
@@ -73,6 +75,8 @@ nlohmann::json audio_stage_plan_to_json(const AudioStagePlan& plan) {
       {"selected_audio_stream_id", plan.selected_audio_stream_id},
       {"audio_extraction", audio_extraction_plan_to_json(plan.extraction_plan)},
       {"vad_task_plan", vad_task_plan_to_json(plan.vad_task_plan)},
+      {"vad_execution_boundary",
+       vad_execution_boundary_to_json(plan.vad_execution_boundary)},
       {"required_outputs", plan.required_outputs},
       {"pending_processors", plan.pending_processors},
       {"blockers", plan.blockers},

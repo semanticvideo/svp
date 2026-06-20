@@ -1,5 +1,6 @@
 #include "svp/audio/audio_extraction_executor.hpp"
 #include "svp/audio/audio_stage_plan.hpp"
+#include "svp/audio/vad_execution_boundary.hpp"
 #include "svp/core/version.hpp"
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/vision/observation_pipeline_plan.hpp"
@@ -179,6 +180,11 @@ int main(int argc, char** argv) {
                                                       staging_dir);
         nlohmann::json extraction_run_json =
             svp::audio::audio_extraction_run_to_json(extraction_run);
+        const svp::audio::VadExecutionBoundary vad_boundary =
+            svp::audio::build_vad_execution_boundary(audio_plan.vad_task_plan,
+                                                     extraction_run.analysis_audio_written,
+                                                     extraction_run.waveform_written,
+                                                     false);
         audio_json["audio_extraction"]["execution"] = extraction_run_json;
         audio_json["audio_extraction"]["extraction_run"] =
             extraction_run.extraction_run;
@@ -195,6 +201,8 @@ int main(int argc, char** argv) {
         for (const std::string& blocker : extraction_run.blockers) {
           audio_json["blockers"].push_back(blocker);
         }
+        audio_json["vad_execution_boundary"] =
+            svp::audio::vad_execution_boundary_to_json(vad_boundary);
         output["audio_foundation"] = audio_json;
       } else if (stop_after == "vision-plan") {
         const svp::vision::VisionObservationPipelinePlan vision_plan =
