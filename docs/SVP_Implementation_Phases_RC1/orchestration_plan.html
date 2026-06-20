@@ -366,13 +366,13 @@
 
       <article class="card">
         <h2>Current Implementation State</h2>
-        <p>The SVP v1.0 RC2 spec package is present in the repository, and the OCR/color unblock gate is complete. The validator spine, RC2 fixtures, inspector summaries/dumps, media probing foundation, ONNX runtime boundary, audio foundation, and vision/color foundations have landed. Phase 07 now stages audio extraction, audio absence, processor provenance, waveform envelopes, and an honest VAD runtime boundary. Phase 09 now stages color observations, real-frame/canonical-raster color sampling, and an honest OCR/text foundation. Phase 10 now has atomic package writing, SQLite index/index manifest generation, relationships/provenance wiring, stored validation output, honest required block stream placeholders, tested SVPB writer infrastructure, and verified-model runtime gates for depth and embeddings. The remaining validator blockers require real source-derived inputs for model-backed depth and embedding generation.</p>
+        <p>The SVP v1.0 RC2 spec package is present in the repository, and the OCR/color unblock gate is complete. The validator spine, RC2 fixtures, inspector summaries/dumps, media probing foundation, ONNX runtime boundary, audio foundation, and vision/color foundations have landed. Phase 07 now stages audio extraction, audio absence, processor provenance, waveform envelopes, and an honest VAD runtime boundary. Phase 09 now stages real-frame color observations, real depth blocks, real OCR text/numeric observations, and source-derived text embeddings when OCR text exists. Phase 10 now has atomic package writing, SQLite index/index manifest generation, relationships/provenance wiring, stored validation output, required block streams, tested SVPB writer infrastructure, verified-model runtime gates, and validator-clean package assembly. Phase 11 has produced a validator-clean real video trial package from <code>test-30.mp4</code>. The remaining work is quality and coverage hardening, not basic package validity.</p>
         <ul>
           <li><code>AGENTS.md</code> now defines agent permissions, worktree rules, branch/push/PR permission, test discipline, and no-god-file expectations.</li>
           <li>The base roadmap lives under <code>docs/SVP_Implementation_Phases_RC1/</code> with active RC2 deltas under <code>docs/SVP_Implementation_Phases_RC2_Update/</code>.</li>
           <li>Implementation should follow the phase docs, not free-form invention.</li>
           <li>The orchestrator thread owns sequencing and must be woken by builders and reviewers when they finish.</li>
-          <li>Do not treat incomplete builder output as a valid package. Until real depth and embedding block streams exist and validator passes, builder stop points must keep <code>valid_svp_package_written=false</code>.</li>
+          <li>Do not treat incomplete builder output as a valid package. Trial output may report <code>valid_svp_package_written=true</code> only when the validator exits cleanly, as reproduced for the first <code>test-30.mp4</code> path.</li>
         </ul>
       </article>
 
@@ -783,7 +783,7 @@
           <li>Make missing model errors clear and non-crashing.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> no Python runtime, content-addressed behavior, clear ownership boundaries.</p>
-        <p class="small">Status: model bundle/cache foundation and ONNX Runtime session boundary have landed. Model bundles are verified with BLAKE3 before use, and depth/embedding generation remains honestly blocked until real decoded frames or source-derived embedding inputs are wired.</p>
+        <p class="small">Status: model bundle/cache foundation and ONNX Runtime session boundary have landed. Depth Anything V2 Small and Nomic Embed Text v1.5 bundles are used from the external model cache, with manifest-listed file hashes verified before use. Canonical <code>bundle_blake3</code> verification remains a known spec/tooling gap until the bundle digest byte algorithm is defined.</p>
       </div>
 
       <div class="phase">
@@ -803,7 +803,7 @@
           <li>Support queries like "find all orange scenes" through scene/shot color summaries.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> no over-promising, block validity, degenerate/static video behavior.</p>
-        <p class="small">Status: planned-only vision pipeline, deterministic color quantization, color observation record planning, frame/keyframe color sampling, foundation color staging, real-frame/canonical-raster color sampling boundary, and honest depth-generation runtime gate have landed. OCR/text recognition, real depth frame input, embedding source input, and package/index integration remain separate follow-up slices.</p>
+        <p class="small">Status: deterministic color quantization, color observation record planning, frame/keyframe color sampling, foundation color staging, real-frame/canonical-raster color sampling, real model-backed depth generation, native Tesseract OCR text/numeric generation, and source-derived text embedding generation have landed. Known quality gaps remain in OCR accuracy, scene/timeline segmentation, and richer color coverage across the full human baseline.</p>
       </div>
 
       <div class="phase">
@@ -835,7 +835,7 @@
           <li>The branch may remain a single integration branch, but commits and review notes should make these checkpoints easy to inspect.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> do not approve Phase 10 if package writing, index generation, relationships, provenance, validation output, and atomic finalization are all mixed together without clear ownership boundaries. Also verify atomic writer behavior, logical hash correctness, and builder/validator integration.</p>
-        <p class="small">Status: atomic package writer skeleton, original media packaging, SQLite index generation, text/color query tables, index manifest, logical row hash output, relationships/provenance wiring, stored validation output, required block stream placeholders, SVPB writer helpers, and ONNX/model verification gates have landed. Remaining validator failures are now precise: non-empty depth and embedding block streams require real source-derived model inputs.</p>
+        <p class="small">Status: atomic package writer skeleton, original media packaging, SQLite index generation, text/color query tables, index manifest, logical row hash output, relationships/provenance wiring, stored validation output, required block streams, SVPB writer helpers, ONNX/model verification gates, real depth blocks, real OCR text/numeric files, and real text embedding blocks have landed. The <code>OCR.MOV</code> and <code>test-30.mp4</code> paths have both reached validator-clean package output when the local model cache and native tools are available.</p>
       </div>
 
       <div class="phase">
@@ -874,7 +874,7 @@
           <li>If no visible text exists, <code>text_absence.json</code> must honestly record that absence.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> trial evidence, actionable findings, no hand-built package shortcuts.</p>
-        <p class="small">Parallelizable: no. This is the milestone.</p>
+        <p class="small">Status: milestone reached for <code>test-30.mp4</code>. The trial generated a validator-clean package with real depth blocks, real OCR text/numeric observations, real embeddings, color observations, SQLite/index manifest, provenance, and stored validation output. Human-baseline comparison shows useful package structure with quality gaps: OCR is noisy and misses some short text such as <code>TEST</code>/<code>AZ</code>, transcript/ASR is absent, scene/timeline segmentation is still foundation-level, color coverage is sparse, <code>vector_index</code> is empty despite embedding records, and <code>embedding_sets_blake3</code> likely references the wrong embedding set source path.</p>
       </div>
 
       <div class="phase">
@@ -1147,13 +1147,13 @@ Act:
     <section class="card">
       <h2>Immediate Next Work</h2>
       <ol>
-        <li><strong>Current merged baseline:</strong> PRs #22 through #39 are landed, covering staged audio extraction through VAD runtime boundary, OCR/color foundations, atomic package writing, SQLite index/index manifest generation, relationships/provenance wiring, validation report storage, required block placeholders, SVPB writer infrastructure, and ONNX/model verification gates.</li>
+        <li><strong>Current merged baseline:</strong> PRs #22 through #43 are landed, covering staged audio extraction through VAD runtime boundary, OCR/color foundations, atomic package writing, SQLite index/index manifest generation, relationships/provenance wiring, validation report storage, required block streams, SVPB writer infrastructure, ONNX/model verification gates, real depth, real OCR, real embeddings, and a validator-clean <code>OCR.MOV</code> package path.</li>
         <li><strong>Keep two-builder discipline:</strong> reviewers may run concurrently, but no more than two builder threads should be active at once.</li>
-        <li><strong>Continue Phase 09/10:</strong> feed real decoded/canonical video frames into depth generation first, then use the verified model runtime and SVPB writer to replace the empty depth placeholder with a real non-empty stream.</li>
-        <li><strong>Continue Phase 07/09 only when assigned:</strong> real model-backed VAD and real OCR/text recognition still require the ONNX/model runtime path; do not block package validation work on them unless the trial requires those observations.</li>
-        <li><strong>Prepare for Phase 11:</strong> once depth and embedding block streams validate, run the first real 20 to 30 second package trial and use validator output to drive fixes.</li>
+        <li><strong>Harden Phase 11 trial quality:</strong> keep <code>test-30.mp4</code> as the first human-baseline package trial and turn its findings into narrow fixes: OCR quality/noise filtering, richer scene/timeline segmentation, broader color sampling, transcript/ASR gap reporting, and reproducible trial evidence.</li>
+        <li><strong>Fix package/index polish:</strong> populate or intentionally explain <code>vector_index</code> for embedding records, correct the <code>embedding_sets_blake3</code> source path, and keep direct validator output at exit code 0.</li>
+        <li><strong>Continue Phase 07 only when assigned:</strong> ASR/transcript, real VAD speech regions, diarization, and speaker assignment remain separate quality/capability slices after the validator-clean visual package path.</li>
       </ol>
-      <p>The orchestration loop is no longer paused on the RC2 OCR/color gate. It should continue through explicitly assigned Phase 10 slices while preserving honest partial-output flags until the package becomes validator-proven.</p>
+      <p>The orchestration loop is no longer proving that a package can become valid; that milestone has been reached. It should now preserve validator-clean output while improving usefulness against the human baseline and tightening query/index fidelity.</p>
     </section>
 
     <section class="card">
