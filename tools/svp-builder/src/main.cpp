@@ -40,6 +40,15 @@ void write_json_file(const std::filesystem::path& output_path,
   output << value.dump(2) << "\n";
 }
 
+svp::media::MediaProbe load_or_run_probe(const std::string& source_path,
+                                         const std::string& probe_json_path,
+                                         const std::string& ffprobe_path) {
+  if (!probe_json_path.empty()) {
+    return svp::media::load_media_probe_json(probe_json_path);
+  }
+  return svp::media::probe_media_with_ffprobe(source_path, ffprobe_path);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -49,18 +58,20 @@ int main(int argc, char** argv) {
 
   std::string probe_source_path;
   std::string probe_json_path;
+  std::string probe_ffprobe_path = "ffprobe";
   bool probe_json_output = false;
 
   auto* probe = app.add_subcommand(
       "probe", "Read deterministic media probe metadata and compute SVP timing data");
   probe->add_option("source", probe_source_path, "Source media path")->required();
   probe->add_option("--probe-json", probe_json_path,
-                    "Precomputed media probe JSON; native FFmpeg probing is not linked yet")
-      ->required();
+                    "Precomputed media probe JSON; skips running ffprobe");
+  probe->add_option("--ffprobe", probe_ffprobe_path, "ffprobe executable path");
   probe->add_flag("--json", probe_json_output, "Emit JSON");
 
   std::string build_source_path;
   std::string build_probe_json_path;
+  std::string build_ffprobe_path = "ffprobe";
   std::string build_output_path;
   std::string stop_after = "media-ingest";
 
@@ -68,8 +79,8 @@ int main(int argc, char** argv) {
       "build", "Write an honest media-ingest foundation JSON artifact");
   build->add_option("source", build_source_path, "Source media path")->required();
   build->add_option("--probe-json", build_probe_json_path,
-                    "Precomputed media probe JSON; native FFmpeg probing is not linked yet")
-      ->required();
+                    "Precomputed media probe JSON; skips running ffprobe");
+  build->add_option("--ffprobe", build_ffprobe_path, "ffprobe executable path");
   build->add_option("--out", build_output_path,
                     "Output path for the media-ingest foundation JSON")
       ->required();
@@ -82,8 +93,9 @@ int main(int argc, char** argv) {
     if (*probe) {
       const svp::media::MediaIngestPlan plan =
           svp::media::build_media_ingest_plan(probe_source_path,
-                                              svp::media::load_media_probe_json(
-                                                  probe_json_path));
+                                              load_or_run_probe(probe_source_path,
+                                                                probe_json_path,
+                                                                probe_ffprobe_path));
       if (probe_json_output) {
         std::cout << svp::media::media_ingest_plan_to_json(plan).dump(2) << "\n";
       } else {
@@ -100,8 +112,9 @@ int main(int argc, char** argv) {
 
       const svp::media::MediaIngestPlan plan =
           svp::media::build_media_ingest_plan(build_source_path,
-                                              svp::media::load_media_probe_json(
-                                                  build_probe_json_path));
+                                              load_or_run_probe(build_source_path,
+                                                                build_probe_json_path,
+                                                                build_ffprobe_path));
       nlohmann::json output = svp::media::media_ingest_plan_to_json(plan);
       output["builder_command"] = {
           {"command", "build"},

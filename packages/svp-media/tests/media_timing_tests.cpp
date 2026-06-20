@@ -1,5 +1,6 @@
 #include "svp/media/canonical_raster.hpp"
 #include "svp/media/canonical_timing.hpp"
+#include "svp/media/media_probe.hpp"
 
 #include <cassert>
 
@@ -48,11 +49,88 @@ void test_canonical_rasters() {
   assert(rotated.height == 640);
 }
 
+void test_probe_json_round_trip_preserves_nested_timing() {
+  svp::media::MediaProbe probe;
+  probe.format_name = "mov,mp4,m4a,3gp,3g2,mj2";
+  probe.container_timing = svp::media::StreamTiming{
+      {1, 1000000},
+      0,
+      3003000,
+      std::nullopt,
+      std::nullopt,
+  };
+  probe.video_streams.push_back(svp::media::VideoStreamProbe{
+      "vstream_0001",
+      0,
+      "h264",
+      1920,
+      1080,
+      0,
+      {1, 1},
+      {{1, 30000}, 0, 90090, {{30000, 1001}}, 90},
+  });
+  probe.audio_streams.push_back(svp::media::AudioStreamProbe{
+      "astream_0001",
+      1,
+      "aac",
+      48000,
+      2,
+      {{1, 48000}, 0, 144144, std::nullopt, std::nullopt},
+  });
+
+  const nlohmann::json encoded = svp::media::media_probe_to_json(probe);
+  assert(encoded["video_streams"][0].contains("timing"));
+  assert(!encoded["video_streams"][0].contains("timebase"));
+
+  const svp::media::MediaProbe parsed =
+      svp::media::parse_media_probe_json(encoded, "round-trip");
+  assert(parsed.container_timing.has_value());
+  assert(parsed.container_timing->duration_pts == 3003000);
+  assert(parsed.video_streams.size() == 1);
+  assert(parsed.video_streams[0].timing.timebase.numerator == 1);
+  assert(parsed.video_streams[0].timing.timebase.denominator == 30000);
+  assert(parsed.video_streams[0].timing.duration_pts == 90090);
+  assert(parsed.video_streams[0].timing.average_frame_rate.has_value());
+  assert(parsed.video_streams[0].timing.average_frame_rate->numerator == 30000);
+  assert(parsed.video_streams[0].timing.average_frame_rate->denominator == 1001);
+  assert(parsed.video_streams[0].timing.frame_count == 90);
+  assert(parsed.audio_streams.size() == 1);
+  assert(parsed.audio_streams[0].timing.timebase.denominator == 48000);
+}
+
+void test_probe_json_parser_keeps_legacy_flat_timing() {
+  const nlohmann::json value = {
+      {"format_name", "matroska,webm"},
+      {"video_streams",
+       {{{"id", "vstream_0001"},
+         {"index", 0},
+         {"codec_name", "vp9"},
+         {"width", 1080},
+         {"height", 1920},
+         {"pixel_aspect_ratio", "1:1"},
+         {"timebase", "1/1000"},
+         {"start_pts", 12},
+         {"duration_pts", 3456},
+         {"avg_frame_rate", "30/1"},
+         {"frame_count", 104}}}},
+      {"audio_streams", nlohmann::json::array()},
+  };
+
+  const svp::media::MediaProbe parsed =
+      svp::media::parse_media_probe_json(value, "legacy-flat");
+  assert(parsed.video_streams[0].timing.timebase.denominator == 1000);
+  assert(parsed.video_streams[0].timing.start_pts == 12);
+  assert(parsed.video_streams[0].timing.duration_pts == 3456);
+  assert(parsed.video_streams[0].timing.frame_count == 104);
+}
+
 }  // namespace
 
 int main() {
   test_round_half_to_even();
   test_frame_rates();
   test_canonical_rasters();
+  test_probe_json_round_trip_preserves_nested_timing();
+  test_probe_json_parser_keeps_legacy_flat_timing();
   return 0;
 }

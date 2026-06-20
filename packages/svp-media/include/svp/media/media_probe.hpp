@@ -49,6 +49,9 @@ struct MediaProbe {
 [[nodiscard]] MediaProbe parse_media_probe_json(const nlohmann::json& value,
                                                 std::string_view source_name);
 [[nodiscard]] MediaProbe load_media_probe_json(const std::filesystem::path& path);
+[[nodiscard]] MediaProbe probe_media_with_ffprobe(
+    const std::filesystem::path& source_path,
+    const std::filesystem::path& ffprobe_path = "ffprobe");
 [[nodiscard]] nlohmann::json media_probe_to_json(const MediaProbe& probe);
 
 }  // namespace svp::media
