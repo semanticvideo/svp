@@ -13,6 +13,8 @@ add_library(svp-package
   src/index_logical_rows.cpp
   src/index_writer.cpp
   src/relationship_provenance_writer.cpp
+  src/spatial_embedding_placeholders.cpp
+  src/validation_report_storage.cpp
 )
 
 add_library(svp::package ALIAS svp-package)
