@@ -36,6 +36,19 @@ std::string shell_quote(const std::filesystem::path& path) {
   return quoted;
 }
 
+std::string shell_quote_str(const std::string& s) {
+  std::string quoted = "'";
+  for (const char c : s) {
+    if (c == '\'') {
+      quoted += "'\\''";
+    } else {
+      quoted += c;
+    }
+  }
+  quoted += "'";
+  return quoted;
+}
+
 bool executable_exists(const std::filesystem::path& exe) {
   if (exe.empty()) return false;
   if (exe.has_parent_path()) return std::filesystem::exists(exe);
@@ -127,7 +140,19 @@ std::string normalize_text(const std::string& raw) {
       prev_space = false;
     }
   }
-  return lower(collapsed);
+  // Remove spaces after punctuation so OCR variants reconcile:
+  // "$19. 99" -> "$19.99", "June 20, 2026" -> "june 20,2026"
+  std::string no_punct_space;
+  for (std::size_t i = 0; i < collapsed.size(); ++i) {
+    if (i > 0 && collapsed[i] == ' ' &&
+        (collapsed[i - 1] == '.' || collapsed[i - 1] == ',' ||
+         collapsed[i - 1] == ';' || collapsed[i - 1] == ':' ||
+         collapsed[i - 1] == '$' || collapsed[i - 1] == '!')) {
+      continue;
+    }
+    no_punct_space += collapsed[i];
+  }
+  return lower(no_punct_space);
 }
 
 // Write a ColorRasterFrame to a temporary PNG file using ffmpeg.
@@ -175,10 +200,37 @@ bool write_frame_to_png(const ColorRasterFrame& frame,
   return true;
 }
 
+// Run ffmpeg to extract a single frame as PNG with a given filter chain.
+bool run_ffmpeg_extract(
+    const std::filesystem::path& ffmpeg_path,
+    const std::filesystem::path& source_path,
+    const std::string& seek,
+    const std::string& vf_filter,
+    const std::filesystem::path& output_png) {
+  std::string cmd =
+      shell_quote(ffmpeg_path) +
+      " -v error"
+      " -ss " + seek +
+      " -i " + shell_quote(source_path) +
+      " -vf " + shell_quote_str(vf_filter) +
+      " -vframes 1"
+      " -y " + shell_quote(output_png) +
+      " 2>/dev/null";
+
+  FILE* pipe = popen(cmd.c_str(), "r");
+  if (!pipe) return false;
+
+  char buffer[4096];
+  while (fread(buffer, 1, sizeof(buffer), pipe) > 0) {}
+  const int status = pclose(pipe);
+  return WIFEXITED(status) && WEXITSTATUS(status) == 0 &&
+      std::filesystem::exists(output_png);
+}
+
 // Extract a frame from the source video as a PNG file at a given timestamp.
 // Uses ffmpeg directly to avoid the raw RGB round-trip that can lose data.
-// Applies preprocessing (grayscale, contrast normalization, sharpening) to
-// improve tesseract text detection on video frames.
+// Tries preprocessing (grayscale, histeq, unsharp) first, then falls back
+// to a simple scale if the filter chain is unavailable or fails.
 bool extract_frame_png_from_source(
     const std::filesystem::path& ffmpeg_path,
     const std::filesystem::path& source_path,
@@ -188,53 +240,30 @@ bool extract_frame_png_from_source(
     const std::filesystem::path& output_png,
     std::string& error) {
   const std::string seek = microseconds_to_seek_string(seek_us);
-
-  // Build a filter chain that:
-  // 1. Scales to target dimensions
-  // 2. Converts to grayscale (luma) for better OCR
-  // 3. Normalizes contrast histogram
-  // 4. Applies unsharp mask for text edge enhancement
-  std::string vf =
+  const std::string scale_filter =
       "scale=" + std::to_string(target_width) + ":" +
-      std::to_string(target_height) +
-      ",format=gray"
-      ",histeq"
-      ",unsharp=5:5:1.0";
+      std::to_string(target_height);
 
-  std::string cmd =
-      shell_quote(ffmpeg_path) +
-      " -v error"
-      " -ss " + seek +
-      " -i " + shell_quote(source_path) +
-      " -vf " + shell_quote(std::filesystem::path(vf)) +
-      " -vframes 1"
-      " -y " + shell_quote(output_png) +
-      " 2>/dev/null";
-
-  FILE* pipe = popen(cmd.c_str(), "r");
-  if (!pipe) {
-    error = "popen failed: " + std::string(std::strerror(errno));
-    return false;
+  // Try with full preprocessing: scale + grayscale + histeq + unsharp
+  const std::string full_filter =
+      scale_filter + ",format=gray,histeq,unsharp=5:5:1.0";
+  if (run_ffmpeg_extract(ffmpeg_path, source_path, seek, full_filter, output_png)) {
+    return true;
   }
 
-  char buffer[4096];
-  while (fread(buffer, 1, sizeof(buffer), pipe) > 0) {}
-
-  const int status = pclose(pipe);
-  const bool exited_ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
-
-  if (!exited_ok) {
-    error = "ffmpeg exited with status " +
-            std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : status);
-    return false;
+  // Fallback 1: scale + grayscale only (histeq/unsharp may be unavailable)
+  const std::string gray_filter = scale_filter + ",format=gray";
+  if (run_ffmpeg_extract(ffmpeg_path, source_path, seek, gray_filter, output_png)) {
+    return true;
   }
 
-  if (!std::filesystem::exists(output_png)) {
-    error = "ffmpeg did not produce output PNG file";
-    return false;
+  // Fallback 2: plain scale (no preprocessing at all)
+  if (run_ffmpeg_extract(ffmpeg_path, source_path, seek, scale_filter, output_png)) {
+    return true;
   }
 
-  return true;
+  error = "ffmpeg failed to extract frame with all filter chains";
+  return false;
 }
 
 // Parse tesseract TSV output into words.
@@ -495,8 +524,8 @@ std::vector<ParsedNumber> parse_numeric_values(const std::string& raw_text,
                                                 double confidence) {
   std::vector<ParsedNumber> results;
 
-  // Currency: $N.NN or $N
-  static const std::regex currency_re(R"(\$(\d+(?:\.\d+)?))");
+  // Currency: $N.NN, $N, or OCR variant "$N. NN" (space before cents)
+  static const std::regex currency_re(R"(\$(\d+)(?:\.\s*(\d+))?)");
   // Decimal: N.NN
   static const std::regex decimal_re(R"(\b(\d+\.\d+)\b)");
   // Integer: N (standalone, not part of decimal or currency)
@@ -511,9 +540,17 @@ std::vector<ParsedNumber> parse_numeric_values(const std::string& raw_text,
   while (std::regex_search(search_start, raw_text.cend(), match, currency_re)) {
     ParsedNumber num;
     num.raw_text = match[0].str();
-    num.normalized_text = match[1].str();
+    // Normalize: remove spaces from the numeric value
+    std::string dollars = match[1].str();
+    std::string cents = match[2].str();
+    if (!cents.empty()) {
+      num.normalized_text = dollars + "." + cents;
+      num.numeric_value = dollars + "." + cents;
+    } else {
+      num.normalized_text = dollars;
+      num.numeric_value = dollars;
+    }
     num.number_kind = "decimal";
-    num.numeric_value = match[1].str();
     num.unit = "currency_unknown";
     num.confidence = confidence;
     results.push_back(std::move(num));
@@ -647,20 +684,26 @@ double bbox_iou(int a_left, int a_top, int a_right, int a_bottom,
 // Reconcile per-frame detections into time-spanning observations.
 // Detections with the same normalized text and overlapping bounding boxes
 // (IoU > 0.3) are merged. Single-frame detections with low confidence are
-// suppressed as likely OCR noise.
+// suppressed as likely OCR noise. Detections with very short text (<=2 chars)
+// are filtered as noise.
 std::vector<ReconciledObservation> reconcile_detections(
     const std::vector<FrameDetection>& detections,
     int total_frames,
-    double min_confidence = 0.30) {
+    double min_confidence = 0.30,
+    std::size_t min_text_chars = 3) {
   std::vector<ReconciledObservation> reconciled;
 
-  // Group detections by normalized text
+  // Group detections by normalized text (so spacing/punctuation variants
+  // like "$19. 99" and "$19.99" can reconcile together)
   std::map<std::string, std::vector<std::size_t>> by_text;
   for (std::size_t i = 0; i < detections.size(); ++i) {
-    by_text[detections[i].raw_text].push_back(i);
+    const std::string norm = normalize_text(detections[i].raw_text);
+    // Skip very short text (likely OCR noise: single chars, punctuation)
+    if (norm.length() < min_text_chars) continue;
+    by_text[norm].push_back(i);
   }
 
-  for (const auto& [text, indices] : by_text) {
+  for (const auto& [norm_text, indices] : by_text) {
     // Cluster detections by spatial overlap
     std::vector<std::vector<std::size_t>> clusters;
     for (std::size_t idx : indices) {
@@ -685,8 +728,15 @@ std::vector<ReconciledObservation> reconcile_detections(
 
     for (const auto& cluster : clusters) {
       ReconciledObservation obs;
-      obs.raw_text = detections[cluster[0]].raw_text;
-      obs.normalized_text = normalize_text(obs.raw_text);
+      // Use the longest raw_text variant as the representative raw text
+      std::size_t best_idx = cluster[0];
+      for (std::size_t idx : cluster) {
+        if (detections[idx].raw_text.size() > detections[best_idx].raw_text.size()) {
+          best_idx = idx;
+        }
+      }
+      obs.raw_text = detections[best_idx].raw_text;
+      obs.normalized_text = norm_text;
       obs.frame_width = detections[cluster[0]].frame_width;
       obs.frame_height = detections[cluster[0]].frame_height;
       obs.detection_count = static_cast<int>(cluster.size());
