@@ -1,3 +1,4 @@
+#include "svp/audio/audio_extraction_executor.hpp"
 #include "svp/audio/audio_stage_plan.hpp"
 #include "svp/core/version.hpp"
 #include "svp/media/media_ingest_plan.hpp"
@@ -83,6 +84,11 @@ bool executable_exists(const std::filesystem::path& executable_path) {
   return false;
 }
 
+std::filesystem::path default_staging_dir_for_output(
+    const std::filesystem::path& output_path) {
+  return std::filesystem::path(output_path.string() + ".staging");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -108,6 +114,7 @@ int main(int argc, char** argv) {
   std::string build_ffprobe_path = "ffprobe";
   std::string build_ffmpeg_path = "ffmpeg";
   std::string build_output_path;
+  std::string build_staging_dir;
   std::string stop_after = "media-ingest";
 
   auto* build = app.add_subcommand(
@@ -120,6 +127,8 @@ int main(int argc, char** argv) {
   build->add_option("--out", build_output_path,
                     "Output path for the builder foundation JSON")
       ->required();
+  build->add_option("--staging-dir", build_staging_dir,
+                    "Directory for staged builder outputs");
   build->add_option("--stop-after", stop_after,
                     "Supported foundation stages: media-ingest, audio, vision-plan");
 
@@ -155,11 +164,32 @@ int main(int argc, char** argv) {
                                                                 build_ffprobe_path));
       nlohmann::json output = svp::media::media_ingest_plan_to_json(plan);
       if (stop_after == "audio") {
-        output["audio_foundation"] = svp::audio::audio_stage_plan_to_json(
+        const svp::audio::AudioStagePlan audio_plan =
             svp::audio::build_audio_stage_plan(build_source_path,
                                                plan.probe,
                                                executable_exists(build_ffmpeg_path),
-                                               build_ffmpeg_path));
+                                               build_ffmpeg_path);
+        nlohmann::json audio_json = svp::audio::audio_stage_plan_to_json(audio_plan);
+        const std::filesystem::path staging_dir =
+            build_staging_dir.empty()
+                ? default_staging_dir_for_output(build_output_path)
+                : std::filesystem::path(build_staging_dir);
+        const svp::audio::AudioExtractionRun extraction_run =
+            svp::audio::execute_audio_extraction_plan(audio_plan.extraction_plan,
+                                                      staging_dir);
+        nlohmann::json extraction_run_json =
+            svp::audio::audio_extraction_run_to_json(extraction_run);
+        audio_json["audio_extraction"]["execution"] = extraction_run_json;
+        audio_json["audio_extraction"]["extraction_run"] =
+            extraction_run.extraction_run;
+        audio_json["audio_extraction"]["original_streams_written"] =
+            extraction_run.original_streams_written;
+        audio_json["audio_extraction"]["analysis_audio_written"] =
+            extraction_run.analysis_audio_written;
+        for (const std::string& blocker : extraction_run.blockers) {
+          audio_json["blockers"].push_back(blocker);
+        }
+        output["audio_foundation"] = audio_json;
       } else if (stop_after == "vision-plan") {
         const svp::vision::VisionObservationPipelinePlan vision_plan =
             svp::vision::build_vision_observation_pipeline_plan(plan);

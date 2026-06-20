@@ -1,9 +1,12 @@
+#include "svp/audio/audio_extraction_executor.hpp"
 #include "svp/audio/audio_stage_plan.hpp"
 #include "svp/audio/transcript_records.hpp"
 #include "svp/audio/vad_task_plan.hpp"
 
 #include <cassert>
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <vector>
@@ -147,6 +150,101 @@ void test_multi_stream_analysis_audio_waits_for_vad_selection() {
   assert(!extraction["blockers"].empty());
 }
 
+void test_audio_extraction_executor_writes_staged_single_stream_outputs() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-audio-executor-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+  const std::filesystem::path source = root / "audio-source.txt";
+  {
+    std::ofstream output(source);
+    output << "fake audio bytes\n";
+  }
+
+  svp::audio::AudioExtractionPlan plan;
+  plan.source_path = source;
+  plan.ffmpeg_available = true;
+  plan.source_audio_present = true;
+  plan.original_streams.push_back(svp::audio::AudioExtractionCommandPlan{
+      "task.audio.extract.astream_000",
+      "astream_0001",
+      1,
+      "media/audio/original_stream_000.flac",
+      {"/bin/cp", source.string(), "media/audio/original_stream_000.flac"},
+  });
+  plan.analysis_audio.task_id = "task.audio.analysis.astream_000";
+  plan.analysis_audio.depends_on = {"task.audio.extract.astream_000"};
+  plan.analysis_audio.selected_source_audio_stream_id = "astream_0001";
+  plan.analysis_audio.output_ref = "media/audio/analysis_mono_16k.wav";
+  plan.analysis_audio.arguments = {
+      "/bin/cp",
+      source.string(),
+      "media/audio/analysis_mono_16k.wav",
+  };
+
+  const std::filesystem::path staging_root = root / "staging";
+  const svp::audio::AudioExtractionRun run =
+      svp::audio::execute_audio_extraction_plan(plan, staging_root);
+  const nlohmann::json encoded = svp::audio::audio_extraction_run_to_json(run);
+
+  assert(encoded["extraction_run"] == true);
+  assert(encoded["original_streams_written"] == true);
+  assert(encoded["analysis_audio_written"] == true);
+  assert(encoded["original_streams"][0]["command_executed"] == true);
+  assert(encoded["analysis_audio"]["command_executed"] == true);
+  assert(std::filesystem::exists(staging_root / "media/audio/original_stream_000.flac"));
+  assert(std::filesystem::exists(staging_root / "media/audio/analysis_mono_16k.wav"));
+
+  std::filesystem::remove_all(root);
+}
+
+void test_audio_extraction_executor_leaves_multi_stream_analysis_unrun() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-audio-executor-blocked-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+  const std::filesystem::path source = root / "audio-source.txt";
+  {
+    std::ofstream output(source);
+    output << "fake audio bytes\n";
+  }
+
+  svp::audio::AudioExtractionPlan plan;
+  plan.source_audio_present = true;
+  plan.original_streams.push_back(svp::audio::AudioExtractionCommandPlan{
+      "task.audio.extract.astream_000",
+      "astream_0001",
+      1,
+      "media/audio/original_stream_000.flac",
+      {"/bin/cp", source.string(), "media/audio/original_stream_000.flac"},
+  });
+  plan.original_streams.push_back(svp::audio::AudioExtractionCommandPlan{
+      "task.audio.extract.astream_001",
+      "astream_0002",
+      2,
+      "media/audio/original_stream_001.flac",
+      {"/bin/cp", source.string(), "media/audio/original_stream_001.flac"},
+  });
+  plan.analysis_audio.task_id = "task.audio.analysis.pending_vad_selection";
+  plan.analysis_audio.output_ref = "media/audio/analysis_mono_16k.wav";
+  plan.analysis_audio.selected_source_audio_stream_id =
+      "pending_vad_speech_positive_selection";
+
+  const std::filesystem::path staging_root = root / "staging";
+  const svp::audio::AudioExtractionRun run =
+      svp::audio::execute_audio_extraction_plan(plan, staging_root);
+  const nlohmann::json encoded = svp::audio::audio_extraction_run_to_json(run);
+
+  assert(encoded["extraction_run"] == true);
+  assert(encoded["original_streams_written"] == true);
+  assert(encoded["analysis_audio_written"] == false);
+  assert(encoded["analysis_audio"]["command_available"] == false);
+  assert(encoded["analysis_audio"]["command_executed"] == false);
+  assert(!encoded["blockers"].empty());
+
+  std::filesystem::remove_all(root);
+}
+
 void test_vad_task_plan_uses_stable_thirty_second_boundaries() {
   svp::media::MediaProbe probe;
   probe.audio_streams.push_back({"astream_0001", 1, "aac", 48000, 2, {}});
@@ -180,6 +278,8 @@ int main() {
   test_audio_stage_plan_is_honest_about_pending_processors();
   test_audio_extraction_plan_documents_ffmpeg_commands_when_available();
   test_multi_stream_analysis_audio_waits_for_vad_selection();
+  test_audio_extraction_executor_writes_staged_single_stream_outputs();
+  test_audio_extraction_executor_leaves_multi_stream_analysis_unrun();
   test_vad_task_plan_uses_stable_thirty_second_boundaries();
   return 0;
 }
