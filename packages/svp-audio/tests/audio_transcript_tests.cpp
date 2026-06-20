@@ -1,6 +1,7 @@
 #include "svp/audio/audio_extraction_executor.hpp"
 #include "svp/audio/audio_stage_plan.hpp"
 #include "svp/audio/transcript_records.hpp"
+#include "svp/audio/vad_execution_boundary.hpp"
 #include "svp/audio/vad_task_plan.hpp"
 #include "svp/audio/waveform_envelope.hpp"
 
@@ -123,6 +124,13 @@ void test_audio_stage_plan_is_honest_about_pending_processors() {
   assert(encoded["audio_extraction"]["extraction_run"] == false);
   assert(encoded["vad_task_plan"]["vad_run"] == false);
   assert(encoded["vad_task_plan"]["speech_regions_written"] == false);
+  assert(encoded["vad_execution_boundary"]["vad_run"] == false);
+  assert(encoded["vad_execution_boundary"]["speech_regions_written"] == false);
+  assert(encoded["vad_execution_boundary"]["final_output_ref"] ==
+         "transcript/speech_regions.jsonl");
+  assert(encoded["vad_execution_boundary"]["analysis_audio_available"] == false);
+  assert(encoded["vad_execution_boundary"]["waveform_available"] == false);
+  assert(encoded["vad_execution_boundary"]["model_runtime_available"] == false);
 
   const std::vector<std::string> required_outputs =
       encoded["required_outputs"].get<std::vector<std::string>>();
@@ -425,6 +433,33 @@ void test_vad_task_plan_uses_stable_thirty_second_boundaries() {
   assert(encoded["vad_run"] == false);
 }
 
+void test_vad_execution_boundary_preserves_honest_unrun_state() {
+  svp::media::MediaProbe probe;
+  probe.audio_streams.push_back({"astream_0001", 1, "aac", 48000, 2, {}});
+
+  const svp::audio::VadTaskPlan plan =
+      svp::audio::build_vad_task_plan(probe, 65000000, false);
+  const svp::audio::VadExecutionBoundary boundary =
+      svp::audio::build_vad_execution_boundary(plan, true, true, false);
+  const nlohmann::json encoded = svp::audio::vad_execution_boundary_to_json(boundary);
+
+  assert(encoded["processor_id"] == "proc_silero_vad_0001");
+  assert(encoded["model_id"] == "model_silero_vad");
+  assert(encoded["runtime"] == "onnxruntime");
+  assert(encoded["analysis_audio_available"] == true);
+  assert(encoded["waveform_available"] == true);
+  assert(encoded["model_runtime_available"] == false);
+  assert(encoded["vad_run"] == false);
+  assert(encoded["speech_regions_written"] == false);
+  assert(encoded["speech_region_count"] == 0);
+  assert(encoded["final_output_ref"] == "transcript/speech_regions.jsonl");
+  assert(encoded["task_ids"].size() == 3);
+  assert(encoded["staged_chunk_output_refs"].size() == 3);
+  assert(encoded["staged_chunk_output_refs"][2] ==
+         "transcript/speech_regions.chunk_000002.jsonl");
+  assert(!encoded["blockers"].empty());
+}
+
 }  // namespace
 
 int main() {
@@ -438,5 +473,6 @@ int main() {
   test_audio_extraction_executor_writes_staged_single_stream_outputs();
   test_audio_extraction_executor_leaves_multi_stream_analysis_unrun();
   test_vad_task_plan_uses_stable_thirty_second_boundaries();
+  test_vad_execution_boundary_preserves_honest_unrun_state();
   return 0;
 }

@@ -5,6 +5,7 @@ add_library(svp-audio
   src/audio_extraction_plan.cpp
   src/audio_stage_plan.cpp
   src/transcript_records.cpp
+  src/vad_execution_boundary.cpp
   src/vad_task_plan.cpp
   src/waveform_envelope.cpp
 )
