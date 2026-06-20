@@ -4,6 +4,8 @@ add_library(svp-vision
   src/color_frame_sampling.cpp
   src/color_observation_records.cpp
   src/color_quantization.cpp
+  src/depth_generation.cpp
+  src/embedding_generation.cpp
   src/foundation_color_observations.cpp
   src/foundation_color_staging.cpp
   src/foundation_ocr_staging.cpp
@@ -23,7 +25,9 @@ target_compile_features(svp-vision PUBLIC cxx_std_20)
 target_link_libraries(svp-vision
   PUBLIC
     nlohmann_json::nlohmann_json
+    svp::blocks
     svp::media
+    svp::models
 )
 
 if(BUILD_TESTING)

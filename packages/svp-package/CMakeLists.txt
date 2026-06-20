@@ -36,6 +36,7 @@ target_link_libraries(svp-package
     libzip::zip
     SQLite::SQLite3
     ${BLAKE3_LIBRARY}
+    svp::vision
 )
 
 if(BUILD_TESTING)

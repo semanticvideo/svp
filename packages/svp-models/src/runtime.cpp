@@ -2,7 +2,261 @@
 
 #include "svp/models/error.hpp"
 
+#include <algorithm>
+#include <cstring>
+#include <stdexcept>
+
+#if defined(SVP_ONNX_RUNTIME_AVAILABLE)
+#include <onnxruntime_cxx_api.h>
+#if defined(__APPLE__)
+#include <coreml_provider_factory.h>
+#endif
+#endif
+
 namespace svp::models {
+
+#if defined(SVP_ONNX_RUNTIME_AVAILABLE)
+
+struct OnnxSession::Impl {
+  Ort::Env env;
+  Ort::Session session{nullptr};
+  std::string model_id_value;
+  std::string execution_provider_value;
+  std::vector<std::string> input_names;
+  std::vector<std::string> output_names;
+  std::vector<std::int64_t> input_shape;
+  std::vector<std::int64_t> output_shape;
+
+  Impl() : env(ORT_LOGGING_LEVEL_WARNING, "svp-models") {}
+};
+
+OnnxSession::OnnxSession() : impl_(std::make_unique<Impl>()) {}
+
+OnnxSession::~OnnxSession() = default;
+
+OnnxSession::OnnxSession(OnnxSession&&) noexcept = default;
+
+OnnxSession& OnnxSession::operator=(OnnxSession&&) noexcept = default;
+
+bool OnnxSession::is_available() { return true; }
+
+OnnxSession OnnxSession::load(const ModelBundleManifest& manifest,
+                              const std::filesystem::path& bundle_root,
+                              const OnnxSessionOptions& options) {
+  OnnxSession result;
+  result.impl_ = std::make_unique<Impl>();
+  result.impl_->model_id_value = manifest.model_id;
+  result.impl_->execution_provider_value = options.execution_provider;
+
+  std::filesystem::path model_file_path;
+  for (const auto& file : manifest.files) {
+    if (file.role == "model" || file.role == "onnx" || file.role == "weights") {
+      model_file_path = bundle_root / file.path;
+      break;
+    }
+  }
+  if (model_file_path.empty()) {
+    for (const auto& file : manifest.files) {
+      const std::string& p = file.path;
+      if (p.size() >= 5 &&
+          (p.substr(p.size() - 5) == ".onnx" || p.substr(p.size() - 4) == ".ort")) {
+        model_file_path = bundle_root / file.path;
+        break;
+      }
+    }
+  }
+  if (model_file_path.empty()) {
+    throw ModelError(ModelErrorCode::missing_model,
+                     "No ONNX model file found in bundle for " + manifest.model_id);
+  }
+  if (!std::filesystem::exists(model_file_path)) {
+    throw ModelError(ModelErrorCode::missing_model,
+                     "ONNX model file not found: " + model_file_path.string());
+  }
+
+  Ort::SessionOptions session_options;
+  if (options.intra_op_num_threads > 0) {
+    session_options.SetIntraOpNumThreads(options.intra_op_num_threads);
+  }
+  if (options.inter_op_num_threads > 0) {
+    session_options.SetInterOpNumThreads(options.inter_op_num_threads);
+  }
+
+#if defined(__APPLE__)
+  if (options.execution_provider == "coreml") {
+    Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_CoreML(
+        session_options, 0));
+  }
+#endif
+
+  result.impl_->session = Ort::Session(result.impl_->env,
+                                       model_file_path.string().c_str(),
+                                       session_options);
+
+  Ort::AllocatorWithDefaultOptions allocator;
+
+  auto input_count = result.impl_->session.GetInputCount();
+  for (std::size_t i = 0; i < input_count; ++i) {
+    auto name = result.impl_->session.GetInputNameAllocated(i, allocator);
+    result.impl_->input_names.push_back(name.get());
+    auto type_info = result.impl_->session.GetInputTypeInfo(i);
+    auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+    result.impl_->input_shape = tensor_info.GetShape();
+  }
+
+  auto output_count = result.impl_->session.GetOutputCount();
+  for (std::size_t i = 0; i < output_count; ++i) {
+    auto name = result.impl_->session.GetOutputNameAllocated(i, allocator);
+    result.impl_->output_names.push_back(name.get());
+    auto type_info = result.impl_->session.GetOutputTypeInfo(i);
+    auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+    result.impl_->output_shape = tensor_info.GetShape();
+  }
+
+  return result;
+}
+
+OnnxIoSpec OnnxSession::io_spec() const {
+  OnnxIoSpec spec;
+  Ort::AllocatorWithDefaultOptions allocator;
+
+  for (std::size_t i = 0; i < impl_->session.GetInputCount(); ++i) {
+    auto name = impl_->session.GetInputNameAllocated(i, allocator);
+    auto type_info = impl_->session.GetInputTypeInfo(i);
+    auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+    OnnxTensorInfo info;
+    info.name = name.get();
+    info.shape = tensor_info.GetShape();
+    info.dtype = "float32";
+    spec.inputs.push_back(std::move(info));
+  }
+
+  for (std::size_t i = 0; i < impl_->session.GetOutputCount(); ++i) {
+    auto name = impl_->session.GetOutputNameAllocated(i, allocator);
+    auto type_info = impl_->session.GetOutputTypeInfo(i);
+    auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+    OnnxTensorInfo info;
+    info.name = name.get();
+    info.shape = tensor_info.GetShape();
+    info.dtype = "float32";
+    spec.outputs.push_back(std::move(info));
+  }
+
+  return spec;
+}
+
+std::vector<float> OnnxSession::run_depth(
+    const float* input_data,
+    std::size_t input_count,
+    std::uint32_t width,
+    std::uint32_t height) const {
+  if (impl_->input_names.empty() || impl_->output_names.empty()) {
+    throw ModelError(ModelErrorCode::runtime_unavailable,
+                     "Session has no input or output names");
+  }
+
+  Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
+      OrtArenaAllocator, OrtMemTypeDefault);
+
+  std::vector<std::int64_t> input_shape = impl_->input_shape;
+  for (auto& dim : input_shape) {
+    if (dim == -1) {
+      if (input_shape.size() == 4) {
+        if (dim == input_shape[0]) dim = 1;
+        else if (dim == input_shape[2]) dim = height;
+        else if (dim == input_shape[3]) dim = width;
+        else dim = 1;
+      } else {
+        dim = 1;
+      }
+    }
+  }
+
+  Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+      memory_info, const_cast<float*>(input_data), input_count,
+      input_shape.data(), input_shape.size());
+
+  const char* input_names_cstr = impl_->input_names[0].c_str();
+  const char* output_names_cstr = impl_->output_names[0].c_str();
+
+  auto output_tensors = impl_->session.Run(
+      Ort::RunOptions{nullptr},
+      &input_names_cstr, &input_tensor, 1,
+      &output_names_cstr, 1);
+
+  if (output_tensors.empty()) {
+    throw ModelError(ModelErrorCode::runtime_unavailable,
+                     "ONNX Runtime produced no output tensors");
+  }
+
+  auto& output_tensor = output_tensors[0];
+  auto type_info = output_tensor.GetTensorTypeAndShapeInfo();
+  auto element_count = type_info.GetElementCount();
+
+  const float* output_data = output_tensor.GetTensorData<float>();
+  return std::vector<float>(output_data, output_data + element_count);
+}
+
+std::vector<float> OnnxSession::run_embedding(
+    const float* input_data,
+    std::size_t input_count) const {
+  if (impl_->input_names.empty() || impl_->output_names.empty()) {
+    throw ModelError(ModelErrorCode::runtime_unavailable,
+                     "Session has no input or output names");
+  }
+
+  Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
+      OrtArenaAllocator, OrtMemTypeDefault);
+
+  std::vector<std::int64_t> input_shape = impl_->input_shape;
+  for (auto& dim : input_shape) {
+    if (dim == -1) dim = 1;
+  }
+  if (input_shape.size() == 1) {
+    input_shape[0] = static_cast<std::int64_t>(input_count);
+  }
+
+  Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+      memory_info, const_cast<float*>(input_data), input_count,
+      input_shape.data(), input_shape.size());
+
+  const char* input_names_cstr = impl_->input_names[0].c_str();
+  const char* output_names_cstr = impl_->output_names[0].c_str();
+
+  auto output_tensors = impl_->session.Run(
+      Ort::RunOptions{nullptr},
+      &input_names_cstr, &input_tensor, 1,
+      &output_names_cstr, 1);
+
+  if (output_tensors.empty()) {
+    throw ModelError(ModelErrorCode::runtime_unavailable,
+                     "ONNX Runtime produced no output tensors");
+  }
+
+  auto& output_tensor = output_tensors[0];
+  auto type_info = output_tensor.GetTensorTypeAndShapeInfo();
+  auto element_count = type_info.GetElementCount();
+
+  const float* output_data = output_tensor.GetTensorData<float>();
+  return std::vector<float>(output_data, output_data + element_count);
+}
+
+std::string OnnxSession::model_id() const {
+  return impl_ ? impl_->model_id_value : "";
+}
+
+std::string OnnxSession::execution_provider() const {
+  return impl_ ? impl_->execution_provider_value : "";
+}
+
+#else
+
+struct OnnxSession::Impl {};
+
+OnnxSession::OnnxSession() : impl_(nullptr) {}
+OnnxSession::~OnnxSession() = default;
+OnnxSession::OnnxSession(OnnxSession&&) noexcept = default;
+OnnxSession& OnnxSession::operator=(OnnxSession&&) noexcept = default;
 
 bool OnnxSession::is_available() {
   return false;
@@ -15,5 +269,25 @@ OnnxSession OnnxSession::load(const ModelBundleManifest&,
                    "ONNX Runtime support is not configured in this build; model "
                    "bundle parsing and BLAKE3 verification are available");
 }
+
+OnnxIoSpec OnnxSession::io_spec() const {
+  return {};
+}
+
+std::vector<float> OnnxSession::run_depth(const float*, std::size_t,
+                                          std::uint32_t, std::uint32_t) const {
+  throw ModelError(ModelErrorCode::runtime_unavailable,
+                   "ONNX Runtime is not available");
+}
+
+std::vector<float> OnnxSession::run_embedding(const float*, std::size_t) const {
+  throw ModelError(ModelErrorCode::runtime_unavailable,
+                   "ONNX Runtime is not available");
+}
+
+std::string OnnxSession::model_id() const { return {}; }
+std::string OnnxSession::execution_provider() const { return {}; }
+
+#endif
 
 }  // namespace svp::models

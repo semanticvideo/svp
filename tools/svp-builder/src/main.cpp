@@ -214,6 +214,7 @@ int main(int argc, char** argv) {
   std::string build_ffmpeg_path = "ffmpeg";
   std::string build_output_path;
   std::string build_staging_dir;
+  std::string build_model_cache_dir;
   std::string stop_after = "media-ingest";
 
   auto* build = app.add_subcommand(
@@ -228,6 +229,8 @@ int main(int argc, char** argv) {
       ->required();
   build->add_option("--staging-dir", build_staging_dir,
                     "Directory for staged builder outputs");
+  build->add_option("--model-cache", build_model_cache_dir,
+                    "Path to SVP model cache directory containing model bundles");
   build->add_option("--stop-after", stop_after,
                     "Supported foundation stages: media-ingest, audio, vision-plan, "
                     "foundation-color, foundation-ocr, package-skeleton");
@@ -436,7 +439,10 @@ int main(int argc, char** argv) {
         // Write honest spatial/embedding placeholder entries
         const svp::package::SpatialEmbeddingPlaceholderSummary placeholder_summary =
             svp::package::write_spatial_and_embedding_placeholders(
-                staging_dir, model_runtime_available);
+                staging_dir, model_runtime_available,
+                svp::media::media_ingest_plan_to_json(plan),
+                build_model_cache_dir.empty() ? std::filesystem::path{} :
+                    std::filesystem::path(build_model_cache_dir));
         output["spatial_embedding_placeholders"] =
             svp::package::spatial_embedding_placeholder_summary_to_json(
                 placeholder_summary);
@@ -561,6 +567,26 @@ int main(int argc, char** argv) {
         std::cout << "Model runtime available: "
                   << output.at("spatial_embedding_placeholders").at("model_runtime_available")
                   << "\n";
+        std::cout << "Depth model available: "
+                  << output.at("spatial_embedding_placeholders").at("depth_model_available")
+                  << "\n";
+        std::cout << "Embedding model available: "
+                  << output.at("spatial_embedding_placeholders").at("embedding_model_available")
+                  << "\n";
+        if (output.at("spatial_embedding_placeholders").contains("depth_generation_detail") &&
+            output.at("spatial_embedding_placeholders").at("depth_generation_detail").contains("blocker") &&
+            !output.at("spatial_embedding_placeholders").at("depth_generation_detail").at("blocker").get<std::string>().empty()) {
+          std::cout << "Depth blocker: "
+                    << output.at("spatial_embedding_placeholders").at("depth_generation_detail").at("blocker")
+                    << "\n";
+        }
+        if (output.at("spatial_embedding_placeholders").contains("embedding_generation_detail") &&
+            output.at("spatial_embedding_placeholders").at("embedding_generation_detail").contains("blocker") &&
+            !output.at("spatial_embedding_placeholders").at("embedding_generation_detail").at("blocker").get<std::string>().empty()) {
+          std::cout << "Embedding blocker: "
+                    << output.at("spatial_embedding_placeholders").at("embedding_generation_detail").at("blocker")
+                    << "\n";
+        }
         std::cout << "Wrote skeleton .svp package to: " << package_path << "\n";
         if (validation_report_stored) {
           std::cout << "Validation report stored at: provenance/validation.json\n";
