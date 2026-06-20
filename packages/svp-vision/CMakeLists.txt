@@ -5,6 +5,7 @@ add_library(svp-vision
   src/color_observation_records.cpp
   src/color_quantization.cpp
   src/foundation_color_observations.cpp
+  src/foundation_color_staging.cpp
   src/observation_pipeline_plan.cpp
 )
 
@@ -95,4 +96,21 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-vision-foundation-color-observations-tests
            COMMAND svp-vision-foundation-color-observations-tests)
+
+  add_executable(svp-vision-foundation-color-staging-tests
+    tests/foundation_color_staging_tests.cpp
+  )
+
+  target_compile_features(svp-vision-foundation-color-staging-tests
+    PRIVATE
+      cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-foundation-color-staging-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-foundation-color-staging-tests
+           COMMAND svp-vision-foundation-color-staging-tests)
 endif()
