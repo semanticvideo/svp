@@ -4,8 +4,11 @@
 #include "svp/vision/canonical_frame_input.hpp"
 #include "svp/vision/depth_generation.hpp"
 #include "svp/vision/embedding_generation.hpp"
+#include "svp/vision/ocr_generation.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <map>
 #include <string>
@@ -155,7 +158,8 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     const nlohmann::json& media_plan_json,
     const std::filesystem::path& model_cache_root,
     const svp::media::MediaIngestPlan* media_plan,
-    const std::filesystem::path& ffmpeg_path) {
+    const std::filesystem::path& ffmpeg_path,
+    const std::filesystem::path& tesseract_path) {
   SpatialEmbeddingPlaceholderSummary summary;
   summary.model_runtime_available = model_runtime_available;
 
@@ -173,10 +177,74 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
       }
     }
 
-    // Decode real canonical frames from source media for depth generation
+    // Decode real canonical frames from source media once and share across
+    // depth generation and OCR generation.
     svp::vision::DecodedCanonicalFrames decoded_frames;
     if (media_plan != nullptr && !ffmpeg_path.empty()) {
       decoded_frames = svp::vision::decode_canonical_frames(*media_plan, ffmpeg_path);
+    }
+
+    // Run OCR generation on decoded frames before embedding generation so
+    // that text_observations.jsonl is populated when embedding generation
+    // reads it.  OCR uses tesseract as a subprocess (native, no Python).
+    // OCR decodes its own higher-resolution frames for text detection.
+    svp::vision::OcrGenerationOptions ocr_opts;
+    ocr_opts.tesseract_path = tesseract_path.empty() ?
+        std::filesystem::path("tesseract") : tesseract_path;
+    ocr_opts.ffmpeg_path = ffmpeg_path;
+    ocr_opts.media_plan = media_plan;
+    ocr_opts.canonical_raster_width = static_cast<int>(raster_w);
+    ocr_opts.canonical_raster_height = static_cast<int>(raster_h);
+    // Decode OCR frames at a higher resolution for text detection.
+    // Use the source display dimensions capped at 1920x1080 to preserve
+    // text readability while keeping processing reasonable.
+    if (media_plan != nullptr) {
+      int src_w = static_cast<int>(media_plan->primary_video_stream.width);
+      int src_h = static_cast<int>(media_plan->primary_video_stream.height);
+      // Account for rotation: if rotation is 90 or 270, swap dimensions
+      if (std::abs(media_plan->primary_video_stream.rotation_degrees) == 90) {
+        std::swap(src_w, src_h);
+      }
+      const int max_ocr_dim = 1920;
+      if (src_w > max_ocr_dim || src_h > max_ocr_dim) {
+        if (src_w >= src_h) {
+          ocr_opts.ocr_frame_width = max_ocr_dim;
+          ocr_opts.ocr_frame_height = static_cast<int>(
+              std::round(static_cast<double>(src_h) * max_ocr_dim / src_w));
+        } else {
+          ocr_opts.ocr_frame_height = max_ocr_dim;
+          ocr_opts.ocr_frame_width = static_cast<int>(
+              std::round(static_cast<double>(src_w) * max_ocr_dim / src_h));
+        }
+      } else {
+        ocr_opts.ocr_frame_width = src_w;
+        ocr_opts.ocr_frame_height = src_h;
+      }
+    }
+
+    svp::vision::OcrGenerationResult ocr_result;
+    try {
+      ocr_result = svp::vision::generate_ocr_observations(
+          ocr_opts, decoded_frames, staging_dir);
+    } catch (const std::exception& e) {
+      ocr_result.blocker = std::string("OCR generation error: ") + e.what();
+    }
+
+    summary.ocr_available = ocr_result.ocr_available;
+    summary.ocr_frame_input_available = ocr_result.ocr_frame_input_available;
+    summary.ocr_detection_run = ocr_result.ocr_detection_run;
+    summary.ocr_recognition_run = ocr_result.ocr_recognition_run;
+    summary.text_observation_count =
+        static_cast<std::size_t>(ocr_result.text_observation_count);
+    summary.numeric_value_count =
+        static_cast<std::size_t>(ocr_result.numeric_value_count);
+    summary.ocr_generation_detail =
+        svp::vision::ocr_generation_result_to_json(ocr_result);
+
+    // Append OCR processor provenance records
+    if (!ocr_result.processors.empty()) {
+      append_processor_records(staging_dir / "provenance" / "processors.jsonl",
+                               ocr_result.processors);
     }
 
     svp::vision::DepthGenerationOptions depth_opts;
@@ -264,13 +332,85 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     }
     append_processor_records(staging_dir / "provenance" / "processors.jsonl",
                              processors);
-    summary.provenance_records_added = processors.size();
+    summary.provenance_records_added += processors.size();
 
     return summary;
   }
 
   summary.depth_generation_run = false;
   summary.embedding_generation_run = false;
+
+  // Even without ONNX Runtime, tesseract OCR can run independently.
+  // Decode frames and run OCR so text artifacts are produced.
+  svp::vision::DecodedCanonicalFrames decoded_frames;
+  if (media_plan != nullptr && !ffmpeg_path.empty()) {
+    decoded_frames = svp::vision::decode_canonical_frames(*media_plan, ffmpeg_path);
+  }
+
+  // Determine canonical raster dimensions for bbox normalization
+  std::uint32_t raster_w = 640;
+  std::uint32_t raster_h = 360;
+  if (!media_plan_json.empty() && media_plan_json.contains("canonical_raster")) {
+    const auto& raster = media_plan_json["canonical_raster"];
+    if (raster.contains("width") && raster["width"].is_number())
+      raster_w = raster["width"].get<std::uint32_t>();
+    if (raster.contains("height") && raster["height"].is_number())
+      raster_h = raster["height"].get<std::uint32_t>();
+  }
+
+  svp::vision::OcrGenerationOptions ocr_opts;
+  ocr_opts.tesseract_path = tesseract_path.empty() ?
+      std::filesystem::path("tesseract") : tesseract_path;
+  ocr_opts.ffmpeg_path = ffmpeg_path;
+  ocr_opts.media_plan = media_plan;
+  ocr_opts.canonical_raster_width = static_cast<int>(raster_w);
+  ocr_opts.canonical_raster_height = static_cast<int>(raster_h);
+  if (media_plan != nullptr) {
+    int src_w = static_cast<int>(media_plan->primary_video_stream.width);
+    int src_h = static_cast<int>(media_plan->primary_video_stream.height);
+    if (std::abs(media_plan->primary_video_stream.rotation_degrees) == 90) {
+      std::swap(src_w, src_h);
+    }
+    const int max_ocr_dim = 1920;
+    if (src_w > max_ocr_dim || src_h > max_ocr_dim) {
+      if (src_w >= src_h) {
+        ocr_opts.ocr_frame_width = max_ocr_dim;
+        ocr_opts.ocr_frame_height = static_cast<int>(
+            std::round(static_cast<double>(src_h) * max_ocr_dim / src_w));
+      } else {
+        ocr_opts.ocr_frame_height = max_ocr_dim;
+        ocr_opts.ocr_frame_width = static_cast<int>(
+            std::round(static_cast<double>(src_w) * max_ocr_dim / src_h));
+      }
+    } else {
+      ocr_opts.ocr_frame_width = src_w;
+      ocr_opts.ocr_frame_height = src_h;
+    }
+  }
+
+  svp::vision::OcrGenerationResult ocr_result;
+  try {
+    ocr_result = svp::vision::generate_ocr_observations(
+        ocr_opts, decoded_frames, staging_dir);
+  } catch (const std::exception& e) {
+    ocr_result.blocker = std::string("OCR generation error: ") + e.what();
+  }
+
+  summary.ocr_available = ocr_result.ocr_available;
+  summary.ocr_frame_input_available = ocr_result.ocr_frame_input_available;
+  summary.ocr_detection_run = ocr_result.ocr_detection_run;
+  summary.ocr_recognition_run = ocr_result.ocr_recognition_run;
+  summary.text_observation_count =
+      static_cast<std::size_t>(ocr_result.text_observation_count);
+  summary.numeric_value_count =
+      static_cast<std::size_t>(ocr_result.numeric_value_count);
+  summary.ocr_generation_detail =
+      svp::vision::ocr_generation_result_to_json(ocr_result);
+
+  if (!ocr_result.processors.empty()) {
+    append_processor_records(staging_dir / "provenance" / "processors.jsonl",
+                             ocr_result.processors);
+  }
 
   write_empty_file(staging_dir / "spatial" / "depth.index.jsonl");
   summary.depth_index_written = true;
@@ -300,7 +440,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
   };
   append_processor_records(staging_dir / "provenance" / "processors.jsonl",
                            placeholder_processors);
-  summary.provenance_records_added = placeholder_processors.size();
+  summary.provenance_records_added += placeholder_processors.size();
 
   return summary;
 }
@@ -324,8 +464,15 @@ nlohmann::json spatial_embedding_placeholder_summary_to_json(
       {"embedding_model_available", summary.embedding_model_available != 0},
       {"model_runtime_available", summary.model_runtime_available != 0},
       {"provenance_records_added", summary.provenance_records_added},
+      {"ocr_available", summary.ocr_available != 0},
+      {"ocr_frame_input_available", summary.ocr_frame_input_available != 0},
+      {"ocr_detection_run", summary.ocr_detection_run != 0},
+      {"ocr_recognition_run", summary.ocr_recognition_run != 0},
+      {"text_observation_count", summary.text_observation_count},
+      {"numeric_value_count", summary.numeric_value_count},
       {"depth_generation_detail", summary.depth_generation_detail},
       {"embedding_generation_detail", summary.embedding_generation_detail},
+      {"ocr_generation_detail", summary.ocr_generation_detail},
   };
 }
 

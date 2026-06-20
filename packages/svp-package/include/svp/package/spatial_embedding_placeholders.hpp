@@ -24,9 +24,16 @@ struct SpatialEmbeddingPlaceholderSummary {
   std::size_t depth_model_verified = false;
   std::size_t depth_frame_input_available = false;
   std::size_t embedding_model_available = false;
+  std::size_t ocr_available = false;
+  std::size_t ocr_frame_input_available = false;
+  std::size_t ocr_detection_run = false;
+  std::size_t ocr_recognition_run = false;
+  std::size_t text_observation_count = 0;
+  std::size_t numeric_value_count = 0;
   std::size_t provenance_records_added = 0;
   nlohmann::json depth_generation_detail;
   nlohmann::json embedding_generation_detail;
+  nlohmann::json ocr_generation_detail;
 };
 
 /**
@@ -58,7 +65,8 @@ struct SpatialEmbeddingPlaceholderSummary {
     const nlohmann::json& media_plan_json = {},
     const std::filesystem::path& model_cache_root = {},
     const svp::media::MediaIngestPlan* media_plan = nullptr,
-    const std::filesystem::path& ffmpeg_path = {});
+    const std::filesystem::path& ffmpeg_path = {},
+    const std::filesystem::path& tesseract_path = {});
 
 [[nodiscard]] nlohmann::json spatial_embedding_placeholder_summary_to_json(
     const SpatialEmbeddingPlaceholderSummary& summary);

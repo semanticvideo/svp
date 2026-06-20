@@ -83,6 +83,8 @@ struct FoundationOcrStagingArtifact {
   nlohmann::json manifest;
 };
 
+[[nodiscard]] std::string sanitize_utf8(const std::string& input);
+
 // Build the deterministic synthetic staging sample.
 [[nodiscard]] FoundationOcrStagingArtifact build_foundation_ocr_staging_synthetic_artifact();
 

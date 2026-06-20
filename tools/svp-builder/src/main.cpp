@@ -4,9 +4,11 @@
 #include "svp/core/version.hpp"
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/models/runtime.hpp"
+#include "svp/vision/canonical_frame_input.hpp"
 #include "svp/vision/foundation_color_staging.hpp"
 #include "svp/vision/foundation_ocr_staging.hpp"
 #include "svp/vision/observation_pipeline_plan.hpp"
+#include "svp/vision/ocr_generation.hpp"
 #include "svp/package/package_writer.hpp"
 #include "svp/package/index_writer.hpp"
 #include "svp/package/relationship_provenance_writer.hpp"
@@ -20,6 +22,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdlib>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -215,6 +218,7 @@ int main(int argc, char** argv) {
   std::string build_output_path;
   std::string build_staging_dir;
   std::string build_model_cache_dir;
+  std::string build_tesseract_path = "tesseract";
   std::string stop_after = "media-ingest";
 
   auto* build = app.add_subcommand(
@@ -231,6 +235,8 @@ int main(int argc, char** argv) {
                     "Directory for staged builder outputs");
   build->add_option("--model-cache", build_model_cache_dir,
                     "Path to SVP model cache directory containing model bundles");
+  build->add_option("--tesseract", build_tesseract_path,
+                    "Path to tesseract OCR executable");
   build->add_option("--stop-after", stop_after,
                     "Supported foundation stages: media-ingest, audio, vision-plan, "
                     "foundation-color, foundation-ocr, package-skeleton");
@@ -349,14 +355,54 @@ int main(int argc, char** argv) {
         output["foundation_color_staging"] = color_json;
       }
 
-      if (stop_after == "foundation-ocr" || stop_after == "package-skeleton") {
-        const svp::vision::FoundationOcrStagingArtifact ocr_artifact =
-            svp::vision::build_real_ocr_staging_artifact(
-                plan, model_runtime_available);
-        write_foundation_ocr_staging_files(staging_dir, ocr_artifact);
+      if (stop_after == "foundation-ocr") {
+        // Decode canonical frames (used as fallback) and run real OCR.
+        // OCR decodes its own higher-resolution frames for text detection.
+        svp::vision::DecodedCanonicalFrames decoded_frames =
+            svp::vision::decode_canonical_frames(plan, build_ffmpeg_path);
+
+        svp::vision::OcrGenerationOptions ocr_opts;
+        ocr_opts.tesseract_path = build_tesseract_path;
+        ocr_opts.ffmpeg_path = build_ffmpeg_path;
+        ocr_opts.media_plan = &plan;
+        ocr_opts.canonical_raster_width = plan.canonical_raster.width;
+        ocr_opts.canonical_raster_height = plan.canonical_raster.height;
+        {
+          int src_w = static_cast<int>(plan.primary_video_stream.width);
+          int src_h = static_cast<int>(plan.primary_video_stream.height);
+          if (std::abs(plan.primary_video_stream.rotation_degrees) == 90) {
+            std::swap(src_w, src_h);
+          }
+          const int max_ocr_dim = 1920;
+          if (src_w > max_ocr_dim || src_h > max_ocr_dim) {
+            if (src_w >= src_h) {
+              ocr_opts.ocr_frame_width = max_ocr_dim;
+              ocr_opts.ocr_frame_height = static_cast<int>(
+                  std::round(static_cast<double>(src_h) * max_ocr_dim / src_w));
+            } else {
+              ocr_opts.ocr_frame_height = max_ocr_dim;
+              ocr_opts.ocr_frame_width = static_cast<int>(
+                  std::round(static_cast<double>(src_w) * max_ocr_dim / src_h));
+            }
+          } else {
+            ocr_opts.ocr_frame_width = src_w;
+            ocr_opts.ocr_frame_height = src_h;
+          }
+        }
+
+        svp::vision::OcrGenerationResult ocr_result =
+            svp::vision::generate_ocr_observations(
+                ocr_opts, decoded_frames, staging_dir);
+
+        // Append OCR processor provenance records
+        if (!ocr_result.processors.empty()) {
+          nlohmann::json procs = nlohmann::json::array();
+          for (const auto& p : ocr_result.processors) procs.push_back(p);
+          append_jsonl_file(staging_dir / "provenance" / "processors.jsonl", procs);
+        }
 
         nlohmann::json ocr_json =
-            svp::vision::foundation_ocr_staging_artifact_to_json(ocr_artifact);
+            svp::vision::ocr_generation_result_to_json(ocr_result);
         ocr_json["staging_paths"] = {
             {"text_regions_jsonl",
              (staging_dir / "text" / "text_regions.jsonl").string()},
@@ -437,6 +483,8 @@ int main(int argc, char** argv) {
                 relationship_summary);
 
         // Write honest spatial/embedding placeholder entries
+        // This also runs real OCR generation on decoded frames before
+        // embedding generation so text_observations.jsonl is populated.
         const svp::package::SpatialEmbeddingPlaceholderSummary placeholder_summary =
             svp::package::write_spatial_and_embedding_placeholders(
                 staging_dir, model_runtime_available,
@@ -444,7 +492,8 @@ int main(int argc, char** argv) {
                 build_model_cache_dir.empty() ? std::filesystem::path{} :
                     std::filesystem::path(build_model_cache_dir),
                 &plan,
-                build_ffmpeg_path);
+                build_ffmpeg_path,
+                build_tesseract_path);
         output["spatial_embedding_placeholders"] =
             svp::package::spatial_embedding_placeholder_summary_to_json(
                 placeholder_summary);
@@ -531,14 +580,25 @@ int main(int argc, char** argv) {
       }
       if (stop_after == "foundation-ocr") {
         const bool ocr_detection_run =
-            output.at("foundation_ocr_staging").at("manifest").value(
-                "ocr_detection_run", false);
+            output.at("foundation_ocr_staging").value("ocr_detection_run", false);
+        const bool ocr_available =
+            output.at("foundation_ocr_staging").value("ocr_available", false);
         std::cout << "Staged foundation OCR observations under: "
                   << staging_dir << "\n";
+        std::cout << "OCR available: " << ocr_available << "\n";
+        std::cout << "OCR detection run: " << ocr_detection_run << "\n";
+        std::cout << "Text observation count: "
+                  << output.at("foundation_ocr_staging").value("text_observation_count", 0)
+                  << "\n";
         if (ocr_detection_run) {
-          std::cout << "Real media frames were processed for the OCR staging artifact.\n";
+          std::cout << "Real media frames were processed for OCR via tesseract.\n";
         } else {
-          std::cout << "No real OCR models were executed; honest absence was reported.\n";
+          std::cout << "No real OCR was executed; honest absence was reported.\n";
+          if (output.at("foundation_ocr_staging").contains("blocker") &&
+              !output.at("foundation_ocr_staging").at("blocker").get<std::string>().empty()) {
+            std::cout << "OCR blocker: "
+                      << output.at("foundation_ocr_staging").at("blocker") << "\n";
+          }
         }
       }
       if (stop_after == "package-skeleton") {
@@ -583,6 +643,24 @@ int main(int argc, char** argv) {
                   << "\n";
         std::cout << "Embedding model available: "
                   << output.at("spatial_embedding_placeholders").at("embedding_model_available")
+                  << "\n";
+        std::cout << "OCR available: "
+                  << output.at("spatial_embedding_placeholders").value("ocr_available", false)
+                  << "\n";
+        std::cout << "OCR frame input available: "
+                  << output.at("spatial_embedding_placeholders").value("ocr_frame_input_available", false)
+                  << "\n";
+        std::cout << "OCR detection run: "
+                  << output.at("spatial_embedding_placeholders").value("ocr_detection_run", false)
+                  << "\n";
+        std::cout << "OCR recognition run: "
+                  << output.at("spatial_embedding_placeholders").value("ocr_recognition_run", false)
+                  << "\n";
+        std::cout << "Text observation count: "
+                  << output.at("spatial_embedding_placeholders").value("text_observation_count", 0)
+                  << "\n";
+        std::cout << "Numeric value count: "
+                  << output.at("spatial_embedding_placeholders").value("numeric_value_count", 0)
                   << "\n";
         if (output.at("spatial_embedding_placeholders").contains("depth_generation_detail") &&
             output.at("spatial_embedding_placeholders").at("depth_generation_detail").contains("blocker") &&

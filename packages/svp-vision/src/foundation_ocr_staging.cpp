@@ -4,16 +4,78 @@
 
 namespace svp::vision {
 
+std::string sanitize_utf8(const std::string& input) {
+  std::string output;
+  output.reserve(input.size());
+  for (std::size_t i = 0; i < input.size(); ) {
+    unsigned char c = input[i];
+    if (c <= 0x7F) {
+      output += static_cast<char>(c);
+      i += 1;
+    } else if ((c & 0xE0) == 0xC0) {
+      if (i + 1 < input.size() &&
+          (static_cast<unsigned char>(input[i + 1]) & 0xC0) == 0x80) {
+        if (c >= 0xC2) {
+          output += input[i];
+          output += input[i + 1];
+          i += 2;
+          continue;
+        }
+      }
+      output += "\xEF\xBF\xBD";
+      i += 1;
+    } else if ((c & 0xF0) == 0xE0) {
+      if (i + 2 < input.size() &&
+          (static_cast<unsigned char>(input[i + 1]) & 0xC0) == 0x80 &&
+          (static_cast<unsigned char>(input[i + 2]) & 0xC0) == 0x80) {
+        bool surrogate = (c == 0xED && static_cast<unsigned char>(input[i + 1]) >= 0xA0);
+        bool overlong = (c == 0xE0 && static_cast<unsigned char>(input[i + 1]) < 0xA0);
+        if (!surrogate && !overlong) {
+          output += input[i];
+          output += input[i + 1];
+          output += input[i + 2];
+          i += 3;
+          continue;
+        }
+      }
+      output += "\xEF\xBF\xBD";
+      i += 1;
+    } else if ((c & 0xF8) == 0xF0) {
+      if (i + 3 < input.size() &&
+          (static_cast<unsigned char>(input[i + 1]) & 0xC0) == 0x80 &&
+          (static_cast<unsigned char>(input[i + 2]) & 0xC0) == 0x80 &&
+          (static_cast<unsigned char>(input[i + 3]) & 0xC0) == 0x80) {
+        bool valid_bounds = (c < 0xF4 || (c == 0xF4 && static_cast<unsigned char>(input[i + 1]) <= 0x8F));
+        bool overlong = (c == 0xF0 && static_cast<unsigned char>(input[i + 1]) < 0x90);
+        if (c >= 0xF0 && c <= 0xF4 && valid_bounds && !overlong) {
+          output += input[i];
+          output += input[i + 1];
+          output += input[i + 2];
+          output += input[i + 3];
+          i += 4;
+          continue;
+        }
+      }
+      output += "\xEF\xBF\xBD";
+      i += 1;
+    } else {
+      output += "\xEF\xBF\xBD";
+      i += 1;
+    }
+  }
+  return output;
+}
+
 nlohmann::json text_region_to_json(const TextRegionRecord& record) {
   nlohmann::json j = {
-      {"text_region_id", record.text_region_id},
-      {"observation_type", record.observation_type},
+      {"text_region_id", sanitize_utf8(record.text_region_id)},
+      {"observation_type", sanitize_utf8(record.observation_type)},
       {"start_us", record.start_us},
       {"end_us", record.end_us},
       {"bbox_norm", record.bbox_norm},
       {"bbox_px", record.bbox_px},
       {"confidence", record.confidence},
-      {"provenance_id", record.provenance_id},
+      {"provenance_id", sanitize_utf8(record.provenance_id)},
   };
   if (record.frame_start.has_value()) {
     j["frame_start"] = *record.frame_start;
@@ -22,31 +84,31 @@ nlohmann::json text_region_to_json(const TextRegionRecord& record) {
     j["frame_end"] = *record.frame_end;
   }
   if (record.shot_id.has_value()) {
-    j["shot_id"] = *record.shot_id;
+    j["shot_id"] = sanitize_utf8(*record.shot_id);
   }
   if (record.scene_id.has_value()) {
-    j["scene_id"] = *record.scene_id;
+    j["scene_id"] = sanitize_utf8(*record.scene_id);
   }
   if (record.region_id.has_value()) {
-    j["region_id"] = *record.region_id;
+    j["region_id"] = sanitize_utf8(*record.region_id);
   }
   if (record.entity_id.has_value()) {
-    j["entity_id"] = *record.entity_id;
+    j["entity_id"] = sanitize_utf8(*record.entity_id);
   }
   if (record.orientation_deg.has_value()) {
     j["orientation_deg"] = *record.orientation_deg;
   }
   if (record.text_direction.has_value()) {
-    j["text_direction"] = *record.text_direction;
+    j["text_direction"] = sanitize_utf8(*record.text_direction);
   }
   if (record.script.has_value()) {
-    j["script"] = *record.script;
+    j["script"] = sanitize_utf8(*record.script);
   }
   if (record.foreground_color_observation_id.has_value()) {
-    j["foreground_color_observation_id"] = *record.foreground_color_observation_id;
+    j["foreground_color_observation_id"] = sanitize_utf8(*record.foreground_color_observation_id);
   }
   if (record.background_color_observation_id.has_value()) {
-    j["background_color_observation_id"] = *record.background_color_observation_id;
+    j["background_color_observation_id"] = sanitize_utf8(*record.background_color_observation_id);
   }
   if (record.contrast_ratio.has_value()) {
     j["contrast_ratio"] = *record.contrast_ratio;
@@ -58,54 +120,58 @@ nlohmann::json text_region_to_json(const TextRegionRecord& record) {
 }
 
 nlohmann::json text_observation_to_json(const TextObservationRecord& record) {
+  nlohmann::json frame_ids = nlohmann::json::array();
+  for (const auto& id : record.source_frame_ids) {
+    frame_ids.push_back(sanitize_utf8(id));
+  }
   nlohmann::json j = {
-      {"text_observation_id", record.text_observation_id},
-      {"text_region_id", record.text_region_id},
-      {"observation_type", record.observation_type},
-      {"raw_text", record.raw_text},
-      {"normalized_text", record.normalized_text},
+      {"text_observation_id", sanitize_utf8(record.text_observation_id)},
+      {"text_region_id", sanitize_utf8(record.text_region_id)},
+      {"observation_type", sanitize_utf8(record.observation_type)},
+      {"raw_text", sanitize_utf8(record.raw_text)},
+      {"normalized_text", sanitize_utf8(record.normalized_text)},
       {"confidence", record.confidence},
-      {"source_frame_ids", record.source_frame_ids},
-      {"provenance_id", record.provenance_id},
+      {"source_frame_ids", frame_ids},
+      {"provenance_id", sanitize_utf8(record.provenance_id)},
   };
   if (record.language.has_value()) {
     j["language"] = *record.language;
   }
   if (record.layout_class.has_value()) {
-    j["layout_class"] = *record.layout_class;
+    j["layout_class"] = sanitize_utf8(*record.layout_class);
   }
   return j;
 }
 
 nlohmann::json numeric_value_to_json(const NumericValueRecord& record) {
   nlohmann::json j = {
-      {"numeric_value_id", record.numeric_value_id},
-      {"text_observation_id", record.text_observation_id},
-      {"text_region_id", record.text_region_id},
-      {"raw_text", record.raw_text},
-      {"normalized_text", record.normalized_text},
-      {"number_kind", record.number_kind},
-      {"numeric_value", record.numeric_value},
+      {"numeric_value_id", sanitize_utf8(record.numeric_value_id)},
+      {"text_observation_id", sanitize_utf8(record.text_observation_id)},
+      {"text_region_id", sanitize_utf8(record.text_region_id)},
+      {"raw_text", sanitize_utf8(record.raw_text)},
+      {"normalized_text", sanitize_utf8(record.normalized_text)},
+      {"number_kind", sanitize_utf8(record.number_kind)},
+      {"numeric_value", sanitize_utf8(record.numeric_value)},
       {"confidence", record.confidence},
-      {"parse_rule", record.parse_rule},
-      {"provenance_id", record.provenance_id},
+      {"parse_rule", sanitize_utf8(record.parse_rule)},
+      {"provenance_id", sanitize_utf8(record.provenance_id)},
   };
   if (record.unit.has_value()) {
-    j["unit"] = *record.unit;
+    j["unit"] = sanitize_utf8(*record.unit);
   }
   return j;
 }
 
 nlohmann::json text_absence_to_json(const TextAbsenceRecord& record) {
   return {
-      {"schema_version", record.schema_version},
+      {"schema_version", sanitize_utf8(record.schema_version)},
       {"ocr_required", record.ocr_required},
       {"ocr_completed", record.ocr_completed},
       {"text_region_count", record.text_region_count},
       {"text_observation_count", record.text_observation_count},
       {"numeric_value_count", record.numeric_value_count},
-      {"reason", record.reason},
-      {"provenance_id", record.provenance_id},
+      {"reason", sanitize_utf8(record.reason)},
+      {"provenance_id", sanitize_utf8(record.provenance_id)},
   };
 }
 
@@ -116,10 +182,10 @@ nlohmann::json make_ocr_processor_provenance(const std::string& id,
                                              const std::string& version,
                                              const std::string& runtime) {
   return {
-      {"id", id},
-      {"processor_type", type},
-      {"processor_version", version},
-      {"runtime", runtime},
+      {"id", sanitize_utf8(id)},
+      {"processor_type", sanitize_utf8(type)},
+      {"processor_version", sanitize_utf8(version)},
+      {"runtime", sanitize_utf8(runtime)},
       {"execution_provider", "cpu"},
       {"model_refs", nlohmann::json::array()},
   };
@@ -296,11 +362,11 @@ FoundationOcrStagingArtifact build_real_ocr_staging_artifact(
       {"numeric_value_count", 0},
       {"text_absence_written", true},
       {"processor_provenance_written", true},
-      {"source_path", plan.source_path.string()},
+      {"source_path", sanitize_utf8(plan.source_path.string())},
       {"notes",
-       {"Real media frames were not processed because the ONNX model runtime is unavailable.",
-        "No fake OCR observations were written.",
-        "It does not claim a final .svp package was written."}},
+       {sanitize_utf8("Real media frames were not processed because the ONNX model runtime is unavailable."),
+        sanitize_utf8("No fake OCR observations were written."),
+        sanitize_utf8("It does not claim a final .svp package was written.")}},
   };
 
   return artifact;
