@@ -14,4 +14,5 @@ target_link_libraries(svp-builder
     svp::audio
     svp::core
     svp::media
+    svp::vision
 )
