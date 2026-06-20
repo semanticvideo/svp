@@ -1,5 +1,6 @@
 #include "svp/core/version.hpp"
 #include "svp/media/media_ingest_plan.hpp"
+#include "svp/vision/observation_pipeline_plan.hpp"
 
 #include <CLI/CLI.hpp>
 #include <nlohmann/json.hpp>
@@ -76,16 +77,16 @@ int main(int argc, char** argv) {
   std::string stop_after = "media-ingest";
 
   auto* build = app.add_subcommand(
-      "build", "Write an honest media-ingest foundation JSON artifact");
+      "build", "Write an honest builder foundation JSON artifact");
   build->add_option("source", build_source_path, "Source media path")->required();
   build->add_option("--probe-json", build_probe_json_path,
                     "Precomputed media probe JSON; skips running ffprobe");
   build->add_option("--ffprobe", build_ffprobe_path, "ffprobe executable path");
   build->add_option("--out", build_output_path,
-                    "Output path for the media-ingest foundation JSON")
+                    "Output path for the builder foundation JSON")
       ->required();
   build->add_option("--stop-after", stop_after,
-                    "Only media-ingest is supported by this foundation command");
+                    "Supported values: media-ingest, vision-plan");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -105,8 +106,9 @@ int main(int argc, char** argv) {
     }
 
     if (*build) {
-      if (stop_after != "media-ingest") {
-        std::cerr << "svp-builder build currently supports only --stop-after media-ingest\n";
+      if (stop_after != "media-ingest" && stop_after != "vision-plan") {
+        std::cerr
+            << "svp-builder build currently supports --stop-after media-ingest or vision-plan\n";
         return 2;
       }
 
@@ -116,13 +118,22 @@ int main(int argc, char** argv) {
                                                                 build_probe_json_path,
                                                                 build_ffprobe_path));
       nlohmann::json output = svp::media::media_ingest_plan_to_json(plan);
+      if (stop_after == "vision-plan") {
+        const svp::vision::VisionObservationPipelinePlan vision_plan =
+            svp::vision::build_vision_observation_pipeline_plan(plan);
+        output["vision_observation_pipeline"] =
+            svp::vision::vision_observation_pipeline_plan_to_json(vision_plan);
+      }
       output["builder_command"] = {
           {"command", "build"},
-          {"stop_after", "media-ingest"},
+          {"stop_after", stop_after},
           {"valid_svp_package_written", false},
       };
       write_json_file(build_output_path, output);
-      std::cout << "Wrote media-ingest foundation JSON: " << build_output_path << "\n";
+      std::cout << "Wrote builder foundation JSON: " << build_output_path << "\n";
+      if (stop_after == "vision-plan") {
+        std::cout << "Vision/OCR/color task plan only; no observations were generated.\n";
+      }
       std::cout << "No .svp package was created by this foundation command.\n";
       return 0;
     }

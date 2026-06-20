@@ -19,6 +19,7 @@ add_subdirectory(packages/svp-models)
 add_subdirectory(packages/svp-validation)
 add_subdirectory(packages/svp-package)
 add_subdirectory(packages/svp-media)
+add_subdirectory(packages/svp-vision)
 
 add_subdirectory(tools/svp-validator)
 add_subdirectory(tools/svp-reader)
