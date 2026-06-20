@@ -6,6 +6,7 @@ add_library(svp-vision
   src/color_quantization.cpp
   src/foundation_color_observations.cpp
   src/foundation_color_staging.cpp
+  src/foundation_ocr_staging.cpp
   src/observation_pipeline_plan.cpp
   src/real_frame_color_sampling.cpp
 )
@@ -131,4 +132,21 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-vision-real-frame-color-sampling-tests
            COMMAND svp-vision-real-frame-color-sampling-tests)
+
+  add_executable(svp-vision-foundation-ocr-staging-tests
+    tests/foundation_ocr_staging_tests.cpp
+  )
+
+  target_compile_features(svp-vision-foundation-ocr-staging-tests
+    PRIVATE
+      cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-foundation-ocr-staging-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-foundation-ocr-staging-tests
+           COMMAND svp-vision-foundation-ocr-staging-tests)
 endif()
