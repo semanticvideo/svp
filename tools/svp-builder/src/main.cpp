@@ -2,6 +2,7 @@
 #include "svp/audio/audio_stage_plan.hpp"
 #include "svp/core/version.hpp"
 #include "svp/media/media_ingest_plan.hpp"
+#include "svp/vision/foundation_color_staging.hpp"
 #include "svp/vision/observation_pipeline_plan.hpp"
 
 #include <CLI/CLI.hpp>
@@ -42,6 +43,43 @@ void write_json_file(const std::filesystem::path& output_path,
     throw std::runtime_error("unable to open output path: " + output_path.string());
   }
   output << value.dump(2) << "\n";
+}
+
+void write_jsonl_file(const std::filesystem::path& output_path,
+                      const nlohmann::json& records) {
+  if (!records.is_array()) {
+    throw std::runtime_error("jsonl staging records must be an array");
+  }
+
+  const std::filesystem::path parent = output_path.parent_path();
+  if (!parent.empty()) {
+    std::filesystem::create_directories(parent);
+  }
+
+  std::ofstream output(output_path);
+  if (!output) {
+    throw std::runtime_error("unable to open output path: " + output_path.string());
+  }
+
+  for (const nlohmann::json& record : records) {
+    output << record.dump() << "\n";
+  }
+}
+
+void write_foundation_color_staging_files(
+    const std::filesystem::path& staging_dir,
+    const svp::vision::FoundationColorStagingArtifact& artifact) {
+  const nlohmann::json color_observations =
+      svp::vision::color_observation_records_to_jsonl_array(
+          artifact.records.records);
+  write_jsonl_file(staging_dir / "colors" / "color_observations.jsonl",
+                   color_observations);
+  write_json_file(staging_dir / "colors" / "color_summary.json",
+                  artifact.records.color_summary);
+  write_json_file(staging_dir / "colors" / "color_absence.json",
+                  artifact.records.color_absence);
+  write_jsonl_file(staging_dir / "provenance" / "processors.jsonl",
+                   nlohmann::json::array({artifact.processor_provenance}));
 }
 
 svp::media::MediaProbe load_or_run_probe(const std::string& source_path,
@@ -130,7 +168,8 @@ int main(int argc, char** argv) {
   build->add_option("--staging-dir", build_staging_dir,
                     "Directory for staged builder outputs");
   build->add_option("--stop-after", stop_after,
-                    "Supported foundation stages: media-ingest, audio, vision-plan");
+                    "Supported foundation stages: media-ingest, audio, vision-plan, "
+                    "foundation-color");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -151,9 +190,9 @@ int main(int argc, char** argv) {
 
     if (*build) {
       if (stop_after != "media-ingest" && stop_after != "audio" &&
-          stop_after != "vision-plan") {
+          stop_after != "vision-plan" && stop_after != "foundation-color") {
         std::cerr << "svp-builder build currently supports --stop-after media-ingest, audio, "
-                     "or vision-plan\n";
+                     "vision-plan, or foundation-color\n";
         return 2;
       }
 
@@ -201,6 +240,28 @@ int main(int argc, char** argv) {
             svp::vision::build_vision_observation_pipeline_plan(plan);
         output["vision_observation_pipeline"] =
             svp::vision::vision_observation_pipeline_plan_to_json(vision_plan);
+      } else if (stop_after == "foundation-color") {
+        const std::filesystem::path staging_dir =
+            build_staging_dir.empty()
+                ? default_staging_dir_for_output(build_output_path)
+                : std::filesystem::path(build_staging_dir);
+        const svp::vision::FoundationColorStagingArtifact color_artifact =
+            svp::vision::build_foundation_color_staging_artifact();
+        write_foundation_color_staging_files(staging_dir, color_artifact);
+
+        nlohmann::json color_json =
+            svp::vision::foundation_color_staging_artifact_to_json(color_artifact);
+        color_json["staging_paths"] = {
+            {"color_observations_jsonl",
+             (staging_dir / "colors" / "color_observations.jsonl").string()},
+            {"color_summary_json",
+             (staging_dir / "colors" / "color_summary.json").string()},
+            {"color_absence_json",
+             (staging_dir / "colors" / "color_absence.json").string()},
+            {"processors_jsonl",
+             (staging_dir / "provenance" / "processors.jsonl").string()},
+        };
+        output["foundation_color_staging"] = color_json;
       }
       output["builder_command"] = {
           {"command", "build"},
@@ -214,6 +275,15 @@ int main(int argc, char** argv) {
       }
       if (stop_after == "vision-plan") {
         std::cout << "Vision/OCR/color task plan only; no observations were generated.\n";
+      }
+      if (stop_after == "foundation-color") {
+        const std::filesystem::path staging_dir =
+            build_staging_dir.empty()
+                ? default_staging_dir_for_output(build_output_path)
+                : std::filesystem::path(build_staging_dir);
+        std::cout << "Staged synthetic foundation color observations under: "
+                  << staging_dir << "\n";
+        std::cout << "No real media frames were decoded for the color staging artifact.\n";
       }
       std::cout << "No .svp package was created by this foundation command.\n";
       return 0;
