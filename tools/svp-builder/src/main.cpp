@@ -543,10 +543,14 @@ int main(int argc, char** argv) {
         std::cout << "Spatial/embedding placeholders written: "
                   << output.at("spatial_embedding_placeholders").at("depth_index_written")
                   << " depth index, "
+                  << output.at("spatial_embedding_placeholders").at("depth_blocks_written")
+                  << " depth blocks, "
                   << output.at("spatial_embedding_placeholders").at("masks_blocks_written")
                   << " masks blocks, "
                   << output.at("spatial_embedding_placeholders").at("embedding_sets_written")
-                  << " embedding sets\n";
+                  << " embedding sets, "
+                  << output.at("spatial_embedding_placeholders").at("embeddings_blocks_written")
+                  << " embeddings blocks\n";
         std::cout << "Wrote skeleton .svp package to: " << package_path << "\n";
         if (validation_report_stored) {
           std::cout << "Validation report stored at: provenance/validation.json\n";
