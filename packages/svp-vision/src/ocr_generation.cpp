@@ -393,10 +393,21 @@ std::vector<TesseractWord> run_tesseract_psm(
     std::string& stderr_msg) {
   std::vector<TesseractWord> words;
 
-  std::string err_file = image_path.string() + ".err";
+  // Resolve symlinks in the image path before passing to tesseract.
+  // Tesseract/Leptonica on macOS fails to open files via symlinked paths
+  // such as /tmp (which symlinks to /private/tmp), causing OCR to silently
+  // produce no text. canonical() resolves the full real path.
+  std::filesystem::path resolved_image_path = image_path;
+  std::error_code canon_ec;
+  auto canon = std::filesystem::canonical(image_path, canon_ec);
+  if (!canon_ec) {
+    resolved_image_path = canon;
+  }
+
+  std::string err_file = resolved_image_path.string() + ".err";
   std::string cmd =
       shell_quote(tesseract_path) +
-      " " + shell_quote(image_path) +
+      " " + shell_quote(resolved_image_path) +
       " stdout"
       " --psm " + std::to_string(psm) +
       " -l " + language +
