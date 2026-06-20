@@ -2,6 +2,7 @@
 #include "svp/package/package_layout.hpp"
 #include "svp/package/package_probe.hpp"
 #include "svp/package/index_writer.hpp"
+#include "svp/package/relationship_provenance_writer.hpp"
 #include <nlohmann/json.hpp>
 
 #include <cassert>
@@ -12,6 +13,18 @@
 #include <vector>
 
 namespace {
+
+std::vector<nlohmann::json> read_jsonl_records(const std::filesystem::path& path) {
+  std::vector<nlohmann::json> records;
+  std::ifstream input(path);
+  std::string line;
+  while (std::getline(input, line)) {
+    if (!line.empty()) {
+      records.push_back(nlohmann::json::parse(line));
+    }
+  }
+  return records;
+}
 
 void test_write_package_skeleton_creates_atomic_zip_file() {
   const std::filesystem::path root =
@@ -149,6 +162,71 @@ void test_writer_fails_on_rename_and_cleans_up_temp() {
   std::filesystem::remove_all(root);
 }
 
+void test_write_relationships_and_provenance() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-relationships-provenance-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "text");
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  {
+    std::ofstream out(staging_dir / "text" / "text_regions.jsonl");
+    nlohmann::json reg = {
+      {"text_region_id", "text_region_001"},
+      {"start_us", 1000},
+      {"end_us", 2000},
+      {"shot_id", "shot_001"},
+      {"scene_id", "scene_001"},
+      {"confidence", 0.75}
+    };
+    out << reg.dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "provenance" / "processors.jsonl");
+    out << nlohmann::json{{"id", "processor_ocr_0001"}, {"version", "b"}}.dump() << "\n";
+    out << nlohmann::json{{"id", "processor_ocr_0001"}, {"version", "a"}}.dump() << "\n";
+    out << nlohmann::json{{"id", "processor_color_0001"}, {"version", "a"}}.dump() << "\n";
+  }
+
+  const svp::package::RelationshipProvenanceWriteSummary summary =
+      svp::package::write_relationships_and_provenance(staging_dir);
+  assert(summary.relationships_written == 2);
+  assert(summary.processors_written == 3);
+  assert(summary.duplicate_processors_merged == 1);
+
+  const std::vector<nlohmann::json> relationships =
+      read_jsonl_records(staging_dir / "relationships" / "relationships.jsonl");
+  assert(relationships.size() == 2);
+  assert(relationships[0]["source_id"] == "text_region_001");
+  assert(relationships[0]["processor_id"] == "processor_relationship_writer_0001");
+  assert(relationships[0]["type"] == "appears_in_scene" ||
+         relationships[0]["type"] == "appears_in_shot");
+
+  const std::vector<nlohmann::json> processors =
+      read_jsonl_records(staging_dir / "provenance" / "processors.jsonl");
+  assert(processors.size() == 3);
+  assert(processors[0]["id"] == "processor_color_0001");
+  assert(processors[1]["id"] == "processor_ocr_0001");
+  assert(processors[1]["version"] == "a");
+  assert(processors[2]["id"] == "processor_relationship_writer_0001");
+
+  const std::filesystem::path package_path = root / "output.svp";
+  nlohmann::json manifest = {
+    {"svp_version", "1.0-rc.2"},
+    {"package_id", "svp_relationship_test_pkg"}
+  };
+  assert(svp::package::write_package_skeleton(package_path, staging_dir, "", manifest));
+  auto layout_result = svp::package::read_package_layout(package_path);
+  assert(layout_result.has_value());
+  assert(layout_result.value().has_entry("relationships/relationships.jsonl"));
+  assert(layout_result.value().has_entry("provenance/processors.jsonl"));
+
+  std::filesystem::remove_all(root);
+}
+
 void test_write_index_foundation() {
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "svp-index-writer-test";
@@ -214,6 +292,10 @@ void test_write_index_foundation() {
     {"created_utc", "2026-06-20T00:00:00Z"}
   };
 
+  const svp::package::RelationshipProvenanceWriteSummary relationship_summary =
+      svp::package::write_relationships_and_provenance(staging_dir);
+  assert(relationship_summary.relationships_written == 2);
+
   bool success = svp::package::write_index_foundation(staging_dir, manifest);
   assert(success);
 
@@ -239,6 +321,7 @@ int main() {
   test_write_package_skeleton_creates_atomic_zip_file();
   test_writer_fails_gracefully_on_missing_staging_dir();
   test_writer_fails_on_rename_and_cleans_up_temp();
+  test_write_relationships_and_provenance();
   test_write_index_foundation();
   std::cout << "All svp-package-tests passed!\n";
   return 0;
