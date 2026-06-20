@@ -366,7 +366,7 @@
 
       <article class="card">
         <h2>Current Implementation State</h2>
-        <p>The SVP v1.0 RC2 spec package is present in the repository, and the OCR/color unblock gate is complete. The validator spine, RC2 fixtures, inspector summaries/dumps, media probing foundation, model-runtime foundation, audio foundation, and vision/color foundations have landed. Current active work is Phase 07 audio extraction and Phase 09 structured color observation output; the next large gate is Phase 10 package writing, relationships, index generation, provenance, and validator integration.</p>
+        <p>The SVP v1.0 RC2 spec package is present in the repository, and the OCR/color unblock gate is complete. The validator spine, RC2 fixtures, inspector summaries/dumps, media probing foundation, model-runtime foundation, audio foundation, and vision/color foundations have landed. Phase 07 now stages audio extraction, audio absence, processor provenance, waveform envelopes, and an honest VAD runtime boundary. Phase 09 now stages synthetic foundation color observations and has a real-frame/canonical-raster color sampling boundary with honest fallback behavior. The next large gate is Phase 10 package writing, relationships, index generation, provenance, and validator integration.</p>
         <ul>
           <li><code>AGENTS.md</code> now defines agent permissions, worktree rules, branch/push/PR permission, test discipline, and no-god-file expectations.</li>
           <li>The base roadmap lives under <code>docs/SVP_Implementation_Phases_RC1/</code> with active RC2 deltas under <code>docs/SVP_Implementation_Phases_RC2_Update/</code>.</li>
@@ -766,7 +766,7 @@
           <li>Handle silent video as valid zero-word behavior according to the spec.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> timestamp units, provenance honesty, no hidden Python runtime requirement.</p>
-        <p class="small">Status: audio/transcript data model, extraction/VAD planning, and staged FFmpeg extraction are in progress. Keep VAD, ASR, diarization, and package-writing claims honest until those processors actually run.</p>
+        <p class="small">Status: audio/transcript data model, staged FFmpeg extraction, audio absence/provenance, waveform envelope generation, VAD task planning, and the VAD runtime boundary have landed. ONNX-backed VAD detection, ASR/transcription, diarization, speaker assignment, and package writing remain separate follow-up slices.</p>
       </div>
 
       <div class="phase">
@@ -803,7 +803,7 @@
           <li>Support queries like "find all orange scenes" through scene/shot color summaries.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> no over-promising, block validity, degenerate/static video behavior.</p>
-        <p class="small">Status: planned-only vision pipeline, deterministic color quantization, and color observation record planning are in progress. Real frame sampling and OCR/model execution remain separate follow-up slices.</p>
+        <p class="small">Status: planned-only vision pipeline, deterministic color quantization, color observation record planning, frame/keyframe color sampling, foundation color staging, and real-frame/canonical-raster color sampling boundary have landed. OCR/text detection, model execution, and package/index integration remain separate follow-up slices.</p>
       </div>
 
       <div class="phase">
@@ -1147,13 +1147,13 @@ Act:
     <section class="card">
       <h2>Immediate Next Work</h2>
       <ol>
-        <li><strong>Merge approved active PRs:</strong> PR #22 covers staged FFmpeg audio extraction, and PR #23 covers color observation record planning.</li>
+        <li><strong>Current merged baseline:</strong> PRs #22 through #31 are landed, covering staged audio extraction through VAD runtime boundary and color observation planning through real-frame color sampling.</li>
         <li><strong>Keep two-builder discipline:</strong> reviewers may run concurrently, but no more than two builder threads should be active at once.</li>
-        <li><strong>Continue Phase 07:</strong> after extraction staging, add waveform/audio absence/provenance output, then VAD execution only when the runtime boundary is ready.</li>
-        <li><strong>Continue Phase 09:</strong> after color record planning, wire deterministic color summaries to real frame/keyframe sampling, then OCR/model execution when runtime sessions are ready.</li>
+        <li><strong>Continue Phase 07 only when assigned:</strong> replace the VAD runtime-unavailable/placeholder branch with real model-backed detection once ONNX Runtime and the supported VAD model bundle are available.</li>
+        <li><strong>Continue Phase 09 only when assigned:</strong> add OCR/text detection and recognition or wire real-frame color outputs toward package/index integration without claiming a final `.svp` package.</li>
         <li><strong>Prepare Phase 10:</strong> package writer, relationships, SQLite index generation, logical row hashes, provenance, final validation output, and atomic finalization are the next large integration gate before a true first-video package.</li>
       </ol>
-      <p>The orchestration loop is no longer paused on the RC2 OCR/color gate. It should keep moving through Phase 07 and Phase 09 while preserving honest partial-output flags until Phase 10 can create validator-proven packages.</p>
+      <p>The orchestration loop is no longer paused on the RC2 OCR/color gate. It should continue only through explicitly assigned Phase 07, Phase 09, or Phase 10 slices while preserving honest partial-output flags until Phase 10 can create validator-proven packages.</p>
     </section>
 
     <section class="card">
