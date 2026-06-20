@@ -162,6 +162,10 @@ QuantizedColorObservation summarize_color_samples(
     throw std::invalid_argument("unregistered color sampling basis: " +
                                 target.sampling_basis);
   }
+  if (pixels.empty()) {
+    throw std::invalid_argument(
+        "color observation samples must contain at least one pixel");
+  }
 
   QuantizedColorObservation observation;
   observation.target = target;
@@ -172,12 +176,6 @@ QuantizedColorObservation summarize_color_samples(
 
   for (const std::string& bucket_id : registered_color_bucket_ids()) {
     observation.bucket_coverage[bucket_id] = 0.0;
-  }
-
-  if (pixels.empty()) {
-    observation.dominant_bucket = "other";
-    observation.quality_score = 0.0;
-    return observation;
   }
 
   for (const Srgb8Pixel pixel : pixels) {

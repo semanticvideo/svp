@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -57,6 +58,15 @@ int main() {
   require(svp::vision::assign_registered_color_bucket(
               svp::vision::srgb8_to_oklch({255, 160, 0})) == "yellow",
           "yellow pixel should assign to yellow bucket");
+
+  bool rejected_empty_samples = false;
+  try {
+    (void)svp::vision::summarize_color_samples(sample_target(), {});
+  } catch (const std::invalid_argument&) {
+    rejected_empty_samples = true;
+  }
+  require(rejected_empty_samples,
+          "empty samples must not produce a serializable color observation");
 
   const std::vector<svp::vision::Srgb8Pixel> pixels = {
       {255, 128, 0},
