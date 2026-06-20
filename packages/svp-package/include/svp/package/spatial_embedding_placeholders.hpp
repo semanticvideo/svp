@@ -4,6 +4,8 @@
 #include <filesystem>
 #include <nlohmann/json.hpp>
 
+namespace svp::media { struct MediaIngestPlan; }
+
 namespace svp::package {
 
 struct SpatialEmbeddingPlaceholderSummary {
@@ -18,6 +20,8 @@ struct SpatialEmbeddingPlaceholderSummary {
   std::size_t embedding_generation_run = false;
   std::size_t model_runtime_available = false;
   std::size_t depth_model_available = false;
+  std::size_t depth_model_verified = false;
+  std::size_t depth_frame_input_available = false;
   std::size_t embedding_model_available = false;
   std::size_t provenance_records_added = 0;
   nlohmann::json depth_generation_detail;
@@ -43,12 +47,17 @@ struct SpatialEmbeddingPlaceholderSummary {
  *
  * Also appends honest provenance processor records to
  * provenance/processors.jsonl.
+ *
+ * When media_plan and ffmpeg_path are provided, real canonical frames are
+ * decoded and passed to depth generation for ONNX inference.
  */
 [[nodiscard]] SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     const std::filesystem::path& staging_dir,
     bool model_runtime_available,
     const nlohmann::json& media_plan_json = {},
-    const std::filesystem::path& model_cache_root = {});
+    const std::filesystem::path& model_cache_root = {},
+    const svp::media::MediaIngestPlan* media_plan = nullptr,
+    const std::filesystem::path& ffmpeg_path = {});
 
 [[nodiscard]] nlohmann::json spatial_embedding_placeholder_summary_to_json(
     const SpatialEmbeddingPlaceholderSummary& summary);

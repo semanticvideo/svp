@@ -442,7 +442,9 @@ int main(int argc, char** argv) {
                 staging_dir, model_runtime_available,
                 svp::media::media_ingest_plan_to_json(plan),
                 build_model_cache_dir.empty() ? std::filesystem::path{} :
-                    std::filesystem::path(build_model_cache_dir));
+                    std::filesystem::path(build_model_cache_dir),
+                &plan,
+                build_ffmpeg_path);
         output["spatial_embedding_placeholders"] =
             svp::package::spatial_embedding_placeholder_summary_to_json(
                 placeholder_summary);
@@ -569,6 +571,12 @@ int main(int argc, char** argv) {
                   << "\n";
         std::cout << "Depth model available: "
                   << output.at("spatial_embedding_placeholders").at("depth_model_available")
+                  << "\n";
+        std::cout << "Depth model verified: "
+                  << output.at("spatial_embedding_placeholders").value("depth_model_verified", false)
+                  << "\n";
+        std::cout << "Depth frame input available: "
+                  << output.at("spatial_embedding_placeholders").value("depth_frame_input_available", false)
                   << "\n";
         std::cout << "Embedding model available: "
                   << output.at("spatial_embedding_placeholders").at("embedding_model_available")
