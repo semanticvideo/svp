@@ -366,13 +366,13 @@
 
       <article class="card">
         <h2>Current Implementation State</h2>
-        <p>The SVP v1.0 RC2 spec package is present in the repository, and the OCR/color unblock gate is complete. The validator spine, RC2 fixtures, inspector summaries/dumps, media probing foundation, model-runtime foundation, audio foundation, and vision/color foundations have landed. Phase 07 now stages audio extraction, audio absence, processor provenance, waveform envelopes, and an honest VAD runtime boundary. Phase 09 now stages color observations, real-frame/canonical-raster color sampling, and an honest OCR/text foundation. Phase 10 has started: atomic package writing plus SQLite index and index manifest generation have landed. The next large gate is relationships/provenance/final validation integration.</p>
+        <p>The SVP v1.0 RC2 spec package is present in the repository, and the OCR/color unblock gate is complete. The validator spine, RC2 fixtures, inspector summaries/dumps, media probing foundation, model-runtime foundation, audio foundation, and vision/color foundations have landed. Phase 07 now stages audio extraction, audio absence, processor provenance, waveform envelopes, and an honest VAD runtime boundary. Phase 09 now stages color observations, real-frame/canonical-raster color sampling, and an honest OCR/text foundation. Phase 10 now has atomic package writing, SQLite index/index manifest generation, relationships/provenance wiring, stored validation output, and honest required block stream placeholders. The remaining validator blockers require real non-empty depth and embedding block streams.</p>
         <ul>
           <li><code>AGENTS.md</code> now defines agent permissions, worktree rules, branch/push/PR permission, test discipline, and no-god-file expectations.</li>
           <li>The base roadmap lives under <code>docs/SVP_Implementation_Phases_RC1/</code> with active RC2 deltas under <code>docs/SVP_Implementation_Phases_RC2_Update/</code>.</li>
           <li>Implementation should follow the phase docs, not free-form invention.</li>
           <li>The orchestrator thread owns sequencing and must be woken by builders and reviewers when they finish.</li>
-          <li>Do not treat incomplete builder output as a valid package. Until the package writer, relationships, index, provenance, and validator integration all pass, builder stop points must keep <code>valid_svp_package_written=false</code>.</li>
+          <li>Do not treat incomplete builder output as a valid package. Until real depth and embedding block streams exist and validator passes, builder stop points must keep <code>valid_svp_package_written=false</code>.</li>
         </ul>
       </article>
 
@@ -835,7 +835,7 @@
           <li>The branch may remain a single integration branch, but commits and review notes should make these checkpoints easy to inspect.</li>
         </ul>
         <p><strong>Reviewer focus:</strong> do not approve Phase 10 if package writing, index generation, relationships, provenance, validation output, and atomic finalization are all mixed together without clear ownership boundaries. Also verify atomic writer behavior, logical hash correctness, and builder/validator integration.</p>
-        <p class="small">Status: atomic package writer skeleton, original media packaging, SQLite index generation, text/color query tables, index manifest, and logical row hash output have landed. Next Phase 10 work should focus on relationships, provenance wiring, final validation output storage, and reducing remaining expected validator failures.</p>
+        <p class="small">Status: atomic package writer skeleton, original media packaging, SQLite index generation, text/color query tables, index manifest, logical row hash output, relationships/provenance wiring, stored validation output, and required block stream placeholders have landed. Remaining validator failures are now precise: non-empty depth and embedding block streams require real processing.</p>
       </div>
 
       <div class="phase">
@@ -1147,11 +1147,11 @@ Act:
     <section class="card">
       <h2>Immediate Next Work</h2>
       <ol>
-        <li><strong>Current merged baseline:</strong> PRs #22 through #34 are landed, covering staged audio extraction through VAD runtime boundary, OCR/color foundations, atomic package writing, and SQLite index/index manifest generation.</li>
+        <li><strong>Current merged baseline:</strong> PRs #22 through #37 are landed, covering staged audio extraction through VAD runtime boundary, OCR/color foundations, atomic package writing, SQLite index/index manifest generation, relationships/provenance wiring, validation report storage, and required block placeholders.</li>
         <li><strong>Keep two-builder discipline:</strong> reviewers may run concurrently, but no more than two builder threads should be active at once.</li>
-        <li><strong>Continue Phase 10:</strong> implement relationships from existing observations, then wire provenance and final validation report storage into the package.</li>
-        <li><strong>Continue Phase 07/09 only when assigned:</strong> real model-backed VAD and real OCR/text recognition still require the ONNX/model runtime path; do not block Phase 10 skeleton integration on them.</li>
-        <li><strong>Prepare for Phase 11:</strong> once package relationships/provenance/validation output are in place, run the first real 20 to 30 second package trial and use validator output to drive fixes.</li>
+        <li><strong>Continue Phase 09/10:</strong> replace honest empty depth and embedding block placeholders with real non-empty SVPB streams from depth estimation and embedding generation.</li>
+        <li><strong>Continue Phase 07/09 only when assigned:</strong> real model-backed VAD and real OCR/text recognition still require the ONNX/model runtime path; do not block package validation work on them unless the trial requires those observations.</li>
+        <li><strong>Prepare for Phase 11:</strong> once depth and embedding block streams validate, run the first real 20 to 30 second package trial and use validator output to drive fixes.</li>
       </ol>
       <p>The orchestration loop is no longer paused on the RC2 OCR/color gate. It should continue through explicitly assigned Phase 10 slices while preserving honest partial-output flags until the package becomes validator-proven.</p>
     </section>
