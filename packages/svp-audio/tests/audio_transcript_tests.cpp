@@ -460,6 +460,52 @@ void test_vad_execution_boundary_preserves_honest_unrun_state() {
   assert(!encoded["blockers"].empty());
 }
 
+void test_execute_vad_boundary_handles_runtime_unavailable_honestly() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-audio-vad-exec-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  svp::media::MediaProbe probe;
+  probe.audio_streams.push_back({"astream_0001", 1, "aac", 48000, 2, {}});
+
+  const svp::audio::VadTaskPlan plan =
+      svp::audio::build_vad_task_plan(probe, 65000000, false);
+
+  // Case 1: model_runtime_available is false
+  {
+    const svp::audio::VadExecutionBoundary boundary =
+        svp::audio::build_vad_execution_boundary(plan, true, true, false);
+    const svp::audio::VadExecutionBoundary result =
+        svp::audio::execute_vad_boundary(boundary, root);
+    assert(result.vad_run == false);
+    assert(result.speech_regions_written == false);
+    assert(result.speech_region_count == 0);
+  }
+
+  // Case 2: model_runtime_available is true (throws runtime_unavailable)
+  {
+    const svp::audio::VadExecutionBoundary boundary =
+        svp::audio::build_vad_execution_boundary(plan, true, true, true);
+    const svp::audio::VadExecutionBoundary result =
+        svp::audio::execute_vad_boundary(boundary, root);
+    assert(result.vad_run == false);
+    assert(result.speech_regions_written == false);
+    assert(result.speech_region_count == 0);
+    assert(!result.blockers.empty());
+    bool found_error = false;
+    for (const auto& blocker : result.blockers) {
+      if (blocker.find("runtime_unavailable") != std::string::npos ||
+          blocker.find("support is not configured") != std::string::npos) {
+        found_error = true;
+      }
+    }
+    assert(found_error);
+  }
+
+  std::filesystem::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
@@ -474,5 +520,6 @@ int main() {
   test_audio_extraction_executor_leaves_multi_stream_analysis_unrun();
   test_vad_task_plan_uses_stable_thirty_second_boundaries();
   test_vad_execution_boundary_preserves_honest_unrun_state();
+  test_execute_vad_boundary_handles_runtime_unavailable_honestly();
   return 0;
 }

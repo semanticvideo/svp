@@ -33,6 +33,10 @@ struct VadExecutionBoundary {
     bool waveform_available,
     bool model_runtime_available);
 
+[[nodiscard]] VadExecutionBoundary execute_vad_boundary(
+    const VadExecutionBoundary& boundary,
+    const std::filesystem::path& staging_root);
+
 [[nodiscard]] nlohmann::json vad_execution_boundary_to_json(
     const VadExecutionBoundary& boundary);
 

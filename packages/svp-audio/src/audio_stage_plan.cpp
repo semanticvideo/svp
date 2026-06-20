@@ -25,7 +25,8 @@ std::vector<std::string> required_audio_outputs() {
 AudioStagePlan build_audio_stage_plan(const std::filesystem::path& source_path,
                                       const svp::media::MediaProbe& probe,
                                       bool ffmpeg_audio_extraction_available,
-                                      const std::filesystem::path& ffmpeg_path) {
+                                      const std::filesystem::path& ffmpeg_path,
+                                      bool model_runtime_available) {
   AudioStagePlan plan;
   plan.source_path = source_path;
   plan.source_audio_present = !probe.audio_streams.empty();
@@ -37,9 +38,9 @@ AudioStagePlan build_audio_stage_plan(const std::filesystem::path& source_path,
                                   probe,
                                   ffmpeg_audio_extraction_available,
                                   ffmpeg_path);
-  plan.vad_task_plan = build_vad_task_plan(probe, std::nullopt, false);
+  plan.vad_task_plan = build_vad_task_plan(probe, std::nullopt, model_runtime_available);
   plan.vad_execution_boundary =
-      build_vad_execution_boundary(plan.vad_task_plan, false, false, false);
+      build_vad_execution_boundary(plan.vad_task_plan, false, false, model_runtime_available);
 
   plan.required_outputs = required_audio_outputs();
   plan.pending_processors = {
@@ -61,7 +62,9 @@ AudioStagePlan build_audio_stage_plan(const std::filesystem::path& source_path,
   plan.blockers.insert(plan.blockers.end(),
                        plan.vad_task_plan.blockers.begin(),
                        plan.vad_task_plan.blockers.end());
-  plan.blockers.push_back("VAD model runtime is not wired in this foundation pass");
+  if (!model_runtime_available) {
+    plan.blockers.push_back("VAD model runtime is not wired in this foundation pass");
+  }
   plan.blockers.push_back("whisper.cpp transcription is not wired in this foundation pass");
   plan.blockers.push_back("sherpa-onnx diarization is not wired in this foundation pass");
 

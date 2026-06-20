@@ -3,6 +3,7 @@
 #include "svp/audio/vad_execution_boundary.hpp"
 #include "svp/core/version.hpp"
 #include "svp/media/media_ingest_plan.hpp"
+#include "svp/models/runtime.hpp"
 #include "svp/vision/foundation_color_staging.hpp"
 #include "svp/vision/observation_pipeline_plan.hpp"
 
@@ -204,11 +205,13 @@ int main(int argc, char** argv) {
                                                                 build_ffprobe_path));
       nlohmann::json output = svp::media::media_ingest_plan_to_json(plan);
       if (stop_after == "audio") {
+        const bool model_runtime_available = svp::models::OnnxSession::is_available();
         const svp::audio::AudioStagePlan audio_plan =
             svp::audio::build_audio_stage_plan(build_source_path,
                                                plan.probe,
                                                executable_exists(build_ffmpeg_path),
-                                               build_ffmpeg_path);
+                                               build_ffmpeg_path,
+                                               model_runtime_available);
         nlohmann::json audio_json = svp::audio::audio_stage_plan_to_json(audio_plan);
         const std::filesystem::path staging_dir =
             build_staging_dir.empty()
@@ -223,7 +226,10 @@ int main(int argc, char** argv) {
             svp::audio::build_vad_execution_boundary(audio_plan.vad_task_plan,
                                                      extraction_run.analysis_audio_written,
                                                      extraction_run.waveform_written,
-                                                     false);
+                                                     model_runtime_available);
+        const svp::audio::VadExecutionBoundary executed_boundary =
+            svp::audio::execute_vad_boundary(vad_boundary, staging_dir);
+
         audio_json["audio_extraction"]["execution"] = extraction_run_json;
         audio_json["audio_extraction"]["extraction_run"] =
             extraction_run.extraction_run;
@@ -240,8 +246,13 @@ int main(int argc, char** argv) {
         for (const std::string& blocker : extraction_run.blockers) {
           audio_json["blockers"].push_back(blocker);
         }
+        for (const std::string& blocker : executed_boundary.blockers) {
+          if (std::find(audio_json["blockers"].begin(), audio_json["blockers"].end(), blocker) == audio_json["blockers"].end()) {
+            audio_json["blockers"].push_back(blocker);
+          }
+        }
         audio_json["vad_execution_boundary"] =
-            svp::audio::vad_execution_boundary_to_json(vad_boundary);
+            svp::audio::vad_execution_boundary_to_json(executed_boundary);
         output["audio_foundation"] = audio_json;
       } else if (stop_after == "vision-plan") {
         const svp::vision::VisionObservationPipelinePlan vision_plan =
