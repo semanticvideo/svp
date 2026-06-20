@@ -186,6 +186,12 @@ int main(int argc, char** argv) {
             extraction_run.original_streams_written;
         audio_json["audio_extraction"]["analysis_audio_written"] =
             extraction_run.analysis_audio_written;
+        audio_json["audio_extraction"]["audio_absence_written"] =
+            extraction_run.audio_absence_written;
+        audio_json["audio_extraction"]["waveform_written"] =
+            extraction_run.waveform_written;
+        audio_json["audio_extraction"]["processor_provenance_written"] =
+            extraction_run.processor_provenance_written;
         for (const std::string& blocker : extraction_run.blockers) {
           audio_json["blockers"].push_back(blocker);
         }

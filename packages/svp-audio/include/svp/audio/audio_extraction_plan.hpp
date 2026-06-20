@@ -26,6 +26,28 @@ struct AnalysisAudioCommandPlan {
   std::vector<std::string> arguments;
 };
 
+struct AudioAbsenceArtifactPlan {
+  std::string task_id;
+  std::vector<std::string> depends_on;
+  std::string processor_id;
+  std::string output_ref;
+};
+
+struct WaveformArtifactPlan {
+  std::string task_id;
+  std::vector<std::string> depends_on;
+  std::string processor_id;
+  std::string input_ref;
+  std::string output_ref;
+  std::int64_t window_duration_us = 10000;
+};
+
+struct AudioProvenanceArtifactPlan {
+  std::string task_id;
+  std::vector<std::string> depends_on;
+  std::string output_ref;
+};
+
 struct AudioExtractionPlan {
   std::filesystem::path source_path;
   std::filesystem::path ffmpeg_path = "ffmpeg";
@@ -33,6 +55,9 @@ struct AudioExtractionPlan {
   bool source_audio_present = false;
   std::vector<AudioExtractionCommandPlan> original_streams;
   AnalysisAudioCommandPlan analysis_audio;
+  AudioAbsenceArtifactPlan audio_absence;
+  WaveformArtifactPlan waveform;
+  AudioProvenanceArtifactPlan processor_provenance;
   std::vector<std::string> blockers;
 };
 

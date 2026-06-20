@@ -125,6 +125,18 @@ void test_audio_extraction_plan_documents_ffmpeg_commands_when_available() {
   assert(extraction["analysis_audio"]["selected_source_audio_stream_id"] == "astream_0001");
   assert(extraction["analysis_audio"]["output_ref"] == "media/audio/analysis_mono_16k.wav");
   assert(extraction["analysis_audio"]["command_available"] == true);
+  assert(extraction["audio_absence"]["output_ref"] == "media/audio/audio_absence.json");
+  assert(extraction["audio_absence"]["processor_id"] ==
+         "proc_audio_absence_foundation_0001");
+  assert(extraction["waveform"]["output_ref"] == "media/audio/waveform.jsonl");
+  assert(extraction["waveform"]["input_ref"] == "media/audio/analysis_mono_16k.wav");
+  assert(extraction["waveform"]["window_duration_us"] == 10000);
+  assert(extraction["waveform"]["waveform_run"] == false);
+  assert(extraction["waveform"]["waveform_written"] == false);
+  assert(extraction["processor_provenance"]["output_ref"] ==
+         "provenance/processors.jsonl");
+  assert(extraction["processor_provenance"]["final_package_provenance_written"] ==
+         false);
   assert(extraction["extraction_run"] == false);
   assert(extraction["analysis_audio_written"] == false);
 }
@@ -181,6 +193,17 @@ void test_audio_extraction_executor_writes_staged_single_stream_outputs() {
       source.string(),
       "media/audio/analysis_mono_16k.wav",
   };
+  plan.audio_absence.task_id = "task.audio.absence.write";
+  plan.audio_absence.depends_on = {"task.audio.extract.astream_000"};
+  plan.audio_absence.processor_id = "proc_audio_absence_foundation_0001";
+  plan.audio_absence.output_ref = "media/audio/audio_absence.json";
+  plan.waveform.task_id = "task.audio.waveform.analysis_mono_16k";
+  plan.waveform.depends_on = {"task.audio.analysis.astream_000"};
+  plan.waveform.processor_id = "proc_waveform_envelope_0001";
+  plan.waveform.input_ref = "media/audio/analysis_mono_16k.wav";
+  plan.waveform.output_ref = "media/audio/waveform.jsonl";
+  plan.processor_provenance.task_id = "task.audio.provenance.plan";
+  plan.processor_provenance.output_ref = "provenance/processors.jsonl";
 
   const std::filesystem::path staging_root = root / "staging";
   const svp::audio::AudioExtractionRun run =
@@ -190,10 +213,29 @@ void test_audio_extraction_executor_writes_staged_single_stream_outputs() {
   assert(encoded["extraction_run"] == true);
   assert(encoded["original_streams_written"] == true);
   assert(encoded["analysis_audio_written"] == true);
+  assert(encoded["audio_absence_written"] == true);
+  assert(encoded["waveform_written"] == false);
+  assert(encoded["processor_provenance_written"] == true);
   assert(encoded["original_streams"][0]["command_executed"] == true);
   assert(encoded["analysis_audio"]["command_executed"] == true);
+  assert(encoded["audio_absence"]["written"] == true);
+  assert(encoded["waveform"]["written"] == false);
+  assert(encoded["processor_provenance"]["written"] == true);
   assert(std::filesystem::exists(staging_root / "media/audio/original_stream_000.flac"));
   assert(std::filesystem::exists(staging_root / "media/audio/analysis_mono_16k.wav"));
+  assert(std::filesystem::exists(staging_root / "media/audio/audio_absence.json"));
+  assert(!std::filesystem::exists(staging_root / "media/audio/waveform.jsonl"));
+  assert(std::filesystem::exists(staging_root / "provenance/processors.jsonl"));
+
+  {
+    std::ifstream input(staging_root / "media/audio/audio_absence.json");
+    const nlohmann::json absence = nlohmann::json::parse(input);
+    assert(absence["source_audio_present"] == true);
+    assert(absence["source_audio_stream_count"] == 1);
+    assert(absence["selected_source_audio_stream_id"] == "astream_0001");
+    assert(absence["analysis_audio_written"] == true);
+    assert(absence["final_package_ready"] == false);
+  }
 
   std::filesystem::remove_all(root);
 }
@@ -229,6 +271,18 @@ void test_audio_extraction_executor_leaves_multi_stream_analysis_unrun() {
   plan.analysis_audio.output_ref = "media/audio/analysis_mono_16k.wav";
   plan.analysis_audio.selected_source_audio_stream_id =
       "pending_vad_speech_positive_selection";
+  plan.audio_absence.task_id = "task.audio.absence.write";
+  plan.audio_absence.depends_on = {"task.audio.extract.astream_000",
+                                   "task.audio.extract.astream_001"};
+  plan.audio_absence.processor_id = "proc_audio_absence_foundation_0001";
+  plan.audio_absence.output_ref = "media/audio/audio_absence.json";
+  plan.waveform.task_id = "task.audio.waveform.analysis_mono_16k";
+  plan.waveform.depends_on = {"task.audio.analysis.pending_vad_selection"};
+  plan.waveform.processor_id = "proc_waveform_envelope_0001";
+  plan.waveform.input_ref = "media/audio/analysis_mono_16k.wav";
+  plan.waveform.output_ref = "media/audio/waveform.jsonl";
+  plan.processor_provenance.task_id = "task.audio.provenance.plan";
+  plan.processor_provenance.output_ref = "provenance/processors.jsonl";
 
   const std::filesystem::path staging_root = root / "staging";
   const svp::audio::AudioExtractionRun run =
@@ -238,8 +292,13 @@ void test_audio_extraction_executor_leaves_multi_stream_analysis_unrun() {
   assert(encoded["extraction_run"] == true);
   assert(encoded["original_streams_written"] == true);
   assert(encoded["analysis_audio_written"] == false);
+  assert(encoded["audio_absence_written"] == true);
+  assert(encoded["waveform_written"] == false);
+  assert(encoded["processor_provenance_written"] == true);
   assert(encoded["analysis_audio"]["command_available"] == false);
   assert(encoded["analysis_audio"]["command_executed"] == false);
+  assert(encoded["audio_absence"]["written"] == true);
+  assert(encoded["waveform"]["written"] == false);
   assert(!encoded["blockers"].empty());
 
   std::filesystem::remove_all(root);
