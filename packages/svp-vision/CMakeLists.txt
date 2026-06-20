@@ -1,6 +1,7 @@
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(svp-vision
+  src/color_quantization.cpp
   src/observation_pipeline_plan.cpp
 )
 
@@ -20,16 +21,30 @@ target_link_libraries(svp-vision
 )
 
 if(BUILD_TESTING)
-  add_executable(svp-vision-tests
+  add_executable(svp-vision-plan-tests
     tests/observation_pipeline_plan_tests.cpp
   )
 
-  target_compile_features(svp-vision-tests PRIVATE cxx_std_20)
+  target_compile_features(svp-vision-plan-tests PRIVATE cxx_std_20)
 
-  target_link_libraries(svp-vision-tests
+  target_link_libraries(svp-vision-plan-tests
     PRIVATE
       svp::vision
   )
 
-  add_test(NAME svp-vision-tests COMMAND svp-vision-tests)
+  add_test(NAME svp-vision-plan-tests COMMAND svp-vision-plan-tests)
+
+  add_executable(svp-vision-color-quantization-tests
+    tests/color_quantization_tests.cpp
+  )
+
+  target_compile_features(svp-vision-color-quantization-tests PRIVATE cxx_std_20)
+
+  target_link_libraries(svp-vision-color-quantization-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-color-quantization-tests
+           COMMAND svp-vision-color-quantization-tests)
 endif()

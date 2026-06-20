@@ -31,6 +31,9 @@ struct VisionObservationPipelinePlan {
   std::string schema_version;
   std::string source_path;
   std::string canonical_raster_basis;
+  std::string color_space;
+  std::string color_bucket_registry_version;
+  double color_percentage_sum_tolerance;
   std::vector<ObservationPipelineTask> tasks;
   std::vector<std::string> explicit_non_goals;
 };

@@ -1,5 +1,7 @@
 #include "svp/vision/observation_pipeline_plan.hpp"
 
+#include "svp/vision/color_quantization.hpp"
+
 #include <utility>
 
 namespace svp::vision {
@@ -206,6 +208,9 @@ VisionObservationPipelinePlan build_vision_observation_pipeline_plan(
       "svp-vision-observation-pipeline-plan-v1",
       media_plan.source_path.string(),
       "canonical_analysis_raster",
+      registered_color_space(),
+      registered_color_bucket_version(),
+      registered_color_percentage_sum_tolerance(),
       std::move(tasks),
       {"real_ocr_or_model_inference",
        "real_video_frame_decoding",
@@ -226,6 +231,15 @@ nlohmann::json vision_observation_pipeline_plan_to_json(
       {"schema_version", plan.schema_version},
       {"source", {{"path", plan.source_path}}},
       {"canonical_raster_basis", plan.canonical_raster_basis},
+      {"color_quantization",
+       {{"execution_state", "foundation_only"},
+        {"color_space", plan.color_space},
+        {"color_bucket_registry_version", plan.color_bucket_registry_version},
+        {"percentage_sum_tolerance", plan.color_percentage_sum_tolerance},
+        {"registered_bucket_ids", registered_color_bucket_ids()},
+        {"sample_input_kind", "in_memory_srgb8_pixels"},
+        {"output_kind", "quantized_color_observation_draft"},
+        {"quantization_method", "deterministic_srgb8_to_oklch_bucket_rules"}}},
       {"tasks", tasks},
       {"explicit_non_goals", plan.explicit_non_goals},
       {"observations_generated", false},

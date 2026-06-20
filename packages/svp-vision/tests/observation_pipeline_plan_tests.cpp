@@ -56,6 +56,16 @@ int main() {
           "foundation plan must not claim model execution");
   require(json.at("valid_svp_package_written") == false,
           "foundation plan must not claim package writing");
+  require(json.at("color_quantization").at("execution_state") == "foundation_only",
+          "color quantization must be marked as foundation-only");
+  require(json.at("color_quantization").at("color_space") == "svp_oklch_v1",
+          "color quantization must use the RC2 registered color space");
+  require(json.at("color_quantization").at("color_bucket_registry_version") ==
+              "svp-color-buckets-v1",
+          "color quantization must use the RC2 bucket registry");
+  require(json.at("color_quantization").at("sample_input_kind") ==
+              "in_memory_srgb8_pixels",
+          "color quantization foundation must advertise in-memory sample inputs");
 
   const nlohmann::json& tasks = json.at("tasks");
   require(has_task_boundary(tasks, "ocr_text_detection"),
