@@ -1,14 +1,19 @@
 #include "svp/vision/embedding_generation.hpp"
 
 #include <cassert>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 
 int main() {
-  const std::filesystem::path model_cache =
-      std::filesystem::path("/Users/domesposito/Projects/svp-model-cache");
+  const char* cache_env = std::getenv("SVP_MODEL_CACHE_ROOT");
+  if (cache_env == nullptr || cache_env[0] == '\0') {
+    std::cerr << "Skipping: SVP_MODEL_CACHE_ROOT env var not set\n";
+    return 0;
+  }
 
+  const std::filesystem::path model_cache(cache_env);
   if (!std::filesystem::exists(model_cache / "model_nomic_embed_text_v1_5")) {
     std::cerr << "Skipping: model cache not found at " << model_cache << "\n";
     return 0;

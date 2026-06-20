@@ -242,7 +242,7 @@ std::vector<float> OnnxSession::run_embedding(
   return std::vector<float>(output_data, output_data + element_count);
 }
 
-std::vector<float> OnnxSession::run_text_embedding(
+TextEmbeddingOutput OnnxSession::run_text_embedding(
     const std::int64_t* input_ids,
     const std::int64_t* token_type_ids,
     const std::int64_t* attention_mask,
@@ -296,9 +296,14 @@ std::vector<float> OnnxSession::run_text_embedding(
   auto& output_tensor = output_tensors[0];
   auto type_info = output_tensor.GetTensorTypeAndShapeInfo();
   auto element_count = type_info.GetElementCount();
+  auto output_shape = type_info.GetShape();
 
   const float* output_data = output_tensor.GetTensorData<float>();
-  return std::vector<float>(output_data, output_data + element_count);
+
+  TextEmbeddingOutput result;
+  result.data = std::vector<float>(output_data, output_data + element_count);
+  result.shape.assign(output_shape.begin(), output_shape.end());
+  return result;
 }
 
 std::string OnnxSession::model_id() const {
@@ -345,7 +350,7 @@ std::vector<float> OnnxSession::run_embedding(const float*, std::size_t) const {
                    "ONNX Runtime is not available");
 }
 
-std::vector<float> OnnxSession::run_text_embedding(
+TextEmbeddingOutput OnnxSession::run_text_embedding(
     const std::int64_t*, const std::int64_t*, const std::int64_t*,
     std::size_t, std::size_t) const {
   throw ModelError(ModelErrorCode::runtime_unavailable,

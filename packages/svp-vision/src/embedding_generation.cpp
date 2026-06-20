@@ -236,7 +236,7 @@ EmbeddingGenerationResult generate_embedding_blocks(
         verify_errors += issue.message + "; ";
       }
     }
-    result.blocker = "Model bundle BLAKE3 verification failed: " + verify_errors;
+    result.blocker = "Manifest file BLAKE3 hash verification failed: " + verify_errors;
     result.processor_provenance = make_embedding_processor_provenance(
         manifest.model_id, manifest.model_bundle_id,
         options.execution_provider, "not_run", result.blocker);
@@ -300,9 +300,9 @@ EmbeddingGenerationResult generate_embedding_blocks(
   for (const auto& text_input : text_inputs) {
     TokenizedText tokenized = tokenizer.tokenize(text_input.text, 512);
 
-    std::vector<float> hidden_states;
+    svp::models::TextEmbeddingOutput embedding_output;
     try {
-      hidden_states = session.run_text_embedding(
+      embedding_output = session.run_text_embedding(
           tokenized.input_ids.data(),
           tokenized.token_type_ids.data(),
           tokenized.attention_mask.data(),
@@ -317,8 +317,57 @@ EmbeddingGenerationResult generate_embedding_blocks(
       return result;
     }
 
+    if (embedding_output.shape.size() != 3) {
+      result.blocker = std::string("ONNX output shape validation failed for ") +
+          text_input.id + ": expected rank-3 output, got rank " +
+          std::to_string(embedding_output.shape.size());
+      result.processor_provenance = make_embedding_processor_provenance(
+          manifest.model_id, manifest.model_bundle_id,
+          options.execution_provider, "error", result.blocker);
+      return result;
+    }
+
+    const std::size_t expected_elements =
+        static_cast<std::size_t>(embedding_output.shape[0]) *
+        static_cast<std::size_t>(embedding_output.shape[1]) *
+        static_cast<std::size_t>(embedding_output.shape[2]);
+    if (embedding_output.data.size() != expected_elements) {
+      result.blocker = std::string("ONNX output element count mismatch for ") +
+          text_input.id + ": shape implies " +
+          std::to_string(expected_elements) + " elements, got " +
+          std::to_string(embedding_output.data.size());
+      result.processor_provenance = make_embedding_processor_provenance(
+          manifest.model_id, manifest.model_bundle_id,
+          options.execution_provider, "error", result.blocker);
+      return result;
+    }
+
+    if (static_cast<std::uint32_t>(embedding_output.shape[2]) !=
+        options.embedding_dim) {
+      result.blocker = std::string("ONNX output dimension mismatch for ") +
+          text_input.id + ": expected " +
+          std::to_string(options.embedding_dim) + ", got " +
+          std::to_string(embedding_output.shape[2]);
+      result.processor_provenance = make_embedding_processor_provenance(
+          manifest.model_id, manifest.model_bundle_id,
+          options.execution_provider, "error", result.blocker);
+      return result;
+    }
+
+    if (static_cast<std::size_t>(embedding_output.shape[1]) !=
+        tokenized.seq_len) {
+      result.blocker = std::string("ONNX output seq_len mismatch for ") +
+          text_input.id + ": expected " +
+          std::to_string(tokenized.seq_len) + ", got " +
+          std::to_string(embedding_output.shape[1]);
+      result.processor_provenance = make_embedding_processor_provenance(
+          manifest.model_id, manifest.model_bundle_id,
+          options.execution_provider, "error", result.blocker);
+      return result;
+    }
+
     std::vector<float> embedding = mean_pool_and_normalize(
-        hidden_states, tokenized.attention_mask,
+        embedding_output.data, tokenized.attention_mask,
         tokenized.seq_len, options.embedding_dim);
 
     if (!validate_embedding(embedding, options.embedding_dim)) {

@@ -27,6 +27,11 @@ struct OnnxIoSpec {
   std::vector<OnnxTensorInfo> outputs;
 };
 
+struct TextEmbeddingOutput {
+  std::vector<float> data;
+  std::vector<std::int64_t> shape;
+};
+
 class OnnxSession {
  public:
   OnnxSession();
@@ -54,7 +59,7 @@ class OnnxSession {
       const float* input_data,
       std::size_t input_count) const;
 
-  [[nodiscard]] std::vector<float> run_text_embedding(
+  [[nodiscard]] TextEmbeddingOutput run_text_embedding(
       const std::int64_t* input_ids,
       const std::int64_t* token_type_ids,
       const std::int64_t* attention_mask,
