@@ -4,9 +4,11 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -175,6 +177,8 @@ bool write_frame_to_png(const ColorRasterFrame& frame,
 
 // Extract a frame from the source video as a PNG file at a given timestamp.
 // Uses ffmpeg directly to avoid the raw RGB round-trip that can lose data.
+// Applies preprocessing (grayscale, contrast normalization, sharpening) to
+// improve tesseract text detection on video frames.
 bool extract_frame_png_from_source(
     const std::filesystem::path& ffmpeg_path,
     const std::filesystem::path& source_path,
@@ -185,13 +189,24 @@ bool extract_frame_png_from_source(
     std::string& error) {
   const std::string seek = microseconds_to_seek_string(seek_us);
 
+  // Build a filter chain that:
+  // 1. Scales to target dimensions
+  // 2. Converts to grayscale (luma) for better OCR
+  // 3. Normalizes contrast histogram
+  // 4. Applies unsharp mask for text edge enhancement
+  std::string vf =
+      "scale=" + std::to_string(target_width) + ":" +
+      std::to_string(target_height) +
+      ",format=gray"
+      ",histeq"
+      ",unsharp=5:5:1.0";
+
   std::string cmd =
       shell_quote(ffmpeg_path) +
       " -v error"
       " -ss " + seek +
       " -i " + shell_quote(source_path) +
-      " -vf scale=" + std::to_string(target_width) + ":" +
-      std::to_string(target_height) +
+      " -vf " + shell_quote(std::filesystem::path(vf)) +
       " -vframes 1"
       " -y " + shell_quote(output_png) +
       " 2>/dev/null";
@@ -202,7 +217,6 @@ bool extract_frame_png_from_source(
     return false;
   }
 
-  // Read and discard any output
   char buffer[4096];
   while (fread(buffer, 1, sizeof(buffer), pipe) > 0) {}
 
@@ -223,48 +237,10 @@ bool extract_frame_png_from_source(
   return true;
 }
 
-// Run tesseract on an image file and parse TSV output.
-// tesseract <image> stdout --psm 11 -l <lang> tsv
-// PSM 11 = "sparse text - find as much text as possible in no particular order"
-std::vector<TesseractWord> run_tesseract_tsv(
-    const std::filesystem::path& tesseract_path,
-    const std::filesystem::path& image_path,
-    const std::string& language,
-    std::string& error) {
+// Parse tesseract TSV output into words.
+std::vector<TesseractWord> parse_tesseract_tsv(const std::string& output) {
   std::vector<TesseractWord> words;
 
-  std::string cmd =
-      shell_quote(tesseract_path) +
-      " " + shell_quote(image_path) +
-      " stdout"
-      " --psm 11"
-      " -l " + language +
-      " tsv"
-      " 2>/dev/null";
-
-  FILE* pipe = popen(cmd.c_str(), "r");
-  if (!pipe) {
-    error = "popen failed: " + std::string(std::strerror(errno));
-    return words;
-  }
-
-  std::string output;
-  char buffer[4096];
-  while (true) {
-    const std::size_t n = fread(buffer, 1, sizeof(buffer), pipe);
-    if (n == 0) break;
-    output.append(buffer, n);
-  }
-  const int status = pclose(pipe);
-  const bool exited_ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
-
-  if (!exited_ok) {
-    error = "tesseract exited with status " +
-            std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : status);
-    // Still try to parse whatever output we got
-  }
-
-  // Parse TSV: level page block par line word left top width height conf text
   std::istringstream iss(output);
   std::string line;
   bool header_seen = false;
@@ -289,7 +265,6 @@ std::vector<TesseractWord> run_tesseract_tsv(
       continue;
     }
 
-    // Only accept word-level rows (level == 5)
     if (level_col >= 0 && cols.size() > static_cast<std::size_t>(level_col)) {
       try {
         int level = std::stoi(cols[level_col]);
@@ -330,6 +305,92 @@ std::vector<TesseractWord> run_tesseract_tsv(
   }
 
   return words;
+}
+
+// Run tesseract with a specific PSM mode and parse TSV output.
+std::vector<TesseractWord> run_tesseract_psm(
+    const std::filesystem::path& tesseract_path,
+    const std::filesystem::path& image_path,
+    const std::string& language,
+    int psm,
+    std::string& error) {
+  std::vector<TesseractWord> words;
+
+  std::string cmd =
+      shell_quote(tesseract_path) +
+      " " + shell_quote(image_path) +
+      " stdout"
+      " --psm " + std::to_string(psm) +
+      " -l " + language +
+      " tsv"
+      " 2>/dev/null";
+
+  FILE* pipe = popen(cmd.c_str(), "r");
+  if (!pipe) {
+    error = "popen failed: " + std::string(std::strerror(errno));
+    return words;
+  }
+
+  std::string output;
+  char buffer[4096];
+  while (true) {
+    const std::size_t n = fread(buffer, 1, sizeof(buffer), pipe);
+    if (n == 0) break;
+    output.append(buffer, n);
+  }
+  const int status = pclose(pipe);
+  const bool exited_ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+
+  if (!exited_ok) {
+    error = "tesseract exited with status " +
+            std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : status);
+  }
+
+  return parse_tesseract_tsv(output);
+}
+
+// Run tesseract on an image file with PSM fallback.
+// Tries PSM 11 (sparse text), then PSM 6 (uniform block), then PSM 3 (auto).
+// Merges results, deduplicating by (text, left, top) to avoid double-counting.
+std::vector<TesseractWord> run_tesseract_tsv(
+    const std::filesystem::path& tesseract_path,
+    const std::filesystem::path& image_path,
+    const std::string& language,
+    std::string& error) {
+  std::vector<TesseractWord> all_words;
+
+  // PSM modes to try in order: sparse, uniform block, fully automatic
+  const int psm_modes[] = {11, 6, 3};
+  std::string last_error;
+
+  for (int psm : psm_modes) {
+    std::string psm_error;
+    auto psm_words = run_tesseract_psm(
+        tesseract_path, image_path, language, psm, psm_error);
+    if (!psm_error.empty()) last_error = psm_error;
+
+    for (auto& w : psm_words) {
+      // Deduplicate: skip if same text at same position already exists
+      bool dup = false;
+      for (const auto& existing : all_words) {
+        if (existing.text == w.text &&
+            existing.left == w.left && existing.top == w.top) {
+          dup = true;
+          break;
+        }
+      }
+      if (!dup) all_words.push_back(std::move(w));
+    }
+
+    // If we got good results from sparse mode, don't need fallback
+    if (!all_words.empty() && psm == 11) break;
+  }
+
+  if (all_words.empty() && !last_error.empty()) {
+    error = last_error;
+  }
+
+  return all_words;
 }
 
 // Group words into text regions based on spatial proximity.
@@ -401,7 +462,9 @@ std::vector<WordGroup> group_words(const std::vector<TesseractWord>& words) {
 }
 
 // Parse numeric values from recognized text.
-// Looks for currency ($N.NN), decimal numbers, and integers in the text.
+// Only emits currency values, decimals, and integers that appear in date-like
+// or multi-word context. Standalone bare integers from noisy single-word OCR
+// are suppressed to avoid numeric noise.
 struct ParsedNumber {
   std::string raw_text;
   std::string normalized_text;
@@ -410,6 +473,23 @@ struct ParsedNumber {
   std::string unit;
   double confidence;
 };
+
+// Check if the text looks like a date pattern (e.g. "June 20, 2026").
+bool looks_like_date_context(const std::string& text) {
+  static const std::regex date_re(
+      R"((january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+\d{2,4})",
+      std::regex_constants::icase);
+  return std::regex_search(text, date_re);
+}
+
+// Count the number of word tokens in the text.
+int count_words(const std::string& text) {
+  std::istringstream iss(text);
+  std::string word;
+  int count = 0;
+  while (iss >> word) ++count;
+  return count;
+}
 
 std::vector<ParsedNumber> parse_numeric_values(const std::string& raw_text,
                                                 double confidence) {
@@ -425,7 +505,7 @@ std::vector<ParsedNumber> parse_numeric_values(const std::string& raw_text,
   std::string::const_iterator search_start = raw_text.cbegin();
   std::smatch match;
 
-  // First pass: find currency matches
+  // First pass: find currency matches (always emitted — high signal)
   std::vector<std::pair<std::size_t, std::size_t>> matched_ranges;
   search_start = raw_text.cbegin();
   while (std::regex_search(search_start, raw_text.cend(), match, currency_re)) {
@@ -470,30 +550,37 @@ std::vector<ParsedNumber> parse_numeric_values(const std::string& raw_text,
     search_start = match[0].second;
   }
 
-  // Third pass: find standalone integers not overlapping with previous matches
-  search_start = raw_text.cbegin();
-  while (std::regex_search(search_start, raw_text.cend(), match, integer_re)) {
-    std::size_t pos = match[0].first - raw_text.cbegin();
-    std::size_t end_pos = pos + match[0].length();
+  // Third pass: find standalone integers — only emit if in date context or
+  // the observation has multiple words (suppressing single-integer noise).
+  const bool is_date = looks_like_date_context(raw_text);
+  const int word_count = count_words(raw_text);
+  const bool allow_integers = is_date || word_count >= 3;
 
-    bool overlaps = false;
-    for (const auto& r : matched_ranges) {
-      if (pos < r.second && end_pos > r.first) {
-        overlaps = true;
-        break;
+  if (allow_integers) {
+    search_start = raw_text.cbegin();
+    while (std::regex_search(search_start, raw_text.cend(), match, integer_re)) {
+      std::size_t pos = match[0].first - raw_text.cbegin();
+      std::size_t end_pos = pos + match[0].length();
+
+      bool overlaps = false;
+      for (const auto& r : matched_ranges) {
+        if (pos < r.second && end_pos > r.first) {
+          overlaps = true;
+          break;
+        }
       }
+      if (!overlaps) {
+        ParsedNumber num;
+        num.raw_text = match[0].str();
+        num.normalized_text = match[0].str();
+        num.number_kind = "integer";
+        num.numeric_value = match[0].str();
+        num.confidence = confidence;
+        results.push_back(std::move(num));
+        matched_ranges.push_back({pos, end_pos});
+      }
+      search_start = match[0].second;
     }
-    if (!overlaps) {
-      ParsedNumber num;
-      num.raw_text = match[0].str();
-      num.normalized_text = match[0].str();
-      num.number_kind = "integer";
-      num.numeric_value = match[0].str();
-      num.confidence = confidence;
-      results.push_back(std::move(num));
-      matched_ranges.push_back({pos, end_pos});
-    }
-    search_start = match[0].second;
   }
 
   return results;
@@ -503,6 +590,155 @@ std::string pad_id(const std::string& prefix, int index, int width = 6) {
   std::ostringstream oss;
   oss << prefix << std::setw(width) << std::setfill('0') << index;
   return oss.str();
+}
+
+// --- Multi-frame reconciliation structures ---
+
+// A per-frame detection: one group of words found in a single frame.
+struct FrameDetection {
+  std::string frame_id;
+  std::int64_t timestamp_us = 0;
+  std::size_t frame_index = 0;
+  int frame_width = 0;
+  int frame_height = 0;
+  std::string raw_text;
+  double confidence = 0.0;
+  int bbox_left = 0, bbox_top = 0, bbox_right = 0, bbox_bottom = 0;
+};
+
+// A reconciled observation: merged from multiple FrameDetections with the same
+// normalized text and overlapping spatial position.
+struct ReconciledObservation {
+  std::string raw_text;
+  std::string normalized_text;
+  double confidence = 0.0;
+  std::int64_t start_us = 0;
+  std::int64_t end_us = 0;
+  std::size_t frame_start = 0;
+  std::size_t frame_end = 0;
+  std::vector<std::string> source_frame_ids;
+  int bbox_left = 0, bbox_top = 0, bbox_right = 0, bbox_bottom = 0;
+  int frame_width = 0;
+  int frame_height = 0;
+  int detection_count = 1;
+};
+
+// Compute IoU (intersection over union) of two bounding boxes.
+double bbox_iou(int a_left, int a_top, int a_right, int a_bottom,
+                int b_left, int b_top, int b_right, int b_bottom) {
+  const int inter_left = std::max(a_left, b_left);
+  const int inter_top = std::max(a_top, b_top);
+  const int inter_right = std::min(a_right, b_right);
+  const int inter_bottom = std::min(a_bottom, b_bottom);
+  if (inter_right <= inter_left || inter_bottom <= inter_top) return 0.0;
+  const double inter_area =
+      static_cast<double>(inter_right - inter_left) *
+      static_cast<double>(inter_bottom - inter_top);
+  const double a_area =
+      static_cast<double>(a_right - a_left) *
+      static_cast<double>(a_bottom - a_top);
+  const double b_area =
+      static_cast<double>(b_right - b_left) *
+      static_cast<double>(b_bottom - b_top);
+  const double union_area = a_area + b_area - inter_area;
+  return union_area > 0.0 ? inter_area / union_area : 0.0;
+}
+
+// Reconcile per-frame detections into time-spanning observations.
+// Detections with the same normalized text and overlapping bounding boxes
+// (IoU > 0.3) are merged. Single-frame detections with low confidence are
+// suppressed as likely OCR noise.
+std::vector<ReconciledObservation> reconcile_detections(
+    const std::vector<FrameDetection>& detections,
+    int total_frames,
+    double min_confidence = 0.30) {
+  std::vector<ReconciledObservation> reconciled;
+
+  // Group detections by normalized text
+  std::map<std::string, std::vector<std::size_t>> by_text;
+  for (std::size_t i = 0; i < detections.size(); ++i) {
+    by_text[detections[i].raw_text].push_back(i);
+  }
+
+  for (const auto& [text, indices] : by_text) {
+    // Cluster detections by spatial overlap
+    std::vector<std::vector<std::size_t>> clusters;
+    for (std::size_t idx : indices) {
+      bool added = false;
+      for (auto& cluster : clusters) {
+        for (std::size_t cidx : cluster) {
+          const double iou = bbox_iou(
+              detections[idx].bbox_left, detections[idx].bbox_top,
+              detections[idx].bbox_right, detections[idx].bbox_bottom,
+              detections[cidx].bbox_left, detections[cidx].bbox_top,
+              detections[cidx].bbox_right, detections[cidx].bbox_bottom);
+          if (iou > 0.3) {
+            cluster.push_back(idx);
+            added = true;
+            break;
+          }
+        }
+        if (added) break;
+      }
+      if (!added) clusters.push_back({idx});
+    }
+
+    for (const auto& cluster : clusters) {
+      ReconciledObservation obs;
+      obs.raw_text = detections[cluster[0]].raw_text;
+      obs.normalized_text = normalize_text(obs.raw_text);
+      obs.frame_width = detections[cluster[0]].frame_width;
+      obs.frame_height = detections[cluster[0]].frame_height;
+      obs.detection_count = static_cast<int>(cluster.size());
+
+      double conf_sum = 0.0;
+      obs.bbox_left = INT_MAX;
+      obs.bbox_top = INT_MAX;
+      obs.bbox_right = 0;
+      obs.bbox_bottom = 0;
+      obs.start_us = INT64_MAX;
+      obs.end_us = 0;
+      obs.frame_start = SIZE_MAX;
+      obs.frame_end = 0;
+
+      for (std::size_t idx : cluster) {
+        const auto& det = detections[idx];
+        conf_sum += det.confidence;
+        obs.bbox_left = std::min(obs.bbox_left, det.bbox_left);
+        obs.bbox_top = std::min(obs.bbox_top, det.bbox_top);
+        obs.bbox_right = std::max(obs.bbox_right, det.bbox_right);
+        obs.bbox_bottom = std::max(obs.bbox_bottom, det.bbox_bottom);
+        obs.start_us = std::min(obs.start_us, det.timestamp_us);
+        obs.end_us = std::max(obs.end_us, det.timestamp_us);
+        obs.frame_start = std::min(obs.frame_start, det.frame_index);
+        obs.frame_end = std::max(obs.frame_end, det.frame_index);
+        obs.source_frame_ids.push_back(det.frame_id);
+      }
+
+      obs.confidence = conf_sum / static_cast<double>(cluster.size());
+
+      // Suppress single-frame low-confidence detections as likely noise
+      // (only if we have multiple frames — with 1 frame total, keep everything)
+      if (total_frames > 1 && cluster.size() == 1 && obs.confidence < min_confidence) {
+        continue;
+      }
+
+      // Boost confidence for observations detected across multiple frames
+      if (cluster.size() > 1) {
+        obs.confidence = std::min(1.0, obs.confidence + 0.1 * (cluster.size() - 1));
+      }
+
+      reconciled.push_back(std::move(obs));
+    }
+  }
+
+  // Sort by start_us for stable output
+  std::sort(reconciled.begin(), reconciled.end(),
+            [](const ReconciledObservation& a, const ReconciledObservation& b) {
+              return a.start_us < b.start_us;
+            });
+
+  return reconciled;
 }
 
 }  // namespace
@@ -597,20 +833,13 @@ OcrGenerationResult generate_ocr_observations(
   const std::filesystem::path temp_dir = staging_dir / ".ocr_temp";
   std::filesystem::create_directories(temp_dir);
 
-  int region_counter = 0;
-  int obs_counter = 0;
-  int numeric_counter = 0;
-  std::size_t total_observations = 0;
+  // Phase 1: Collect per-frame detections
+  std::vector<FrameDetection> all_detections;
 
   for (std::size_t frame_idx = 0; frame_idx < effective_frames.frames.size(); ++frame_idx) {
-    if (total_observations >= options.max_observations) break;
-
     const ColorRasterFrame& frame = effective_frames.frames[frame_idx];
 
     // Extract frame as PNG for tesseract.
-    // When media_plan is available, extract directly from the source video
-    // at the OCR resolution (avoids raw RGB round-trip issues).
-    // Otherwise, fall back to writing decoded pixels via ffmpeg.
     const std::filesystem::path png_path =
         temp_dir / (frame.frame_id + ".png");
     std::string write_error;
@@ -629,7 +858,7 @@ OcrGenerationResult generate_ocr_observations(
       continue;
     }
 
-    // Run tesseract on the PNG
+    // Run tesseract on the PNG with PSM fallback
     std::string tesseract_error;
     std::vector<TesseractWord> words = run_tesseract_tsv(
         options.tesseract_path, png_path, options.language, tesseract_error);
@@ -653,8 +882,6 @@ OcrGenerationResult generate_ocr_observations(
     std::vector<WordGroup> groups = group_words(filtered);
 
     for (const auto& group : groups) {
-      if (total_observations >= options.max_observations) break;
-
       // Build raw text from words in the group
       std::string raw_text;
       for (std::size_t i = 0; i < group.words.size(); ++i) {
@@ -676,84 +903,109 @@ OcrGenerationResult generate_ocr_observations(
 
       if (bx_max <= bx_min || by_max <= by_min) continue;
 
-      ++region_counter;
-      ++obs_counter;
-      ++total_observations;
-
-      const std::string region_id = pad_id("text_region_", region_counter);
-      const std::string obs_id = pad_id("text_obs_", obs_counter);
-
-      // Normalized coordinates are relative to the frame dimensions.
-      // bbox_px is in canonical analysis raster pixels: scale from OCR frame
-      // coordinates to canonical raster dimensions.
-      const int raster_w = (options.canonical_raster_width > 0) ?
-          options.canonical_raster_width : frame_w;
-      const int raster_h = (options.canonical_raster_height > 0) ?
-          options.canonical_raster_height : frame_h;
-
-      TextRegionRecord region;
-      region.text_region_id = region_id;
-      region.observation_type = "text_detection";
-      region.start_us = frame.timestamp_us;
-      region.end_us = frame.timestamp_us;
-      region.frame_start = static_cast<std::int64_t>(frame_idx);
-      region.frame_end = static_cast<std::int64_t>(frame_idx);
-      region.bbox_norm = {
-          static_cast<double>(bx_min) / frame_w,
-          static_cast<double>(by_min) / frame_h,
-          static_cast<double>(bx_max) / frame_w,
-          static_cast<double>(by_max) / frame_h,
-      };
-      region.bbox_px = {
-          static_cast<int>(std::round(static_cast<double>(bx_min) * raster_w / frame_w)),
-          static_cast<int>(std::round(static_cast<double>(by_min) * raster_h / frame_h)),
-          static_cast<int>(std::round(static_cast<double>(bx_max) * raster_w / frame_w)),
-          static_cast<int>(std::round(static_cast<double>(by_max) * raster_h / frame_h)),
-      };
-      region.confidence = conf;
-      region.provenance_id = "processor_ocr_detector_0001";
-      result.text_regions.push_back(region);
-
-      TextObservationRecord obs;
-      obs.text_observation_id = obs_id;
-      obs.text_region_id = region_id;
-      obs.observation_type = "text_recognition";
-      obs.raw_text = raw_text;
-      obs.normalized_text = normalize_text(raw_text);
-      obs.language = nlohmann::json{
-          {"primary", options.language}, {"script", "Latn"},
-          {"mode", "single"}, {"confidence", conf}};
-      obs.confidence = conf;
-      obs.layout_class = "scene_text";
-      obs.source_frame_ids = {frame.frame_id};
-      obs.provenance_id = "processor_ocr_recognizer_0001";
-      result.text_observations.push_back(obs);
-
-      // Parse numeric values from recognized text
-      auto numbers = parse_numeric_values(raw_text, conf);
-      for (const auto& num : numbers) {
-        ++numeric_counter;
-        NumericValueRecord nv;
-        nv.numeric_value_id = pad_id("numeric_value_", numeric_counter);
-        nv.text_observation_id = obs_id;
-        nv.text_region_id = region_id;
-        nv.raw_text = num.raw_text;
-        nv.normalized_text = num.normalized_text;
-        nv.number_kind = num.number_kind;
-        nv.numeric_value = num.numeric_value;
-        nv.unit = num.unit.empty() ? std::optional<std::string>{} :
-            std::optional<std::string>{num.unit};
-        nv.confidence = num.confidence;
-        nv.parse_rule = "svp-number-parser-v1";
-        nv.provenance_id = "processor_numeric_parser_0001";
-        result.numeric_values.push_back(nv);
-      }
+      FrameDetection det;
+      det.frame_id = frame.frame_id;
+      det.timestamp_us = frame.timestamp_us;
+      det.frame_index = frame_idx;
+      det.frame_width = frame_w;
+      det.frame_height = frame_h;
+      det.raw_text = raw_text;
+      det.confidence = conf;
+      det.bbox_left = bx_min;
+      det.bbox_top = by_min;
+      det.bbox_right = bx_max;
+      det.bbox_bottom = by_max;
+      all_detections.push_back(std::move(det));
     }
   }
 
   // Clean up temp directory
   std::error_code ec;
   std::filesystem::remove_all(temp_dir, ec);
+
+  // Phase 2: Reconcile detections across frames
+  const int total_frames = static_cast<int>(effective_frames.frames.size());
+  auto reconciled = reconcile_detections(all_detections, total_frames);
+
+  // Phase 3: Emit reconciled observations as records
+  int region_counter = 0;
+  int obs_counter = 0;
+  int numeric_counter = 0;
+
+  for (const auto& robs : reconciled) {
+    if (static_cast<std::size_t>(obs_counter) >= options.max_observations) break;
+
+    ++region_counter;
+    ++obs_counter;
+
+    const std::string region_id = pad_id("text_region_", region_counter);
+    const std::string obs_id = pad_id("text_obs_", obs_counter);
+
+    const int frame_w = robs.frame_width;
+    const int frame_h = robs.frame_height;
+    const int raster_w = (options.canonical_raster_width > 0) ?
+        options.canonical_raster_width : frame_w;
+    const int raster_h = (options.canonical_raster_height > 0) ?
+        options.canonical_raster_height : frame_h;
+
+    TextRegionRecord region;
+    region.text_region_id = region_id;
+    region.observation_type = "text_detection";
+    region.start_us = robs.start_us;
+    region.end_us = robs.end_us;
+    region.frame_start = static_cast<std::int64_t>(robs.frame_start);
+    region.frame_end = static_cast<std::int64_t>(robs.frame_end);
+    region.bbox_norm = {
+        static_cast<double>(robs.bbox_left) / frame_w,
+        static_cast<double>(robs.bbox_top) / frame_h,
+        static_cast<double>(robs.bbox_right) / frame_w,
+        static_cast<double>(robs.bbox_bottom) / frame_h,
+    };
+    region.bbox_px = {
+        static_cast<int>(std::round(static_cast<double>(robs.bbox_left) * raster_w / frame_w)),
+        static_cast<int>(std::round(static_cast<double>(robs.bbox_top) * raster_h / frame_h)),
+        static_cast<int>(std::round(static_cast<double>(robs.bbox_right) * raster_w / frame_w)),
+        static_cast<int>(std::round(static_cast<double>(robs.bbox_bottom) * raster_h / frame_h)),
+    };
+    region.confidence = robs.confidence;
+    region.provenance_id = "processor_ocr_detector_0001";
+    result.text_regions.push_back(region);
+
+    TextObservationRecord obs;
+    obs.text_observation_id = obs_id;
+    obs.text_region_id = region_id;
+    obs.observation_type = "text_recognition";
+    obs.raw_text = robs.raw_text;
+    obs.normalized_text = robs.normalized_text;
+    obs.language = nlohmann::json{
+        {"primary", options.language}, {"script", "Latn"},
+        {"mode", "multi"}, {"confidence", robs.confidence}};
+    obs.confidence = robs.confidence;
+    obs.layout_class = "scene_text";
+    obs.source_frame_ids = robs.source_frame_ids;
+    obs.provenance_id = "processor_ocr_recognizer_0001";
+    result.text_observations.push_back(obs);
+
+    // Parse numeric values from recognized text
+    auto numbers = parse_numeric_values(robs.raw_text, robs.confidence);
+    for (const auto& num : numbers) {
+      ++numeric_counter;
+      NumericValueRecord nv;
+      nv.numeric_value_id = pad_id("numeric_value_", numeric_counter);
+      nv.text_observation_id = obs_id;
+      nv.text_region_id = region_id;
+      nv.raw_text = num.raw_text;
+      nv.normalized_text = num.normalized_text;
+      nv.number_kind = num.number_kind;
+      nv.numeric_value = num.numeric_value;
+      nv.unit = num.unit.empty() ? std::optional<std::string>{} :
+          std::optional<std::string>{num.unit};
+      nv.confidence = num.confidence;
+      nv.parse_rule = "svp-number-parser-v1";
+      nv.provenance_id = "processor_numeric_parser_0001";
+      result.numeric_values.push_back(nv);
+    }
+  }
 
   result.ocr_recognition_run = true;
   result.text_region_count = static_cast<std::int64_t>(result.text_regions.size());
@@ -776,21 +1028,23 @@ OcrGenerationResult generate_ocr_observations(
       "processor_ocr_detector_0001", "ocr_detector",
       "svp-vision-ocr-generation-v1", "tesseract_subprocess",
       "completed",
-      "Text detection via tesseract subprocess on " +
+      "Text detection via tesseract subprocess (PSM 11/6/3 fallback) on " +
           std::to_string(effective_frames.frames.size()) +
           " decoded frame(s) at " +
           std::to_string(effective_frames.frames.empty() ? 0 : effective_frames.frames[0].width) +
           "x" +
           std::to_string(effective_frames.frames.empty() ? 0 : effective_frames.frames[0].height) +
-          " resolution; detected " +
-          std::to_string(result.text_region_count) + " text region(s)"));
+          " resolution; collected " +
+          std::to_string(all_detections.size()) + " per-frame detection(s)"));
   result.processors.push_back(make_ocr_processor_provenance(
       "processor_ocr_recognizer_0001", "ocr_recognizer",
       "svp-vision-ocr-generation-v1", "tesseract_subprocess",
       "completed",
-      "Text recognition via tesseract subprocess; produced " +
+      "Text recognition via tesseract subprocess with multi-frame reconciliation; "
+      "produced " +
           std::to_string(result.text_observation_count) +
-          " text observation(s)"));
+          " reconciled text observation(s) from " +
+          std::to_string(all_detections.size()) + " per-frame detection(s)"));
   result.processors.push_back(make_ocr_processor_provenance(
       "processor_numeric_parser_0001", "numeric_parser",
       "svp-vision-ocr-generation-v1", "deterministic_cpp",
