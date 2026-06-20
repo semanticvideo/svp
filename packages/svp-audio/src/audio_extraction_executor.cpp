@@ -7,6 +7,7 @@
 
 #include <cerrno>
 #include <cstring>
+#include <fstream>
 #include <stdexcept>
 #include <utility>
 
@@ -160,6 +161,191 @@ nlohmann::json command_run_to_json(const AudioExtractionCommandRun& run) {
   return encoded;
 }
 
+nlohmann::json derived_artifact_run_to_json(const AudioDerivedArtifactRun& run) {
+  nlohmann::json encoded = {
+      {"task_id", run.task_id},
+      {"output_ref", run.output_ref},
+      {"staged_output_path", run.staged_output_path.string()},
+      {"written", run.written},
+  };
+  if (!run.skipped_reason.empty()) {
+    encoded["skipped_reason"] = run.skipped_reason;
+  }
+  return encoded;
+}
+
+void write_json_file(const std::filesystem::path& path, const nlohmann::json& value) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream output(path);
+  if (!output) {
+    throw std::runtime_error("unable to open staged audio JSON artifact: " + path.string());
+  }
+  output << value.dump(2) << "\n";
+}
+
+void write_jsonl_file(const std::filesystem::path& path,
+                      const std::vector<nlohmann::json>& records) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream output(path);
+  if (!output) {
+    throw std::runtime_error("unable to open staged audio JSONL artifact: " + path.string());
+  }
+  for (const nlohmann::json& record : records) {
+    output << record.dump() << "\n";
+  }
+}
+
+nlohmann::json audio_absence_record(const AudioExtractionPlan& plan,
+                                    const AudioExtractionRun& run) {
+  nlohmann::json original_audio_refs = nlohmann::json::array();
+  for (const AudioExtractionCommandRun& command_run : run.original_streams) {
+    if (command_run.success) {
+      original_audio_refs.push_back(command_run.output_ref);
+    }
+  }
+
+  return {
+      {"source_audio_present", plan.source_audio_present},
+      {"source_audio_stream_count", plan.original_streams.size()},
+      {"selected_source_audio_stream_id",
+       plan.analysis_audio.selected_source_audio_stream_id},
+      {"canonical_silence_generated", false},
+      {"original_audio_refs", original_audio_refs},
+      {"analysis_audio_ref", run.analysis_audio.success ? run.analysis_audio.output_ref : ""},
+      {"analysis_audio_written", run.analysis_audio.success},
+      {"provenance_id", plan.audio_absence.processor_id},
+      {"foundation_status", "staged_from_probe_and_audio_extraction_run"},
+      {"final_package_ready", false},
+      {"blockers", run.blockers},
+  };
+}
+
+nlohmann::json extraction_processor_record(const AudioExtractionPlan& plan,
+                                           const AudioExtractionRun& run) {
+  nlohmann::json input_refs = nlohmann::json::array();
+  input_refs.push_back(plan.source_path.string());
+
+  nlohmann::json output_refs = nlohmann::json::array();
+  for (const AudioExtractionCommandRun& command_run : run.original_streams) {
+    output_refs.push_back(command_run.output_ref);
+  }
+  output_refs.push_back(run.analysis_audio.output_ref);
+
+  nlohmann::json task_ids = nlohmann::json::array();
+  for (const AudioExtractionCommandRun& command_run : run.original_streams) {
+    task_ids.push_back(command_run.task_id);
+  }
+  task_ids.push_back(run.analysis_audio.task_id);
+
+  return {
+      {"id", "proc_ffmpeg_audio_extraction_0001"},
+      {"name", "FFmpeg audio extraction"},
+      {"version", "pending_version_probe"},
+      {"input_refs", input_refs},
+      {"output_refs", output_refs},
+      {"model_refs", nlohmann::json::array()},
+      {"task_ids", task_ids},
+      {"runtime", "ffmpeg_cli"},
+      {"execution_provider", "cpu"},
+      {"foundation_status", run.extraction_run ? "attempted" : "planned"},
+      {"completed", run.original_streams_written && run.analysis_audio_written},
+  };
+}
+
+nlohmann::json absence_processor_record(const AudioExtractionPlan& plan,
+                                        const AudioExtractionRun& run) {
+  nlohmann::json input_refs = nlohmann::json::array();
+  for (const AudioExtractionCommandRun& command_run : run.original_streams) {
+    if (command_run.success) {
+      input_refs.push_back(command_run.output_ref);
+    }
+  }
+  if (run.analysis_audio.success) {
+    input_refs.push_back(run.analysis_audio.output_ref);
+  }
+
+  return {
+      {"id", plan.audio_absence.processor_id},
+      {"name", "SVP audio absence foundation writer"},
+      {"version", "foundation"},
+      {"input_refs", input_refs},
+      {"output_refs", {plan.audio_absence.output_ref}},
+      {"model_refs", nlohmann::json::array()},
+      {"task_ids", {plan.audio_absence.task_id}},
+      {"runtime", "svp-audio"},
+      {"execution_provider", "cpu"},
+      {"foundation_status", run.audio_absence_written ? "staged" : "planned"},
+      {"completed", run.audio_absence_written},
+  };
+}
+
+nlohmann::json waveform_processor_record(const AudioExtractionPlan& plan) {
+  return {
+      {"id", plan.waveform.processor_id},
+      {"name", "SVP waveform envelope"},
+      {"version", "pending"},
+      {"input_refs", {plan.waveform.input_ref}},
+      {"output_refs", {plan.waveform.output_ref}},
+      {"model_refs", nlohmann::json::array()},
+      {"task_ids", {plan.waveform.task_id}},
+      {"runtime", "pending"},
+      {"execution_provider", "cpu"},
+      {"window_duration_us", plan.waveform.window_duration_us},
+      {"foundation_status", "planned"},
+      {"completed", false},
+      {"pending_reason", "waveform envelope generation is not wired in this foundation pass"},
+  };
+}
+
+AudioDerivedArtifactRun stage_audio_absence(const AudioExtractionPlan& plan,
+                                            AudioExtractionRun& run,
+                                            const std::filesystem::path& staging_root) {
+  AudioDerivedArtifactRun artifact;
+  artifact.task_id = plan.audio_absence.task_id;
+  artifact.output_ref = plan.audio_absence.output_ref;
+
+  if (!is_safe_output_ref(artifact.output_ref)) {
+    artifact.skipped_reason = "output_ref is not a safe relative package path";
+    return artifact;
+  }
+
+  artifact.staged_output_path = staged_path_for_ref(staging_root, artifact.output_ref);
+  write_json_file(artifact.staged_output_path, audio_absence_record(plan, run));
+  artifact.written = true;
+  return artifact;
+}
+
+AudioDerivedArtifactRun stage_processor_provenance(const AudioExtractionPlan& plan,
+                                                   AudioExtractionRun& run,
+                                                   const std::filesystem::path& staging_root) {
+  AudioDerivedArtifactRun artifact;
+  artifact.task_id = plan.processor_provenance.task_id;
+  artifact.output_ref = plan.processor_provenance.output_ref;
+
+  if (!is_safe_output_ref(artifact.output_ref)) {
+    artifact.skipped_reason = "output_ref is not a safe relative package path";
+    return artifact;
+  }
+
+  artifact.staged_output_path = staged_path_for_ref(staging_root, artifact.output_ref);
+  write_jsonl_file(artifact.staged_output_path,
+                   {extraction_processor_record(plan, run),
+                    absence_processor_record(plan, run),
+                    waveform_processor_record(plan)});
+  artifact.written = true;
+  return artifact;
+}
+
+AudioDerivedArtifactRun planned_waveform_artifact(const AudioExtractionPlan& plan,
+                                                  const std::filesystem::path& staging_root) {
+  AudioDerivedArtifactRun artifact;
+  artifact.task_id = plan.waveform.task_id;
+  artifact.output_ref = plan.waveform.output_ref;
+  artifact.staged_output_path = staged_path_for_ref(staging_root, artifact.output_ref);
+  artifact.skipped_reason = "waveform envelope generation is not wired in this foundation pass";
+  return artifact;
+}
+
 }  // namespace
 
 AudioExtractionRun execute_audio_extraction_plan(const AudioExtractionPlan& plan,
@@ -193,6 +379,21 @@ AudioExtractionRun execute_audio_extraction_plan(const AudioExtractionPlan& plan
     run.original_streams_written = run.original_streams_written && command_run.success;
   }
   run.analysis_audio_written = run.analysis_audio.success;
+  run.audio_absence = stage_audio_absence(plan, run, staging_root);
+  run.audio_absence_written = run.audio_absence.written;
+  if (!run.audio_absence_written && !run.audio_absence.skipped_reason.empty()) {
+    run.blockers.push_back(plan.audio_absence.task_id + ": " +
+                           run.audio_absence.skipped_reason);
+  }
+  run.waveform = planned_waveform_artifact(plan, staging_root);
+  run.waveform_written = false;
+  run.blockers.push_back(plan.waveform.task_id + ": " + run.waveform.skipped_reason);
+  run.processor_provenance = stage_processor_provenance(plan, run, staging_root);
+  run.processor_provenance_written = run.processor_provenance.written;
+  if (!run.processor_provenance_written && !run.processor_provenance.skipped_reason.empty()) {
+    run.blockers.push_back(plan.processor_provenance.task_id + ": " +
+                           run.processor_provenance.skipped_reason);
+  }
 
   return run;
 }
@@ -207,10 +408,17 @@ nlohmann::json audio_extraction_run_to_json(const AudioExtractionRun& run) {
       {"staging_root", run.staging_root.string()},
       {"original_streams", original_streams},
       {"analysis_audio", command_run_to_json(run.analysis_audio)},
+      {"audio_absence", derived_artifact_run_to_json(run.audio_absence)},
+      {"waveform", derived_artifact_run_to_json(run.waveform)},
+      {"processor_provenance",
+       derived_artifact_run_to_json(run.processor_provenance)},
       {"blockers", run.blockers},
       {"extraction_run", run.extraction_run},
       {"original_streams_written", run.original_streams_written},
       {"analysis_audio_written", run.analysis_audio_written},
+      {"audio_absence_written", run.audio_absence_written},
+      {"waveform_written", run.waveform_written},
+      {"processor_provenance_written", run.processor_provenance_written},
   };
 }
 

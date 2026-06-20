@@ -23,14 +23,28 @@ struct AudioExtractionCommandRun {
   std::string skipped_reason;
 };
 
+struct AudioDerivedArtifactRun {
+  std::string task_id;
+  std::string output_ref;
+  std::filesystem::path staged_output_path;
+  bool written = false;
+  std::string skipped_reason;
+};
+
 struct AudioExtractionRun {
   std::filesystem::path staging_root;
   std::vector<AudioExtractionCommandRun> original_streams;
   AudioExtractionCommandRun analysis_audio;
+  AudioDerivedArtifactRun audio_absence;
+  AudioDerivedArtifactRun waveform;
+  AudioDerivedArtifactRun processor_provenance;
   std::vector<std::string> blockers;
   bool extraction_run = false;
   bool original_streams_written = false;
   bool analysis_audio_written = false;
+  bool audio_absence_written = false;
+  bool waveform_written = false;
+  bool processor_provenance_written = false;
 };
 
 [[nodiscard]] AudioExtractionRun execute_audio_extraction_plan(
