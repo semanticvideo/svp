@@ -90,11 +90,39 @@ void test_real_artifact_runtime_unavailable() {
   require(absence.at("text_region_count") == 0, "absence region count should be 0");
 }
 
+void test_sanitize_utf8() {
+  // 1. Valid ASCII
+  require(svp::vision::sanitize_utf8("Hello, World!") == "Hello, World!",
+          "valid ASCII should remain unchanged");
+
+  // 2. Valid UTF-8 (Chinese characters: 世界)
+  require(svp::vision::sanitize_utf8("Hello, \xE4\xB8\x96\xE7\x95\x8C!") == "Hello, \xE4\xB8\x96\xE7\x95\x8C!",
+          "valid UTF-8 should remain unchanged");
+
+  // 3. Invalid raw byte (0x89)
+  require(svp::vision::sanitize_utf8("Hello \x89 World") == "Hello \xEF\xBF\xBD World",
+          "invalid raw byte should be replaced with U+FFFD");
+
+  // 4. Overlong 2-byte sequence (\xC0\xAF)
+  // \xC0 starts a 2-byte sequence but since c < 0xC2 it is rejected.
+  // The first byte \xC0 is replaced by \xEF\xBF\xBD.
+  // The second byte \xAF is a continuation byte out of context, so it is also replaced.
+  require(svp::vision::sanitize_utf8("\xC0\xAF") == "\xEF\xBF\xBD\xEF\xBF\xBD",
+          "overlong 2-byte sequence should be replaced");
+
+  // 5. Surrogate halves (\xED\xA0\x80)
+  // Starts with \xED, second byte is >= 0xA0 (0xA0). Replaced.
+  // The next bytes \xA0 and \x80 are continuation bytes out of context, also replaced.
+  require(svp::vision::sanitize_utf8("\xED\xA0\x80") == "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD",
+          "surrogate halves should be replaced");
+}
+
 }  // namespace
 
 int main() {
   test_synthetic_artifact();
   test_real_artifact_runtime_unavailable();
+  test_sanitize_utf8();
   std::cout << "All OCR staging foundation tests passed.\n";
   return 0;
 }

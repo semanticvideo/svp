@@ -74,14 +74,14 @@ nlohmann::json make_ocr_processor_provenance(
     const std::string& version, const std::string& runtime,
     const std::string& status, const std::string& note) {
   return {
-      {"id", id},
-      {"processor_type", type},
-      {"processor_version", version},
-      {"runtime", runtime},
+      {"id", sanitize_utf8(id)},
+      {"processor_type", sanitize_utf8(type)},
+      {"processor_version", sanitize_utf8(version)},
+      {"runtime", sanitize_utf8(runtime)},
       {"execution_provider", "cpu"},
       {"model_refs", nlohmann::json::array()},
-      {"status", status},
-      {"note", note},
+      {"status", sanitize_utf8(status)},
+      {"note", sanitize_utf8(note)},
   };
 }
 
@@ -1020,18 +1020,18 @@ OcrGenerationResult generate_ocr_observations(
     }
     if (!png_ok) {
       nlohmann::json diag = {
-          {"frame_id", frame.frame_id},
+          {"frame_id", sanitize_utf8(frame.frame_id)},
           {"timestamp_us", frame.timestamp_us},
           {"extraction_succeeded", false},
-          {"extraction_error", write_error},
-          {"extraction_path", png_path.string()},
-          {"preprocessing_fallback", selected_fallback},
+          {"extraction_error", sanitize_utf8(write_error)},
+          {"extraction_path", sanitize_utf8(png_path.string())},
+          {"preprocessing_fallback", sanitize_utf8(selected_fallback)},
           {"tesseract_attempted", false}
       };
       frame_diagnostics.push_back(diag);
       any_frame_failed = true;
       if (failure_reason_details.empty()) {
-        failure_reason_details = "Frame extraction failed for " + frame.frame_id + ": " + write_error;
+        failure_reason_details = sanitize_utf8("Frame extraction failed for " + frame.frame_id + ": " + write_error);
       }
       continue;
     }
@@ -1061,22 +1061,22 @@ OcrGenerationResult generate_ocr_observations(
           {"psm", r.psm},
           {"exit_ok", r.exit_ok},
           {"exit_status", r.exit_status},
-          {"error", r.error},
+          {"error", sanitize_utf8(r.error)},
           {"word_count", r.word_count},
           {"tsv_available", r.tsv_available},
-          {"stderr_msg", r.stderr_msg}
+          {"stderr_msg", sanitize_utf8(r.stderr_msg)}
       });
     }
 
     nlohmann::json diag = {
-        {"frame_id", frame.frame_id},
+        {"frame_id", sanitize_utf8(frame.frame_id)},
         {"timestamp_us", frame.timestamp_us},
         {"extraction_succeeded", true},
-        {"extraction_path", png_path.string()},
-        {"preprocessing_fallback", selected_fallback},
+        {"extraction_path", sanitize_utf8(png_path.string())},
+        {"preprocessing_fallback", sanitize_utf8(selected_fallback)},
         {"tesseract_attempted", true},
         {"tesseract_succeeded", !tesseract_failed_on_all},
-        {"tesseract_error", tesseract_error},
+        {"tesseract_error", sanitize_utf8(tesseract_error)},
         {"psm_runs", t_runs_json}
     };
     frame_diagnostics.push_back(diag);
@@ -1084,7 +1084,7 @@ OcrGenerationResult generate_ocr_observations(
     if (tesseract_failed_on_all) {
       any_frame_failed = true;
       if (failure_reason_details.empty()) {
-        failure_reason_details = "Tesseract failed on frame " + frame.frame_id + ": " + tesseract_error;
+        failure_reason_details = sanitize_utf8("Tesseract failed on frame " + frame.frame_id + ": " + tesseract_error);
       }
       continue;
     }
@@ -1426,7 +1426,7 @@ nlohmann::json ocr_generation_result_to_json(const OcrGenerationResult& result) 
       {"text_region_count", result.text_region_count},
       {"text_observation_count", result.text_observation_count},
       {"numeric_value_count", result.numeric_value_count},
-      {"blocker", result.blocker},
+      {"blocker", sanitize_utf8(result.blocker)},
       {"text_regions", regions_arr},
       {"text_observations", obs_arr},
       {"numeric_values", num_arr},
