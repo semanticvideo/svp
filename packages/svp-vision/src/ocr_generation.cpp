@@ -781,10 +781,10 @@ std::vector<ReconciledObservation> reconcile_detections(
   for (std::size_t i = 0; i < detections.size(); ++i) {
     const std::string norm = normalize_text(detections[i].raw_text);
     const std::string key = alphanumeric_key(norm);
-    
+
     // Skip very short text or punctuation-only noise based on alphanumeric content length
     if (key.length() < min_text_chars) continue;
-    
+
     by_text_key[key].push_back(i);
   }
 
