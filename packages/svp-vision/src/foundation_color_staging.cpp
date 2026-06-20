@@ -115,15 +115,45 @@ nlohmann::json make_real_manifest(const ColorObservationRecordPlan& records,
                                   const std::string& provenance_id,
                                   const media::MediaIngestPlan& plan,
                                   const RealFrameSamplingResult& sampling_result) {
-  const std::string raster_source = sampling_result.real_decoding_succeeded
-      ? ("ffmpeg decoded frames scaled to " +
-         std::to_string(plan.canonical_raster.width) + "x" +
-         std::to_string(plan.canonical_raster.height))
-      : ("synthetic fallback (2x2): " + sampling_result.skipped_reason);
+  // Four honest execution states, mutually exclusive with the flag triple:
+  //   real_decoding_attempted / real_media_frame_decoding_run
+  //
+  //  ffmpeg_unavailable_synthetic_fallback
+  //      attempted=false, decoding_run=false — ffmpeg not found or
+  //      pre-conditions not met; synthetic fallback used, source not touched.
+  //
+  //  real_frame_decoding_all_missed_synthetic_fallback
+  //      attempted=true,  decoding_run=false — ffmpeg ran but every targeted
+  //      timestamp returned 0 bytes; synthetic fallback used.
+  //
+  //  real_frame_decoding_partial
+  //      attempted=true,  decoding_run=true  — some timestamps decoded,
+  //      some missed; observations come from the decoded subset.
+  //
+  //  real_frame_decoding_succeeded
+  //      attempted=true,  decoding_run=true  — all targeted timestamps
+  //      decoded successfully; no synthetic data used.
 
-  const std::string execution_state = sampling_result.real_decoding_succeeded
-      ? "real_frame_decoding_succeeded"
-      : "real_frame_decoding_attempted_fallback_to_synthetic";
+  std::string execution_state;
+  if (!sampling_result.real_decoding_attempted) {
+    execution_state = "ffmpeg_unavailable_synthetic_fallback";
+  } else if (!sampling_result.real_decoding_succeeded) {
+    execution_state = "real_frame_decoding_all_missed_synthetic_fallback";
+  } else if (sampling_result.frames_missed > 0) {
+    execution_state = "real_frame_decoding_partial";
+  } else {
+    execution_state = "real_frame_decoding_succeeded";
+  }
+
+  const std::string raster_source = sampling_result.real_decoding_succeeded
+      ? ("ffmpeg decoded " + std::to_string(sampling_result.frames_decoded) +
+         " frame(s) scaled to " +
+         std::to_string(plan.canonical_raster.width) + "x" +
+         std::to_string(plan.canonical_raster.height) +
+         (sampling_result.frames_missed > 0
+              ? " (" + std::to_string(sampling_result.frames_missed) + " missed)"
+              : ""))
+      : ("synthetic fallback (2x2): " + sampling_result.skipped_reason);
 
   return {
       {"schema_version", "svp-builder-foundation-color-staging-v1"},
@@ -133,6 +163,9 @@ nlohmann::json make_real_manifest(const ColorObservationRecordPlan& records,
                          : "synthetic_in_memory_color_frames"},
       {"real_media_frame_decoding_run", sampling_result.real_decoding_succeeded},
       {"real_decoding_attempted", sampling_result.real_decoding_attempted},
+      {"frames_attempted", sampling_result.frames_attempted},
+      {"frames_decoded", sampling_result.frames_decoded},
+      {"frames_missed", sampling_result.frames_missed},
       {"canonical_raster_frame_source", raster_source},
       {"source_path", plan.source_path.string()},
       {"canonical_raster_width", plan.canonical_raster.width},
@@ -145,11 +178,13 @@ nlohmann::json make_real_manifest(const ColorObservationRecordPlan& records,
       {"processor_provenance_written", true},
       {"provenance_id", provenance_id},
       {"notes",
-       {"real_media_frame_decoding_run reflects whether ffmpeg decoded actual frames.",
-        "When false, a synthetic 2x2 fallback was used; the source path was not decoded.",
+       {"real_media_frame_decoding_run is true only when at least one frame was decoded.",
+        "real_decoding_attempted is false when ffmpeg was not found or pre-conditions failed.",
+        "frames_missed > 0 means some timestamps were skipped; observations use decoded subset.",
         "valid_svp_package_written is always false until Phase 10 package writing exists."}},
   };
 }
+
 
 }  // namespace
 

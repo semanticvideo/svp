@@ -20,6 +20,10 @@ namespace {
 // the real/synthetic difference is immediately observable.
 constexpr int kMaxDecodedFrames = 5;
 
+// A seek that lands within this margin of the end of the file is clamped
+// back so ffmpeg does not seek past the last decodable frame.
+constexpr std::int64_t kEndMarginUs = 100000;  // 100 ms
+
 bool ffmpeg_is_available(const std::filesystem::path& ffmpeg_path) {
   if (ffmpeg_path.empty()) {
     return false;
@@ -51,7 +55,7 @@ bool ffmpeg_is_available(const std::filesystem::path& ffmpeg_path) {
   return false;
 }
 
-// Shell-quote a path so it can be embedded in a popen command string.
+// Shell-quote a path for embedding in a popen command string.
 std::string shell_quote(const std::filesystem::path& path) {
   std::string quoted = "'";
   for (const char c : path.string()) {
@@ -65,8 +69,7 @@ std::string shell_quote(const std::filesystem::path& path) {
   return quoted;
 }
 
-// Format a microsecond timestamp as an ffmpeg-compatible seek position
-// ("ss.ffffff").
+// Format a microsecond timestamp as an ffmpeg seek position ("ss.ffffff").
 std::string microseconds_to_seek_string(std::int64_t us) {
   const std::int64_t seconds = us / 1000000;
   const std::int64_t fraction = us % 1000000;
@@ -83,7 +86,7 @@ std::string frame_id(int index) {
 }
 
 // Decode exactly one frame at seek_us into rgb24 rawvideo at (width x height).
-// Returns the pixel buffer on success; returns empty on decode failure.
+// Returns the pixel buffer on success; returns empty on any decode failure.
 // Uses popen so it works without linking libav directly.
 std::vector<Srgb8Pixel> decode_frame_at(const std::filesystem::path& ffmpeg_path,
                                          const std::filesystem::path& source_path,
@@ -93,21 +96,19 @@ std::vector<Srgb8Pixel> decode_frame_at(const std::filesystem::path& ffmpeg_path
                                          std::string& out_error) {
   const std::string seek = microseconds_to_seek_string(seek_us);
 
-  // Build the command.  We request exactly one frame (-vframes 1) at the
-  // deterministic seek position (-ss before -i for fast keyframe seek),
-  // scaled to the canonical raster (scale=W:H with force_original_aspect_ratio
-  // handled already by the canonical raster computation, so we pass the exact
-  // target dimensions).
-  std::string cmd = shell_quote(ffmpeg_path) +
-                    " -v error"
-                    " -ss " + seek +
-                    " -i " + shell_quote(source_path) +
-                    " -vf scale=" + std::to_string(width) + ":" + std::to_string(height) +
-                    " -vframes 1"
-                    " -f rawvideo"
-                    " -pix_fmt rgb24"
-                    " pipe:1"
-                    " 2>/dev/null";
+  // -ss before -i performs a fast keyframe seek; the subsequent scale filter
+  // resizes the decoded frame to the exact canonical raster dimensions.
+  const std::string cmd =
+      shell_quote(ffmpeg_path) +
+      " -v error"
+      " -ss " + seek +
+      " -i " + shell_quote(source_path) +
+      " -vf scale=" + std::to_string(width) + ":" + std::to_string(height) +
+      " -vframes 1"
+      " -f rawvideo"
+      " -pix_fmt rgb24"
+      " pipe:1"
+      " 2>/dev/null";
 
   FILE* pipe = popen(cmd.c_str(), "r");
   if (pipe == nullptr) {
@@ -121,35 +122,37 @@ std::vector<Srgb8Pixel> decode_frame_at(const std::filesystem::path& ffmpeg_path
   const std::size_t bytes_read = std::fread(raw_bytes.data(), 1, expected_bytes, pipe);
 
   const int status = pclose(pipe);
-  const bool exited_ok =
-      WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  const bool exited_ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
 
-  if (!exited_ok || bytes_read != expected_bytes) {
+  if (bytes_read != expected_bytes) {
+    // Incomplete pixel buffer: ffmpeg may have exited 0 but seeked past the
+    // last decodable frame in a short file.  Treat as a miss for this
+    // timestamp rather than a hard failure of the whole run.
+    out_error = "short read: got " + std::to_string(bytes_read) + "/" +
+                std::to_string(expected_bytes) + " bytes (ffmpeg exit " +
+                std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : status) + ")";
+    return {};
+  }
+
+  if (!exited_ok) {
     out_error = "ffmpeg exited with status " +
-                std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : status) +
-                " (read " + std::to_string(bytes_read) + "/" +
-                std::to_string(expected_bytes) + " bytes)";
+                std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : status);
     return {};
   }
 
   std::vector<Srgb8Pixel> pixels;
   pixels.reserve(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
-  for (std::size_t i = 0; i + 2 < raw_bytes.size(); i += 3) {
+  for (std::size_t i = 0; i < raw_bytes.size(); i += 3) {
     pixels.push_back({raw_bytes[i], raw_bytes[i + 1], raw_bytes[i + 2]});
-  }
-  // Handle the last pixel if the total byte count is an exact multiple.
-  if (raw_bytes.size() % 3 == 0 && !raw_bytes.empty()) {
-    const std::size_t last = raw_bytes.size() - 3;
-    if (pixels.size() < static_cast<std::size_t>(width) * static_cast<std::size_t>(height)) {
-      pixels.push_back(
-          {raw_bytes[last], raw_bytes[last + 1], raw_bytes[last + 2]});
-    }
   }
   return pixels;
 }
 
 // Compute deterministic seek timestamps distributed across the video duration.
-// Returns microsecond offsets.
+// Timestamps are placed at midpoints of N equal intervals so they stay well
+// away from both ends.  The last timestamp is further clamped to at most
+// (duration_us - kEndMarginUs) so short or generated videos do not produce
+// seeks past the last decodable keyframe.
 std::vector<std::int64_t> deterministic_seek_timestamps_us(
     std::int64_t duration_us,
     int count) {
@@ -160,11 +163,13 @@ std::vector<std::int64_t> deterministic_seek_timestamps_us(
   std::vector<std::int64_t> timestamps;
   timestamps.reserve(static_cast<std::size_t>(count));
 
-  // Place samples at 1/(2*N), 3/(2*N), … from duration to avoid seeking
-  // past the last frame.
+  // Clamp the safe end to leave a margin before EOF.
+  const std::int64_t safe_end =
+      (duration_us > kEndMarginUs) ? (duration_us - kEndMarginUs) : duration_us;
+
   for (int i = 0; i < count; ++i) {
-    const std::int64_t ts =
-        duration_us * (2 * i + 1) / (2 * count);
+    // Midpoint of the i-th of N equal intervals within [0, safe_end].
+    const std::int64_t ts = safe_end * (2 * i + 1) / (2 * count);
     timestamps.push_back(ts);
   }
   return timestamps;
@@ -179,6 +184,7 @@ RealFrameSamplingResult build_real_frame_color_sampling_input(
 
   // --- availability check ---
   if (!ffmpeg_is_available(ffmpeg_path)) {
+    result.real_decoding_attempted = false;
     result.skipped_reason = "ffmpeg not found at: " + ffmpeg_path.string();
     result.input = build_foundation_color_staging_sample_input();
     return result;
@@ -203,6 +209,7 @@ RealFrameSamplingResult build_real_frame_color_sampling_input(
   }
 
   if (duration_us <= 0) {
+    result.real_decoding_attempted = false;
     result.skipped_reason =
         "video stream duration unknown; cannot compute deterministic seek timestamps";
     result.input = build_foundation_color_staging_sample_input();
@@ -213,19 +220,22 @@ RealFrameSamplingResult build_real_frame_color_sampling_input(
   const int width = plan.canonical_raster.width;
   const int height = plan.canonical_raster.height;
   if (width <= 0 || height <= 0) {
+    result.real_decoding_attempted = false;
     result.skipped_reason = "canonical raster dimensions are not positive";
     result.input = build_foundation_color_staging_sample_input();
     return result;
   }
 
-  // --- decode frames ---
+  // --- decode frames (with per-frame miss tolerance) ---
   result.real_decoding_attempted = true;
 
   const std::vector<std::int64_t> timestamps =
       deterministic_seek_timestamps_us(duration_us, kMaxDecodedFrames);
 
+  result.frames_attempted = static_cast<int>(timestamps.size());
+
   std::vector<ColorRasterFrame> frames;
-  bool any_failed = false;
+  std::vector<std::int64_t> decoded_timestamps;
 
   for (int i = 0; i < static_cast<int>(timestamps.size()); ++i) {
     std::string decode_error;
@@ -236,33 +246,40 @@ RealFrameSamplingResult build_real_frame_color_sampling_input(
                                                       height,
                                                       decode_error);
     if (pixels.empty()) {
-      any_failed = true;
-      result.skipped_reason = "frame decode failed at timestamp " +
-                              std::to_string(timestamps[i]) + "us: " +
-                              decode_error;
-      break;
+      // Record the miss but continue; later timestamps may still decode.
+      ++result.frames_missed;
+      if (result.skipped_reason.empty()) {
+        // Keep the first miss reason for the manifest.
+        result.skipped_reason = "frame miss at " + std::to_string(timestamps[i]) +
+                                "us: " + decode_error;
+      }
+      continue;
     }
 
-    const bool is_keyframe = (i == 0);
+    const bool is_keyframe = (decoded_timestamps.empty());
     frames.push_back(ColorRasterFrame{
-        frame_id(i),
+        frame_id(static_cast<int>(decoded_timestamps.size())),
         timestamps[i],
         width,
         height,
         is_keyframe,
         std::move(pixels),
     });
+    decoded_timestamps.push_back(timestamps[i]);
   }
 
-  if (any_failed || frames.empty()) {
+  result.frames_decoded = static_cast<int>(frames.size());
+
+  if (frames.empty()) {
+    // Every targeted timestamp failed.
     result.real_decoding_succeeded = false;
     result.input = build_foundation_color_staging_sample_input();
     return result;
   }
 
-  // --- build scenes and shots ---
-  // One scene covering the full duration; one shot per adjacent frame pair
-  // (or a single shot if there is only one frame).
+  // --- build scenes and shots from the decoded frames ---
+  // One scene spanning all decoded frames; one shot per adjacent frame pair
+  // (or a single shot if only one frame decoded).
   std::vector<std::string> all_frame_ids;
   all_frame_ids.reserve(frames.size());
   for (const ColorRasterFrame& f : frames) {
@@ -271,26 +288,26 @@ RealFrameSamplingResult build_real_frame_color_sampling_input(
 
   ColorTimelineRange full_scene;
   full_scene.target_id = "scene_000001";
-  full_scene.start_us = timestamps.front();
-  full_scene.end_us = timestamps.back();
+  full_scene.start_us = decoded_timestamps.front();
+  full_scene.end_us = decoded_timestamps.back();
   full_scene.frame_ids = all_frame_ids;
 
   std::vector<ColorTimelineRange> shots;
   if (frames.size() == 1) {
     ColorTimelineRange shot;
     shot.target_id = "shot_000001";
-    shot.start_us = timestamps.front();
-    shot.end_us = timestamps.front();
+    shot.start_us = decoded_timestamps.front();
+    shot.end_us = decoded_timestamps.front();
     shot.frame_ids = {frames[0].frame_id};
     shots.push_back(std::move(shot));
   } else {
-    for (std::size_t i = 0; i + 1 < frames.size(); ++i) {
+    for (std::size_t i = 0; i + 1 < decoded_timestamps.size(); ++i) {
       ColorTimelineRange shot;
       std::ostringstream id_oss;
       id_oss << "shot_" << std::setw(6) << std::setfill('0') << (i + 1);
       shot.target_id = id_oss.str();
-      shot.start_us = timestamps[i];
-      shot.end_us = timestamps[i + 1];
+      shot.start_us = decoded_timestamps[i];
+      shot.end_us = decoded_timestamps[i + 1];
       shot.frame_ids = {frames[i].frame_id, frames[i + 1].frame_id};
       shots.push_back(std::move(shot));
     }
