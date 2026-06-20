@@ -77,20 +77,18 @@ bool write_package_skeleton(
       throw std::runtime_error("failed to open zip file for writing: " + zip_error_message(error_code));
     }
 
-    // Use a custom deleter to ensure clean discard/close
+    // Use a custom deleter to ensure clean discard/close and atomic cleanup
     struct ZipGuard {
       zip_t* archive;
       std::filesystem::path temp_path;
       bool success = false;
       ~ZipGuard() {
         if (archive) {
-          if (success) {
-            zip_close(archive);
-          } else {
-            zip_discard(archive);
-            if (std::filesystem::exists(temp_path)) {
-              std::filesystem::remove(temp_path);
-            }
+          zip_discard(archive);
+        }
+        if (!success) {
+          if (std::filesystem::exists(temp_path)) {
+            std::filesystem::remove(temp_path);
           }
         }
       }
@@ -214,17 +212,14 @@ bool write_package_skeleton(
     }
 
     // 6. Close zip successfully
-    guard.success = true;
-    guard.archive = nullptr; // release ownership before calling zip_close
     if (zip_close(archive) < 0) {
-      if (std::filesystem::exists(temp_path)) {
-        std::filesystem::remove(temp_path);
-      }
       throw std::runtime_error("failed to close zip file");
     }
+    guard.archive = nullptr;
 
     // 7. Atomic rename
     std::filesystem::rename(temp_path, package_path);
+    guard.success = true;
     return true;
 
   } catch (const std::exception& error) {

@@ -119,11 +119,40 @@ void test_writer_fails_gracefully_on_missing_staging_dir() {
   std::filesystem::remove_all(root);
 }
 
+void test_writer_fails_on_rename_and_cleans_up_temp() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-package-writer-rename-fail-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path package_path = root / "output.svp";
+  std::filesystem::create_directories(package_path);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir);
+  const std::filesystem::path source_path = "";
+
+  nlohmann::json manifest = {
+    {"svp_version", "1.0-rc.2"}
+  };
+
+  bool success = svp::package::write_package_skeleton(
+      package_path, staging_dir, source_path, manifest);
+
+  assert(!success);
+
+  const std::filesystem::path temp_path = package_path.string() + ".tmp";
+  assert(!std::filesystem::exists(temp_path));
+
+  std::filesystem::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
   test_write_package_skeleton_creates_atomic_zip_file();
   test_writer_fails_gracefully_on_missing_staging_dir();
+  test_writer_fails_on_rename_and_cleans_up_temp();
   std::cout << "All svp-package-tests passed!\n";
   return 0;
 }
