@@ -158,7 +158,8 @@ int main(int argc, char** argv) {
         output["audio_foundation"] = svp::audio::audio_stage_plan_to_json(
             svp::audio::build_audio_stage_plan(build_source_path,
                                                plan.probe,
-                                               executable_exists(build_ffmpeg_path)));
+                                               executable_exists(build_ffmpeg_path),
+                                               build_ffmpeg_path));
       } else if (stop_after == "vision-plan") {
         const svp::vision::VisionObservationPipelinePlan vision_plan =
             svp::vision::build_vision_observation_pipeline_plan(plan);
