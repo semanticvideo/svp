@@ -1,3 +1,4 @@
+#include "svp/audio/audio_stage_plan.hpp"
 #include "svp/core/version.hpp"
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/vision/observation_pipeline_plan.hpp"
@@ -5,6 +6,7 @@
 #include <CLI/CLI.hpp>
 #include <nlohmann/json.hpp>
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -50,6 +52,37 @@ svp::media::MediaProbe load_or_run_probe(const std::string& source_path,
   return svp::media::probe_media_with_ffprobe(source_path, ffprobe_path);
 }
 
+bool executable_exists(const std::filesystem::path& executable_path) {
+  if (executable_path.empty()) {
+    return false;
+  }
+  if (executable_path.has_parent_path()) {
+    return std::filesystem::exists(executable_path);
+  }
+
+  const char* path_env = std::getenv("PATH");
+  if (path_env == nullptr) {
+    return false;
+  }
+
+  std::string paths(path_env);
+  std::size_t start = 0;
+  while (start <= paths.size()) {
+    const std::size_t end = paths.find(':', start);
+    const std::string entry =
+        paths.substr(start, end == std::string::npos ? std::string::npos : end - start);
+    if (!entry.empty() && std::filesystem::exists(std::filesystem::path(entry) / executable_path)) {
+      return true;
+    }
+    if (end == std::string::npos) {
+      break;
+    }
+    start = end + 1;
+  }
+
+  return false;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -73,6 +106,7 @@ int main(int argc, char** argv) {
   std::string build_source_path;
   std::string build_probe_json_path;
   std::string build_ffprobe_path = "ffprobe";
+  std::string build_ffmpeg_path = "ffmpeg";
   std::string build_output_path;
   std::string stop_after = "media-ingest";
 
@@ -82,11 +116,12 @@ int main(int argc, char** argv) {
   build->add_option("--probe-json", build_probe_json_path,
                     "Precomputed media probe JSON; skips running ffprobe");
   build->add_option("--ffprobe", build_ffprobe_path, "ffprobe executable path");
+  build->add_option("--ffmpeg", build_ffmpeg_path, "ffmpeg executable path");
   build->add_option("--out", build_output_path,
                     "Output path for the builder foundation JSON")
       ->required();
   build->add_option("--stop-after", stop_after,
-                    "Supported values: media-ingest, vision-plan");
+                    "Supported foundation stages: media-ingest, audio, vision-plan");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -106,9 +141,10 @@ int main(int argc, char** argv) {
     }
 
     if (*build) {
-      if (stop_after != "media-ingest" && stop_after != "vision-plan") {
-        std::cerr
-            << "svp-builder build currently supports --stop-after media-ingest or vision-plan\n";
+      if (stop_after != "media-ingest" && stop_after != "audio" &&
+          stop_after != "vision-plan") {
+        std::cerr << "svp-builder build currently supports --stop-after media-ingest, audio, "
+                     "or vision-plan\n";
         return 2;
       }
 
@@ -118,7 +154,12 @@ int main(int argc, char** argv) {
                                                                 build_probe_json_path,
                                                                 build_ffprobe_path));
       nlohmann::json output = svp::media::media_ingest_plan_to_json(plan);
-      if (stop_after == "vision-plan") {
+      if (stop_after == "audio") {
+        output["audio_foundation"] = svp::audio::audio_stage_plan_to_json(
+            svp::audio::build_audio_stage_plan(build_source_path,
+                                               plan.probe,
+                                               executable_exists(build_ffmpeg_path)));
+      } else if (stop_after == "vision-plan") {
         const svp::vision::VisionObservationPipelinePlan vision_plan =
             svp::vision::build_vision_observation_pipeline_plan(plan);
         output["vision_observation_pipeline"] =
@@ -131,6 +172,9 @@ int main(int argc, char** argv) {
       };
       write_json_file(build_output_path, output);
       std::cout << "Wrote builder foundation JSON: " << build_output_path << "\n";
+      if (stop_after == "audio") {
+        std::cout << "Audio task plan only; no transcription or diarization was generated.\n";
+      }
       if (stop_after == "vision-plan") {
         std::cout << "Vision/OCR/color task plan only; no observations were generated.\n";
       }
