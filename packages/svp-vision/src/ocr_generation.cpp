@@ -155,6 +155,16 @@ std::string normalize_text(const std::string& raw) {
   return lower(no_punct_space);
 }
 
+std::string alphanumeric_key(const std::string& text) {
+  std::string key;
+  for (char c : text) {
+    if (std::isalnum(static_cast<unsigned char>(c))) {
+      key += std::tolower(static_cast<unsigned char>(c));
+    }
+  }
+  return key;
+}
+
 // Write a ColorRasterFrame to a temporary PNG file using ffmpeg.
 // Used as a fallback when direct source extraction is not available.
 bool write_frame_to_png(const ColorRasterFrame& frame,
@@ -765,17 +775,20 @@ std::vector<ReconciledObservation> reconcile_detections(
     std::size_t min_text_chars = 3) {
   std::vector<ReconciledObservation> reconciled;
 
-  // Group detections by normalized text (so spacing/punctuation variants
-  // like "$19. 99" and "$19.99" can reconcile together)
-  std::map<std::string, std::vector<std::size_t>> by_text;
+  // Group detections by alphanumeric key (so spacing/punctuation variants
+  // like "$19. 99" and "1999" can reconcile together)
+  std::map<std::string, std::vector<std::size_t>> by_text_key;
   for (std::size_t i = 0; i < detections.size(); ++i) {
     const std::string norm = normalize_text(detections[i].raw_text);
-    // Skip very short text (likely OCR noise: single chars, punctuation)
-    if (norm.length() < min_text_chars) continue;
-    by_text[norm].push_back(i);
+    const std::string key = alphanumeric_key(norm);
+
+    // Skip very short text or punctuation-only noise based on alphanumeric content length
+    if (key.length() < min_text_chars) continue;
+
+    by_text_key[key].push_back(i);
   }
 
-  for (const auto& [norm_text, indices] : by_text) {
+  for (const auto& [key, indices] : by_text_key) {
     // Cluster detections by spatial overlap
     std::vector<std::vector<std::size_t>> clusters;
     for (std::size_t idx : indices) {
@@ -808,7 +821,7 @@ std::vector<ReconciledObservation> reconcile_detections(
         }
       }
       obs.raw_text = detections[best_idx].raw_text;
-      obs.normalized_text = norm_text;
+      obs.normalized_text = normalize_text(obs.raw_text);
       obs.frame_width = detections[cluster[0]].frame_width;
       obs.frame_height = detections[cluster[0]].frame_height;
       obs.detection_count = static_cast<int>(cluster.size());
