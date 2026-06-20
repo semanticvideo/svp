@@ -1,4 +1,5 @@
 #include "svp/audio/audio_extraction_executor.hpp"
+#include "svp/audio/waveform_envelope.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -279,21 +280,21 @@ nlohmann::json absence_processor_record(const AudioExtractionPlan& plan,
   };
 }
 
-nlohmann::json waveform_processor_record(const AudioExtractionPlan& plan) {
+nlohmann::json waveform_processor_record(const AudioExtractionPlan& plan,
+                                         const AudioExtractionRun& run) {
   return {
       {"id", plan.waveform.processor_id},
       {"name", "SVP waveform envelope"},
-      {"version", "pending"},
+      {"version", "foundation"},
       {"input_refs", {plan.waveform.input_ref}},
       {"output_refs", {plan.waveform.output_ref}},
       {"model_refs", nlohmann::json::array()},
       {"task_ids", {plan.waveform.task_id}},
-      {"runtime", "pending"},
+      {"runtime", "svp-audio"},
       {"execution_provider", "cpu"},
       {"window_duration_us", plan.waveform.window_duration_us},
-      {"foundation_status", "planned"},
-      {"completed", false},
-      {"pending_reason", "waveform envelope generation is not wired in this foundation pass"},
+      {"foundation_status", run.waveform_written ? "staged" : "planned"},
+      {"completed", run.waveform_written},
   };
 }
 
@@ -331,18 +332,44 @@ AudioDerivedArtifactRun stage_processor_provenance(const AudioExtractionPlan& pl
   write_jsonl_file(artifact.staged_output_path,
                    {extraction_processor_record(plan, run),
                     absence_processor_record(plan, run),
-                    waveform_processor_record(plan)});
+                    waveform_processor_record(plan, run)});
   artifact.written = true;
   return artifact;
 }
 
-AudioDerivedArtifactRun planned_waveform_artifact(const AudioExtractionPlan& plan,
-                                                  const std::filesystem::path& staging_root) {
+AudioDerivedArtifactRun stage_waveform_artifact(const AudioExtractionPlan& plan,
+                                                const AudioExtractionRun& run,
+                                                const std::filesystem::path& staging_root) {
   AudioDerivedArtifactRun artifact;
   artifact.task_id = plan.waveform.task_id;
   artifact.output_ref = plan.waveform.output_ref;
+  if (!is_safe_output_ref(artifact.output_ref) || !is_safe_output_ref(plan.waveform.input_ref)) {
+    artifact.skipped_reason = "waveform input_ref or output_ref is not a safe relative package path";
+    return artifact;
+  }
+
+  const std::filesystem::path input_path = staged_path_for_ref(staging_root,
+                                                              plan.waveform.input_ref);
   artifact.staged_output_path = staged_path_for_ref(staging_root, artifact.output_ref);
-  artifact.skipped_reason = "waveform envelope generation is not wired in this foundation pass";
+  if (!run.analysis_audio.success || !std::filesystem::exists(input_path)) {
+    artifact.skipped_reason = "analysis audio was not staged";
+    return artifact;
+  }
+
+  try {
+    const std::vector<WaveformEnvelopeRecord> records =
+        generate_waveform_envelope_records(input_path, plan.waveform.window_duration_us);
+    std::vector<nlohmann::json> json_records;
+    json_records.reserve(records.size());
+    for (const WaveformEnvelopeRecord& record : records) {
+      json_records.push_back(waveform_envelope_record_to_json(record));
+    }
+    write_jsonl_file(artifact.staged_output_path, json_records);
+    artifact.written = true;
+  } catch (const std::exception& error) {
+    artifact.skipped_reason = error.what();
+  }
+
   return artifact;
 }
 
@@ -385,9 +412,11 @@ AudioExtractionRun execute_audio_extraction_plan(const AudioExtractionPlan& plan
     run.blockers.push_back(plan.audio_absence.task_id + ": " +
                            run.audio_absence.skipped_reason);
   }
-  run.waveform = planned_waveform_artifact(plan, staging_root);
-  run.waveform_written = false;
-  run.blockers.push_back(plan.waveform.task_id + ": " + run.waveform.skipped_reason);
+  run.waveform = stage_waveform_artifact(plan, run, staging_root);
+  run.waveform_written = run.waveform.written;
+  if (!run.waveform_written && !run.waveform.skipped_reason.empty()) {
+    run.blockers.push_back(plan.waveform.task_id + ": " + run.waveform.skipped_reason);
+  }
   run.processor_provenance = stage_processor_provenance(plan, run, staging_root);
   run.processor_provenance_written = run.processor_provenance.written;
   if (!run.processor_provenance_written && !run.processor_provenance.skipped_reason.empty()) {

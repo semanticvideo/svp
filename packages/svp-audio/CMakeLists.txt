@@ -6,6 +6,7 @@ add_library(svp-audio
   src/audio_stage_plan.cpp
   src/transcript_records.cpp
   src/vad_task_plan.cpp
+  src/waveform_envelope.cpp
 )
 
 add_library(svp::audio ALIAS svp-audio)

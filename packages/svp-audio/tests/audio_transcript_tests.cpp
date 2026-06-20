@@ -2,16 +2,53 @@
 #include "svp/audio/audio_stage_plan.hpp"
 #include "svp/audio/transcript_records.hpp"
 #include "svp/audio/vad_task_plan.hpp"
+#include "svp/audio/waveform_envelope.hpp"
 
 #include <cassert>
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace {
+
+void write_u16_le(std::ostream& output, std::uint16_t value) {
+  output.put(static_cast<char>(value & 0xff));
+  output.put(static_cast<char>((value >> 8) & 0xff));
+}
+
+void write_u32_le(std::ostream& output, std::uint32_t value) {
+  output.put(static_cast<char>(value & 0xff));
+  output.put(static_cast<char>((value >> 8) & 0xff));
+  output.put(static_cast<char>((value >> 16) & 0xff));
+  output.put(static_cast<char>((value >> 24) & 0xff));
+}
+
+void write_pcm_s16le_mono_wav(const std::filesystem::path& path,
+                              const std::vector<std::int16_t>& samples) {
+  std::ofstream output(path, std::ios::binary);
+  const std::uint32_t data_size = static_cast<std::uint32_t>(samples.size() * 2);
+  output.write("RIFF", 4);
+  write_u32_le(output, 36 + data_size);
+  output.write("WAVE", 4);
+  output.write("fmt ", 4);
+  write_u32_le(output, 16);
+  write_u16_le(output, 1);
+  write_u16_le(output, 1);
+  write_u32_le(output, 16000);
+  write_u32_le(output, 16000 * 2);
+  write_u16_le(output, 2);
+  write_u16_le(output, 16);
+  output.write("data", 4);
+  write_u32_le(output, data_size);
+  for (const std::int16_t sample : samples) {
+    write_u16_le(output, static_cast<std::uint16_t>(sample));
+  }
+}
 
 void test_word_serialization_uses_canonical_time_strings() {
   svp::audio::TranscriptWord word;
@@ -133,6 +170,8 @@ void test_audio_extraction_plan_documents_ffmpeg_commands_when_available() {
   assert(extraction["waveform"]["window_duration_us"] == 10000);
   assert(extraction["waveform"]["waveform_run"] == false);
   assert(extraction["waveform"]["waveform_written"] == false);
+  assert(extraction["waveform"]["pending_reason"] ==
+         "waveform envelope generation requires staged analysis audio");
   assert(extraction["processor_provenance"]["output_ref"] ==
          "provenance/processors.jsonl");
   assert(extraction["processor_provenance"]["final_package_provenance_written"] ==
@@ -162,6 +201,33 @@ void test_multi_stream_analysis_audio_waits_for_vad_selection() {
   assert(!extraction["blockers"].empty());
 }
 
+void test_waveform_envelope_generates_ten_millisecond_json_records() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-audio-waveform-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+  const std::filesystem::path wav_path = root / "analysis_mono_16k.wav";
+  write_pcm_s16le_mono_wav(wav_path, std::vector<std::int16_t>(320, 16384));
+
+  const std::vector<svp::audio::WaveformEnvelopeRecord> records =
+      svp::audio::generate_waveform_envelope_records(wav_path, 10000);
+  assert(records.size() == 2);
+  const nlohmann::json first =
+      svp::audio::waveform_envelope_record_to_json(records.front());
+  assert(first["id"] == "wave_00000000");
+  assert(first["start_us"] == 0);
+  assert(first["end_us"] == 10000);
+  assert(first["rms_db"] == -6.0);
+  assert(first["peak_db"] == -6.0);
+  const nlohmann::json second =
+      svp::audio::waveform_envelope_record_to_json(records.back());
+  assert(second["id"] == "wave_00000001");
+  assert(second["start_us"] == 10000);
+  assert(second["end_us"] == 20000);
+
+  std::filesystem::remove_all(root);
+}
+
 void test_audio_extraction_executor_writes_staged_single_stream_outputs() {
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "svp-audio-executor-test";
@@ -172,6 +238,8 @@ void test_audio_extraction_executor_writes_staged_single_stream_outputs() {
     std::ofstream output(source);
     output << "fake audio bytes\n";
   }
+  const std::filesystem::path analysis_source = root / "analysis-source.wav";
+  write_pcm_s16le_mono_wav(analysis_source, std::vector<std::int16_t>(320, 16384));
 
   svp::audio::AudioExtractionPlan plan;
   plan.source_path = source;
@@ -190,7 +258,7 @@ void test_audio_extraction_executor_writes_staged_single_stream_outputs() {
   plan.analysis_audio.output_ref = "media/audio/analysis_mono_16k.wav";
   plan.analysis_audio.arguments = {
       "/bin/cp",
-      source.string(),
+      analysis_source.string(),
       "media/audio/analysis_mono_16k.wav",
   };
   plan.audio_absence.task_id = "task.audio.absence.write";
@@ -214,17 +282,17 @@ void test_audio_extraction_executor_writes_staged_single_stream_outputs() {
   assert(encoded["original_streams_written"] == true);
   assert(encoded["analysis_audio_written"] == true);
   assert(encoded["audio_absence_written"] == true);
-  assert(encoded["waveform_written"] == false);
+  assert(encoded["waveform_written"] == true);
   assert(encoded["processor_provenance_written"] == true);
   assert(encoded["original_streams"][0]["command_executed"] == true);
   assert(encoded["analysis_audio"]["command_executed"] == true);
   assert(encoded["audio_absence"]["written"] == true);
-  assert(encoded["waveform"]["written"] == false);
+  assert(encoded["waveform"]["written"] == true);
   assert(encoded["processor_provenance"]["written"] == true);
   assert(std::filesystem::exists(staging_root / "media/audio/original_stream_000.flac"));
   assert(std::filesystem::exists(staging_root / "media/audio/analysis_mono_16k.wav"));
   assert(std::filesystem::exists(staging_root / "media/audio/audio_absence.json"));
-  assert(!std::filesystem::exists(staging_root / "media/audio/waveform.jsonl"));
+  assert(std::filesystem::exists(staging_root / "media/audio/waveform.jsonl"));
   assert(std::filesystem::exists(staging_root / "provenance/processors.jsonl"));
 
   {
@@ -235,6 +303,35 @@ void test_audio_extraction_executor_writes_staged_single_stream_outputs() {
     assert(absence["selected_source_audio_stream_id"] == "astream_0001");
     assert(absence["analysis_audio_written"] == true);
     assert(absence["final_package_ready"] == false);
+  }
+
+  {
+    std::ifstream input(staging_root / "media/audio/waveform.jsonl");
+    std::string line;
+    std::getline(input, line);
+    const nlohmann::json first = nlohmann::json::parse(line);
+    assert(first["id"] == "wave_00000000");
+    assert(first["start_us"] == 0);
+    assert(first["end_us"] == 10000);
+    assert(first["rms_db"] == -6.0);
+    assert(first["peak_db"] == -6.0);
+    std::getline(input, line);
+    const nlohmann::json second = nlohmann::json::parse(line);
+    assert(second["id"] == "wave_00000001");
+    assert(!std::getline(input, line));
+  }
+
+  {
+    std::ifstream input(staging_root / "provenance/processors.jsonl");
+    std::string line;
+    std::getline(input, line);
+    std::getline(input, line);
+    std::getline(input, line);
+    const nlohmann::json waveform_processor = nlohmann::json::parse(line);
+    assert(waveform_processor["id"] == "proc_waveform_envelope_0001");
+    assert(waveform_processor["runtime"] == "svp-audio");
+    assert(waveform_processor["foundation_status"] == "staged");
+    assert(waveform_processor["completed"] == true);
   }
 
   std::filesystem::remove_all(root);
@@ -337,6 +434,7 @@ int main() {
   test_audio_stage_plan_is_honest_about_pending_processors();
   test_audio_extraction_plan_documents_ffmpeg_commands_when_available();
   test_multi_stream_analysis_audio_waits_for_vad_selection();
+  test_waveform_envelope_generates_ten_millisecond_json_records();
   test_audio_extraction_executor_writes_staged_single_stream_outputs();
   test_audio_extraction_executor_leaves_multi_stream_analysis_unrun();
   test_vad_task_plan_uses_stable_thirty_second_boundaries();
