@@ -2,8 +2,10 @@
 #include "svp/audio/transcript_records.hpp"
 
 #include <cassert>
+#include <algorithm>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 
@@ -76,6 +78,19 @@ void test_audio_stage_plan_is_honest_about_pending_processors() {
   assert(encoded["diarization_run"] == false);
   assert(encoded["valid_svp_package_written"] == false);
   assert(!encoded["blockers"].empty());
+
+  const std::vector<std::string> required_outputs =
+      encoded["required_outputs"].get<std::vector<std::string>>();
+  assert(std::find(required_outputs.begin(),
+                   required_outputs.end(),
+                   "media/audio/waveform.jsonl") != required_outputs.end());
+  assert(std::find(required_outputs.begin(),
+                   required_outputs.end(),
+                   "media/audio/audio_absence.json") != required_outputs.end());
+  assert(std::find(required_outputs.begin(), required_outputs.end(), "audio/waveform.jsonl") ==
+         required_outputs.end());
+  assert(std::find(required_outputs.begin(), required_outputs.end(), "audio/audio_absence.json") ==
+         required_outputs.end());
 }
 
 }  // namespace

@@ -9,8 +9,8 @@ std::vector<std::string> required_audio_outputs() {
   return {
       "media/audio/original_stream_NNN.flac",
       "media/audio/analysis_mono_16k.wav",
-      "audio/waveform.jsonl",
-      "audio/audio_absence.json",
+      "media/audio/waveform.jsonl",
+      "media/audio/audio_absence.json",
       "transcript/speech_regions.jsonl",
       "transcript/transcript.json",
       "transcript/words.jsonl",
