@@ -435,7 +435,8 @@ int main(int argc, char** argv) {
 
         // Write honest spatial/embedding placeholder entries
         const svp::package::SpatialEmbeddingPlaceholderSummary placeholder_summary =
-            svp::package::write_spatial_and_embedding_placeholders(staging_dir);
+            svp::package::write_spatial_and_embedding_placeholders(
+                staging_dir, model_runtime_available);
         output["spatial_embedding_placeholders"] =
             svp::package::spatial_embedding_placeholder_summary_to_json(
                 placeholder_summary);
@@ -551,6 +552,15 @@ int main(int argc, char** argv) {
                   << " embedding sets, "
                   << output.at("spatial_embedding_placeholders").at("embeddings_blocks_written")
                   << " embeddings blocks\n";
+        std::cout << "Depth generation run: "
+                  << output.at("spatial_embedding_placeholders").at("depth_generation_run")
+                  << "\n";
+        std::cout << "Embedding generation run: "
+                  << output.at("spatial_embedding_placeholders").at("embedding_generation_run")
+                  << "\n";
+        std::cout << "Model runtime available: "
+                  << output.at("spatial_embedding_placeholders").at("model_runtime_available")
+                  << "\n";
         std::cout << "Wrote skeleton .svp package to: " << package_path << "\n";
         if (validation_report_stored) {
           std::cout << "Validation report stored at: provenance/validation.json\n";

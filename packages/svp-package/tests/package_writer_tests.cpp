@@ -327,15 +327,18 @@ void test_spatial_embedding_placeholders() {
   std::filesystem::create_directories(staging_dir / "provenance");
 
   const svp::package::SpatialEmbeddingPlaceholderSummary summary =
-      svp::package::write_spatial_and_embedding_placeholders(staging_dir);
+      svp::package::write_spatial_and_embedding_placeholders(staging_dir, false);
 
   assert(summary.depth_index_written);
   assert(summary.depth_blocks_written);
+  assert(!summary.depth_generation_run);
   assert(summary.masks_index_written);
   assert(summary.masks_blocks_written);
   assert(summary.embedding_sets_written);
   assert(summary.embeddings_index_written);
   assert(summary.embeddings_blocks_written);
+  assert(!summary.embedding_generation_run);
+  assert(!summary.model_runtime_available);
   assert(summary.provenance_records_added == 2);
 
   assert(std::filesystem::exists(staging_dir / "spatial" / "depth.index.jsonl"));
@@ -437,7 +440,7 @@ void test_package_skeleton_includes_placeholders_and_validation_report() {
   std::filesystem::create_directories(staging_dir / "provenance");
 
   [[maybe_unused]] const auto placeholder_summary =
-      svp::package::write_spatial_and_embedding_placeholders(staging_dir);
+      svp::package::write_spatial_and_embedding_placeholders(staging_dir, false);
 
   nlohmann::json report = {
     {"schema_version", "svp-validation-report-v1"},
