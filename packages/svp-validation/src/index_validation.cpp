@@ -2,6 +2,7 @@
 
 #include "index_logical_rows.hpp"
 #include "json_schema_subset.hpp"
+#include "ocr_color_index_consistency.hpp"
 
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
@@ -489,6 +490,8 @@ std::optional<LogicalRowStreamSummary> validate_sqlite_index(
     auto database = open_read_only_database(sqlite_temp.path());
     auto table_names = read_user_table_names(*database);
     validate_required_tables(report, registry, table_names);
+    add_ocr_color_index_consistency_findings(report, registry, package_path, layout,
+                                             *database);
     return compute_logical_row_stream_summary(*database, table_names);
   } catch (const std::exception& error) {
     add_finding(report, make_finding(registry, kCodeIndexSchemaInvalid,

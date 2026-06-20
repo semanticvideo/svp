@@ -45,6 +45,7 @@ inline constexpr std::string_view kCodeTextInvalidNormalizedText =
     "ERR_TEXT_INVALID_NORMALIZED_TEXT";
 inline constexpr std::string_view kCodeTextInvalidNumericExtraction =
     "ERR_TEXT_INVALID_NUMERIC_EXTRACTION";
+inline constexpr std::string_view kCodeTextIndexMismatch = "ERR_TEXT_INDEX_MISMATCH";
 inline constexpr std::string_view kCodeColorInvalidObservationRecord =
     "ERR_COLOR_INVALID_OBSERVATION_RECORD";
 inline constexpr std::string_view kCodeColorInvalidBucketId = "ERR_COLOR_INVALID_BUCKET_ID";
@@ -58,6 +59,7 @@ inline constexpr std::string_view kCodeColorInvalidDominantBucket =
     "ERR_COLOR_INVALID_DOMINANT_BUCKET";
 inline constexpr std::string_view kCodeColorInvalidSamplingBasis =
     "ERR_COLOR_INVALID_SAMPLING_BASIS";
+inline constexpr std::string_view kCodeColorIndexMismatch = "ERR_COLOR_INDEX_MISMATCH";
 
 inline constexpr std::string_view kTempCodeInputMissing = "X_VALIDATOR_INPUT_MISSING";
 inline constexpr std::string_view kTempCodeInputNotRegularFile = "X_VALIDATOR_INPUT_NOT_REGULAR_FILE";
