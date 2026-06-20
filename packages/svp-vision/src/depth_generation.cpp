@@ -78,45 +78,112 @@ std::string hash_to_hex(const std::array<std::uint8_t, 32>& hash) {
   return oss.str();
 }
 
-// Convert sRGB8 pixel buffer to normalized float [0,1] CHW format for ONNX input.
-// Depth Anything V2 expects NCHW float32 with 3 channels.
+// Convert sRGB8 pixel buffer to normalized float CHW format for ONNX input.
+// Depth Anything V2 expects NCHW float32 with 3 channels, ImageNet normalization.
 std::vector<float> frame_to_normalized_chw(
     const ColorRasterFrame& frame) {
   const std::size_t pixel_count =
       static_cast<std::size_t>(frame.width) * static_cast<std::size_t>(frame.height);
   std::vector<float> output(pixel_count * 3);
+  constexpr float kMean[3] = {0.485f, 0.456f, 0.406f};
+  constexpr float kStd[3] = {0.229f, 0.224f, 0.225f};
   for (std::size_t i = 0; i < pixel_count; ++i) {
-    output[i] = static_cast<float>(frame.pixels[i].r) / 255.0f;
-    output[pixel_count + i] = static_cast<float>(frame.pixels[i].g) / 255.0f;
-    output[2 * pixel_count + i] = static_cast<float>(frame.pixels[i].b) / 255.0f;
+    output[i] = (static_cast<float>(frame.pixels[i].r) / 255.0f - kMean[0]) / kStd[0];
+    output[pixel_count + i] = (static_cast<float>(frame.pixels[i].g) / 255.0f - kMean[1]) / kStd[1];
+    output[2 * pixel_count + i] = (static_cast<float>(frame.pixels[i].b) / 255.0f - kMean[2]) / kStd[2];
   }
   return output;
 }
 
+// Bilinear resize a single-channel depth map from (src_w x src_h) to (dst_w x dst_h).
+// The ONNX model outputs at 14*floor(h/14) x 14*floor(w/14); we resize back to
+// the original frame dimensions so the SVPB depth block matches the canonical raster.
+std::vector<float> bilinear_resize_depth(
+    const std::vector<float>& src,
+    std::uint32_t src_w, std::uint32_t src_h,
+    std::uint32_t dst_w, std::uint32_t dst_h) {
+  if (src_w == dst_w && src_h == dst_h) {
+    return src;
+  }
+  std::vector<float> dst(static_cast<std::size_t>(dst_w) * static_cast<std::size_t>(dst_h));
+  const float x_ratio = static_cast<float>(src_w) / static_cast<float>(dst_w);
+  const float y_ratio = static_cast<float>(src_h) / static_cast<float>(dst_h);
+  for (std::uint32_t y = 0; y < dst_h; ++y) {
+    const float src_y = (y + 0.5f) * y_ratio - 0.5f;
+    const std::uint32_t y0 = static_cast<std::uint32_t>(std::max(0.0f, std::floor(src_y)));
+    const std::uint32_t y1 = std::min(y0 + 1, src_h - 1);
+    const float wy = std::max(0.0f, std::min(1.0f, src_y - static_cast<float>(y0)));
+    for (std::uint32_t x = 0; x < dst_w; ++x) {
+      const float src_x = (x + 0.5f) * x_ratio - 0.5f;
+      const std::uint32_t x0 = static_cast<std::uint32_t>(std::max(0.0f, std::floor(src_x)));
+      const std::uint32_t x1 = std::min(x0 + 1, src_w - 1);
+      const float wx = std::max(0.0f, std::min(1.0f, src_x - static_cast<float>(x0)));
+      const float v00 = src[static_cast<std::size_t>(y0) * src_w + x0];
+      const float v01 = src[static_cast<std::size_t>(y0) * src_w + x1];
+      const float v10 = src[static_cast<std::size_t>(y1) * src_w + x0];
+      const float v11 = src[static_cast<std::size_t>(y1) * src_w + x1];
+      const float v0 = v00 * (1.0f - wx) + v01 * wx;
+      const float v1 = v10 * (1.0f - wx) + v11 * wx;
+      dst[static_cast<std::size_t>(y) * dst_w + x] = v0 * (1.0f - wy) + v1 * wy;
+    }
+  }
+  return dst;
+}
+
 }  // namespace
 
-// Convert float depth output to uint16 payload for SVPB block writing.
-// The ONNX model outputs float depth; we quantize to uint16 relative inverse depth.
-// Returns empty vector if the output size does not exactly match the expected
-// raster dimensions — mismatched output must not be zero-padded into a real block.
+// Convert float depth output to uint16 relative inverse depth payload.
+//
+// RC2 normalization contract:
+//   0     = farthest valid relative depth in the frame
+//   65535 = nearest valid relative depth in the frame
+//
+// The raw ONNX float output is normalized per-frame: we find the finite min
+// and max, then linearly map min -> 0 and max -> 65535.
+//
+// Blocking conditions (return empty vector):
+//   - Size does not match width*height
+//   - Any NaN or Inf present (invalid output must not be packaged as real depth)
+//   - All values are identical (constant output has no meaningful depth
+//     variation; we block rather than pretend it contains real depth)
 std::vector<std::uint16_t> float_depth_to_uint16(
     const std::vector<float>& depth,
     std::uint32_t width,
     std::uint32_t height) {
   const std::size_t expected =
       static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-  if (depth.size() != expected) {
+  if (depth.size() != expected || expected == 0) {
     return {};
   }
-  std::vector<std::uint16_t> output(expected, 0);
+
+  // Reject any NaN or Inf — invalid output must block, not be silently
+  // coerced to a placeholder value.
   for (std::size_t i = 0; i < expected; ++i) {
-    float v = depth[i];
-    if (std::isnan(v) || std::isinf(v)) {
-      v = 0.0f;
+    if (!std::isfinite(depth[i])) {
+      return {};
     }
-    // Clamp to [0, 1] and scale to uint16 range.
-    v = std::max(0.0f, std::min(1.0f, v));
-    output[i] = static_cast<std::uint16_t>(v * 65535.0f);
+  }
+
+  // Find per-frame min and max.
+  float min_val = depth[0];
+  float max_val = depth[0];
+  for (std::size_t i = 1; i < expected; ++i) {
+    if (depth[i] < min_val) min_val = depth[i];
+    if (depth[i] > max_val) max_val = depth[i];
+  }
+
+  // Constant finite output has no meaningful depth variation.  Block it
+  // rather than emit a uniform uint16 field pretending to be depth.
+  if (min_val == max_val) {
+    return {};
+  }
+
+  // Linear normalization: min (farthest) -> 0, max (nearest) -> 65535.
+  const float range = max_val - min_val;
+  std::vector<std::uint16_t> output(expected);
+  for (std::size_t i = 0; i < expected; ++i) {
+    const float normalized = (depth[i] - min_val) / range;
+    output[i] = static_cast<std::uint16_t>(std::lround(normalized * 65535.0f));
   }
   return output;
 }
@@ -181,13 +248,18 @@ DepthGenerationResult generate_depth_blocks(
         verify_errors += issue.message + "; ";
       }
     }
-    result.blocker = "Model bundle BLAKE3 verification failed: " + verify_errors;
+    result.blocker = "Model bundle file BLAKE3 verification failed: " + verify_errors;
     result.processor_provenance = make_depth_processor_provenance(
         manifest.model_id, manifest.model_bundle_id,
         options.execution_provider, "not_run", result.blocker);
     return result;
   }
 
+  // Manifest file hashes verified.  The bundle_blake3 field is not yet
+  // verifiable because the canonical bundle digest algorithm is not specified
+  // in RC1/RC2.  We set depth_model_verified to true to indicate that all
+  // verifiable checks (file BLAKE3 hashes, manifest schema, required files)
+  // passed, not that full authoritative bundle_blake3 verification occurred.
   result.depth_model_verified = true;
 
   // Check if real decoded canonical frame input is available
@@ -255,10 +327,33 @@ DepthGenerationResult generate_depth_blocks(
       return result;
     }
 
-    // Convert float depth to uint16 payload
-    // Reject mismatched ONNX output sizes instead of zero-padding.
+    // The ONNX model outputs at 14*floor(h/14) x 14*floor(w/14), which may
+    // differ from the input frame dimensions.  Resize the depth output back
+    // to the canonical raster dimensions using bilinear interpolation so the
+    // SVPB depth block matches the frame geometry.
+    //
+    // Determine the actual output dimensions from the element count and the
+    // known model output shape formula.
+    const std::uint32_t out_h =
+        14u * static_cast<std::uint32_t>(frame.height / 14);
+    const std::uint32_t out_w =
+        14u * static_cast<std::uint32_t>(frame.width / 14);
+
+    std::vector<float> resized_depth = depth_output;
+    if (out_w > 0 && out_h > 0 &&
+        depth_output.size() == static_cast<std::size_t>(out_w) * static_cast<std::size_t>(out_h) &&
+        (out_w != static_cast<std::uint32_t>(frame.width) ||
+         out_h != static_cast<std::uint32_t>(frame.height))) {
+      resized_depth = bilinear_resize_depth(
+          depth_output, out_w, out_h,
+          static_cast<std::uint32_t>(frame.width),
+          static_cast<std::uint32_t>(frame.height));
+    }
+
+    // Convert float depth to uint16 payload.
+    // Reject mismatched sizes instead of zero-padding.
     std::vector<std::uint16_t> depth_uint16 = float_depth_to_uint16(
-        depth_output,
+        resized_depth,
         static_cast<std::uint32_t>(frame.width),
         static_cast<std::uint32_t>(frame.height));
 
@@ -267,6 +362,7 @@ DepthGenerationResult generate_depth_blocks(
           frame.frame_id + ": expected " +
           std::to_string(static_cast<std::size_t>(frame.width) * static_cast<std::size_t>(frame.height)) +
           " elements but got " + std::to_string(depth_output.size()) +
+          " (resized to " + std::to_string(resized_depth.size()) + ")" +
           "; depth generation blocked to prevent fake/partial depth";
       result.processor_provenance = make_depth_processor_provenance(
           manifest.model_id, manifest.model_bundle_id,
@@ -283,8 +379,10 @@ DepthGenerationResult generate_depth_blocks(
     spec.dtype = svp::blocks::DType::uint16;
     spec.start_frame = frame_idx;
     spec.frame_count = 1;
-    spec.start_us = frame.timestamp_us;
-    spec.end_us = frame.timestamp_us;
+    // For single-frame blocks, use absent time range (-1) since the validator
+    // requires end_us > start_us and a single frame has no duration span.
+    spec.start_us = -1;
+    spec.end_us = -1;
 
     svp::blocks::WrittenBlockInfo block_info;
     try {
