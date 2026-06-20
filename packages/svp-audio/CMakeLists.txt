@@ -1,8 +1,10 @@
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(svp-audio
+  src/audio_extraction_plan.cpp
   src/audio_stage_plan.cpp
   src/transcript_records.cpp
+  src/vad_task_plan.cpp
 )
 
 add_library(svp::audio ALIAS svp-audio)

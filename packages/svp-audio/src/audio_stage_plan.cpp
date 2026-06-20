@@ -24,13 +24,20 @@ std::vector<std::string> required_audio_outputs() {
 
 AudioStagePlan build_audio_stage_plan(const std::filesystem::path& source_path,
                                       const svp::media::MediaProbe& probe,
-                                      bool ffmpeg_audio_extraction_available) {
+                                      bool ffmpeg_audio_extraction_available,
+                                      const std::filesystem::path& ffmpeg_path) {
   AudioStagePlan plan;
   plan.source_path = source_path;
   plan.source_audio_present = !probe.audio_streams.empty();
   if (plan.source_audio_present) {
     plan.selected_audio_stream_id = probe.audio_streams.front().id;
   }
+  plan.extraction_plan =
+      build_audio_extraction_plan(source_path,
+                                  probe,
+                                  ffmpeg_audio_extraction_available,
+                                  ffmpeg_path);
+  plan.vad_task_plan = build_vad_task_plan(probe, std::nullopt, false);
 
   plan.required_outputs = required_audio_outputs();
   plan.pending_processors = {
@@ -46,6 +53,12 @@ AudioStagePlan build_audio_stage_plan(const std::filesystem::path& source_path,
     plan.blockers.push_back(
         "FFmpeg audio extraction executable/library was not verified for this skeleton run");
   }
+  plan.blockers.insert(plan.blockers.end(),
+                       plan.extraction_plan.blockers.begin(),
+                       plan.extraction_plan.blockers.end());
+  plan.blockers.insert(plan.blockers.end(),
+                       plan.vad_task_plan.blockers.begin(),
+                       plan.vad_task_plan.blockers.end());
   plan.blockers.push_back("VAD model runtime is not wired in this foundation pass");
   plan.blockers.push_back("whisper.cpp transcription is not wired in this foundation pass");
   plan.blockers.push_back("sherpa-onnx diarization is not wired in this foundation pass");
@@ -58,6 +71,8 @@ nlohmann::json audio_stage_plan_to_json(const AudioStagePlan& plan) {
       {"source_path", plan.source_path.string()},
       {"source_audio_present", plan.source_audio_present},
       {"selected_audio_stream_id", plan.selected_audio_stream_id},
+      {"audio_extraction", audio_extraction_plan_to_json(plan.extraction_plan)},
+      {"vad_task_plan", vad_task_plan_to_json(plan.vad_task_plan)},
       {"required_outputs", plan.required_outputs},
       {"pending_processors", plan.pending_processors},
       {"blockers", plan.blockers},
