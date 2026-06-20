@@ -1,8 +1,10 @@
 #include "svp/vision/depth_generation.hpp"
 
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <string>
 
 namespace {
@@ -154,36 +156,84 @@ int main() {
             "provenance must contain note");
   }
 
-  // Test 5: float_depth_to_uint16 rejects mismatched sizes
+  // Test 5: float_depth_to_uint16 per-frame normalization behavior
   {
-    // Correct size: 2x2 = 4 elements
-    std::vector<float> correct_depth = {0.0f, 0.5f, 1.0f, 0.25f};
-    std::vector<std::uint16_t> result =
-        svp::vision::float_depth_to_uint16(correct_depth, 2, 2);
-    require(result.size() == 4,
-            "correct-size depth output should produce 4 uint16 values");
-    require(result[0] == 0,
-            "0.0f should map to 0");
-    require(result[2] == 65535,
-            "1.0f should map to 65535");
+    // 5a: Finite varied depth range maps to expected 0..65535 relative range.
+    //     min (farthest) -> 0, max (nearest) -> 65535.
+    {
+      std::vector<float> varied = {1.0f, 5.0f, 10.0f, 3.0f};  // min=1, max=10
+      std::vector<std::uint16_t> r =
+          svp::vision::float_depth_to_uint16(varied, 2, 2);
+      require(r.size() == 4, "varied finite depth should produce 4 values");
+      require(r[0] == 0,     "min value (1.0) should map to 0 (farthest)");
+      require(r[2] == 65535, "max value (10.0) should map to 65535 (nearest)");
+      // 5.0 is (5-1)/(10-1) = 4/9 of the range
+      const std::uint16_t expected_mid =
+          static_cast<std::uint16_t>(std::lround((4.0f / 9.0f) * 65535.0f));
+      require(r[1] == expected_mid,
+              "5.0 should map to expected normalized value");
+    }
 
-    // Too few elements: must return empty, not zero-pad
-    std::vector<float> short_depth = {0.0f, 0.5f};
-    result = svp::vision::float_depth_to_uint16(short_depth, 2, 2);
-    require(result.empty(),
-            "short ONNX output must return empty, not zero-pad");
+    // 5b: NaN present blocks generation (returns empty).
+    {
+      std::vector<float> with_nan = {1.0f, 5.0f, std::nanf(""), 3.0f};
+      std::vector<std::uint16_t> r =
+          svp::vision::float_depth_to_uint16(with_nan, 2, 2);
+      require(r.empty(), "NaN in depth output must block (return empty)");
+    }
 
-    // Too many elements: must also return empty
-    std::vector<float> long_depth = {0.0f, 0.5f, 1.0f, 0.25f, 0.75f};
-    result = svp::vision::float_depth_to_uint16(long_depth, 2, 2);
-    require(result.empty(),
-            "oversized ONNX output must return empty, not truncate");
+    // 5c: Inf present blocks generation (returns empty).
+    {
+      std::vector<float> with_inf = {1.0f, 5.0f, std::numeric_limits<float>::infinity(), 3.0f};
+      std::vector<std::uint16_t> r =
+          svp::vision::float_depth_to_uint16(with_inf, 2, 2);
+      require(r.empty(), "Inf in depth output must block (return empty)");
+    }
 
-    // Empty input: must return empty
-    std::vector<float> empty_depth;
-    result = svp::vision::float_depth_to_uint16(empty_depth, 2, 2);
-    require(result.empty(),
-            "empty ONNX output must return empty");
+    // 5d: All-invalid (all NaN) blocks generation.
+    {
+      std::vector<float> all_nan = {std::nanf(""), std::nanf(""), std::nanf(""), std::nanf("")};
+      std::vector<std::uint16_t> r =
+          svp::vision::float_depth_to_uint16(all_nan, 2, 2);
+      require(r.empty(), "all-NaN depth output must block (return empty)");
+    }
+
+    // 5e: Constant finite output blocks generation (no meaningful depth variation).
+    {
+      std::vector<float> constant = {3.0f, 3.0f, 3.0f, 3.0f};
+      std::vector<std::uint16_t> r =
+          svp::vision::float_depth_to_uint16(constant, 2, 2);
+      require(r.empty(),
+              "constant finite depth output must block (return empty), "
+              "not pretend to contain meaningful depth variation");
+    }
+
+    // 5f: Size mismatch blocks generation.
+    {
+      std::vector<float> short_depth = {0.0f, 0.5f};
+      std::vector<std::uint16_t> r =
+          svp::vision::float_depth_to_uint16(short_depth, 2, 2);
+      require(r.empty(), "short ONNX output must return empty, not zero-pad");
+
+      std::vector<float> long_depth = {0.0f, 0.5f, 1.0f, 0.25f, 0.75f};
+      r = svp::vision::float_depth_to_uint16(long_depth, 2, 2);
+      require(r.empty(), "oversized ONNX output must return empty, not truncate");
+
+      std::vector<float> empty_depth;
+      r = svp::vision::float_depth_to_uint16(empty_depth, 2, 2);
+      require(r.empty(), "empty ONNX output must return empty");
+    }
+
+    // 5g: Negative depth values are handled correctly by per-frame normalization.
+    //     The model may output negative floats; normalization maps min->0, max->65535.
+    {
+      std::vector<float> negatives = {-5.0f, -1.0f, -3.0f, 0.0f};  // min=-5, max=0
+      std::vector<std::uint16_t> r =
+          svp::vision::float_depth_to_uint16(negatives, 2, 2);
+      require(r.size() == 4, "negative finite depth should produce 4 values");
+      require(r[0] == 0,     "min value (-5.0) should map to 0 (farthest)");
+      require(r[3] == 65535, "max value (0.0) should map to 65535 (nearest)");
+    }
   }
 
   // Cleanup

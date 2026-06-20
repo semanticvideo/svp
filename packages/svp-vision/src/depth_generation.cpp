@@ -132,28 +132,58 @@ std::vector<float> bilinear_resize_depth(
 
 }  // namespace
 
-// Convert float depth output to uint16 payload for SVPB block writing.
-// The ONNX model outputs float depth; we quantize to uint16 relative inverse depth.
-// Returns empty vector if the output size does not exactly match the expected
-// raster dimensions — mismatched output must not be zero-padded into a real block.
+// Convert float depth output to uint16 relative inverse depth payload.
+//
+// RC2 normalization contract:
+//   0     = farthest valid relative depth in the frame
+//   65535 = nearest valid relative depth in the frame
+//
+// The raw ONNX float output is normalized per-frame: we find the finite min
+// and max, then linearly map min -> 0 and max -> 65535.
+//
+// Blocking conditions (return empty vector):
+//   - Size does not match width*height
+//   - Any NaN or Inf present (invalid output must not be packaged as real depth)
+//   - All values are identical (constant output has no meaningful depth
+//     variation; we block rather than pretend it contains real depth)
 std::vector<std::uint16_t> float_depth_to_uint16(
     const std::vector<float>& depth,
     std::uint32_t width,
     std::uint32_t height) {
   const std::size_t expected =
       static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-  if (depth.size() != expected) {
+  if (depth.size() != expected || expected == 0) {
     return {};
   }
-  std::vector<std::uint16_t> output(expected, 0);
+
+  // Reject any NaN or Inf — invalid output must block, not be silently
+  // coerced to a placeholder value.
   for (std::size_t i = 0; i < expected; ++i) {
-    float v = depth[i];
-    if (std::isnan(v) || std::isinf(v)) {
-      v = 0.0f;
+    if (!std::isfinite(depth[i])) {
+      return {};
     }
-    // Clamp to [0, 1] and scale to uint16 range.
-    v = std::max(0.0f, std::min(1.0f, v));
-    output[i] = static_cast<std::uint16_t>(v * 65535.0f);
+  }
+
+  // Find per-frame min and max.
+  float min_val = depth[0];
+  float max_val = depth[0];
+  for (std::size_t i = 1; i < expected; ++i) {
+    if (depth[i] < min_val) min_val = depth[i];
+    if (depth[i] > max_val) max_val = depth[i];
+  }
+
+  // Constant finite output has no meaningful depth variation.  Block it
+  // rather than emit a uniform uint16 field pretending to be depth.
+  if (min_val == max_val) {
+    return {};
+  }
+
+  // Linear normalization: min (farthest) -> 0, max (nearest) -> 65535.
+  const float range = max_val - min_val;
+  std::vector<std::uint16_t> output(expected);
+  for (std::size_t i = 0; i < expected; ++i) {
+    const float normalized = (depth[i] - min_val) / range;
+    output[i] = static_cast<std::uint16_t>(std::lround(normalized * 65535.0f));
   }
   return output;
 }
@@ -225,6 +255,11 @@ DepthGenerationResult generate_depth_blocks(
     return result;
   }
 
+  // Manifest file hashes verified.  The bundle_blake3 field is not yet
+  // verifiable because the canonical bundle digest algorithm is not specified
+  // in RC1/RC2.  We set depth_model_verified to true to indicate that all
+  // verifiable checks (file BLAKE3 hashes, manifest schema, required files)
+  // passed, not that full authoritative bundle_blake3 verification occurred.
   result.depth_model_verified = true;
 
   // Check if real decoded canonical frame input is available
