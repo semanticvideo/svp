@@ -246,7 +246,8 @@ std::string read_command_output(const std::string& command) {
 }
 
 std::int32_t parse_rotation_degrees(const nlohmann::json& stream) {
-  const std::optional<std::string> rotate_tag = optional_string(stream, "rotate", "tags");
+  const std::optional<std::string> rotate_tag =
+      optional_string(stream, "rotate", "stream");
   if (rotate_tag.has_value()) {
     try {
       return static_cast<std::int32_t>(std::stol(*rotate_tag));
@@ -267,6 +268,33 @@ std::int32_t parse_rotation_degrees(const nlohmann::json& stream) {
       }
     }
   }
+
+  const auto side_data_list = stream.find("side_data_list");
+  if (side_data_list != stream.end() && side_data_list->is_array()) {
+    for (const nlohmann::json& side_data : *side_data_list) {
+      if (!side_data.is_object()) {
+        continue;
+      }
+      const auto rotation = side_data.find("rotation");
+      if (rotation == side_data.end() || rotation->is_null()) {
+        continue;
+      }
+      try {
+        if (rotation->is_number_integer()) {
+          return rotation->get<std::int32_t>();
+        }
+        if (rotation->is_number_float()) {
+          return static_cast<std::int32_t>(rotation->get<double>());
+        }
+        if (rotation->is_string()) {
+          return static_cast<std::int32_t>(std::stol(rotation->get<std::string>()));
+        }
+      } catch (const std::exception&) {
+        return 0;
+      }
+    }
+  }
+
   return 0;
 }
 
@@ -425,7 +453,15 @@ MediaProbe parse_media_probe_json(const nlohmann::json& value,
     parsed.codec_name = optional_string(stream, "codec_name", stream_source).value_or("");
     parsed.width = require_int32(stream, "width", stream_source);
     parsed.height = require_int32(stream, "height", stream_source);
-    parsed.rotation_degrees = optional_int32(stream, "rotation_degrees", 0, stream_source);
+    const auto rotation = stream.find("rotation_degrees");
+    if (rotation != stream.end() && !rotation->is_null()) {
+      if (!rotation->is_number_integer()) {
+        throw std::runtime_error(stream_source + ".rotation_degrees must be an integer");
+      }
+      parsed.rotation_degrees = rotation->get<std::int32_t>();
+    } else {
+      parsed.rotation_degrees = parse_rotation_degrees(stream);
+    }
     parsed.pixel_aspect_ratio =
         optional_rational_property(stream, "pixel_aspect_ratio", stream_source)
             .value_or(Rational{1, 1});

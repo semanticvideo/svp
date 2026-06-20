@@ -1,5 +1,6 @@
 #include "svp/media/canonical_raster.hpp"
 #include "svp/media/canonical_timing.hpp"
+#include "svp/media/media_ingest_plan.hpp"
 #include "svp/media/media_probe.hpp"
 
 #include <cassert>
@@ -124,6 +125,32 @@ void test_probe_json_parser_keeps_legacy_flat_timing() {
   assert(parsed.video_streams[0].timing.frame_count == 104);
 }
 
+void test_ffprobe_side_data_rotation_feeds_canonical_raster() {
+  const nlohmann::json value = {
+      {"format_name", "mov,mp4,m4a,3gp,3g2,mj2"},
+      {"video_streams",
+       {{{"id", "vstream_0001"},
+         {"index", 0},
+         {"codec_name", "h264"},
+         {"width", 1920},
+         {"height", 1080},
+         {"pixel_aspect_ratio", "1:1"},
+         {"timing", {{"timebase", "1/30000"}, {"start_pts", 0}}},
+         {"side_data_list",
+          {{{"side_data_type", "Display Matrix"}, {"rotation", 90}}}}}}},
+      {"audio_streams", nlohmann::json::array()},
+  };
+
+  const svp::media::MediaProbe parsed =
+      svp::media::parse_media_probe_json(value, "side-data-rotation");
+  assert(parsed.video_streams[0].rotation_degrees == 90);
+
+  const svp::media::MediaIngestPlan plan =
+      svp::media::build_media_ingest_plan("rotated-phone.mov", parsed);
+  assert(plan.canonical_raster.width == 360);
+  assert(plan.canonical_raster.height == 640);
+}
+
 }  // namespace
 
 int main() {
@@ -132,5 +159,6 @@ int main() {
   test_canonical_rasters();
   test_probe_json_round_trip_preserves_nested_timing();
   test_probe_json_parser_keeps_legacy_flat_timing();
+  test_ffprobe_side_data_rotation_feeds_canonical_raster();
   return 0;
 }
