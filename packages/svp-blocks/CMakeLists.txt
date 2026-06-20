@@ -5,6 +5,7 @@ find_library(ZSTD_LIBRARY NAMES zstd REQUIRED)
 
 add_library(svp-blocks
   src/block_stream.cpp
+  src/block_writer.cpp
 )
 
 add_library(svp::blocks ALIAS svp-blocks)
@@ -24,3 +25,18 @@ target_link_libraries(svp-blocks
     ${BLAKE3_LIBRARY}
     ${ZSTD_LIBRARY}
 )
+
+if(BUILD_TESTING)
+  add_executable(svp-blocks-tests
+    tests/block_writer_tests.cpp
+  )
+
+  target_compile_features(svp-blocks-tests PRIVATE cxx_std_20)
+
+  target_link_libraries(svp-blocks-tests
+    PRIVATE
+      svp::blocks
+  )
+
+  add_test(NAME svp-blocks-tests COMMAND svp-blocks-tests)
+endif()

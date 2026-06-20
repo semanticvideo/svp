@@ -86,7 +86,9 @@ nlohmann::json make_spatial_placeholder_processor() {
                "zero-length depth block stream are written as honest "
                "placeholders. The validator requires real depth blocks "
                "with frame ranges; the empty depth block stream will be "
-               "reported as invalid until real depth estimation is run."}
+               "reported as invalid until real depth estimation is run. "
+               "Depth requires Depth Anything V2 Small via ONNX Runtime, "
+               "which is not configured in this build."}
   };
 }
 
@@ -110,7 +112,9 @@ nlohmann::json make_embedding_placeholder_processor() {
                "embedding block stream are written as honest placeholders. "
                "The validator requires real embedding blocks with model "
                "output; the empty embedding block stream will be reported "
-               "as invalid until real model inference is run."}
+               "as invalid until real model inference is run. Embeddings "
+               "require Nomic text/vision models via ONNX Runtime, which "
+               "is not configured in this build."}
   };
 }
 
@@ -141,8 +145,12 @@ void append_processor_records(
 }  // namespace
 
 SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
-    const std::filesystem::path& staging_dir) {
+    const std::filesystem::path& staging_dir,
+    bool model_runtime_available) {
   SpatialEmbeddingPlaceholderSummary summary;
+  summary.model_runtime_available = model_runtime_available;
+  summary.depth_generation_run = false;
+  summary.embedding_generation_run = false;
 
   write_empty_file(staging_dir / "spatial" / "depth.index.jsonl");
   summary.depth_index_written = true;
@@ -182,11 +190,14 @@ nlohmann::json spatial_embedding_placeholder_summary_to_json(
   return {
       {"depth_index_written", summary.depth_index_written != 0},
       {"depth_blocks_written", summary.depth_blocks_written != 0},
+      {"depth_generation_run", summary.depth_generation_run != 0},
       {"masks_index_written", summary.masks_index_written != 0},
       {"masks_blocks_written", summary.masks_blocks_written != 0},
       {"embedding_sets_written", summary.embedding_sets_written != 0},
       {"embeddings_index_written", summary.embeddings_index_written != 0},
       {"embeddings_blocks_written", summary.embeddings_blocks_written != 0},
+      {"embedding_generation_run", summary.embedding_generation_run != 0},
+      {"model_runtime_available", summary.model_runtime_available != 0},
       {"provenance_records_added", summary.provenance_records_added},
   };
 }
