@@ -23,6 +23,7 @@ target_link_libraries(svp-audio
   PUBLIC
     nlohmann_json::nlohmann_json
     svp::media
+    svp::models
 )
 
 if(BUILD_TESTING)

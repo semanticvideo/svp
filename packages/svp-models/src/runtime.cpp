@@ -4,6 +4,10 @@
 
 namespace svp::models {
 
+bool OnnxSession::is_available() {
+  return false;
+}
+
 OnnxSession OnnxSession::load(const ModelBundleManifest&,
                               const std::filesystem::path&,
                               const OnnxSessionOptions&) {
