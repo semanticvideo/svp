@@ -106,10 +106,10 @@ nlohmann::json make_real_processor_provenance(
       {"rounding_and_precision_rules",
        "coverage ratios are exact sample-count fractions serialized as JSON numbers"},
       {"target_types", {"frame", "scene", "shot"}},
-      {"scene_segmentation_method", "deterministic_dominant_bucket_change_v1"},
+      {"scene_segmentation_method", "deterministic_color_distribution_change_v2"},
       {"quality_metrics",
        {{"quality_score", "1.0 for non-empty deterministic foundation samples"},
-        {"scene_segmentation", "foundation_heuristic_dominant_bucket_change"}}},
+        {"scene_segmentation", "foundation_heuristic_color_distribution_change"}}},
   };
 }
 
@@ -176,7 +176,7 @@ nlohmann::json make_real_manifest(const ColorObservationRecordPlan& records,
       {"shot_count", static_cast<int>(sampling_result.input.shots.size())},
       {"scene_segmentation_method",
        sampling_result.real_decoding_succeeded
-           ? "deterministic_dominant_bucket_change_v1"
+           ? "deterministic_color_distribution_change_v2"
            : "synthetic_fallback"},
       {"package_writer_run", false},
       {"valid_svp_package_written", false},

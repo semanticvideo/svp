@@ -1,6 +1,7 @@
 #include "svp/vision/scene_segmentation.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
 #include <map>
 #include <sstream>
@@ -9,42 +10,89 @@
 namespace svp::vision {
 namespace {
 
-// Compute the dominant color bucket for a frame by quantizing every pixel.
-std::string dominant_bucket_for_frame(const ColorRasterFrame& frame) {
-  if (frame.pixels.empty()) {
-    return "other";
-  }
+// L1 distance threshold for distribution-based scene splits.  When the L1
+// distance between consecutive frame bucket-coverage vectors exceeds this
+// value, a scene boundary is placed even if the dominant bucket is unchanged.
+// The mixed-red object scene (~30% red, ~18% pink, ~15% purple) vs the
+// near-solid hot-pink/red block (~98% red) produces an L1 distance well
+// above 1.0, so 0.5 catches that transition while avoiding noise from minor
+// frame-to-frame jitter.
+constexpr double kL1DistanceThreshold = 0.5;
 
-  std::map<std::string, int> bucket_counts;
+// When the dominant bucket's coverage jumps by more than this fraction between
+// consecutive frames, place a scene boundary.  This catches transitions where
+// the dominant bucket stays the same but its concentration changes sharply
+// (e.g. red going from 30% to 97%).
+constexpr double kDominantCoverageJumpThreshold = 0.35;
+
+// Minimum change in color diversity (count of non-gray, non-black buckets with
+// coverage >= 5%) to force a scene boundary even when L1 distance is moderate.
+constexpr int kDiversityChangeThreshold = 2;
+
+// Minimum coverage for a bucket to count toward color diversity.
+constexpr double kDiversityBucketCoverage = 0.05;
+
+// Compute the full bucket coverage vector for a frame.
+std::map<std::string, double> bucket_coverage_vector(
+    const ColorRasterFrame& frame) {
+  std::map<std::string, double> coverage;
+  for (const std::string& id : registered_color_bucket_ids()) {
+    coverage[id] = 0.0;
+  }
+  if (frame.pixels.empty()) {
+    return coverage;
+  }
   for (const Srgb8Pixel& pixel : frame.pixels) {
     const std::string bucket =
         assign_registered_color_bucket(srgb8_to_oklch(pixel));
-    bucket_counts[bucket]++;
+    coverage[bucket] += 1.0;
   }
+  const double total = static_cast<double>(frame.pixels.size());
+  for (auto& [_, value] : coverage) {
+    value /= total;
+  }
+  return coverage;
+}
 
-  const auto max_it =
-      std::max_element(bucket_counts.begin(), bucket_counts.end(),
-                       [](const auto& a, const auto& b) {
-                         return a.second < b.second;
-                       });
+// Compute the dominant color bucket from a coverage vector.
+std::string dominant_bucket_from_coverage(
+    const std::map<std::string, double>& coverage) {
+  const auto max_it = std::max_element(
+      coverage.begin(), coverage.end(),
+      [](const auto& a, const auto& b) { return a.second < b.second; });
+  if (max_it == coverage.end()) {
+    return "other";
+  }
   return max_it->first;
 }
 
-// Compute the coverage fraction of a specific bucket in a frame.
-double bucket_coverage_for_frame(const ColorRasterFrame& frame,
-                                 const std::string& bucket_id) {
-  if (frame.pixels.empty()) {
-    return 0.0;
-  }
+// Compute the dominant color bucket for a frame by quantizing every pixel.
+std::string dominant_bucket_for_frame(const ColorRasterFrame& frame) {
+  return dominant_bucket_from_coverage(bucket_coverage_vector(frame));
+}
 
+// L1 distance between two coverage vectors (sum of absolute differences).
+double l1_distance(const std::map<std::string, double>& a,
+                   const std::map<std::string, double>& b) {
+  double dist = 0.0;
+  for (const std::string& id : registered_color_bucket_ids()) {
+    dist += std::fabs(a.at(id) - b.at(id));
+  }
+  return dist;
+}
+
+// Count non-gray, non-black buckets with coverage >= threshold.
+int color_diversity(const std::map<std::string, double>& coverage) {
   int count = 0;
-  for (const Srgb8Pixel& pixel : frame.pixels) {
-    if (assign_registered_color_bucket(srgb8_to_oklch(pixel)) == bucket_id) {
+  for (const auto& [bucket, value] : coverage) {
+    if (bucket == "gray" || bucket == "black" || bucket == "white") {
+      continue;
+    }
+    if (value >= kDiversityBucketCoverage) {
       ++count;
     }
   }
-  return static_cast<double>(count) /
-         static_cast<double>(frame.pixels.size());
+  return count;
 }
 
 std::string make_scene_id(int index) {
@@ -59,8 +107,8 @@ std::string make_shot_id(int index) {
   return oss.str();
 }
 
-// A raw scene boundary group: consecutive frames sharing the same dominant
-// bucket.
+// A raw scene boundary group: consecutive frames with similar color
+// distribution.
 struct RawSegment {
   std::size_t begin_index;
   std::size_t end_index;  // inclusive
@@ -112,7 +160,7 @@ SceneSegmentationResult segment_frames_by_color_change(
   }
 
   SceneSegmentationResult result;
-  result.method = "deterministic_dominant_bucket_change_v1";
+  result.method = "deterministic_color_distribution_change_v2";
 
   if (frames.size() == 1) {
     SceneSegment seg;
@@ -132,20 +180,66 @@ SceneSegmentationResult segment_frames_by_color_change(
     return result;
   }
 
-  // Step 1: Compute dominant bucket for each frame.
+  // Step 1: Compute coverage vectors and derived signals for each frame.
+  std::vector<std::map<std::string, double>> coverages;
+  coverages.reserve(frames.size());
   std::vector<std::string> dominant_buckets;
   dominant_buckets.reserve(frames.size());
+  std::vector<int> diversities;
+  diversities.reserve(frames.size());
   for (const ColorRasterFrame& frame : frames) {
-    dominant_buckets.push_back(dominant_bucket_for_frame(frame));
+    auto cov = bucket_coverage_vector(frame);
+    diversities.push_back(color_diversity(cov));
+    dominant_buckets.push_back(dominant_bucket_from_coverage(cov));
+    coverages.push_back(std::move(cov));
   }
 
-  // Step 2: Group consecutive frames by dominant bucket into raw segments.
-  // A scene boundary is placed when the dominant bucket changes between
-  // consecutive frames.
+  // Step 2: Detect scene boundaries using multiple signals.
+  // A boundary is placed between frame i-1 and frame i when any of:
+  //   (a) dominant bucket changes
+  //   (b) L1 distance between coverage vectors exceeds threshold
+  //   (c) dominant bucket coverage jumps by more than threshold
+  //   (d) color diversity changes by >= threshold
   std::vector<RawSegment> raw_segments;
   std::size_t seg_start = 0;
   for (std::size_t i = 1; i < frames.size(); ++i) {
-    if (dominant_buckets[i] != dominant_buckets[seg_start]) {
+    bool boundary = false;
+
+    // (a) Dominant bucket change
+    if (dominant_buckets[i] != dominant_buckets[i - 1]) {
+      boundary = true;
+    }
+
+    // (b) L1 distance between consecutive coverage vectors
+    if (!boundary) {
+      const double dist = l1_distance(coverages[i], coverages[i - 1]);
+      if (dist > kL1DistanceThreshold) {
+        boundary = true;
+      }
+    }
+
+    // (c) Dominant bucket coverage jump (same dominant, very different
+    // concentration — e.g. red going from 30% to 97%)
+    if (!boundary) {
+      const std::string& dom = dominant_buckets[i - 1];
+      const double prev_dom_cov = coverages[i - 1].at(dom);
+      const double curr_dom_cov = coverages[i].at(dom);
+      if (std::fabs(curr_dom_cov - prev_dom_cov) >
+          kDominantCoverageJumpThreshold) {
+        boundary = true;
+      }
+    }
+
+    // (d) Color diversity change
+    if (!boundary) {
+      const int div_change =
+          std::abs(diversities[i] - diversities[i - 1]);
+      if (div_change >= kDiversityChangeThreshold) {
+        boundary = true;
+      }
+    }
+
+    if (boundary) {
       raw_segments.push_back(
           {seg_start, i - 1, dominant_buckets[seg_start]});
       seg_start = i;

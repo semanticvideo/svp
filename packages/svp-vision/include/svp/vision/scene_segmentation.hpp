@@ -26,16 +26,21 @@ struct SceneSegmentationResult {
 };
 
 // Segment decoded frames into scenes and shots using deterministic
-// dominant-bucket-change detection.
+// color-distribution-change detection.
 //
-// Scene boundaries are placed where the dominant color bucket of a frame
-// differs from the previous frame's dominant bucket by more than a threshold
-// fraction of the frame's pixel coverage.  Each scene spans one or more
-// consecutive frames with similar dominant color character.
+// Scene boundaries are placed where any of the following signals fire
+// between consecutive frames:
+//   - The dominant color bucket changes.
+//   - The L1 distance between full bucket-coverage vectors exceeds a
+//     threshold (catches distribution shifts even when the dominant
+//     bucket stays the same).
+//   - The dominant bucket's coverage fraction jumps sharply (catches
+//     transitions from mixed to near-solid color).
+//   - The color diversity (count of non-gray buckets above 5%) changes
+//     by 2 or more (catches warm-gray vs gray/multicolor splits).
 //
-// Shots are created one per frame within each scene (or per adjacent pair when
-// a scene has more than one frame), giving shot-level color summaries that
-// cover every sampled timestamp.
+// Each scene spans one or more consecutive frames with similar color
+// distribution character.  Shots are created one per frame.
 //
 // This is a foundation heuristic — it does not claim semantic scene
 // understanding.  It honestly describes its limits via the method string.
