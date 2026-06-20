@@ -3,6 +3,7 @@
 #include "svp/models/error.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <stdexcept>
 
@@ -241,6 +242,65 @@ std::vector<float> OnnxSession::run_embedding(
   return std::vector<float>(output_data, output_data + element_count);
 }
 
+std::vector<float> OnnxSession::run_text_embedding(
+    const std::int64_t* input_ids,
+    const std::int64_t* token_type_ids,
+    const std::int64_t* attention_mask,
+    std::size_t batch_size,
+    std::size_t seq_len) const {
+  if (impl_->input_names.size() < 3 || impl_->output_names.empty()) {
+    throw ModelError(ModelErrorCode::runtime_unavailable,
+                     "Text embedding session requires at least 3 inputs and 1 output");
+  }
+
+  Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
+      OrtArenaAllocator, OrtMemTypeDefault);
+
+  std::array<std::int64_t, 2> shape = {
+      static_cast<std::int64_t>(batch_size),
+      static_cast<std::int64_t>(seq_len)};
+
+  const std::size_t token_count = batch_size * seq_len;
+
+  Ort::Value input_ids_tensor = Ort::Value::CreateTensor<int64_t>(
+      memory_info, const_cast<int64_t*>(input_ids), token_count,
+      shape.data(), shape.size());
+  Ort::Value token_type_tensor = Ort::Value::CreateTensor<int64_t>(
+      memory_info, const_cast<int64_t*>(token_type_ids), token_count,
+      shape.data(), shape.size());
+  Ort::Value attention_mask_tensor = Ort::Value::CreateTensor<int64_t>(
+      memory_info, const_cast<int64_t*>(attention_mask), token_count,
+      shape.data(), shape.size());
+
+  std::array<Ort::Value, 3> input_tensors = {
+      std::move(input_ids_tensor),
+      std::move(token_type_tensor),
+      std::move(attention_mask_tensor)};
+
+  std::array<const char*, 3> input_names_cstr = {
+      impl_->input_names[0].c_str(),
+      impl_->input_names[1].c_str(),
+      impl_->input_names[2].c_str()};
+  const char* output_names_cstr = impl_->output_names[0].c_str();
+
+  auto output_tensors = impl_->session.Run(
+      Ort::RunOptions{nullptr},
+      input_names_cstr.data(), input_tensors.data(), 3,
+      &output_names_cstr, 1);
+
+  if (output_tensors.empty()) {
+    throw ModelError(ModelErrorCode::runtime_unavailable,
+                     "ONNX Runtime produced no output tensors");
+  }
+
+  auto& output_tensor = output_tensors[0];
+  auto type_info = output_tensor.GetTensorTypeAndShapeInfo();
+  auto element_count = type_info.GetElementCount();
+
+  const float* output_data = output_tensor.GetTensorData<float>();
+  return std::vector<float>(output_data, output_data + element_count);
+}
+
 std::string OnnxSession::model_id() const {
   return impl_ ? impl_->model_id_value : "";
 }
@@ -281,6 +341,13 @@ std::vector<float> OnnxSession::run_depth(const float*, std::size_t,
 }
 
 std::vector<float> OnnxSession::run_embedding(const float*, std::size_t) const {
+  throw ModelError(ModelErrorCode::runtime_unavailable,
+                   "ONNX Runtime is not available");
+}
+
+std::vector<float> OnnxSession::run_text_embedding(
+    const std::int64_t*, const std::int64_t*, const std::int64_t*,
+    std::size_t, std::size_t) const {
   throw ModelError(ModelErrorCode::runtime_unavailable,
                    "ONNX Runtime is not available");
 }

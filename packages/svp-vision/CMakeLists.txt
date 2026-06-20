@@ -12,6 +12,7 @@ add_library(svp-vision
   src/foundation_ocr_staging.cpp
   src/observation_pipeline_plan.cpp
   src/real_frame_color_sampling.cpp
+  src/text_tokenizer.cpp
 )
 
 add_library(svp::vision ALIAS svp-vision)
@@ -170,4 +171,20 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-vision-depth-generation-boundary-tests
            COMMAND svp-vision-depth-generation-boundary-tests)
+
+  add_executable(svp-vision-embedding-generation-smoke-test
+    tests/embedding_generation_smoke_test.cpp
+  )
+
+  target_compile_features(svp-vision-embedding-generation-smoke-test PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-embedding-generation-smoke-test
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-embedding-generation-smoke-test
+           COMMAND svp-vision-embedding-generation-smoke-test)
 endif()

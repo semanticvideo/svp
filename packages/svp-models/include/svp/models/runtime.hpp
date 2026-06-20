@@ -54,6 +54,13 @@ class OnnxSession {
       const float* input_data,
       std::size_t input_count) const;
 
+  [[nodiscard]] std::vector<float> run_text_embedding(
+      const std::int64_t* input_ids,
+      const std::int64_t* token_type_ids,
+      const std::int64_t* attention_mask,
+      std::size_t batch_size,
+      std::size_t seq_len) const;
+
   [[nodiscard]] std::string model_id() const;
   [[nodiscard]] std::string execution_provider() const;
 
