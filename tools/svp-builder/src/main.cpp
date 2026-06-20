@@ -8,6 +8,7 @@
 #include "svp/vision/foundation_ocr_staging.hpp"
 #include "svp/vision/observation_pipeline_plan.hpp"
 #include "svp/package/package_writer.hpp"
+#include "svp/package/index_writer.hpp"
 #include "svp/validation/report_json.hpp"
 #include "svp/validation/validator.hpp"
 #include <ctime>
@@ -400,6 +401,11 @@ int main(int argc, char** argv) {
             {"provenance", true}
           }}
         };
+
+        // Generate SQLite index foundation and manifest
+        if (!svp::package::write_index_foundation(staging_dir, manifest_json)) {
+          std::cerr << "Warning: failed to write SQLite index foundation.\n";
+        }
 
         package_written = svp::package::write_package_skeleton(
             package_path, staging_dir, build_source_path, manifest_json);

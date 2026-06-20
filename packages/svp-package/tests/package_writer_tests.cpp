@@ -1,6 +1,8 @@
 #include "svp/package/package_writer.hpp"
 #include "svp/package/package_layout.hpp"
 #include "svp/package/package_probe.hpp"
+#include "svp/package/index_writer.hpp"
+#include <nlohmann/json.hpp>
 
 #include <cassert>
 #include <filesystem>
@@ -147,12 +149,97 @@ void test_writer_fails_on_rename_and_cleans_up_temp() {
   std::filesystem::remove_all(root);
 }
 
+void test_write_index_foundation() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-index-writer-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir);
+
+  // Staging color observation
+  std::filesystem::create_directories(staging_dir / "colors");
+  {
+    std::ofstream out(staging_dir / "colors" / "color_observations.jsonl");
+    nlohmann::json col = {
+      {"color_observation_id", "color_001"},
+      {"target_type", "frame"},
+      {"target_id", "frame_000001"},
+      {"dominant_bucket", "orange"},
+      {"bucket_coverage", {{"orange", 0.85}, {"black", 0.15}}}
+    };
+    out << col.dump() << "\n";
+  }
+
+  // Staging text records
+  std::filesystem::create_directories(staging_dir / "text");
+  {
+    std::ofstream out(staging_dir / "text" / "text_regions.jsonl");
+    nlohmann::json reg = {
+      {"text_region_id", "region_001"},
+      {"start_us", 0},
+      {"end_us", 1000000},
+      {"shot_id", "shot_000001"},
+      {"scene_id", "scene_000001"}
+    };
+    out << reg.dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "text" / "text_observations.jsonl");
+    nlohmann::json obs = {
+      {"text_observation_id", "obs_001"},
+      {"text_region_id", "region_001"},
+      {"raw_text", "SVP"},
+      {"normalized_text", "svp"},
+      {"layout_class", "title"}
+    };
+    out << obs.dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "text" / "numeric_values.jsonl");
+    nlohmann::json num = {
+      {"numeric_value_id", "num_001"},
+      {"text_observation_id", "obs_001"},
+      {"text_region_id", "region_001"},
+      {"numeric_value", "1.0"},
+      {"raw_text", "1.0"},
+      {"normalized_text", "1.0"}
+    };
+    out << num.dump() << "\n";
+  }
+
+  nlohmann::json manifest = {
+    {"package_id", "svp_test_pkg_id"},
+    {"created_utc", "2026-06-20T00:00:00Z"}
+  };
+
+  bool success = svp::package::write_index_foundation(staging_dir, manifest);
+  assert(success);
+
+  // Check that index files exist
+  assert(std::filesystem::exists(staging_dir / "index" / "index.sqlite"));
+  assert(std::filesystem::exists(staging_dir / "index" / "index_manifest.json"));
+
+  // Check manifest content
+  std::ifstream manifest_in(staging_dir / "index" / "index_manifest.json");
+  nlohmann::json index_manifest;
+  manifest_in >> index_manifest;
+  assert(index_manifest["schema_version"] == "svp-index-manifest-v1");
+  assert(index_manifest["table_count"] == 13);
+  assert(index_manifest["row_count"] > 0);
+  assert(index_manifest["created_from"]["manifest_blake3"].get<std::string>().find("blake3:") == 0);
+
+  std::filesystem::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
   test_write_package_skeleton_creates_atomic_zip_file();
   test_writer_fails_gracefully_on_missing_staging_dir();
   test_writer_fails_on_rename_and_cleans_up_temp();
+  test_write_index_foundation();
   std::cout << "All svp-package-tests passed!\n";
   return 0;
 }

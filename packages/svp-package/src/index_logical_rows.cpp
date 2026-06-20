@@ -1,4 +1,4 @@
-#include "index_logical_rows.hpp"
+#include "svp/package/index_logical_rows.hpp"
 
 #include <blake3.h>
 #include <nlohmann/json.hpp>
@@ -14,7 +14,7 @@
 #include <string_view>
 #include <vector>
 
-namespace svp::validation {
+namespace svp::package {
 namespace {
 
 constexpr std::string_view kBlake3PatternPrefix = "blake3:";
@@ -363,4 +363,4 @@ LogicalRowStreamSummary compute_logical_row_stream_summary(
   return summary;
 }
 
-}  // namespace svp::validation
+}  // namespace svp::package
