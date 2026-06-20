@@ -158,6 +158,19 @@ std::vector<std::int64_t> deterministic_seek_timestamps_us(
 DecodedCanonicalFrames decode_canonical_frames(
     const media::MediaIngestPlan& plan,
     const std::filesystem::path& ffmpeg_path) {
+  return decode_frames_at_resolution(
+      plan, ffmpeg_path,
+      plan.canonical_raster.width,
+      plan.canonical_raster.height,
+      kMaxDecodedFrames);
+}
+
+DecodedCanonicalFrames decode_frames_at_resolution(
+    const media::MediaIngestPlan& plan,
+    const std::filesystem::path& ffmpeg_path,
+    int target_width,
+    int target_height,
+    int max_frames) {
   DecodedCanonicalFrames result;
 
   if (!ffmpeg_is_available(ffmpeg_path)) {
@@ -190,18 +203,19 @@ DecodedCanonicalFrames decode_canonical_frames(
     return result;
   }
 
-  const int width = plan.canonical_raster.width;
-  const int height = plan.canonical_raster.height;
+  const int width = target_width;
+  const int height = target_height;
   if (width <= 0 || height <= 0) {
     result.decoding_attempted = false;
-    result.skipped_reason = "canonical raster dimensions are not positive";
+    result.skipped_reason = "target frame dimensions are not positive";
     return result;
   }
 
   result.decoding_attempted = true;
 
+  const int frame_count = max_frames > 0 ? max_frames : kMaxDecodedFrames;
   const std::vector<std::int64_t> timestamps =
-      deterministic_seek_timestamps_us(duration_us, kMaxDecodedFrames);
+      deterministic_seek_timestamps_us(duration_us, frame_count);
 
   result.frames_attempted = static_cast<int>(timestamps.size());
 

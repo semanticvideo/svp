@@ -11,6 +11,7 @@ add_library(svp-vision
   src/foundation_color_staging.cpp
   src/foundation_ocr_staging.cpp
   src/observation_pipeline_plan.cpp
+  src/ocr_generation.cpp
   src/real_frame_color_sampling.cpp
   src/text_tokenizer.cpp
 )

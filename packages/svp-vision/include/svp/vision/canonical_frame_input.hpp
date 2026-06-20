@@ -53,4 +53,16 @@ struct DecodedCanonicalFrames {
     const media::MediaIngestPlan& plan,
     const std::filesystem::path& ffmpeg_path);
 
+// Decode frames at a custom resolution using the same deterministic timestamp
+// selection as decode_canonical_frames.  Used by OCR generation which needs
+// higher-resolution frames than the canonical analysis raster to detect text.
+// Bounding boxes from OCR at this resolution can be normalized to canonical
+// raster coordinates by the caller.
+[[nodiscard]] DecodedCanonicalFrames decode_frames_at_resolution(
+    const media::MediaIngestPlan& plan,
+    const std::filesystem::path& ffmpeg_path,
+    int target_width,
+    int target_height,
+    int max_frames);
+
 }  // namespace svp::vision
