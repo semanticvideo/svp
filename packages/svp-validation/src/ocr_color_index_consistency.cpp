@@ -11,10 +11,10 @@
 #include <memory>
 #include <optional>
 #include <set>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -70,6 +70,7 @@ using TextRegionMap = std::unordered_map<std::string, TextRegionRecord>;
 using TextObservationMap = std::unordered_map<std::string, TextObservationRecord>;
 using NumericValueMap = std::unordered_map<std::string, NumericValueRecord>;
 using ColorObservationMap = std::unordered_map<std::string, ColorObservationRecord>;
+using ColorTargetTuple = std::tuple<std::string, std::string, std::string>;
 
 std::string package_entry_path(std::string_view entry) {
   return "/" + std::string{entry};
@@ -504,11 +505,11 @@ ColorObservationMap read_index_color_observations(sqlite3& database) {
   }
 }
 
-std::set<std::string> read_color_target_rows(sqlite3& database) {
+std::map<ColorTargetTuple, int> read_color_target_rows(sqlite3& database) {
   auto statement =
       prepare(database,
               "SELECT color_observation_id, target_type, target_id FROM color_targets");
-  std::set<std::string> rows;
+  std::map<ColorTargetTuple, int> rows;
   while (true) {
     const auto step = sqlite3_step(statement.get());
     if (step == SQLITE_DONE) {
@@ -517,9 +518,8 @@ std::set<std::string> read_color_target_rows(sqlite3& database) {
     if (step != SQLITE_ROW) {
       throw std::runtime_error(sqlite3_errmsg(&database));
     }
-    rows.insert(sqlite_required_text(*statement, 0) + "\n" +
-                sqlite_required_text(*statement, 1) + "\n" +
-                sqlite_required_text(*statement, 2));
+    ++rows[{sqlite_required_text(*statement, 0), sqlite_required_text(*statement, 1),
+            sqlite_required_text(*statement, 2)}];
   }
 }
 
@@ -610,11 +610,13 @@ void compare_color_targets(
     ValidationReport& report,
     const ValidationCodeRegistry& registry,
     const ColorObservationMap& package_records,
-    const std::set<std::string>& index_rows) {
+    const std::map<ColorTargetTuple, int>& index_rows) {
+  std::map<ColorTargetTuple, int> package_rows;
   for (const auto& [id, package_record] : package_records) {
-    const auto expected =
-        id + "\n" + package_record.target_type + "\n" + package_record.target_id;
-    if (!index_rows.contains(expected)) {
+    const ColorTargetTuple expected{id, package_record.target_type, package_record.target_id};
+    ++package_rows[expected];
+    const auto iterator = index_rows.find(expected);
+    if (iterator == index_rows.end() || iterator->second < package_rows.at(expected)) {
       add_color_index_issue(report, registry,
                             record_path("colors/color_observations.jsonl",
                                         package_record.line),
@@ -623,14 +625,16 @@ void compare_color_targets(
     }
   }
 
-  for (const auto& row : index_rows) {
-    std::istringstream parts{row};
-    std::string id;
-    std::getline(parts, id);
-    if (!package_records.contains(id)) {
+  for (const auto& [row, index_count] : index_rows) {
+    const auto& [id, target_type, target_id] = row;
+    const auto package_iterator = package_rows.find(row);
+    const auto package_count =
+        package_iterator == package_rows.end() ? 0 : package_iterator->second;
+    if (index_count > package_count) {
       add_color_index_issue(report, registry, index_table_path("color_targets"),
-                            "color_targets row has no matching package color observation: " +
-                                id + ".");
+                            "color_targets row has no matching package color observation "
+                            "target tuple: " +
+                                id + ", " + target_type + ", " + target_id + ".");
     }
   }
 }
