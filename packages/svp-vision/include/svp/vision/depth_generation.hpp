@@ -2,6 +2,7 @@
 
 #include "svp/blocks/block_writer.hpp"
 #include "svp/models/runtime.hpp"
+#include "svp/vision/canonical_frame_input.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -18,6 +19,10 @@ struct DepthGenerationOptions {
   std::string execution_provider = "cpu";
   std::uint32_t raster_width = 0;
   std::uint32_t raster_height = 0;
+  // Real decoded canonical frames from the source media.
+  // When non-empty and decoding_succeeded is true, depth generation may
+  // run ONNX inference on these frames and write real depth blocks.
+  DecodedCanonicalFrames frame_input;
 };
 
 struct DepthBlockEntry {
@@ -45,6 +50,8 @@ struct DepthBlockEntry {
 struct DepthGenerationResult {
   bool onnx_runtime_available = false;
   bool depth_model_available = false;
+  bool depth_model_verified = false;
+  bool depth_frame_input_available = false;
   bool depth_generation_run = false;
   bool depth_blocks_written = false;
   bool depth_index_written = false;
@@ -62,5 +69,13 @@ struct DepthGenerationResult {
 
 [[nodiscard]] nlohmann::json depth_generation_result_to_json(
     const DepthGenerationResult& result);
+
+// Convert float depth output to uint16 payload for SVPB block writing.
+// Returns empty vector if the output size does not exactly match the expected
+// raster dimensions — mismatched output must not be zero-padded into a real block.
+[[nodiscard]] std::vector<std::uint16_t> float_depth_to_uint16(
+    const std::vector<float>& depth,
+    std::uint32_t width,
+    std::uint32_t height);
 
 }  // namespace svp::vision

@@ -1,5 +1,7 @@
 #include "svp/package/spatial_embedding_placeholders.hpp"
 
+#include "svp/media/media_ingest_plan.hpp"
+#include "svp/vision/canonical_frame_input.hpp"
 #include "svp/vision/depth_generation.hpp"
 #include "svp/vision/embedding_generation.hpp"
 
@@ -151,7 +153,9 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     const std::filesystem::path& staging_dir,
     bool model_runtime_available,
     const nlohmann::json& media_plan_json,
-    const std::filesystem::path& model_cache_root) {
+    const std::filesystem::path& model_cache_root,
+    const svp::media::MediaIngestPlan* media_plan,
+    const std::filesystem::path& ffmpeg_path) {
   SpatialEmbeddingPlaceholderSummary summary;
   summary.model_runtime_available = model_runtime_available;
 
@@ -169,10 +173,17 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
       }
     }
 
+    // Decode real canonical frames from source media for depth generation
+    svp::vision::DecodedCanonicalFrames decoded_frames;
+    if (media_plan != nullptr && !ffmpeg_path.empty()) {
+      decoded_frames = svp::vision::decode_canonical_frames(*media_plan, ffmpeg_path);
+    }
+
     svp::vision::DepthGenerationOptions depth_opts;
     depth_opts.model_cache_root = model_cache_root;
     depth_opts.raster_width = raster_w;
     depth_opts.raster_height = raster_h;
+    depth_opts.frame_input = decoded_frames;
 
     svp::vision::DepthGenerationResult depth_result;
     try {
@@ -187,6 +198,12 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     summary.depth_blocks_written = depth_result.depth_blocks_written;
     summary.depth_generation_run = depth_result.depth_generation_run;
     summary.depth_model_available = depth_result.depth_model_available;
+    summary.depth_model_verified = depth_result.depth_model_verified;
+    // Report frame input availability from the decoded frames directly,
+    // not from depth_result which may have returned early at model gating.
+    summary.depth_frame_input_available =
+        decoded_frames.decoding_succeeded &&
+        !decoded_frames.frames.empty();
     summary.depth_generation_detail =
         svp::vision::depth_generation_result_to_json(depth_result);
 
@@ -214,7 +231,9 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
       write_empty_file(staging_dir / "spatial" / "depth.index.jsonl");
       summary.depth_index_written = true;
       write_empty_file(staging_dir / "spatial" / "depth.blocks.svpdz");
-      summary.depth_blocks_written = true;
+      summary.depth_placeholder_written = true;
+      // Do NOT set depth_blocks_written — that field means real SVPB depth
+      // blocks were generated. The placeholder is an honest empty file.
     }
 
     write_empty_file(staging_dir / "spatial" / "masks.index.jsonl");
@@ -257,7 +276,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
   summary.depth_index_written = true;
 
   write_empty_file(staging_dir / "spatial" / "depth.blocks.svpdz");
-  summary.depth_blocks_written = true;
+  summary.depth_placeholder_written = true;
 
   write_empty_file(staging_dir / "spatial" / "masks.index.jsonl");
   summary.masks_index_written = true;
@@ -291,8 +310,11 @@ nlohmann::json spatial_embedding_placeholder_summary_to_json(
   return {
       {"depth_index_written", summary.depth_index_written != 0},
       {"depth_blocks_written", summary.depth_blocks_written != 0},
+      {"depth_placeholder_written", summary.depth_placeholder_written != 0},
       {"depth_generation_run", summary.depth_generation_run != 0},
       {"depth_model_available", summary.depth_model_available != 0},
+      {"depth_model_verified", summary.depth_model_verified != 0},
+      {"depth_frame_input_available", summary.depth_frame_input_available != 0},
       {"masks_index_written", summary.masks_index_written != 0},
       {"masks_blocks_written", summary.masks_blocks_written != 0},
       {"embedding_sets_written", summary.embedding_sets_written != 0},

@@ -330,7 +330,8 @@ void test_spatial_embedding_placeholders() {
       svp::package::write_spatial_and_embedding_placeholders(staging_dir, false);
 
   assert(summary.depth_index_written);
-  assert(summary.depth_blocks_written);
+  assert(!summary.depth_blocks_written);
+  assert(summary.depth_placeholder_written);
   assert(!summary.depth_generation_run);
   assert(summary.masks_index_written);
   assert(summary.masks_blocks_written);
@@ -384,7 +385,8 @@ void test_spatial_embedding_placeholders() {
   const nlohmann::json summary_json =
       svp::package::spatial_embedding_placeholder_summary_to_json(summary);
   assert(summary_json["depth_index_written"] == true);
-  assert(summary_json["depth_blocks_written"] == true);
+  assert(summary_json["depth_blocks_written"] == false);
+  assert(summary_json["depth_placeholder_written"] == true);
   assert(summary_json["masks_blocks_written"] == true);
   assert(summary_json["embedding_sets_written"] == true);
   assert(summary_json["embeddings_blocks_written"] == true);

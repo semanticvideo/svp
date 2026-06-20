@@ -37,6 +37,7 @@ target_link_libraries(svp-package
     SQLite::SQLite3
     ${BLAKE3_LIBRARY}
     svp::vision
+    svp::media
 )
 
 if(BUILD_TESTING)

@@ -1,6 +1,7 @@
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(svp-vision
+  src/canonical_frame_input.cpp
   src/color_frame_sampling.cpp
   src/color_observation_records.cpp
   src/color_quantization.cpp
@@ -153,4 +154,20 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-vision-foundation-ocr-staging-tests
            COMMAND svp-vision-foundation-ocr-staging-tests)
+
+  add_executable(svp-vision-depth-generation-boundary-tests
+    tests/depth_generation_boundary_tests.cpp
+  )
+
+  target_compile_features(svp-vision-depth-generation-boundary-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-depth-generation-boundary-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-depth-generation-boundary-tests
+           COMMAND svp-vision-depth-generation-boundary-tests)
 endif()
