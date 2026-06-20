@@ -327,10 +327,37 @@ EmbeddingGenerationResult generate_embedding_blocks(
       return result;
     }
 
-    const std::size_t expected_elements =
-        static_cast<std::size_t>(embedding_output.shape[0]) *
-        static_cast<std::size_t>(embedding_output.shape[1]) *
+    for (std::size_t i = 0; i < 3; ++i) {
+      if (embedding_output.shape[i] <= 0) {
+        result.blocker = std::string("ONNX output shape validation failed for ") +
+            text_input.id + ": dimension " + std::to_string(i) +
+            " is not positive, got " +
+            std::to_string(embedding_output.shape[i]);
+        result.processor_provenance = make_embedding_processor_provenance(
+            manifest.model_id, manifest.model_bundle_id,
+            options.execution_provider, "error", result.blocker);
+        return result;
+      }
+    }
+
+    if (embedding_output.shape[0] != 1) {
+      result.blocker = std::string("ONNX output batch mismatch for ") +
+          text_input.id + ": expected 1, got " +
+          std::to_string(embedding_output.shape[0]);
+      result.processor_provenance = make_embedding_processor_provenance(
+          manifest.model_id, manifest.model_bundle_id,
+          options.execution_provider, "error", result.blocker);
+      return result;
+    }
+
+    const std::size_t out_batch =
+        static_cast<std::size_t>(embedding_output.shape[0]);
+    const std::size_t out_seq_len =
+        static_cast<std::size_t>(embedding_output.shape[1]);
+    const std::size_t out_dim =
         static_cast<std::size_t>(embedding_output.shape[2]);
+
+    const std::size_t expected_elements = out_batch * out_seq_len * out_dim;
     if (embedding_output.data.size() != expected_elements) {
       result.blocker = std::string("ONNX output element count mismatch for ") +
           text_input.id + ": shape implies " +
@@ -342,24 +369,22 @@ EmbeddingGenerationResult generate_embedding_blocks(
       return result;
     }
 
-    if (static_cast<std::uint32_t>(embedding_output.shape[2]) !=
-        options.embedding_dim) {
+    if (out_dim != options.embedding_dim) {
       result.blocker = std::string("ONNX output dimension mismatch for ") +
           text_input.id + ": expected " +
           std::to_string(options.embedding_dim) + ", got " +
-          std::to_string(embedding_output.shape[2]);
+          std::to_string(out_dim);
       result.processor_provenance = make_embedding_processor_provenance(
           manifest.model_id, manifest.model_bundle_id,
           options.execution_provider, "error", result.blocker);
       return result;
     }
 
-    if (static_cast<std::size_t>(embedding_output.shape[1]) !=
-        tokenized.seq_len) {
+    if (out_seq_len != tokenized.seq_len) {
       result.blocker = std::string("ONNX output seq_len mismatch for ") +
           text_input.id + ": expected " +
           std::to_string(tokenized.seq_len) + ", got " +
-          std::to_string(embedding_output.shape[1]);
+          std::to_string(out_seq_len);
       result.processor_provenance = make_embedding_processor_provenance(
           manifest.model_id, manifest.model_bundle_id,
           options.execution_provider, "error", result.blocker);
