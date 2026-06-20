@@ -574,8 +574,9 @@ int main(int argc, char** argv) {
         std::cout << "Depth model available: "
                   << output.at("spatial_embedding_placeholders").at("depth_model_available")
                   << "\n";
-        std::cout << "Depth model verified: "
+        std::cout << "Depth model file hashes verified: "
                   << output.at("spatial_embedding_placeholders").value("depth_model_verified", false)
+                  << " (manifest file BLAKE3 hashes only; bundle_blake3 not yet verifiable)"
                   << "\n";
         std::cout << "Depth frame input available: "
                   << output.at("spatial_embedding_placeholders").value("depth_frame_input_available", false)

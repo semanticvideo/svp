@@ -248,7 +248,7 @@ DepthGenerationResult generate_depth_blocks(
         verify_errors += issue.message + "; ";
       }
     }
-    result.blocker = "Model bundle BLAKE3 verification failed: " + verify_errors;
+    result.blocker = "Model bundle file BLAKE3 verification failed: " + verify_errors;
     result.processor_provenance = make_depth_processor_provenance(
         manifest.model_id, manifest.model_bundle_id,
         options.execution_provider, "not_run", result.blocker);
