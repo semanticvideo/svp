@@ -11,6 +11,7 @@ target_link_libraries(svp-builder
   PRIVATE
     CLI11::CLI11
     nlohmann_json::nlohmann_json
+    svp::audio
     svp::core
     svp::media
 )
