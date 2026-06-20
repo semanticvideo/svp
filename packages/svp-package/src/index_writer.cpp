@@ -485,6 +485,41 @@ bool write_index_foundation(
       }
     }
 
+    const auto relationships = read_jsonl(staging_dir / "relationships" / "relationships.jsonl");
+    if (!relationships.empty()) {
+      const std::string insert_sql =
+          "INSERT INTO relationships (relationship_id, relationship_type, source_id, "
+          "target_id, start_us, end_us, confidence) VALUES (?, ?, ?, ?, ?, ?, ?)";
+      sqlite3_stmt* stmt = nullptr;
+      if (sqlite3_prepare_v2(db.get(), insert_sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+        std::unique_ptr<sqlite3_stmt, StatementDeleter> stmt_guard{stmt};
+        for (const auto& relationship : relationships) {
+          const auto relationship_id = relationship.value("id", "");
+          const auto relationship_type = relationship.value("type", "");
+          const auto source_id = relationship.value("source_id", "");
+          const auto target_id = relationship.value("target_id", "");
+          if (relationship_id.empty() || relationship_type.empty() ||
+              source_id.empty() || target_id.empty() ||
+              !relationship.contains("start_us") || !relationship["start_us"].is_number_integer() ||
+              !relationship.contains("end_us") || !relationship["end_us"].is_number_integer() ||
+              !relationship.contains("confidence") || !relationship["confidence"].is_number()) {
+            continue;
+          }
+
+          sqlite3_bind_text(stmt, 1, relationship_id.c_str(), -1, SQLITE_TRANSIENT);
+          sqlite3_bind_text(stmt, 2, relationship_type.c_str(), -1, SQLITE_TRANSIENT);
+          sqlite3_bind_text(stmt, 3, source_id.c_str(), -1, SQLITE_TRANSIENT);
+          sqlite3_bind_text(stmt, 4, target_id.c_str(), -1, SQLITE_TRANSIENT);
+          sqlite3_bind_int64(stmt, 5, relationship["start_us"].get<std::int64_t>());
+          sqlite3_bind_int64(stmt, 6, relationship["end_us"].get<std::int64_t>());
+          sqlite3_bind_double(stmt, 7, relationship["confidence"].get<double>());
+
+          sqlite3_step(stmt);
+          sqlite3_reset(stmt);
+        }
+      }
+    }
+
     // Retrieve user tables to compute logical rows stream digest
     std::set<std::string> table_names = {
         "binary_blocks",

@@ -9,6 +9,7 @@
 #include "svp/vision/observation_pipeline_plan.hpp"
 #include "svp/package/package_writer.hpp"
 #include "svp/package/index_writer.hpp"
+#include "svp/package/relationship_provenance_writer.hpp"
 #include "svp/validation/report_json.hpp"
 #include "svp/validation/validator.hpp"
 #include <ctime>
@@ -74,6 +75,27 @@ void write_jsonl_file(const std::filesystem::path& output_path,
   }
 }
 
+void append_jsonl_file(const std::filesystem::path& output_path,
+                       const nlohmann::json& records) {
+  if (!records.is_array()) {
+    throw std::runtime_error("jsonl staging records must be an array");
+  }
+
+  const std::filesystem::path parent = output_path.parent_path();
+  if (!parent.empty()) {
+    std::filesystem::create_directories(parent);
+  }
+
+  std::ofstream output(output_path, std::ios::app);
+  if (!output) {
+    throw std::runtime_error("unable to open output path: " + output_path.string());
+  }
+
+  for (const nlohmann::json& record : records) {
+    output << record.dump() << "\n";
+  }
+}
+
 void write_foundation_color_staging_files(
     const std::filesystem::path& staging_dir,
     const svp::vision::FoundationColorStagingArtifact& artifact) {
@@ -86,7 +108,7 @@ void write_foundation_color_staging_files(
                   artifact.records.color_summary);
   write_json_file(staging_dir / "colors" / "color_absence.json",
                   artifact.records.color_absence);
-  write_jsonl_file(staging_dir / "provenance" / "processors.jsonl",
+  append_jsonl_file(staging_dir / "provenance" / "processors.jsonl",
                    nlohmann::json::array({artifact.processor_provenance}));
 }
 
@@ -116,7 +138,7 @@ void write_foundation_ocr_staging_files(
   for (const auto& proc : artifact.processors) {
     processors_arr.push_back(proc);
   }
-  write_jsonl_file(staging_dir / "provenance" / "processors.jsonl", processors_arr);
+  append_jsonl_file(staging_dir / "provenance" / "processors.jsonl", processors_arr);
 }
 
 svp::media::MediaProbe load_or_run_probe(const std::string& source_path,
@@ -402,6 +424,12 @@ int main(int argc, char** argv) {
           }}
         };
 
+        const svp::package::RelationshipProvenanceWriteSummary relationship_summary =
+            svp::package::write_relationships_and_provenance(staging_dir);
+        output["package_relationships_provenance"] =
+            svp::package::relationship_provenance_write_summary_to_json(
+                relationship_summary);
+
         // Generate SQLite index foundation and manifest
         if (!svp::package::write_index_foundation(staging_dir, manifest_json)) {
           std::cerr << "Warning: failed to write SQLite index foundation.\n";
@@ -470,6 +498,12 @@ int main(int argc, char** argv) {
       }
       if (stop_after == "package-skeleton") {
         std::cout << "Staged foundation files under: " << staging_dir << "\n";
+        std::cout << "Relationships written: "
+                  << output.at("package_relationships_provenance").at("relationships_written")
+                  << "\n";
+        std::cout << "Processor provenance records written: "
+                  << output.at("package_relationships_provenance").at("processors_written")
+                  << "\n";
         std::cout << "Wrote skeleton .svp package to: " << package_path << "\n";
         if (validator_passes) {
           std::cout << "Package validation: SUCCESS\n";
