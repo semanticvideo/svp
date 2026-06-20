@@ -230,10 +230,14 @@ def normalized_sql(value):
 
 def canonical_sqlite_value(value):
     if value is None:
-        return None
+        return ["null"]
+    if isinstance(value, int):
+        return ["integer", value]
+    if isinstance(value, float):
+        return ["real", value]
     if isinstance(value, bytes):
-        return "blob:" + value.hex()
-    return value
+        return ["blob", value.hex()]
+    return ["text", value.encode("utf-8").hex()]
 
 def canonical_json_bytes(value):
     return json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
@@ -602,7 +606,7 @@ def index_manifest(index_summary):
         },
     }
 
-def create_index_bytes(missing_table=None):
+def create_index_bytes(missing_table=None, scalar_case=None):
     sqlite_path = root / f"index-{missing_table or 'valid'}.sqlite"
     if sqlite_path.exists():
         sqlite_path.unlink()
@@ -613,8 +617,35 @@ def create_index_bytes(missing_table=None):
             if missing_table and f"CREATE TABLE {missing_table} " in statement:
                 continue
             connection.execute(statement)
+        if scalar_case in {"blob_embedding", "blob_manifest_text_database"}:
+            connection.execute(
+                """
+                INSERT INTO vector_index (
+                  embedding,
+                  object_id,
+                  object_type,
+                  embedding_set_id,
+                  start_us,
+                  end_us
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    sqlite3.Binary(b"\xff"),
+                    "object_scalar_probe",
+                    "probe",
+                    "embedding_set_probe",
+                    0,
+                    1,
+                ),
+            )
         connection.commit()
         index_summary = logical_row_stream_summary(connection)
+        if scalar_case == "blob_manifest_text_database":
+            connection.execute(
+                "UPDATE vector_index SET embedding = ? WHERE object_id = ?",
+                ("blob:ff", "object_scalar_probe"),
+            )
+            connection.commit()
     finally:
         connection.close()
 
@@ -727,6 +758,10 @@ def write_package(
             manifest_value["row_count"] = index_summary["row_count"] + 1
             package.writestr("index/index.sqlite", sqlite_bytes)
             package.writestr("index/index_manifest.json", json.dumps(manifest_value, separators=(",", ":")))
+        elif index_case == "typed_value_mismatch":
+            sqlite_bytes, index_summary = create_index_bytes(scalar_case="blob_manifest_text_database")
+            package.writestr("index/index.sqlite", sqlite_bytes)
+            package.writestr("index/index_manifest.json", json.dumps(index_manifest(index_summary), separators=(",", ":")))
         else:
             sqlite_bytes, index_summary = create_index_bytes()
             package.writestr("index/index.sqlite", sqlite_bytes)
@@ -763,6 +798,7 @@ write_package("unreadable-index-sqlite", no_change, index_case="unreadable_sqlit
 write_package("missing-color-index-table", no_change, index_case="missing_color_table")
 write_package("logical-row-hash-mismatch", no_change, index_case="logical_hash_mismatch")
 write_package("logical-row-count-mismatch", no_change, index_case="row_count_mismatch")
+write_package("logical-row-typed-value-mismatch", no_change, index_case="typed_value_mismatch")
 write_package("invalid-svpb-magic", no_change, depth_block_case="bad_magic")
 write_package("forbidden-svpb-type", no_change, depth_block_case="forbidden_type")
 write_package("svpb-raster-mismatch", no_change, depth_block_case="raster_mismatch")
@@ -868,6 +904,11 @@ logical_row_count_mismatch_report="$workdir/logical-row-count-mismatch.json"
 logical_row_count_mismatch_status="$(run_validator "$workdir/logical-row-count-mismatch.svp" "$logical_row_count_mismatch_report")"
 expect_status "$logical_row_count_mismatch_status" "1" "logical row count mismatch package"
 expect_code "$logical_row_count_mismatch_report" "ERR_CORE_INDEX_LOGICAL_MISMATCH"
+
+logical_typed_value_mismatch_report="$workdir/logical-row-typed-value-mismatch.json"
+logical_typed_value_mismatch_status="$(run_validator "$workdir/logical-row-typed-value-mismatch.svp" "$logical_typed_value_mismatch_report")"
+expect_status "$logical_typed_value_mismatch_status" "1" "logical typed value mismatch package"
+expect_code "$logical_typed_value_mismatch_report" "ERR_CORE_INDEX_LOGICAL_MISMATCH"
 
 invalid_svpb_magic_report="$workdir/invalid-svpb-magic.json"
 invalid_svpb_magic_status="$(run_validator "$workdir/invalid-svpb-magic.svp" "$invalid_svpb_magic_report")"

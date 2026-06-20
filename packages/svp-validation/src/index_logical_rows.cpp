@@ -91,28 +91,35 @@ std::string normalized_sql(std::string value) {
 nlohmann::json sqlite_value_to_json(sqlite3_stmt& statement, int column_index) {
   switch (sqlite3_column_type(&statement, column_index)) {
     case SQLITE_NULL:
-      return nullptr;
+      return nlohmann::json::array({"null"});
     case SQLITE_INTEGER:
-      return sqlite3_column_int64(&statement, column_index);
+      return nlohmann::json::array(
+          {"integer", sqlite3_column_int64(&statement, column_index)});
     case SQLITE_FLOAT:
-      return sqlite3_column_double(&statement, column_index);
+      return nlohmann::json::array(
+          {"real", sqlite3_column_double(&statement, column_index)});
     case SQLITE_TEXT: {
       const auto* text = sqlite3_column_text(&statement, column_index);
-      return text == nullptr ? nlohmann::json{std::string{}}
-                             : nlohmann::json{
-                                   std::string{reinterpret_cast<const char*>(text)}};
+      const auto byte_count = sqlite3_column_bytes(&statement, column_index);
+      if (text == nullptr || byte_count <= 0) {
+        return nlohmann::json::array({"text", ""});
+      }
+      return nlohmann::json::array(
+          {"text", lower_hex(reinterpret_cast<const std::uint8_t*>(text),
+                             static_cast<std::size_t>(byte_count))});
     }
     case SQLITE_BLOB: {
       const auto* blob = static_cast<const std::uint8_t*>(
           sqlite3_column_blob(&statement, column_index));
       const auto byte_count = sqlite3_column_bytes(&statement, column_index);
       if (blob == nullptr || byte_count <= 0) {
-        return "blob:";
+        return nlohmann::json::array({"blob", ""});
       }
-      return "blob:" + lower_hex(blob, static_cast<std::size_t>(byte_count));
+      return nlohmann::json::array(
+          {"blob", lower_hex(blob, static_cast<std::size_t>(byte_count))});
     }
     default:
-      return nullptr;
+      return nlohmann::json::array({"null"});
   }
 }
 
