@@ -6,6 +6,7 @@
 #include "svp/package/spatial_embedding_placeholders.hpp"
 #include "svp/package/validation_report_storage.hpp"
 #include <nlohmann/json.hpp>
+#include <sqlite3.h>
 
 #include <cassert>
 #include <filesystem>
@@ -289,6 +290,66 @@ void test_write_index_foundation() {
     out << num.dump() << "\n";
   }
 
+  // Staging embedding artifacts
+  std::filesystem::create_directories(staging_dir / "embeddings");
+  {
+    nlohmann::json sets_json = {
+        {"sets", nlohmann::json::array({
+            {
+                {"id", "embedset_text_nomic_v15"},
+                {"modality", "text"},
+                {"model_id", "model_nomic_embed_text_v1_5"},
+                {"model_blake3", "abc123"},
+                {"dimension", 768},
+                {"dtype", "float32"},
+                {"normalized", true},
+                {"source_slug", "nomic-ai/nomic-embed-text-v1.5"}
+            }
+        })}
+    };
+    std::ofstream out(staging_dir / "embeddings" / "embedding_sets.json");
+    out << sets_json.dump(2) << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "embeddings" / "embeddings.index.jsonl");
+    nlohmann::json emb1 = {
+        {"id", "embed_obs_001"},
+        {"embedding_set_id", "embedset_text_nomic_v15"},
+        {"input_ref", "region_001"},
+        {"input_kind", "text_observation"},
+        {"block_file", "embeddings/embeddings.blocks.svpez"},
+        {"block_offset", 0},
+        {"block_length", 3200},
+        {"payload_offset", 64},
+        {"uncompressed_size", 3072},
+        {"compressed_size", 3072},
+        {"vector_index", 0},
+        {"dimension", 768},
+        {"dtype", "float32"},
+        {"payload_blake3", "deadbeef"},
+        {"block_blake3", "cafebabe"}
+    };
+    nlohmann::json emb2 = {
+        {"id", "embed_obs_002"},
+        {"embedding_set_id", "embedset_text_nomic_v15"},
+        {"input_ref", "region_001"},
+        {"input_kind", "text_observation"},
+        {"block_file", "embeddings/embeddings.blocks.svpez"},
+        {"block_offset", 3200},
+        {"block_length", 3200},
+        {"payload_offset", 64},
+        {"uncompressed_size", 3072},
+        {"compressed_size", 3072},
+        {"vector_index", 1},
+        {"dimension", 768},
+        {"dtype", "float32"},
+        {"payload_blake3", "deadbee2"},
+        {"block_blake3", "cafebab2"}
+    };
+    out << emb1.dump() << "\n";
+    out << emb2.dump() << "\n";
+  }
+
   nlohmann::json manifest = {
     {"package_id", "svp_test_pkg_id"},
     {"created_utc", "2026-06-20T00:00:00Z"}
@@ -314,8 +375,36 @@ void test_write_index_foundation() {
   assert(index_manifest["row_count"] > 0);
   assert(index_manifest["created_from"]["manifest_blake3"].get<std::string>().find("blake3:") == 0);
 
+  // Verify embedding_sets_blake3 is NOT the empty-data hash
+  const std::string empty_blake3 =
+      "blake3:af1349b9f5f9a1a6a040414f808c47f942896582987abaaae1f0110de8e34890";
+  const std::string emb_sets_hash =
+      index_manifest["created_from"]["embedding_sets_blake3"].get<std::string>();
+  assert(emb_sets_hash.find("blake3:") == 0);
+  assert(emb_sets_hash != empty_blake3);
+
+  // Open SQLite and verify vector_index has 2 rows
+  {
+    sqlite3* raw_db = nullptr;
+    const auto sqlite_path = staging_dir / "index" / "index.sqlite";
+    assert(sqlite3_open_v2(sqlite_path.string().c_str(), &raw_db,
+                           SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK);
+    assert(raw_db != nullptr);
+
+    sqlite3_stmt* stmt = nullptr;
+    assert(sqlite3_prepare_v2(raw_db,
+               "SELECT COUNT(*) FROM vector_index", -1, &stmt, nullptr) == SQLITE_OK);
+    assert(sqlite3_step(stmt) == SQLITE_ROW);
+    const int vector_count = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+    sqlite3_close(raw_db);
+
+    assert(vector_count == 2);
+  }
+
   std::filesystem::remove_all(root);
 }
+
 
 void test_spatial_embedding_placeholders() {
   const std::filesystem::path root =

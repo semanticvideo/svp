@@ -520,6 +520,37 @@ bool write_index_foundation(
       }
     }
 
+    // Load and insert embedding index records into vector_index
+    const auto embedding_index_records = read_jsonl(staging_dir / "embeddings" / "embeddings.index.jsonl");
+    if (!embedding_index_records.empty()) {
+      const std::string insert_vec_sql =
+          "INSERT INTO vector_index (embedding, object_id, object_type, "
+          "embedding_set_id, start_us, end_us) VALUES (?, ?, ?, ?, ?, ?)";
+      sqlite3_stmt* stmt = nullptr;
+      if (sqlite3_prepare_v2(db.get(), insert_vec_sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+        std::unique_ptr<sqlite3_stmt, StatementDeleter> stmt_guard{stmt};
+        for (const auto& emb : embedding_index_records) {
+          const auto emb_id = emb.value("id", "");
+          if (emb_id.empty()) continue;
+
+          // embedding BLOB is NULL — actual vectors live in the binary block stream;
+          // the regular table stores metadata only (sqlite-vec is not linked).
+          sqlite3_bind_null(stmt, 1);
+
+          // object_id comes from input_ref (the source observation ID)
+          bind_json_string(stmt, 2, emb, "input_ref");
+          // object_type comes from input_kind (e.g. "text_observation")
+          bind_json_string(stmt, 3, emb, "input_kind");
+          bind_json_string(stmt, 4, emb, "embedding_set_id");
+          bind_json_int(stmt, 5, emb, "start_us");
+          bind_json_int(stmt, 6, emb, "end_us");
+
+          sqlite3_step(stmt);
+          sqlite3_reset(stmt);
+        }
+      }
+    }
+
     // Retrieve user tables to compute logical rows stream digest
     std::set<std::string> table_names = {
         "binary_blocks",
@@ -547,7 +578,7 @@ bool write_index_foundation(
     const std::string manifest_content = manifest_json.dump(2) + "\n";
     const std::string manifest_blake3 = blake3_hex_for_string(manifest_content);
     const std::string binary_blocks_manifest_blake3 = blake3_hex_for_file(staging_dir / "binary_blocks_manifest.json");
-    const std::string embedding_sets_blake3 = blake3_hex_for_file(staging_dir / "embeddings/embedding_sets.jsonl");
+    const std::string embedding_sets_blake3 = blake3_hex_for_file(staging_dir / "embeddings" / "embedding_sets.json");
 
     // Write index_manifest.json
     nlohmann::json index_manifest_json = {
