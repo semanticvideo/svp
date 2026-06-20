@@ -3,28 +3,10 @@
 #include "svp/models/cache.hpp"
 #include "svp/models/manifest.hpp"
 #include "svp/models/runtime.hpp"
-
-#include <blake3.h>
-
-#include <algorithm>
-#include <cmath>
-#include <cstring>
-#include <fstream>
-#include <iomanip>
-#include <limits>
-#include <sstream>
+#include "svp/models/verification.hpp"
 
 namespace svp::vision {
 namespace {
-
-std::string to_hex(const std::array<std::uint8_t, 32>& hash) {
-  std::ostringstream ss;
-  ss << std::hex << std::setfill('0');
-  for (auto byte : hash) {
-    ss << std::setw(2) << static_cast<int>(byte);
-  }
-  return ss.str();
-}
 
 std::optional<std::filesystem::path> find_model_bundle_dir(
     const std::filesystem::path& cache_root,
@@ -55,18 +37,6 @@ std::optional<std::filesystem::path> find_model_bundle_dir(
   return std::nullopt;
 }
 
-void l2_normalize(std::vector<float>& vec) {
-  float sum_sq = 0.0f;
-  for (float v : vec) {
-    sum_sq += v * v;
-  }
-  if (sum_sq <= 0.0f) return;
-  const float norm = std::sqrt(sum_sq);
-  for (float& v : vec) {
-    v /= norm;
-  }
-}
-
 nlohmann::json make_embedding_processor_provenance(
     const std::string& model_id,
     const std::string& model_bundle_id,
@@ -77,7 +47,7 @@ nlohmann::json make_embedding_processor_provenance(
       {"id", "proc_embedding_0001"},
       {"name", "svp embedding generation"},
       {"version", "svp-embedding-v1"},
-      {"input_refs", {"transcript/words.jsonl"}},
+      {"input_refs", nlohmann::json::array()},
       {"output_refs", {
           "embeddings/embedding_sets.json",
           "embeddings/embeddings.index.jsonl",
@@ -141,154 +111,32 @@ EmbeddingGenerationResult generate_embedding_blocks(
   }
   const auto& manifest = *manifest_opt;
 
-  svp::models::OnnxSession session;
-  try {
-    svp::models::OnnxSessionOptions session_opts;
-    session_opts.execution_provider = options.execution_provider;
-    session = svp::models::OnnxSession::load(manifest, *bundle_dir, session_opts);
-  } catch (const std::exception& e) {
-    result.blocker = std::string("Failed to load ONNX model: ") + e.what();
+  // BLAKE3 verification of model bundle files before any ONNX execution
+  auto verify_report = svp::models::verify_manifest_files(manifest, *bundle_dir);
+  if (!verify_report.ok()) {
+    std::string verify_errors;
+    for (const auto& issue : verify_report.issues) {
+      if (issue.severity == svp::models::VerificationSeverity::error) {
+        verify_errors += issue.message + "; ";
+      }
+    }
+    result.blocker = "Model bundle BLAKE3 verification failed: " + verify_errors;
     result.processor_provenance = make_embedding_processor_provenance(
         manifest.model_id, manifest.model_bundle_id,
         options.execution_provider, "not_run", result.blocker);
     return result;
   }
 
-  const std::uint32_t dim = options.embedding_dim;
-
-  std::vector<float> input_data(dim, 0.0f);
-  for (std::uint32_t i = 0; i < dim; ++i) {
-    input_data[i] = static_cast<float>(i) / static_cast<float>(dim);
-  }
-
-  std::vector<float> embedding_output;
-  try {
-    embedding_output = session.run_embedding(input_data.data(), input_data.size());
-  } catch (const std::exception& e) {
-    result.blocker = std::string("ONNX inference failed: ") + e.what();
-    result.processor_provenance = make_embedding_processor_provenance(
-        manifest.model_id, manifest.model_bundle_id,
-        options.execution_provider, "not_run", result.blocker);
-    return result;
-  }
-
-  if (embedding_output.empty()) {
-    result.blocker = "ONNX model produced empty embedding output";
-    result.processor_provenance = make_embedding_processor_provenance(
-        manifest.model_id, manifest.model_bundle_id,
-        options.execution_provider, "not_run", result.blocker);
-    return result;
-  }
-
-  if (embedding_output.size() < dim) {
-    result.blocker = "ONNX embedding output smaller than expected dimension";
-    result.processor_provenance = make_embedding_processor_provenance(
-        manifest.model_id, manifest.model_bundle_id,
-        options.execution_provider, "not_run", result.blocker);
-    return result;
-  }
-
-  embedding_output.resize(dim);
-  l2_normalize(embedding_output);
-
-  const std::uint32_t vector_count = 1;
-  const std::uint64_t uncompressed_size =
-      static_cast<std::uint64_t>(vector_count) * dim * 4;
-
-  std::vector<std::byte> block_stream;
-
-  svp::blocks::BlockWriteSpec spec;
-  spec.block_type = svp::blocks::BlockType::embedding;
-  spec.extent_0 = vector_count;
-  spec.extent_1 = dim;
-  spec.extent_2 = 1;
-  spec.dtype = svp::blocks::DType::float32;
-  spec.start_frame = std::numeric_limits<std::uint64_t>::max();
-  spec.frame_count = 0;
-  spec.start_us = -1;
-  spec.end_us = -1;
-
-  auto block_info = svp::blocks::write_block(
-      block_stream, spec,
-      reinterpret_cast<const std::byte*>(embedding_output.data()),
-      uncompressed_size);
-
-  EmbeddingEntry entry;
-  entry.id = "emb_00000001";
-  entry.set_id = "emb_set_0001";
-  entry.model_id = manifest.model_id;
-  entry.model_bundle_id = manifest.model_bundle_id;
-  entry.model_blake3 = manifest.bundle_blake3.hex_value();
-  entry.dim = dim;
-  entry.input_ref = "transcript/words.jsonl";
-  entry.block_offset = block_info.block_offset;
-  entry.block_length = block_info.block_length;
-  entry.payload_offset = block_info.payload_offset;
-  entry.uncompressed_size = block_info.uncompressed_size;
-  entry.compressed_size = block_info.compressed_size;
-  entry.payload_blake3 = to_hex(block_info.payload_blake3);
-  entry.block_blake3 = to_hex(block_info.header_blake3);
-  result.entries.push_back(entry);
-
-  result.embedding_generation_run = true;
-
-  const auto blocks_path = staging_dir / "embeddings" / "embeddings.blocks.svpez";
-  std::filesystem::create_directories(blocks_path.parent_path());
-  std::ofstream blocks_file(blocks_path, std::ios::binary);
-  blocks_file.write(reinterpret_cast<const char*>(block_stream.data()),
-                    static_cast<std::streamsize>(block_stream.size()));
-  blocks_file.close();
-  result.embeddings_blocks_written = true;
-
-  const auto index_path = staging_dir / "embeddings" / "embeddings.index.jsonl";
-  std::ofstream index_file(index_path);
-  for (const auto& e : result.entries) {
-    nlohmann::json record = {
-        {"id", e.id},
-        {"set_id", e.set_id},
-        {"model_id", e.model_id},
-        {"model_bundle_id", e.model_bundle_id},
-        {"model_blake3", e.model_blake3},
-        {"dim", e.dim},
-        {"normalization", e.normalization},
-        {"input_ref", e.input_ref},
-        {"block_file", e.block_file},
-        {"block_offset", e.block_offset},
-        {"block_length", e.block_length},
-        {"payload_offset", e.payload_offset},
-        {"uncompressed_size", e.uncompressed_size},
-        {"compressed_size", e.compressed_size},
-        {"payload_blake3", e.payload_blake3},
-        {"block_blake3", e.block_blake3}
-    };
-    index_file << record.dump() << "\n";
-  }
-  index_file.close();
-  result.embeddings_index_written = true;
-
-  nlohmann::json embedding_sets = {
-      {"sets", nlohmann::json::array({
-          {
-              {"set_id", "emb_set_0001"},
-              {"model_id", manifest.model_id},
-              {"model_bundle_id", manifest.model_bundle_id},
-              {"dim", dim},
-              {"normalization", "l2"},
-              {"count", vector_count}
-          }
-      })}
-  };
-  const auto sets_path = staging_dir / "embeddings" / "embedding_sets.json";
-  std::ofstream sets_file(sets_path);
-  sets_file << embedding_sets.dump(2) << "\n";
-  sets_file.close();
-  result.embedding_sets_written = true;
-
+  // Real source-derived embedding input (transcript text, vision features,
+  // etc.) is not yet wired into the embedding generation path. Until real
+  // package content is available as embedding input, generation remains
+  // blocked. Do not produce synthetic or fake embedding vectors.
+  result.blocker = "Real source-derived embedding input is not yet wired; "
+      "embedding generation is blocked until transcript/text or other "
+      "defined embedding input is integrated";
   result.processor_provenance = make_embedding_processor_provenance(
       manifest.model_id, manifest.model_bundle_id,
-      options.execution_provider, "completed",
-      "Embedding blocks generated using ONNX Runtime inference");
-
+      options.execution_provider, "not_run", result.blocker);
   return result;
 }
 

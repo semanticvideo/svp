@@ -3,28 +3,10 @@
 #include "svp/models/cache.hpp"
 #include "svp/models/manifest.hpp"
 #include "svp/models/runtime.hpp"
-
-#include <blake3.h>
-
-#include <algorithm>
-#include <cmath>
-#include <cstring>
-#include <fstream>
-#include <iomanip>
-#include <limits>
-#include <sstream>
+#include "svp/models/verification.hpp"
 
 namespace svp::vision {
 namespace {
-
-std::string to_hex(const std::array<std::uint8_t, 32>& hash) {
-  std::ostringstream ss;
-  ss << std::hex << std::setfill('0');
-  for (auto byte : hash) {
-    ss << std::setw(2) << static_cast<int>(byte);
-  }
-  return ss.str();
-}
 
 std::optional<std::filesystem::path> find_model_bundle_dir(
     const std::filesystem::path& cache_root,
@@ -53,50 +35,6 @@ std::optional<std::filesystem::path> find_model_bundle_dir(
   }
 
   return std::nullopt;
-}
-
-std::vector<float> preprocess_frame_to_rgb(
-    const std::vector<std::uint8_t>& rgb_pixels,
-    std::uint32_t width,
-    std::uint32_t height) {
-  std::vector<float> output(width * height * 3);
-  for (std::size_t i = 0; i < width * height; ++i) {
-    output[i * 3] = rgb_pixels[i * 3] / 255.0f;
-    output[i * 3 + 1] = rgb_pixels[i * 3 + 1] / 255.0f;
-    output[i * 3 + 2] = rgb_pixels[i * 3 + 2] / 255.0f;
-  }
-  return output;
-}
-
-std::vector<std::uint16_t> convert_depth_to_uint16(
-    const float* depth_data,
-    std::size_t count) {
-  std::vector<std::uint16_t> result(count);
-  float min_val = std::numeric_limits<float>::max();
-  float max_val = std::numeric_limits<float>::lowest();
-  for (std::size_t i = 0; i < count; ++i) {
-    float v = depth_data[i];
-    if (std::isfinite(v)) {
-      min_val = std::min(min_val, v);
-      max_val = std::max(max_val, v);
-    }
-  }
-  if (max_val <= min_val) {
-    for (auto& v : result) v = 32768;
-    return result;
-  }
-  const float range = max_val - min_val;
-  for (std::size_t i = 0; i < count; ++i) {
-    float v = depth_data[i];
-    if (!std::isfinite(v)) {
-      result[i] = 0;
-    } else {
-      float normalized = (v - min_val) / range;
-      result[i] = static_cast<std::uint16_t>(std::clamp(
-          static_cast<int>(normalized * 65535.0f), 0, 65535));
-    }
-  }
-  return result;
 }
 
 nlohmann::json make_depth_processor_provenance(
@@ -171,154 +109,30 @@ DepthGenerationResult generate_depth_blocks(
   }
   const auto& manifest = *manifest_opt;
 
-  svp::models::OnnxSession session;
-  try {
-    svp::models::OnnxSessionOptions session_opts;
-    session_opts.execution_provider = options.execution_provider;
-    session = svp::models::OnnxSession::load(manifest, *bundle_dir, session_opts);
-  } catch (const std::exception& e) {
-    result.blocker = std::string("Failed to load ONNX model: ") + e.what();
+  // BLAKE3 verification of model bundle files before any ONNX execution
+  auto verify_report = svp::models::verify_manifest_files(manifest, *bundle_dir);
+  if (!verify_report.ok()) {
+    std::string verify_errors;
+    for (const auto& issue : verify_report.issues) {
+      if (issue.severity == svp::models::VerificationSeverity::error) {
+        verify_errors += issue.message + "; ";
+      }
+    }
+    result.blocker = "Model bundle BLAKE3 verification failed: " + verify_errors;
     result.processor_provenance = make_depth_processor_provenance(
         manifest.model_id, manifest.model_bundle_id,
         options.execution_provider, "not_run", result.blocker);
     return result;
   }
 
-  const std::uint32_t raster_w = options.raster_width > 0
-      ? options.raster_width : 640;
-  const std::uint32_t raster_h = options.raster_height > 0
-      ? options.raster_height : 360;
-
-  if (raster_w == 0 || raster_h == 0) {
-    result.blocker = "Canonical raster dimensions are zero";
-    result.processor_provenance = make_depth_processor_provenance(
-        manifest.model_id, manifest.model_bundle_id,
-        options.execution_provider, "not_run", result.blocker);
-    return result;
-  }
-
-  std::vector<std::byte> block_stream;
-  std::vector<DepthBlockEntry> entries;
-
-  const std::uint64_t frame_count = 1;
-  const std::uint64_t start_frame = 0;
-
-  std::vector<std::uint8_t> synthetic_frame(raster_w * raster_h * 3, 128);
-  auto rgb_float = preprocess_frame_to_rgb(synthetic_frame, raster_w, raster_h);
-
-  std::vector<float> depth_output;
-  try {
-    depth_output = session.run_depth(
-        rgb_float.data(), rgb_float.size(), raster_w, raster_h);
-  } catch (const std::exception& e) {
-    result.blocker = std::string("ONNX inference failed: ") + e.what();
-    result.processor_provenance = make_depth_processor_provenance(
-        manifest.model_id, manifest.model_bundle_id,
-        options.execution_provider, "not_run", result.blocker);
-    return result;
-  }
-
-  if (depth_output.empty()) {
-    result.blocker = "ONNX model produced empty depth output";
-    result.processor_provenance = make_depth_processor_provenance(
-        manifest.model_id, manifest.model_bundle_id,
-        options.execution_provider, "not_run", result.blocker);
-    return result;
-  }
-
-  const std::size_t pixel_count = static_cast<std::size_t>(raster_w) * raster_h;
-  if (depth_output.size() < pixel_count) {
-    result.blocker = "ONNX depth output smaller than raster dimensions";
-    result.processor_provenance = make_depth_processor_provenance(
-        manifest.model_id, manifest.model_bundle_id,
-        options.execution_provider, "not_run", result.blocker);
-    return result;
-  }
-
-  auto depth_uint16 = convert_depth_to_uint16(depth_output.data(), pixel_count);
-
-  const std::uint64_t uncompressed_size = pixel_count * 2;
-
-  svp::blocks::BlockWriteSpec spec;
-  spec.block_type = svp::blocks::BlockType::depth;
-  spec.extent_0 = raster_w;
-  spec.extent_1 = raster_h;
-  spec.extent_2 = 1;
-  spec.dtype = svp::blocks::DType::uint16;
-  spec.start_frame = start_frame;
-  spec.frame_count = frame_count;
-  spec.start_us = 0;
-  spec.end_us = 33333;
-
-  auto block_info = svp::blocks::write_block(
-      block_stream, spec,
-      reinterpret_cast<const std::byte*>(depth_uint16.data()),
-      uncompressed_size);
-
-  DepthBlockEntry entry;
-  entry.id = "depth_00000000";
-  entry.frame_id = "frame_00000000";
-  entry.width = raster_w;
-  entry.height = raster_h;
-  entry.block_offset = block_info.block_offset;
-  entry.block_length = block_info.block_length;
-  entry.payload_offset = block_info.payload_offset;
-  entry.uncompressed_size = block_info.uncompressed_size;
-  entry.compressed_size = block_info.compressed_size;
-  entry.processor_id = "proc_depth_0001";
-  entry.payload_blake3 = to_hex(block_info.payload_blake3);
-  entry.block_blake3 = to_hex(block_info.header_blake3);
-  entry.start_frame = start_frame;
-  entry.frame_count = frame_count;
-  entry.start_us = spec.start_us;
-  entry.end_us = spec.end_us;
-  entries.push_back(entry);
-
-  result.depth_generation_run = true;
-
-  const auto depth_blocks_path = staging_dir / "spatial" / "depth.blocks.svpdz";
-  std::filesystem::create_directories(depth_blocks_path.parent_path());
-  std::ofstream blocks_file(depth_blocks_path, std::ios::binary);
-  blocks_file.write(reinterpret_cast<const char*>(block_stream.data()),
-                    static_cast<std::streamsize>(block_stream.size()));
-  blocks_file.close();
-  result.depth_blocks_written = true;
-
-  const auto depth_index_path = staging_dir / "spatial" / "depth.index.jsonl";
-  std::ofstream index_file(depth_index_path);
-  for (const auto& e : entries) {
-    nlohmann::json record = {
-        {"id", e.id},
-        {"frame_id", e.frame_id},
-        {"width", e.width},
-        {"height", e.height},
-        {"value_type", e.value_type},
-        {"normalization", e.normalization},
-        {"block_file", e.block_file},
-        {"block_offset", e.block_offset},
-        {"block_length", e.block_length},
-        {"payload_offset", e.payload_offset},
-        {"uncompressed_size", e.uncompressed_size},
-        {"compressed_size", e.compressed_size},
-        {"processor_id", e.processor_id},
-        {"payload_blake3", e.payload_blake3},
-        {"block_blake3", e.block_blake3},
-        {"start_frame", e.start_frame},
-        {"frame_count", e.frame_count},
-        {"start_us", e.start_us},
-        {"end_us", e.end_us}
-    };
-    index_file << record.dump() << "\n";
-  }
-  index_file.close();
-  result.depth_index_written = true;
-  result.entries = std::move(entries);
-
+  // Real decoded/canonical video frame input is not yet wired into the
+  // depth generation path. Until frame decoding is integrated, depth
+  // generation remains blocked. Do not produce synthetic or fake depth.
+  result.blocker = "Real decoded/canonical video frame input is not yet wired; "
+      "depth generation is blocked until frame decoding is integrated";
   result.processor_provenance = make_depth_processor_provenance(
       manifest.model_id, manifest.model_bundle_id,
-      options.execution_provider, "completed",
-      "Depth blocks generated using ONNX Runtime inference");
-
+      options.execution_provider, "not_run", result.blocker);
   return result;
 }
 
