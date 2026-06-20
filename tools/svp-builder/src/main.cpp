@@ -5,6 +5,7 @@
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/models/runtime.hpp"
 #include "svp/vision/foundation_color_staging.hpp"
+#include "svp/vision/foundation_ocr_staging.hpp"
 #include "svp/vision/observation_pipeline_plan.hpp"
 
 #include <CLI/CLI.hpp>
@@ -82,6 +83,35 @@ void write_foundation_color_staging_files(
                   artifact.records.color_absence);
   write_jsonl_file(staging_dir / "provenance" / "processors.jsonl",
                    nlohmann::json::array({artifact.processor_provenance}));
+}
+
+void write_foundation_ocr_staging_files(
+    const std::filesystem::path& staging_dir,
+    const svp::vision::FoundationOcrStagingArtifact& artifact) {
+  nlohmann::json regions_arr = nlohmann::json::array();
+  for (const auto& reg : artifact.text_regions) {
+    regions_arr.push_back(svp::vision::text_region_to_json(reg));
+  }
+  nlohmann::json obs_arr = nlohmann::json::array();
+  for (const auto& obs : artifact.text_observations) {
+    obs_arr.push_back(svp::vision::text_observation_to_json(obs));
+  }
+  nlohmann::json num_arr = nlohmann::json::array();
+  for (const auto& num : artifact.numeric_values) {
+    num_arr.push_back(svp::vision::numeric_value_to_json(num));
+  }
+
+  write_jsonl_file(staging_dir / "text" / "text_regions.jsonl", regions_arr);
+  write_jsonl_file(staging_dir / "text" / "text_observations.jsonl", obs_arr);
+  write_jsonl_file(staging_dir / "text" / "numeric_values.jsonl", num_arr);
+  write_json_file(staging_dir / "text" / "text_absence.json",
+                  svp::vision::text_absence_to_json(artifact.text_absence));
+
+  nlohmann::json processors_arr = nlohmann::json::array();
+  for (const auto& proc : artifact.processors) {
+    processors_arr.push_back(proc);
+  }
+  write_jsonl_file(staging_dir / "provenance" / "processors.jsonl", processors_arr);
 }
 
 svp::media::MediaProbe load_or_run_probe(const std::string& source_path,
@@ -171,7 +201,7 @@ int main(int argc, char** argv) {
                     "Directory for staged builder outputs");
   build->add_option("--stop-after", stop_after,
                     "Supported foundation stages: media-ingest, audio, vision-plan, "
-                    "foundation-color");
+                    "foundation-color, foundation-ocr");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -192,9 +222,10 @@ int main(int argc, char** argv) {
 
     if (*build) {
       if (stop_after != "media-ingest" && stop_after != "audio" &&
-          stop_after != "vision-plan" && stop_after != "foundation-color") {
+          stop_after != "vision-plan" && stop_after != "foundation-color" &&
+          stop_after != "foundation-ocr") {
         std::cerr << "svp-builder build currently supports --stop-after media-ingest, audio, "
-                     "vision-plan, or foundation-color\n";
+                     "vision-plan, foundation-color, or foundation-ocr\n";
         return 2;
       }
 
@@ -282,6 +313,32 @@ int main(int argc, char** argv) {
              (staging_dir / "provenance" / "processors.jsonl").string()},
         };
         output["foundation_color_staging"] = color_json;
+      } else if (stop_after == "foundation-ocr") {
+        const std::filesystem::path staging_dir =
+            build_staging_dir.empty()
+                ? default_staging_dir_for_output(build_output_path)
+                : std::filesystem::path(build_staging_dir);
+        const bool model_runtime_available = svp::models::OnnxSession::is_available();
+        const svp::vision::FoundationOcrStagingArtifact ocr_artifact =
+            svp::vision::build_real_ocr_staging_artifact(
+                plan, model_runtime_available);
+        write_foundation_ocr_staging_files(staging_dir, ocr_artifact);
+
+        nlohmann::json ocr_json =
+            svp::vision::foundation_ocr_staging_artifact_to_json(ocr_artifact);
+        ocr_json["staging_paths"] = {
+            {"text_regions_jsonl",
+             (staging_dir / "text" / "text_regions.jsonl").string()},
+            {"text_observations_jsonl",
+             (staging_dir / "text" / "text_observations.jsonl").string()},
+            {"numeric_values_jsonl",
+             (staging_dir / "text" / "numeric_values.jsonl").string()},
+            {"text_absence_json",
+             (staging_dir / "text" / "text_absence.json").string()},
+            {"processors_jsonl",
+             (staging_dir / "provenance" / "processors.jsonl").string()},
+        };
+        output["foundation_ocr_staging"] = ocr_json;
       }
       output["builder_command"] = {
           {"command", "build"},
@@ -310,6 +367,22 @@ int main(int argc, char** argv) {
           std::cout << "Real media frames were decoded for the color staging artifact.\n";
         } else {
           std::cout << "No real media frames were decoded; synthetic fallback was used.\n";
+        }
+      }
+      if (stop_after == "foundation-ocr") {
+        const std::filesystem::path staging_dir =
+            build_staging_dir.empty()
+                ? default_staging_dir_for_output(build_output_path)
+                : std::filesystem::path(build_staging_dir);
+        const bool ocr_detection_run =
+            output.at("foundation_ocr_staging").at("manifest").value(
+                "ocr_detection_run", false);
+        std::cout << "Staged foundation OCR observations under: "
+                  << staging_dir << "\n";
+        if (ocr_detection_run) {
+          std::cout << "Real media frames were processed for the OCR staging artifact.\n";
+        } else {
+          std::cout << "No real OCR models were executed; honest absence was reported.\n";
         }
       }
       std::cout << "No .svp package was created by this foundation command.\n";
