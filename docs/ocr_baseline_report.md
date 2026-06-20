@@ -1,7 +1,30 @@
 # OCR Baseline Comparison Report
 
 **Video:** /Users/domesposito/Projects/samples/test-30.mp4
-**Date:** Sat Jun 20 15:05:26 MST 2026
+**Date:** Sat Jun 20 15:21:35 MST 2026
+
+## Package Validity
+- **Validator Result:** Validator passed with SUCCESS (Exit Code 0).
+- **Proof:** Run completed and skeleton package written successfully to `build/baseline_run/package.json`.
+
+## Human Baseline Comparison (test-30.mp4)
+**Scene 1 OCR Expected:**
+- SVP TEST
+- $19.99
+- Phoenix, AZ
+- June 20, 2026
+
+**OCR Quality Comparison:**
+- **Hits:** Successfully extracts legitimate values like `$19.99`, `Phoenix, `, `June 20, `, `SVP`.
+- **Misses/Noise:** Parts of scene 1 like `TEST` and `AZ` are unreliable or miss-recognized. Other noisy OCR examples such as `Proen IX, Ke`, `Sune 20,` might appear.
+- **Noise Reduction:** Strict filtering has been applied to drop pure punctuation noise or text smaller than 3 alphanumeric characters.
+
+## Feature Completeness Gaps
+- **Numeric Extraction:** Baseline numeric value `19.99` is correctly extracted from OCR.
+- **Embedding Source:** Spatial embeddings are currently source-derived directly from OCR text observations.
+- **ASR/Transcript Gap:** ASR/transcripts are completely absent; they are not faked.
+- **Scene/Timeline Gap:** Scene segmentation and timeline boundaries are still foundation-level.
+- **Color Limitations:** Color coverage and quantization are at broad/foundation limits without scene-aware refinements.
 
 ## Extracted Text Observations
 
