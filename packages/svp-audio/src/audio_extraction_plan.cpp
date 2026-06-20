@@ -105,7 +105,7 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
   }
 
   plan.analysis_audio.output_ref = "media/audio/analysis_mono_16k.wav";
-  if (plan.source_audio_present) {
+  if (probe.audio_streams.size() == 1) {
     const svp::media::AudioStreamProbe& stream = probe.audio_streams.front();
     plan.analysis_audio.task_id = "task.audio.analysis.astream_000";
     plan.analysis_audio.depends_on = {"task.audio.extract.astream_000"};
@@ -117,6 +117,14 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
                                        stream,
                                        plan.analysis_audio.output_ref)
             : std::vector<std::string>{};
+  } else if (probe.audio_streams.size() > 1) {
+    plan.analysis_audio.task_id = "task.audio.analysis.pending_vad_selection";
+    for (std::size_t index = 0; index < probe.audio_streams.size(); ++index) {
+      plan.analysis_audio.depends_on.push_back(stream_task_id(index));
+    }
+    plan.analysis_audio.selected_source_audio_stream_id = "pending_vad_speech_positive_selection";
+    plan.blockers.push_back(
+        "analysis audio selection for multiple source streams requires VAD speech-positive stream or mix decision");
   } else {
     plan.analysis_audio.task_id = "task.audio.analysis.silence_000";
     plan.analysis_audio.selected_source_audio_stream_id = "canonical_silence";

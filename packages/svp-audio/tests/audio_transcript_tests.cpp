@@ -101,7 +101,6 @@ void test_audio_stage_plan_is_honest_about_pending_processors() {
 void test_audio_extraction_plan_documents_ffmpeg_commands_when_available() {
   svp::media::MediaProbe probe;
   probe.audio_streams.push_back({"astream_0001", 1, "aac", 48000, 2, {}});
-  probe.audio_streams.push_back({"astream_0002", 2, "aac", 48000, 2, {}});
 
   const svp::audio::AudioStagePlan plan =
       svp::audio::build_audio_stage_plan("sample.mov", probe, true);
@@ -110,7 +109,7 @@ void test_audio_extraction_plan_documents_ffmpeg_commands_when_available() {
 
   assert(extraction["ffmpeg_available"] == true);
   assert(extraction["ffmpeg_path"] == "ffmpeg");
-  assert(extraction["original_streams"].size() == 2);
+  assert(extraction["original_streams"].size() == 1);
   assert(extraction["original_streams"][0]["task_id"] == "task.audio.extract.astream_000");
   assert(extraction["original_streams"][0]["output_ref"] ==
          "media/audio/original_stream_000.flac");
@@ -125,6 +124,27 @@ void test_audio_extraction_plan_documents_ffmpeg_commands_when_available() {
   assert(extraction["analysis_audio"]["command_available"] == true);
   assert(extraction["extraction_run"] == false);
   assert(extraction["analysis_audio_written"] == false);
+}
+
+void test_multi_stream_analysis_audio_waits_for_vad_selection() {
+  svp::media::MediaProbe probe;
+  probe.audio_streams.push_back({"astream_0001", 1, "aac", 48000, 2, {}});
+  probe.audio_streams.push_back({"astream_0002", 2, "aac", 48000, 2, {}});
+
+  const svp::audio::AudioStagePlan plan =
+      svp::audio::build_audio_stage_plan("sample.mov", probe, true);
+  const nlohmann::json extraction =
+      svp::audio::audio_stage_plan_to_json(plan)["audio_extraction"];
+
+  assert(extraction["original_streams"].size() == 2);
+  assert(extraction["analysis_audio"]["task_id"] ==
+         "task.audio.analysis.pending_vad_selection");
+  assert(extraction["analysis_audio"]["selected_source_audio_stream_id"] ==
+         "pending_vad_speech_positive_selection");
+  assert(extraction["analysis_audio"]["depends_on"].size() == 2);
+  assert(extraction["analysis_audio"]["arguments"].empty());
+  assert(extraction["analysis_audio"]["command_available"] == false);
+  assert(!extraction["blockers"].empty());
 }
 
 void test_vad_task_plan_uses_stable_thirty_second_boundaries() {
@@ -159,6 +179,7 @@ int main() {
   test_attached_punctuation_can_have_zero_duration();
   test_audio_stage_plan_is_honest_about_pending_processors();
   test_audio_extraction_plan_documents_ffmpeg_commands_when_available();
+  test_multi_stream_analysis_audio_waits_for_vad_selection();
   test_vad_task_plan_uses_stable_thirty_second_boundaries();
   return 0;
 }
