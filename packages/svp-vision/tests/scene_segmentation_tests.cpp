@@ -226,8 +226,149 @@ int main() {
   {
     auto frames = make_uniform_orange_frames(3);
     auto result = svp::vision::segment_frames_by_color_change(frames);
-    require(result.method == "deterministic_dominant_bucket_change_v1",
+    require(result.method == "deterministic_color_distribution_change_v2",
             "method: correct method string");
+  }
+
+  // -------------------------------------------------------------------------
+  // Test 9: mixed-red vs near-solid-red split (same dominant bucket)
+  //
+  // Group A: mixed red/pink/purple/gray — red is dominant but only ~25%.
+  // Group B: near-solid red — red is ~100%.
+  // Both have dominant bucket "red" but the L1 distance and coverage jump
+  // should force a boundary.
+  // -------------------------------------------------------------------------
+  {
+    // 4x4 frames to get enough pixel diversity.
+    // Group A: 5 red, 3 pink, 3 purple, 3 gray, 2 brown = 16 pixels.
+    //   Red ~31%, pink ~19%, purple ~19%, gray ~19%, brown ~12%.
+    //   Dominant = red, diversity = 4 (red, pink, purple, brown).
+    std::vector<svp::vision::Srgb8Pixel> mixed_pixels = {
+        // 5 red (hue ~23, high chroma)
+        {240, 10, 50}, {240, 10, 50}, {240, 10, 50},
+        {240, 10, 50}, {240, 10, 50},
+        // 3 pink (hue ~344, high chroma)
+        {255, 100, 200}, {255, 100, 200}, {255, 100, 200},
+        // 3 purple (hue ~300, high chroma)
+        {120, 40, 200}, {120, 40, 200}, {120, 40, 200},
+        // 3 gray (low chroma)
+        {128, 128, 128}, {128, 128, 128}, {128, 128, 128},
+        // 2 brown (hue ~62, moderate chroma, low lightness)
+        {100, 60, 20}, {100, 60, 20},
+    };
+
+    // Group B: 16 red pixels — near-solid red.
+    std::vector<svp::vision::Srgb8Pixel> solid_red_pixels(
+        16, {240, 10, 50});
+
+    std::vector<svp::vision::ColorRasterFrame> frames = {
+        make_frame("mr_1", 0, true, mixed_pixels, 4, 4),
+        make_frame("mr_2", 1000000, false, mixed_pixels, 4, 4),
+        make_frame("mr_3", 2000000, true, mixed_pixels, 4, 4),
+        make_frame("sr_1", 3000000, true, solid_red_pixels, 4, 4),
+        make_frame("sr_2", 4000000, false, solid_red_pixels, 4, 4),
+        make_frame("sr_3", 5000000, true, solid_red_pixels, 4, 4),
+    };
+
+    auto result = svp::vision::segment_frames_by_color_change(frames, 1);
+
+    require(result.scenes.size() == 2,
+            "mixed-red vs solid-red: should split into 2 scenes");
+    require(result.scenes[0].dominant_bucket == "red",
+            "mixed-red scene: dominant bucket is red");
+    require(result.scenes[1].dominant_bucket == "red",
+            "solid-red scene: dominant bucket is red");
+    require(result.scenes[0].frame_ids.size() == 3,
+            "mixed-red scene: 3 frames");
+    require(result.scenes[1].frame_ids.size() == 3,
+            "solid-red scene: 3 frames");
+  }
+
+  // -------------------------------------------------------------------------
+  // Test 10: gray/warm vs gray/multicolor split (same dominant bucket)
+  //
+  // Group A: gray-dominant warm scene — gray ~60%, orange ~20%, brown ~20%.
+  //   Diversity = 2 (orange, brown).
+  // Group B: gray-dominant multicolor — gray ~50%, yellow ~12%, purple ~12%,
+  //   red ~12%, green ~14%.
+  //   Diversity = 4 (yellow, purple, red, green).
+  // Same dominant bucket "gray" but diversity change >= 2 forces a split.
+  // -------------------------------------------------------------------------
+  {
+    // 4x4 = 16 pixels.
+    // Group A: 10 gray, 3 orange, 3 brown.
+    std::vector<svp::vision::Srgb8Pixel> warm_gray_pixels = {
+        {128, 128, 128}, {128, 128, 128}, {128, 128, 128}, {128, 128, 128},
+        {128, 128, 128}, {128, 128, 128}, {128, 128, 128}, {128, 128, 128},
+        {128, 128, 128}, {128, 128, 128},
+        {255, 140, 0}, {255, 140, 0}, {255, 140, 0},
+        {100, 60, 20}, {100, 60, 20}, {100, 60, 20},
+    };
+
+    // Group B: 8 gray, 2 yellow, 2 purple, 2 red, 2 green.
+    std::vector<svp::vision::Srgb8Pixel> multicolor_gray_pixels = {
+        {128, 128, 128}, {128, 128, 128}, {128, 128, 128}, {128, 128, 128},
+        {128, 128, 128}, {128, 128, 128}, {128, 128, 128}, {128, 128, 128},
+        {230, 210, 30}, {230, 210, 30},
+        {140, 60, 200}, {140, 60, 200},
+        {200, 30, 30}, {200, 30, 30},
+        {30, 180, 30}, {30, 180, 30},
+    };
+
+    std::vector<svp::vision::ColorRasterFrame> frames = {
+        make_frame("wg_1", 0, true, warm_gray_pixels, 4, 4),
+        make_frame("wg_2", 1000000, false, warm_gray_pixels, 4, 4),
+        make_frame("wg_3", 2000000, true, warm_gray_pixels, 4, 4),
+        make_frame("mg_1", 3000000, true, multicolor_gray_pixels, 4, 4),
+        make_frame("mg_2", 4000000, false, multicolor_gray_pixels, 4, 4),
+        make_frame("mg_3", 5000000, true, multicolor_gray_pixels, 4, 4),
+    };
+
+    auto result = svp::vision::segment_frames_by_color_change(frames, 1);
+
+    require(result.scenes.size() == 2,
+            "gray/warm vs gray/multicolor: should split into 2 scenes");
+    require(result.scenes[0].dominant_bucket == "gray",
+            "warm-gray scene: dominant bucket is gray");
+    require(result.scenes[1].dominant_bucket == "gray",
+            "multicolor-gray scene: dominant bucket is gray");
+    require(result.scenes[0].frame_ids.size() == 3,
+            "warm-gray scene: 3 frames");
+    require(result.scenes[1].frame_ids.size() == 3,
+            "multicolor-gray scene: 3 frames");
+  }
+
+  // -------------------------------------------------------------------------
+  // Test 11: green and blue blocks remain stable (regression)
+  //
+  // Solid green frames followed by solid blue frames should still produce
+  // exactly 2 scenes with the correct dominant buckets.
+  // -------------------------------------------------------------------------
+  {
+    std::vector<svp::vision::Srgb8Pixel> green_pixels(4, {0, 200, 0});
+    std::vector<svp::vision::Srgb8Pixel> blue_pixels(4, {0, 0, 200});
+
+    std::vector<svp::vision::ColorRasterFrame> frames = {
+        make_frame("g1", 0, true, green_pixels),
+        make_frame("g2", 1000000, false, green_pixels),
+        make_frame("g3", 2000000, true, green_pixels),
+        make_frame("b1", 3000000, true, blue_pixels),
+        make_frame("b2", 4000000, false, blue_pixels),
+        make_frame("b3", 5000000, true, blue_pixels),
+    };
+
+    auto result = svp::vision::segment_frames_by_color_change(frames, 1);
+
+    require(result.scenes.size() == 2,
+            "green/blue regression: 2 scenes");
+    require(result.scenes[0].dominant_bucket == "green",
+            "green/blue regression: scene 0 is green");
+    require(result.scenes[1].dominant_bucket == "blue",
+            "green/blue regression: scene 1 is blue");
+    require(result.scenes[0].frame_ids.size() == 3,
+            "green/blue regression: green scene has 3 frames");
+    require(result.scenes[1].frame_ids.size() == 3,
+            "green/blue regression: blue scene has 3 frames");
   }
 
   std::cout << "All scene_segmentation tests passed.\n";
