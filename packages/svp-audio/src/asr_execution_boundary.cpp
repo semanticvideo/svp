@@ -241,7 +241,7 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
     }
 
     const std::filesystem::path temp_slice_dir =
-        staging_root / "transcript" / "chunk_slices";
+        std::filesystem::temp_directory_path() / "svp-asr-chunk-slices";
 
     std::vector<std::vector<AsrWord>> chunk_words;
     chunk_words.reserve(boundary.chunk_plan.chunks.size());
