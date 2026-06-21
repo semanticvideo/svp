@@ -1,10 +1,13 @@
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(svp-audio
+  src/asr_chunk_planner.cpp
+  src/asr_execution_boundary.cpp
   src/audio_extraction_executor.cpp
   src/audio_extraction_plan.cpp
   src/audio_stage_plan.cpp
   src/transcript_records.cpp
+  src/transcript_writer.cpp
   src/vad_execution_boundary.cpp
   src/vad_task_plan.cpp
   src/waveform_envelope.cpp
