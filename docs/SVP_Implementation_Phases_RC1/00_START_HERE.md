@@ -43,9 +43,21 @@ Visible text and measured color distribution are observations, not labels. Examp
 
 ## What happens next
 
-The next work is split into practical phases that get the project to a real 30-second video processing trial with valid `/text/` and `/colors/` Core sections.
+The original phase plan got the project to a real 30-second video processing trial with valid `/text/` and `/colors/` Core sections. That milestone has now been reached in the implementation: real video packages can be validator-clean with OCR text, numeric values, color observations, depth, OCR evidence crops, OCR-derived embeddings, and ONNX Whisper ASR transcript words when the local model cache and native tools are available.
 
-The phases are not all sequential. Some can run in parallel once the build system exists.
+The next work is completion and hardening. It is still organized through the same phases, but the active backlog is now stackable lanes:
+
+1. Query and inspection usability, including `svp query`.
+2. Speaker diarization and speaker embeddings.
+3. Visual tracks, spatial regions, and mask blocks.
+4. Relationship graph completion.
+5. Transcript chunk embeddings and vision embeddings.
+6. Strict validator/spec enforcement.
+7. Canonical model-bundle BLAKE3 verification.
+8. OCR, scene, color, and ASR quality hardening.
+9. Installable SVP agent skill and developer guide.
+
+The phases are not all sequential. Some can run in parallel once dependencies and shared contract zones are clear.
 
 ## Critical sequencing rule
 
