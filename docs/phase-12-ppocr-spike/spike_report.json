@@ -1,0 +1,938 @@
+{
+  "spike_date": "2026-06-21",
+  "platform": "M2 MacBook Air",
+  "models": {
+    "ppocr": {
+      "name": "PP-OCRv6_medium",
+      "det_model": "/Users/domesposito/.paddlex/official_models/PP-OCRv6_medium_det",
+      "rec_model": "/Users/domesposito/.paddlex/official_models/PP-OCRv6_medium_rec",
+      "det_model_sha256": "85218d2e3d98f5a21c58b4220627be923a97aee5db3cc71f39536ab31ac53960",
+      "rec_model_sha256": "1b01c79a914587933f615569e75de54f2e638ebb5d3f3b3c1b38c24ede8c7319"
+    },
+    "tesseract": {
+      "version": ""
+    },
+    "ppocr_onnx": {
+      "name": "PP-OCRv6_medium_ONNX",
+      "det_model": "/tmp/ppocr-onnx-export/det.onnx",
+      "rec_model": "/tmp/ppocr-onnx-export/rec.onnx",
+      "det_onnx_sha256": "363bff8850064024234760b29543d113354221aa336327e107f2530f263f5b09",
+      "rec_onnx_sha256": "d586cb851b35391d1dda84ff6ff387752ba25ec1ad79a9ad7ea60b1e44765c1b",
+      "det_pdiparams_sha256": "85218d2e3d98f5a21c58b4220627be923a97aee5db3cc71f39536ab31ac53960",
+      "rec_pdiparams_sha256": "1b01c79a914587933f615569e75de54f2e638ebb5d3f3b3c1b38c24ede8c7319",
+      "det_onnx_size_bytes": 62119542,
+      "rec_onnx_size_bytes": 76555610,
+      "license": "Apache-2.0",
+      "export_tool": "paddle2onnx 2.1.0, opset 14, no optimization",
+      "runtime": "onnxruntime 1.19.2 CPUExecutionProvider",
+      "note": "Simplified DB post-processing; full PaddlePaddle pipeline finds more text regions"
+    }
+  },
+  "frames": [
+    {
+      "path": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_1.0s.jpg",
+      "source": "SVP-TEST.MOV",
+      "timestamp": 1.0
+    },
+    {
+      "path": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_2.0s.jpg",
+      "source": "SVP-TEST.MOV",
+      "timestamp": 2.0
+    },
+    {
+      "path": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_3.0s.jpg",
+      "source": "SVP-TEST.MOV",
+      "timestamp": 3.0
+    },
+    {
+      "path": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_4.0s.jpg",
+      "source": "SVP-TEST.MOV",
+      "timestamp": 4.0
+    },
+    {
+      "path": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_3.0s.jpg",
+      "source": "test-30.mp4",
+      "timestamp": 3.0
+    },
+    {
+      "path": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_5.0s.jpg",
+      "source": "test-30.mp4",
+      "timestamp": 5.0
+    },
+    {
+      "path": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_10.0s.jpg",
+      "source": "test-30.mp4",
+      "timestamp": 10.0
+    },
+    {
+      "path": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_15.0s.jpg",
+      "source": "test-30.mp4",
+      "timestamp": 15.0
+    },
+    {
+      "path": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_20.0s.jpg",
+      "source": "test-30.mp4",
+      "timestamp": 20.0
+    },
+    {
+      "path": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_25.0s.jpg",
+      "source": "test-30.mp4",
+      "timestamp": 25.0
+    }
+  ],
+  "results": {
+    "ppocr": [
+      {
+        "image": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_1.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 1.0,
+        "elapsed_seconds": 2.334,
+        "detections": [
+          {
+            "text": "SVPTEST",
+            "score": 0.9664,
+            "poly": []
+          },
+          {
+            "text": "Hi Codex!",
+            "score": 0.9849,
+            "poly": []
+          },
+          {
+            "text": "hpen",
+            "score": 0.7767,
+            "poly": []
+          }
+        ]
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_2.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 2.0,
+        "elapsed_seconds": 2.354,
+        "detections": [
+          {
+            "text": "SVPTEST",
+            "score": 0.9405,
+            "poly": []
+          },
+          {
+            "text": "Hi Codex!",
+            "score": 0.9944,
+            "poly": []
+          },
+          {
+            "text": "olpem",
+            "score": 0.5759,
+            "poly": []
+          }
+        ]
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_3.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 3.0,
+        "elapsed_seconds": 4.121,
+        "detections": [
+          {
+            "text": "SVPTEST",
+            "score": 0.9331,
+            "poly": []
+          },
+          {
+            "text": "Hi Codex!",
+            "score": 0.9997,
+            "poly": []
+          },
+          {
+            "text": "lpem",
+            "score": 0.7434,
+            "poly": []
+          }
+        ]
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_4.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 4.0,
+        "elapsed_seconds": 2.531,
+        "detections": [
+          {
+            "text": "SVPTEST",
+            "score": 0.9522,
+            "poly": []
+          },
+          {
+            "text": "Hi Codex!",
+            "score": 0.9999,
+            "poly": []
+          },
+          {
+            "text": "Alpen",
+            "score": 0.6055,
+            "poly": []
+          }
+        ]
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_3.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 3.0,
+        "elapsed_seconds": 3.976,
+        "detections": [
+          {
+            "text": "000",
+            "score": 0.9031,
+            "poly": []
+          },
+          {
+            "text": "SVPTEST",
+            "score": 0.9991,
+            "poly": []
+          },
+          {
+            "text": "$19. 99",
+            "score": 0.954,
+            "poly": []
+          },
+          {
+            "text": "Phoenix, AZ",
+            "score": 0.9968,
+            "poly": []
+          },
+          {
+            "text": "June 20, 2026",
+            "score": 0.9667,
+            "poly": []
+          },
+          {
+            "text": "ARYEVERYDAY",
+            "score": 1.0,
+            "poly": []
+          }
+        ]
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_5.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 5.0,
+        "elapsed_seconds": 3.57,
+        "detections": [
+          {
+            "text": "SVP TEST",
+            "score": 0.9403,
+            "poly": []
+          },
+          {
+            "text": "$19.99",
+            "score": 0.9964,
+            "poly": []
+          },
+          {
+            "text": "Phoenix, AZ",
+            "score": 0.9917,
+            "poly": []
+          },
+          {
+            "text": "June 20, 2026",
+            "score": 0.994,
+            "poly": []
+          }
+        ]
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_10.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 10.0,
+        "elapsed_seconds": 3.35,
+        "detections": [
+          {
+            "text": "Way",
+            "score": 0.7489,
+            "poly": []
+          }
+        ]
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_15.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 15.0,
+        "elapsed_seconds": 3.283,
+        "detections": [
+          {
+            "text": "D",
+            "score": 0.9107,
+            "poly": []
+          },
+          {
+            "text": "4",
+            "score": 0.5579,
+            "poly": []
+          }
+        ]
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_20.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 20.0,
+        "elapsed_seconds": 3.037,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_25.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 25.0,
+        "elapsed_seconds": 3.226,
+        "detections": [
+          {
+            "text": "DO",
+            "score": 0.6046,
+            "poly": []
+          }
+        ]
+      }
+    ],
+    "tesseract_downscaled": [
+      {
+        "image": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_1.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 1.0,
+        "elapsed_seconds": 1.097,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_2.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 2.0,
+        "elapsed_seconds": 0.825,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_3.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 3.0,
+        "elapsed_seconds": 1.595,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_4.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 4.0,
+        "elapsed_seconds": 1.452,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_3.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 3.0,
+        "elapsed_seconds": 1.071,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_5.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 5.0,
+        "elapsed_seconds": 1.208,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_10.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 10.0,
+        "elapsed_seconds": 1.509,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_15.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 15.0,
+        "elapsed_seconds": 0.795,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_20.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 20.0,
+        "elapsed_seconds": 0.804,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_25.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 25.0,
+        "elapsed_seconds": 0.74,
+        "detections": []
+      }
+    ],
+    "tesseract_fullres": [
+      {
+        "image": "/tmp/ppocr-spike/results/frames_fullres/SVP-TEST_MOV/frame_1.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 1.0,
+        "elapsed_seconds": 0.771,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames_fullres/SVP-TEST_MOV/frame_2.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 2.0,
+        "elapsed_seconds": 0.72,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames_fullres/SVP-TEST_MOV/frame_3.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 3.0,
+        "elapsed_seconds": 0.675,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames_fullres/SVP-TEST_MOV/frame_4.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 4.0,
+        "elapsed_seconds": 1.345,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames_fullres/test-30_mp4/frame_3.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 3.0,
+        "elapsed_seconds": 0.732,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames_fullres/test-30_mp4/frame_5.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 5.0,
+        "elapsed_seconds": 0.692,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames_fullres/test-30_mp4/frame_10.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 10.0,
+        "elapsed_seconds": 0.757,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames_fullres/test-30_mp4/frame_15.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 15.0,
+        "elapsed_seconds": 0.716,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames_fullres/test-30_mp4/frame_20.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 20.0,
+        "elapsed_seconds": 0.662,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames_fullres/test-30_mp4/frame_25.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 25.0,
+        "elapsed_seconds": 0.652,
+        "detections": []
+      }
+    ],
+    "ppocr_onnx": [
+      {
+        "image": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_1.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 1.0,
+        "elapsed_seconds": 0.794,
+        "detections": [
+          {
+            "text": "SVPTEST",
+            "score": 0.0001,
+            "box": [
+              506,
+              268,
+              886,
+              326
+            ]
+          },
+          {
+            "text": "Ahoer",
+            "score": 0.0001,
+            "box": [
+              293,
+              482,
+              495,
+              536
+            ]
+          }
+        ]
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_2.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 2.0,
+        "elapsed_seconds": 0.701,
+        "detections": [
+          {
+            "text": "SVPTEST",
+            "score": 0.0001,
+            "box": [
+              492,
+              285,
+              849,
+              335
+            ]
+          },
+          {
+            "text": "HiCodex!",
+            "score": 0.0001,
+            "box": [
+              471,
+              370,
+              795,
+              439
+            ]
+          },
+          {
+            "text": "aler",
+            "score": 0.0001,
+            "box": [
+              237,
+              493,
+              486,
+              537
+            ]
+          }
+        ]
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_3.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 3.0,
+        "elapsed_seconds": 0.857,
+        "detections": [
+          {
+            "text": "SVPTEST",
+            "score": 0.0001,
+            "box": [
+              479,
+              284,
+              847,
+              342
+            ]
+          },
+          {
+            "text": "Alpem",
+            "score": 0.0001,
+            "box": [
+              217,
+              495,
+              471,
+              537
+            ]
+          }
+        ]
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/SVP-TEST_MOV/frame_4.0s.jpg",
+        "source": "SVP-TEST.MOV",
+        "timestamp": 4.0,
+        "elapsed_seconds": 0.728,
+        "detections": [
+          {
+            "text": "SVPTEST",
+            "score": 0.0001,
+            "box": [
+              515,
+              265,
+              920,
+              310
+            ]
+          },
+          {
+            "text": "HiCodex!",
+            "score": 0.0001,
+            "box": [
+              496,
+              355,
+              862,
+              430
+            ]
+          },
+          {
+            "text": "Alew",
+            "score": 0.0001,
+            "box": [
+              263,
+              497,
+              524,
+              536
+            ]
+          }
+        ]
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_3.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 3.0,
+        "elapsed_seconds": 0.552,
+        "detections": [
+          {
+            "text": "$19.99",
+            "score": 0.0001,
+            "box": [
+              702,
+              346,
+              878,
+              398
+            ]
+          }
+        ]
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_5.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 5.0,
+        "elapsed_seconds": 0.58,
+        "detections": [
+          {
+            "text": "$19.99",
+            "score": 0.0001,
+            "box": [
+              712,
+              353,
+              894,
+              407
+            ]
+          }
+        ]
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_10.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 10.0,
+        "elapsed_seconds": 0.478,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_15.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 15.0,
+        "elapsed_seconds": 0.497,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_20.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 20.0,
+        "elapsed_seconds": 0.527,
+        "detections": []
+      },
+      {
+        "image": "/tmp/ppocr-spike/results/frames/test-30_mp4/frame_25.0s.jpg",
+        "source": "test-30.mp4",
+        "timestamp": 25.0,
+        "elapsed_seconds": 0.55,
+        "detections": [
+          {
+            "text": "O",
+            "score": 0.0001,
+            "box": [
+              315,
+              129,
+              753,
+              279
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "scoring": {
+    "SVP-TEST.MOV_ppocr": {
+      "fields": [
+        {
+          "ground_truth": "SVP TEST",
+          "best_match": "SVPTEST",
+          "score": "near",
+          "confidence": 0.9522
+        },
+        {
+          "ground_truth": "Hi Codex!",
+          "best_match": "Hi Codex!",
+          "score": "exact",
+          "confidence": 0.9999
+        }
+      ],
+      "false_positives": [
+        {
+          "text": "hpen",
+          "score": 0.7767,
+          "image": "frame_1.0s.jpg"
+        },
+        {
+          "text": "olpem",
+          "score": 0.5759,
+          "image": "frame_2.0s.jpg"
+        },
+        {
+          "text": "lpem",
+          "score": 0.7434,
+          "image": "frame_3.0s.jpg"
+        },
+        {
+          "text": "Alpen",
+          "score": 0.6055,
+          "image": "frame_4.0s.jpg"
+        }
+      ],
+      "exact_count": 1,
+      "near_count": 1,
+      "partial_count": 0,
+      "failed_count": 0,
+      "false_positive_count": 4
+    },
+    "SVP-TEST.MOV_tesseract_downscaled": {
+      "fields": [
+        {
+          "ground_truth": "SVP TEST",
+          "best_match": null,
+          "score": "failed",
+          "confidence": 0.0
+        },
+        {
+          "ground_truth": "Hi Codex!",
+          "best_match": null,
+          "score": "failed",
+          "confidence": 0.0
+        }
+      ],
+      "false_positives": [],
+      "exact_count": 0,
+      "near_count": 0,
+      "partial_count": 0,
+      "failed_count": 2,
+      "false_positive_count": 0
+    },
+    "SVP-TEST.MOV_tesseract_fullres": {
+      "fields": [
+        {
+          "ground_truth": "SVP TEST",
+          "best_match": null,
+          "score": "failed",
+          "confidence": 0.0
+        },
+        {
+          "ground_truth": "Hi Codex!",
+          "best_match": null,
+          "score": "failed",
+          "confidence": 0.0
+        }
+      ],
+      "false_positives": [],
+      "exact_count": 0,
+      "near_count": 0,
+      "partial_count": 0,
+      "failed_count": 2,
+      "false_positive_count": 0
+    },
+    "test-30.mp4_ppocr": {
+      "fields": [
+        {
+          "ground_truth": "SVP TEST",
+          "best_match": "SVP TEST",
+          "score": "exact",
+          "confidence": 0.9403
+        },
+        {
+          "ground_truth": "$19.99",
+          "best_match": "$19.99",
+          "score": "exact",
+          "confidence": 0.9964
+        },
+        {
+          "ground_truth": "Phoenix, AZ",
+          "best_match": "Phoenix, AZ",
+          "score": "exact",
+          "confidence": 0.9917
+        },
+        {
+          "ground_truth": "June 20, 2026",
+          "best_match": "June 20, 2026",
+          "score": "exact",
+          "confidence": 0.994
+        }
+      ],
+      "false_positives": [
+        {
+          "text": "000",
+          "score": 0.9031,
+          "image": "frame_3.0s.jpg"
+        },
+        {
+          "text": "ARYEVERYDAY",
+          "score": 1.0,
+          "image": "frame_3.0s.jpg"
+        },
+        {
+          "text": "Way",
+          "score": 0.7489,
+          "image": "frame_10.0s.jpg"
+        },
+        {
+          "text": "DO",
+          "score": 0.6046,
+          "image": "frame_25.0s.jpg"
+        }
+      ],
+      "exact_count": 4,
+      "near_count": 0,
+      "partial_count": 0,
+      "failed_count": 0,
+      "false_positive_count": 4
+    },
+    "test-30.mp4_tesseract_downscaled": {
+      "fields": [
+        {
+          "ground_truth": "SVP TEST",
+          "best_match": null,
+          "score": "failed",
+          "confidence": 0.0
+        },
+        {
+          "ground_truth": "$19.99",
+          "best_match": null,
+          "score": "failed",
+          "confidence": 0.0
+        },
+        {
+          "ground_truth": "Phoenix, AZ",
+          "best_match": null,
+          "score": "failed",
+          "confidence": 0.0
+        },
+        {
+          "ground_truth": "June 20, 2026",
+          "best_match": null,
+          "score": "failed",
+          "confidence": 0.0
+        }
+      ],
+      "false_positives": [],
+      "exact_count": 0,
+      "near_count": 0,
+      "partial_count": 0,
+      "failed_count": 4,
+      "false_positive_count": 0
+    },
+    "test-30.mp4_tesseract_fullres": {
+      "fields": [
+        {
+          "ground_truth": "SVP TEST",
+          "best_match": null,
+          "score": "failed",
+          "confidence": 0.0
+        },
+        {
+          "ground_truth": "$19.99",
+          "best_match": null,
+          "score": "failed",
+          "confidence": 0.0
+        },
+        {
+          "ground_truth": "Phoenix, AZ",
+          "best_match": null,
+          "score": "failed",
+          "confidence": 0.0
+        },
+        {
+          "ground_truth": "June 20, 2026",
+          "best_match": null,
+          "score": "failed",
+          "confidence": 0.0
+        }
+      ],
+      "false_positives": [],
+      "exact_count": 0,
+      "near_count": 0,
+      "partial_count": 0,
+      "failed_count": 4,
+      "false_positive_count": 0
+    },
+    "SVP-TEST.MOV_ppocr_onnx": {
+      "fields": [
+        {
+          "ground_truth": "SVP TEST",
+          "best_match": "SVPTEST",
+          "score": "near",
+          "confidence": 0.0001
+        },
+        {
+          "ground_truth": "Hi Codex!",
+          "best_match": "HiCodex!",
+          "score": "near",
+          "confidence": 0.0001
+        }
+      ],
+      "false_positives": [
+        {
+          "text": "Ahoer",
+          "score": 0.0001,
+          "image": "frame_1.0s.jpg"
+        },
+        {
+          "text": "aler",
+          "score": 0.0001,
+          "image": "frame_2.0s.jpg"
+        },
+        {
+          "text": "Alpem",
+          "score": 0.0001,
+          "image": "frame_3.0s.jpg"
+        },
+        {
+          "text": "Alew",
+          "score": 0.0001,
+          "image": "frame_4.0s.jpg"
+        }
+      ],
+      "exact_count": 0,
+      "near_count": 2,
+      "partial_count": 0,
+      "failed_count": 0,
+      "false_positive_count": 4
+    },
+    "test-30.mp4_ppocr_onnx": {
+      "fields": [
+        {
+          "ground_truth": "SVP TEST",
+          "best_match": null,
+          "score": "failed",
+          "confidence": 0.0
+        },
+        {
+          "ground_truth": "$19.99",
+          "best_match": "$19.99",
+          "score": "exact",
+          "confidence": 0.0001
+        },
+        {
+          "ground_truth": "Phoenix, AZ",
+          "best_match": "O",
+          "score": "near",
+          "confidence": 0.0001
+        },
+        {
+          "ground_truth": "June 20, 2026",
+          "best_match": null,
+          "score": "failed",
+          "confidence": 0.0
+        }
+      ],
+      "false_positives": [],
+      "exact_count": 1,
+      "near_count": 1,
+      "partial_count": 0,
+      "failed_count": 2,
+      "false_positive_count": 0
+    }
+  }
+}

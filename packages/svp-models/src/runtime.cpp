@@ -314,6 +314,85 @@ std::string OnnxSession::execution_provider() const {
   return impl_ ? impl_->execution_provider_value : "";
 }
 
+std::vector<float> OnnxSession::run_raw(
+    const std::string& input_name,
+    const float* input_data,
+    std::size_t input_count,
+    const std::vector<std::int64_t>& input_shape) const {
+  if (!impl_ || impl_->session == nullptr) {
+    throw ModelError(ModelErrorCode::runtime_unavailable,
+                     "ONNX session is not loaded");
+  }
+
+  Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
+      OrtArenaAllocator, OrtMemTypeDefault);
+
+  Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+      memory_info, const_cast<float*>(input_data), input_count,
+      input_shape.data(), input_shape.size());
+
+  const char* input_names_cstr = input_name.c_str();
+  const char* output_names_cstr = impl_->output_names[0].c_str();
+
+  auto output_tensors = impl_->session.Run(
+      Ort::RunOptions{nullptr},
+      &input_names_cstr, &input_tensor, 1,
+      &output_names_cstr, 1);
+
+  if (output_tensors.empty()) {
+    throw ModelError(ModelErrorCode::runtime_unavailable,
+                     "ONNX Runtime produced no output tensors");
+  }
+
+  auto& output_tensor = output_tensors[0];
+  auto type_info = output_tensor.GetTensorTypeAndShapeInfo();
+  auto element_count = type_info.GetElementCount();
+
+  const float* output_data = output_tensor.GetTensorData<float>();
+  return std::vector<float>(output_data, output_data + element_count);
+}
+
+std::pair<std::vector<float>, std::vector<std::int64_t>>
+OnnxSession::run_raw_with_shape(
+    const std::string& input_name,
+    const float* input_data,
+    std::size_t input_count,
+    const std::vector<std::int64_t>& input_shape) const {
+  if (impl_->input_names.empty() || impl_->output_names.empty()) {
+    throw ModelError(ModelErrorCode::runtime_unavailable,
+                     "Session has no input or output names");
+  }
+
+  Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
+      OrtArenaAllocator, OrtMemTypeDefault);
+
+  Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+      memory_info, const_cast<float*>(input_data), input_count,
+      input_shape.data(), input_shape.size());
+
+  const char* input_names_cstr = input_name.c_str();
+  const char* output_names_cstr = impl_->output_names[0].c_str();
+
+  auto output_tensors = impl_->session.Run(
+      Ort::RunOptions{nullptr},
+      &input_names_cstr, &input_tensor, 1,
+      &output_names_cstr, 1);
+
+  if (output_tensors.empty()) {
+    throw ModelError(ModelErrorCode::runtime_unavailable,
+                     "ONNX Runtime produced no output tensors");
+  }
+
+  auto& output_tensor = output_tensors[0];
+  auto type_info = output_tensor.GetTensorTypeAndShapeInfo();
+  auto element_count = type_info.GetElementCount();
+  auto output_shape = type_info.GetShape();
+
+  const float* output_data = output_tensor.GetTensorData<float>();
+  return {std::vector<float>(output_data, output_data + element_count),
+          output_shape};
+}
+
 #else
 
 struct OnnxSession::Impl {};
@@ -341,6 +420,21 @@ OnnxIoSpec OnnxSession::io_spec() const {
 
 std::vector<float> OnnxSession::run_depth(const float*, std::size_t,
                                           std::uint32_t, std::uint32_t) const {
+  throw ModelError(ModelErrorCode::runtime_unavailable,
+                   "ONNX Runtime is not available");
+}
+
+std::vector<float> OnnxSession::run_raw(
+    const std::string&, const float*, std::size_t,
+    const std::vector<std::int64_t>&) const {
+  throw ModelError(ModelErrorCode::runtime_unavailable,
+                   "ONNX Runtime is not available");
+}
+
+std::pair<std::vector<float>, std::vector<std::int64_t>>
+OnnxSession::run_raw_with_shape(
+    const std::string&, const float*, std::size_t,
+    const std::vector<std::int64_t>&) const {
   throw ModelError(ModelErrorCode::runtime_unavailable,
                    "ONNX Runtime is not available");
 }
