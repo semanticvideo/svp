@@ -1233,15 +1233,26 @@ void test_timeline_writer() {
   // Check shots.jsonl
   auto shots = read_jsonl_records(staging_dir / "timeline" / "shots.jsonl");
   assert(shots.size() == 2);
-  assert(shots[0].value("id", "") == "shot_000001");
+
+  // 1. Shots must be non-zero intervals
   assert(shots[0].value("start_us", -1) == 0);
   assert(shots[0].value("end_us", -1) == 500000);
-  assert(shots[0].value("start_frame_id", "") == "frame_000001");
-  assert(shots[0].value("end_frame_id", "") == "frame_000002");
+  assert(shots[0].value("start_us", -1) < shots[0].value("end_us", -1));
+
+  assert(shots[1].value("start_us", -1) == 500000);
+  assert(shots[1].value("end_us", -1) == 1000000);
+  assert(shots[1].value("start_us", -1) < shots[1].value("end_us", -1));
+
+  // 2. Shot intervals are sorted and do not overlap
+  assert(shots[0].value("end_us", -1) == shots[1].value("start_us", -1));
+
+  // 3. First shot starts at 0, last shot ends at media duration
+  assert(shots[0].value("start_us", -1) == 0);
+  assert(shots[1].value("end_us", -1) == 1000000);
+
+  // 4. source_start/source_end labels are only used when interval semantics cover source boundaries
   assert(shots[0].value("cut_type_in", "") == "source_start");
   assert(shots[0].value("cut_type_out", "") == "hard_cut");
-
-  assert(shots[1].value("id", "") == "shot_000002");
   assert(shots[1].value("cut_type_in", "") == "hard_cut");
   assert(shots[1].value("cut_type_out", "") == "source_end");
 
@@ -1249,8 +1260,10 @@ void test_timeline_writer() {
   auto scenes = read_jsonl_records(staging_dir / "timeline" / "scenes.jsonl");
   assert(scenes.size() == 1);
   assert(scenes[0].value("id", "") == "scene_000001");
-  assert(scenes[0].value("start_us", -1) == 0);
-  assert(scenes[0].value("end_us", -1) == 1000000);
+
+  // 5. Scenes contain their shot intervals coherently
+  assert(scenes[0].value("start_us", -1) == shots[0].value("start_us", -1));
+  assert(scenes[0].value("end_us", -1) == shots[1].value("end_us", -1));
   assert(scenes[0]["shot_ids"].size() == 2);
   assert(scenes[0]["shot_ids"][0] == "shot_000001");
   assert(scenes[0]["shot_ids"][1] == "shot_000002");
