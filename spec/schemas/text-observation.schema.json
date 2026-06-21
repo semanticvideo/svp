@@ -47,6 +47,12 @@
         "type": "string"
       }
     },
+    "evidence_crop_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "provenance_id": {
       "type": "string"
     }
