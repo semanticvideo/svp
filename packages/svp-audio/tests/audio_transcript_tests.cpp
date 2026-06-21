@@ -193,7 +193,7 @@ void test_audio_extraction_plan_documents_ffmpeg_commands_when_available() {
   assert(extraction["analysis_audio_written"] == false);
 }
 
-void test_multi_stream_analysis_audio_waits_for_vad_selection() {
+void test_multi_stream_analysis_audio_selects_first_stream() {
   svp::media::MediaProbe probe;
   probe.audio_streams.push_back({"astream_0001", 1, "aac", 48000, 2, {}});
   probe.audio_streams.push_back({"astream_0002", 2, "aac", 48000, 2, {}});
@@ -204,14 +204,20 @@ void test_multi_stream_analysis_audio_waits_for_vad_selection() {
       svp::audio::audio_stage_plan_to_json(plan)["audio_extraction"];
 
   assert(extraction["original_streams"].size() == 2);
-  assert(extraction["analysis_audio"]["task_id"] ==
-         "task.audio.analysis.pending_vad_selection");
-  assert(extraction["analysis_audio"]["selected_source_audio_stream_id"] ==
-         "pending_vad_speech_positive_selection");
-  assert(extraction["analysis_audio"]["depends_on"].size() == 2);
-  assert(extraction["analysis_audio"]["arguments"].empty());
-  assert(extraction["analysis_audio"]["command_available"] == false);
+  assert(extraction["analysis_audio"]["task_id"] == "task.audio.analysis.astream_000");
+  assert(extraction["analysis_audio"]["selected_source_audio_stream_id"] == "astream_0001");
+  assert(extraction["analysis_audio"]["depends_on"].size() == 1);
+  assert(extraction["analysis_audio"]["command_available"] == true);
+  assert(!extraction["analysis_audio"]["arguments"].empty());
   assert(!extraction["blockers"].empty());
+  bool has_multi_stream_blocker = false;
+  for (const auto& blocker : extraction["blockers"]) {
+    if (blocker.get<std::string>().find("multiple audio streams") != std::string::npos) {
+      has_multi_stream_blocker = true;
+      break;
+    }
+  }
+  assert(has_multi_stream_blocker);
 }
 
 void test_waveform_envelope_generates_ten_millisecond_json_records() {
@@ -1223,7 +1229,7 @@ int main() {
   test_attached_punctuation_can_have_zero_duration();
   test_audio_stage_plan_is_honest_about_pending_processors();
   test_audio_extraction_plan_documents_ffmpeg_commands_when_available();
-  test_multi_stream_analysis_audio_waits_for_vad_selection();
+  test_multi_stream_analysis_audio_selects_first_stream();
   test_waveform_envelope_generates_ten_millisecond_json_records();
   test_audio_extraction_executor_writes_staged_single_stream_outputs();
   test_audio_extraction_executor_leaves_multi_stream_analysis_unrun();
