@@ -73,66 +73,436 @@ nlohmann::json make_relationship(const std::string& id,
                                  const std::string& type,
                                  const std::string& source_id,
                                  const std::string& target_id,
-                                 const nlohmann::json& source_record) {
+                                 std::int64_t start_us,
+                                 std::int64_t end_us,
+                                 double confidence,
+                                 const std::string& evidence_source_path) {
   return {
       {"id", id},
       {"type", type},
       {"source_id", source_id},
       {"target_id", target_id},
-      {"start_us", int_value_or_zero(source_record, "start_us")},
-      {"end_us", int_value_or_zero(source_record, "end_us")},
+      {"start_us", start_us},
+      {"end_us", end_us},
       {"evidence", {
-          {"source_path", "text/text_regions.jsonl"},
-          {"text_region_id", source_id}
+          {"source_path", evidence_source_path}
       }},
-      {"confidence", confidence_value_or_one(source_record)},
+      {"confidence", confidence},
       {"processor_id", kRelationshipProcessorId},
   };
 }
 
-std::vector<nlohmann::json> build_relationships(const std::filesystem::path& staging_dir) {
+nlohmann::json make_relationship_from_record(const std::string& id,
+                                              const std::string& type,
+                                              const std::string& source_id,
+                                              const std::string& target_id,
+                                              const nlohmann::json& source_record,
+                                              const std::string& evidence_source_path) {
+  return make_relationship(
+      id, type, source_id, target_id,
+      int_value_or_zero(source_record, "start_us"),
+      int_value_or_zero(source_record, "end_us"),
+      confidence_value_or_one(source_record),
+      evidence_source_path);
+}
+
+struct KnownIds {
+  std::set<std::string> text_region_ids;
+  std::set<std::string> text_observation_ids;
+  std::set<std::string> numeric_value_ids;
+  std::set<std::string> evidence_crop_ids;
+  std::set<std::string> color_observation_ids;
+  std::set<std::string> speaker_ids;
+  std::set<std::string> speaker_segment_ids;
+  std::set<std::string> word_ids;
+  std::set<std::string> embedding_ids;
+  std::set<std::string> depth_ids;
+  std::set<std::string> frame_ids;
+  std::set<std::string> shot_ids;
+  std::set<std::string> scene_ids;
+  std::set<std::string> processor_ids;
+};
+
+KnownIds collect_known_ids(const std::filesystem::path& staging_dir) {
+  KnownIds ids;
+
+  for (const auto& rec : read_jsonl(staging_dir / "text" / "text_regions.jsonl")) {
+    const std::string id = string_value(rec, "text_region_id");
+    if (!id.empty()) ids.text_region_ids.insert(id);
+    const std::string shot = string_value(rec, "shot_id");
+    if (!shot.empty()) ids.shot_ids.insert(shot);
+    const std::string scene = string_value(rec, "scene_id");
+    if (!scene.empty()) ids.scene_ids.insert(scene);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "text" / "text_observations.jsonl")) {
+    const std::string id = string_value(rec, "text_observation_id");
+    if (!id.empty()) ids.text_observation_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "text" / "numeric_values.jsonl")) {
+    const std::string id = string_value(rec, "numeric_value_id");
+    if (!id.empty()) ids.numeric_value_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "text" / "evidence_crops.jsonl")) {
+    const std::string id = string_value(rec, "crop_id");
+    if (!id.empty()) ids.evidence_crop_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "colors" / "color_observations.jsonl")) {
+    const std::string id = string_value(rec, "color_observation_id");
+    if (!id.empty()) ids.color_observation_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "transcript" / "words.jsonl")) {
+    const std::string id = string_value(rec, "id");
+    if (!id.empty()) ids.word_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "transcript" / "speakers.jsonl")) {
+    const std::string id = string_value(rec, "id");
+    if (!id.empty()) ids.speaker_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "transcript" / "speaker_segments.jsonl")) {
+    const std::string id = string_value(rec, "id");
+    if (!id.empty()) ids.speaker_segment_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "embeddings" / "embeddings.index.jsonl")) {
+    const std::string id = string_value(rec, "id");
+    if (!id.empty()) ids.embedding_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "spatial" / "depth.index.jsonl")) {
+    const std::string id = string_value(rec, "id");
+    if (!id.empty()) ids.depth_ids.insert(id);
+    const std::string frame = string_value(rec, "frame_id");
+    if (!frame.empty()) ids.frame_ids.insert(frame);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "provenance" / "processors.jsonl")) {
+    const std::string id = string_value(rec, "id");
+    if (!id.empty()) ids.processor_ids.insert(id);
+  }
+
+  return ids;
+}
+
+struct RelationshipBuilder {
   std::vector<nlohmann::json> relationships;
   std::size_t sequence = 1;
+  RelationshipTypeCounts counts;
+  const KnownIds& ids;
 
-  const std::vector<nlohmann::json> text_regions =
-      read_jsonl(staging_dir / "text" / "text_regions.jsonl");
-  for (const nlohmann::json& region : text_regions) {
-    const std::string region_id = string_value(region, "text_region_id");
-    if (region_id.empty()) {
-      continue;
+  explicit RelationshipBuilder(const KnownIds& known_ids) : ids(known_ids) {}
+
+  std::string next_id(const std::string& prefix) {
+    return prefix + std::to_string(sequence++);
+  }
+
+  void add(const std::string& prefix,
+           const std::string& type,
+           const std::string& source_id,
+           const std::string& target_id,
+           std::int64_t start_us,
+           std::int64_t end_us,
+           double confidence,
+           const std::string& evidence_path) {
+    if (source_id.empty() || target_id.empty()) {
+      ++counts.skipped_dangling;
+      return;
     }
+    relationships.push_back(make_relationship(
+        next_id(prefix), type, source_id, target_id,
+        start_us, end_us, confidence, evidence_path));
+  }
+};
+
+void build_text_region_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto text_regions = read_jsonl(staging_dir / "text" / "text_regions.jsonl");
+  for (const auto& region : text_regions) {
+    const std::string region_id = string_value(region, "text_region_id");
+    if (region_id.empty()) continue;
 
     const std::string shot_id = string_value(region, "shot_id");
     if (!shot_id.empty()) {
-      relationships.push_back(make_relationship(
-          "rel_text_region_shot_" + std::to_string(sequence++),
-          "appears_in_shot", region_id, shot_id, region));
+      if (builder.ids.shot_ids.count(shot_id) ||
+          builder.ids.text_region_ids.count(shot_id)) {
+        builder.add("rel_tr_shot_", "appears_in_shot", region_id, shot_id,
+                    int_value_or_zero(region, "start_us"),
+                    int_value_or_zero(region, "end_us"),
+                    confidence_value_or_one(region),
+                    "text/text_regions.jsonl");
+        ++builder.counts.text_region_shot;
+      } else {
+        ++builder.counts.skipped_dangling;
+      }
     }
 
     const std::string scene_id = string_value(region, "scene_id");
     if (!scene_id.empty()) {
-      relationships.push_back(make_relationship(
-          "rel_text_region_scene_" + std::to_string(sequence++),
-          "appears_in_scene", region_id, scene_id, region));
+      if (builder.ids.scene_ids.count(scene_id) ||
+          builder.ids.text_region_ids.count(scene_id)) {
+        builder.add("rel_tr_scene_", "appears_in_scene", region_id, scene_id,
+                    int_value_or_zero(region, "start_us"),
+                    int_value_or_zero(region, "end_us"),
+                    confidence_value_or_one(region),
+                    "text/text_regions.jsonl");
+        ++builder.counts.text_region_scene;
+      } else {
+        ++builder.counts.skipped_dangling;
+      }
     }
   }
+}
 
-  std::sort(relationships.begin(), relationships.end(),
+void build_text_observation_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto observations = read_jsonl(staging_dir / "text" / "text_observations.jsonl");
+  for (const auto& obs : observations) {
+    const std::string obs_id = string_value(obs, "text_observation_id");
+    const std::string region_id = string_value(obs, "text_region_id");
+    if (obs_id.empty()) continue;
+
+    if (!region_id.empty() && builder.ids.text_region_ids.count(region_id)) {
+      builder.add("rel_obs_region_", "observation_in_region",
+                  obs_id, region_id, 0, 0,
+                  confidence_value_or_one(obs),
+                  "text/text_observations.jsonl");
+      ++builder.counts.text_observation_region;
+    } else if (!region_id.empty()) {
+      ++builder.counts.skipped_dangling;
+    }
+
+    if (obs.contains("evidence_crop_refs") && obs["evidence_crop_refs"].is_array()) {
+      for (const auto& crop_ref : obs["evidence_crop_refs"]) {
+        if (!crop_ref.is_string()) continue;
+        const std::string crop_id = crop_ref.get<std::string>();
+        if (builder.ids.evidence_crop_ids.count(crop_id)) {
+          builder.add("rel_obs_crop_", "has_evidence_crop",
+                      obs_id, crop_id, 0, 0,
+                      confidence_value_or_one(obs),
+                      "text/text_observations.jsonl");
+          ++builder.counts.text_observation_evidence_crop;
+        } else {
+          ++builder.counts.skipped_dangling;
+        }
+      }
+    }
+  }
+}
+
+void build_numeric_value_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto numeric_values = read_jsonl(staging_dir / "text" / "numeric_values.jsonl");
+  for (const auto& num : numeric_values) {
+    const std::string num_id = string_value(num, "numeric_value_id");
+    const std::string obs_id = string_value(num, "text_observation_id");
+    if (num_id.empty()) continue;
+
+    if (!obs_id.empty() && builder.ids.text_observation_ids.count(obs_id)) {
+      builder.add("rel_num_obs_", "numeric_value_from_observation",
+                  num_id, obs_id, 0, 0,
+                  confidence_value_or_one(num),
+                  "text/numeric_values.jsonl");
+      ++builder.counts.numeric_value_observation;
+    } else if (!obs_id.empty()) {
+      ++builder.counts.skipped_dangling;
+    }
+  }
+}
+
+void build_transcript_speaker_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto words = read_jsonl(staging_dir / "transcript" / "words.jsonl");
+  const auto speaker_segments = read_jsonl(staging_dir / "transcript" / "speaker_segments.jsonl");
+
+  for (const auto& word : words) {
+    const std::string word_id = string_value(word, "id");
+    if (word_id.empty()) continue;
+
+    const std::string speaker_id = string_value(word, "speaker_id");
+    if (!speaker_id.empty() && builder.ids.speaker_ids.count(speaker_id)) {
+      builder.add("rel_word_speaker_", "word_spoken_by",
+                  word_id, speaker_id,
+                  int_value_or_zero(word, "start_us"),
+                  int_value_or_zero(word, "end_us"),
+                  confidence_value_or_one(word),
+                  "transcript/words.jsonl");
+      ++builder.counts.word_speaker;
+    } else if (!speaker_id.empty()) {
+      ++builder.counts.skipped_dangling;
+    }
+
+    const std::int64_t word_mid =
+        (int_value_or_zero(word, "start_us") +
+         int_value_or_zero(word, "end_us")) / 2;
+    for (const auto& seg : speaker_segments) {
+      const std::string seg_id = string_value(seg, "id");
+      if (seg_id.empty()) continue;
+      const std::int64_t seg_start = int_value_or_zero(seg, "start_us");
+      const std::int64_t seg_end = int_value_or_zero(seg, "end_us");
+      if (word_mid >= seg_start && word_mid < seg_end) {
+        if (builder.ids.speaker_segment_ids.count(seg_id)) {
+          builder.add("rel_word_seg_", "word_in_speaker_segment",
+                      word_id, seg_id,
+                      int_value_or_zero(word, "start_us"),
+                      int_value_or_zero(word, "end_us"),
+                      confidence_value_or_one(word),
+                      "transcript/words.jsonl");
+          ++builder.counts.word_speaker_segment;
+        } else {
+          ++builder.counts.skipped_dangling;
+        }
+        break;
+      }
+    }
+  }
+}
+
+void build_color_observation_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto color_obs = read_jsonl(staging_dir / "colors" / "color_observations.jsonl");
+  for (const auto& color : color_obs) {
+    const std::string color_id = string_value(color, "color_observation_id");
+    const std::string target_type = string_value(color, "target_type");
+    const std::string target_id = string_value(color, "target_id");
+    if (color_id.empty() || target_id.empty()) continue;
+
+    bool target_exists = false;
+    if (target_type == "frame") {
+      target_exists = builder.ids.frame_ids.count(target_id) > 0;
+    } else if (target_type == "shot") {
+      target_exists = builder.ids.shot_ids.count(target_id) > 0;
+    } else if (target_type == "scene") {
+      target_exists = builder.ids.scene_ids.count(target_id) > 0;
+    } else if (target_type == "text_region") {
+      target_exists = builder.ids.text_region_ids.count(target_id) > 0;
+    } else {
+      target_exists = true;
+    }
+
+    if (target_exists) {
+      builder.add("rel_color_target_", "color_observation_of",
+                  color_id, target_id, 0, 0,
+                  confidence_value_or_one(color),
+                  "colors/color_observations.jsonl");
+      ++builder.counts.color_observation_target;
+    } else {
+      ++builder.counts.skipped_dangling;
+    }
+  }
+}
+
+void build_depth_frame_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto depth_entries = read_jsonl(staging_dir / "spatial" / "depth.index.jsonl");
+  for (const auto& depth : depth_entries) {
+    const std::string depth_id = string_value(depth, "id");
+    const std::string frame_id = string_value(depth, "frame_id");
+    if (depth_id.empty() || frame_id.empty()) continue;
+
+    if (builder.ids.frame_ids.count(frame_id)) {
+      builder.add("rel_depth_frame_", "depth_for_frame",
+                  depth_id, frame_id,
+                  int_value_or_zero(depth, "start_us"),
+                  int_value_or_zero(depth, "end_us"),
+                  1.0,
+                  "spatial/depth.index.jsonl");
+      ++builder.counts.depth_frame;
+    } else {
+      ++builder.counts.skipped_dangling;
+    }
+  }
+}
+
+void build_embedding_source_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto embeddings = read_jsonl(staging_dir / "embeddings" / "embeddings.index.jsonl");
+  for (const auto& emb : embeddings) {
+    const std::string emb_id = string_value(emb, "id");
+    const std::string input_ref = string_value(emb, "input_ref");
+    const std::string input_kind = string_value(emb, "input_kind");
+    if (emb_id.empty() || input_ref.empty()) continue;
+
+    bool source_exists = false;
+    if (input_kind == "text_observation") {
+      source_exists = builder.ids.text_observation_ids.count(input_ref) > 0 ||
+                      builder.ids.text_region_ids.count(input_ref) > 0;
+    } else if (input_kind == "text_region") {
+      source_exists = builder.ids.text_region_ids.count(input_ref) > 0;
+    } else if (input_kind == "transcript" || input_kind == "word") {
+      source_exists = builder.ids.word_ids.count(input_ref) > 0;
+    } else {
+      source_exists = true;
+    }
+
+    if (source_exists) {
+      builder.add("rel_emb_source_", "embedding_source_is",
+                  emb_id, input_ref,
+                  int_value_or_zero(emb, "start_us"),
+                  int_value_or_zero(emb, "end_us"),
+                  1.0,
+                  "embeddings/embeddings.index.jsonl");
+      ++builder.counts.embedding_source;
+    } else {
+      ++builder.counts.skipped_dangling;
+    }
+  }
+}
+
+std::vector<nlohmann::json> build_relationships(const std::filesystem::path& staging_dir,
+                                                 RelationshipTypeCounts& counts) {
+  const KnownIds ids = collect_known_ids(staging_dir);
+  RelationshipBuilder builder(ids);
+
+  build_text_region_relationships(builder, staging_dir);
+  build_text_observation_relationships(builder, staging_dir);
+  build_numeric_value_relationships(builder, staging_dir);
+  build_transcript_speaker_relationships(builder, staging_dir);
+  build_color_observation_relationships(builder, staging_dir);
+  build_depth_frame_relationships(builder, staging_dir);
+  build_embedding_source_relationships(builder, staging_dir);
+
+  counts = builder.counts;
+
+  std::sort(builder.relationships.begin(), builder.relationships.end(),
             [](const nlohmann::json& lhs, const nlohmann::json& rhs) {
               return lhs.value("id", "") < rhs.value("id", "");
             });
-  return relationships;
+  return builder.relationships;
 }
 
 nlohmann::json make_relationship_processor_record() {
   return {
       {"id", kRelationshipProcessorId},
       {"name", "svp package relationship writer"},
-      {"version", "svp-package-relationship-writer-v1"},
-      {"input_refs", {"text/text_regions.jsonl"}},
+      {"version", "svp-package-relationship-writer-v2"},
+      {"input_refs", {
+          "text/text_regions.jsonl",
+          "text/text_observations.jsonl",
+          "text/numeric_values.jsonl",
+          "text/evidence_crops.jsonl",
+          "transcript/words.jsonl",
+          "transcript/speakers.jsonl",
+          "transcript/speaker_segments.jsonl",
+          "colors/color_observations.jsonl",
+          "spatial/depth.index.jsonl",
+          "embeddings/embeddings.index.jsonl"
+      }},
       {"output_refs", {"relationships/relationships.jsonl"}},
       {"model_refs", nlohmann::json::array()},
-      {"task_ids", {"task.relationships.text_regions"}},
+      {"task_ids", {"task.relationships.full_graph"}},
       {"cache_keys", nlohmann::json::array()},
   };
 }
@@ -187,9 +557,11 @@ RelationshipProvenanceWriteSummary write_relationships_and_provenance(
     const std::filesystem::path& staging_dir) {
   RelationshipProvenanceWriteSummary summary;
 
-  const std::vector<nlohmann::json> relationships = build_relationships(staging_dir);
+  RelationshipTypeCounts counts;
+  const std::vector<nlohmann::json> relationships = build_relationships(staging_dir, counts);
   write_jsonl(staging_dir / "relationships" / "relationships.jsonl", relationships);
   summary.relationships_written = relationships.size();
+  summary.type_counts = counts;
 
   RelationshipProvenanceWriteSummary provenance_summary =
       rewrite_processors(staging_dir, !relationships.empty());
@@ -204,6 +576,19 @@ nlohmann::json relationship_provenance_write_summary_to_json(
       {"relationships_written", summary.relationships_written},
       {"processors_written", summary.processors_written},
       {"duplicate_processors_merged", summary.duplicate_processors_merged},
+      {"type_counts", {
+          {"text_region_shot", summary.type_counts.text_region_shot},
+          {"text_region_scene", summary.type_counts.text_region_scene},
+          {"text_observation_region", summary.type_counts.text_observation_region},
+          {"text_observation_evidence_crop", summary.type_counts.text_observation_evidence_crop},
+          {"numeric_value_observation", summary.type_counts.numeric_value_observation},
+          {"word_speaker", summary.type_counts.word_speaker},
+          {"word_speaker_segment", summary.type_counts.word_speaker_segment},
+          {"color_observation_target", summary.type_counts.color_observation_target},
+          {"depth_frame", summary.type_counts.depth_frame},
+          {"embedding_source", summary.type_counts.embedding_source},
+          {"skipped_dangling", summary.type_counts.skipped_dangling},
+      }},
   };
 }
 

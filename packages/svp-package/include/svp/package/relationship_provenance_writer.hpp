@@ -6,10 +6,25 @@
 
 namespace svp::package {
 
+struct RelationshipTypeCounts {
+  std::size_t text_region_shot = 0;
+  std::size_t text_region_scene = 0;
+  std::size_t text_observation_region = 0;
+  std::size_t text_observation_evidence_crop = 0;
+  std::size_t numeric_value_observation = 0;
+  std::size_t word_speaker = 0;
+  std::size_t word_speaker_segment = 0;
+  std::size_t color_observation_target = 0;
+  std::size_t depth_frame = 0;
+  std::size_t embedding_source = 0;
+  std::size_t skipped_dangling = 0;
+};
+
 struct RelationshipProvenanceWriteSummary {
   std::size_t relationships_written = 0;
   std::size_t processors_written = 0;
   std::size_t duplicate_processors_merged = 0;
+  RelationshipTypeCounts type_counts;
 };
 
 [[nodiscard]] RelationshipProvenanceWriteSummary write_relationships_and_provenance(
