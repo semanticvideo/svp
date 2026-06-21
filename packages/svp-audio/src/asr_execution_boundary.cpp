@@ -1,5 +1,6 @@
 #include "svp/audio/asr_execution_boundary.hpp"
 #include "svp/audio/transcript_records.hpp"
+#include "svp/audio/whisper_mel.hpp"
 #include "svp/audio/whisper_model.hpp"
 #include "svp/models/manifest.hpp"
 #include "svp/models/runtime.hpp"
@@ -98,6 +99,13 @@ nlohmann::json speaker_record_json(const std::string& speaker_id,
 nlohmann::json chunk_provenance_record(const AsrChunkPlan& chunk,
                                        const std::string& processor_id,
                                        const std::string& asr_status) {
+  nlohmann::json asr_limitations = {
+      {"timestamp_method", "whisper_timestamp_token_segments"},
+      {"timestamp_precision", "words_distributed_evenly_within_segment"},
+      {"confidence_status", "unimplemented"},
+      {"speaker_mode", "one_speaker_fallback"},
+  };
+
   return {
       {"chunk_id", chunk.chunk_id},
       {"processor_id", processor_id},
@@ -108,6 +116,7 @@ nlohmann::json chunk_provenance_record(const AsrChunkPlan& chunk,
       {"model_id", chunk.model_id},
       {"runtime", chunk.runtime},
       {"asr_status", asr_status},
+      {"asr_limitations", asr_limitations},
   };
 }
 
@@ -231,15 +240,22 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
       throw std::runtime_error("staged analysis WAV file not found: " + input_wav.string());
     }
 
+    const std::filesystem::path temp_slice_dir =
+        staging_root / "transcript" / "chunk_slices";
+
     std::vector<std::vector<AsrWord>> chunk_words;
     chunk_words.reserve(boundary.chunk_plan.chunks.size());
 
     for (std::size_t i = 0; i < boundary.chunk_plan.chunks.size(); ++i) {
       const AsrChunkPlan& chunk = boundary.chunk_plan.chunks[i];
 
+      const std::filesystem::path chunk_wav =
+          slice_wav_to_temp(input_wav, chunk.source_start_us,
+                            chunk.source_end_us, temp_slice_dir);
+
       const WhisperInferenceResult whisper_result =
-          run_whisper_inference(input_wav, model_dir, chunk.chunk_id,
-                                 chunk.source_start_us, chunk.source_end_us);
+          run_whisper_inference(chunk_wav, model_dir, chunk.chunk_id,
+                                 0, chunk.source_end_us - chunk.source_start_us);
 
       if (!whisper_result.ran) {
         for (const std::string& blocker : whisper_result.blockers) {
@@ -255,8 +271,6 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
       std::vector<AsrWord> words;
       for (const AsrWord& w : whisper_result.all_words) {
         AsrWord adjusted = w;
-        adjusted.start_us += chunk.source_start_us;
-        adjusted.end_us += chunk.source_start_us;
         adjusted.chunk_ordinal = static_cast<std::int64_t>(i);
         words.push_back(adjusted);
       }
@@ -299,6 +313,13 @@ nlohmann::json asr_execution_boundary_to_json(const AsrExecutionBoundary& bounda
     chunk_refs.push_back(ref);
   }
 
+  nlohmann::json asr_limitations = {
+      {"timestamp_method", "whisper_timestamp_token_segments"},
+      {"timestamp_precision", "words_distributed_evenly_within_segment"},
+      {"confidence_status", "unimplemented"},
+      {"speaker_mode", "one_speaker_fallback"},
+  };
+
   return {
       {"processor_id", boundary.processor_id},
       {"model_id", boundary.model_id},
@@ -323,6 +344,7 @@ nlohmann::json asr_execution_boundary_to_json(const AsrExecutionBoundary& bounda
       {"reconciled_word_count", boundary.reconciled_word_count},
       {"speaker_count", boundary.speaker_count},
       {"one_speaker_mode", boundary.one_speaker_mode},
+      {"asr_limitations", asr_limitations},
       {"blockers", boundary.blockers},
       {"chunk_plan", asr_chunk_plan_to_json(boundary.chunk_plan)},
   };

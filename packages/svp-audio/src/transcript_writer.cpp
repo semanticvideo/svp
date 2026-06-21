@@ -89,6 +89,16 @@ nlohmann::json ran_transcript_json(const AsrExecutionBoundary& boundary,
       {"confidence", 0.0},
   };
 
+  nlohmann::json asr_limitations = {
+      {"timestamp_method", "whisper_timestamp_token_segments"},
+      {"timestamp_precision", "words_distributed_evenly_within_segment"},
+      {"timestamp_note", "Word start_us/end_us are derived from Whisper decoder timestamp tokens (50357+). Words are distributed evenly within each timestamp segment, not cross-attention aligned."},
+      {"confidence_status", "unimplemented"},
+      {"confidence_note", "Per-word confidence is not yet extracted from decoder logits. All confidence values are 0.0."},
+      {"speaker_mode", "one_speaker_fallback"},
+      {"speaker_note", "Single speaker assigned without diarization. All words have speaker_id speaker_0001."},
+  };
+
   return {
       {"language", language},
       {"duration_us", boundary.chunk_plan.total_duration_us},
@@ -98,12 +108,20 @@ nlohmann::json ran_transcript_json(const AsrExecutionBoundary& boundary,
       {"processor_id", boundary.processor_id},
       {"asr_status", asr_status_string(boundary.asr_status)},
       {"one_speaker_mode", boundary.one_speaker_mode},
+      {"asr_limitations", asr_limitations},
   };
 }
 
 nlohmann::json chunk_provenance_json(const AsrChunkPlan& chunk,
                                      const std::string& processor_id,
                                      const std::string& asr_status) {
+  nlohmann::json asr_limitations = {
+      {"timestamp_method", "whisper_timestamp_token_segments"},
+      {"timestamp_precision", "words_distributed_evenly_within_segment"},
+      {"confidence_status", "unimplemented"},
+      {"speaker_mode", "one_speaker_fallback"},
+  };
+
   return {
       {"chunk_id", chunk.chunk_id},
       {"processor_id", processor_id},
@@ -114,6 +132,7 @@ nlohmann::json chunk_provenance_json(const AsrChunkPlan& chunk,
       {"model_id", chunk.model_id},
       {"runtime", chunk.runtime},
       {"asr_status", asr_status},
+      {"asr_limitations", asr_limitations},
   };
 }
 
@@ -167,6 +186,7 @@ TranscriptWriteResult write_transcript_artifacts(const AsrExecutionBoundary& bou
     result.transcript_written = true;
 
     std::vector<nlohmann::json> word_records;
+    const std::string speaker_id = "speaker_0001";
     for (std::size_t i = 0; i < boundary.reconciled_words.size(); ++i) {
       const AsrWord& w = boundary.reconciled_words[i];
       word_records.push_back({
@@ -176,6 +196,7 @@ TranscriptWriteResult write_transcript_artifacts(const AsrExecutionBoundary& bou
           {"end_us", w.end_us},
           {"confidence", w.confidence},
           {"chunk_ordinal", w.chunk_ordinal},
+          {"speaker_id", speaker_id},
       });
     }
     write_jsonl_file(words_path, word_records);

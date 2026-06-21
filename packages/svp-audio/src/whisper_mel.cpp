@@ -219,4 +219,77 @@ WhisperMelFeatures compute_whisper_mel_from_wav(const std::filesystem::path& wav
   return {std::move(mel_data), kNMels, kNFrames};
 }
 
+void write_u16_le(std::ostream& out, std::uint16_t v) {
+  out.put(static_cast<char>(v & 0xFF));
+  out.put(static_cast<char>((v >> 8) & 0xFF));
+}
+
+void write_u32_le(std::ostream& out, std::uint32_t v) {
+  out.put(static_cast<char>(v & 0xFF));
+  out.put(static_cast<char>((v >> 8) & 0xFF));
+  out.put(static_cast<char>((v >> 16) & 0xFF));
+  out.put(static_cast<char>((v >> 24) & 0xFF));
+}
+
+std::filesystem::path slice_wav_to_temp(
+    const std::filesystem::path& input_wav,
+    std::int64_t start_us,
+    std::int64_t end_us,
+    const std::filesystem::path& temp_dir) {
+  PcmWavData wav = read_pcm_s16le_mono_wav(input_wav);
+
+  const std::int64_t start_sample =
+      static_cast<std::int64_t>(start_us * kSampleRate / 1000000LL);
+  const std::int64_t end_sample =
+      static_cast<std::int64_t>(end_us * kSampleRate / 1000000LL);
+
+  const std::int64_t clamped_start = std::max(std::int64_t{0}, start_sample);
+  const std::int64_t clamped_end =
+      std::min(end_sample, static_cast<std::int64_t>(wav.samples.size()));
+
+  if (clamped_start >= clamped_end) {
+    throw std::runtime_error("chunk slice produces zero or negative samples");
+  }
+
+  const std::size_t n_samples =
+      static_cast<std::size_t>(clamped_end - clamped_start);
+
+  std::filesystem::create_directories(temp_dir);
+  const std::filesystem::path out_path =
+      temp_dir / ("chunk_slice_" +
+                  std::to_string(start_us) + "_" +
+                  std::to_string(end_us) + ".wav");
+
+  std::ofstream out(out_path, std::ios::binary);
+  if (!out) {
+    throw std::runtime_error("unable to create temp WAV: " + out_path.string());
+  }
+
+  const std::uint32_t data_size = static_cast<std::uint32_t>(n_samples * 2);
+  const std::uint32_t riff_size = 36 + data_size;
+
+  out.write("RIFF", 4);
+  write_u32_le(out, riff_size);
+  out.write("WAVE", 4);
+  out.write("fmt ", 4);
+  write_u32_le(out, 16);
+  write_u16_le(out, 1);
+  write_u16_le(out, 1);
+  write_u32_le(out, static_cast<std::uint32_t>(kSampleRate));
+  write_u32_le(out, static_cast<std::uint32_t>(kSampleRate * 2));
+  write_u16_le(out, 2);
+  write_u16_le(out, 16);
+  out.write("data", 4);
+  write_u32_le(out, data_size);
+
+  for (std::size_t i = 0; i < n_samples; ++i) {
+    const float s = wav.samples[static_cast<std::size_t>(clamped_start) + i];
+    const std::int16_t pcm = static_cast<std::int16_t>(
+        std::max(-32768.0f, std::min(32767.0f, s * 32767.0f)));
+    write_u16_le(out, static_cast<std::uint16_t>(pcm));
+  }
+
+  return out_path;
+}
+
 }  // namespace svp::audio
