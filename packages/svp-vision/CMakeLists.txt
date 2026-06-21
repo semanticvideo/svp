@@ -7,6 +7,7 @@ add_library(svp-vision
   src/color_quantization.cpp
   src/depth_generation.cpp
   src/embedding_generation.cpp
+  src/evidence_crop.cpp
   src/foundation_color_observations.cpp
   src/foundation_color_staging.cpp
   src/foundation_ocr_staging.cpp
@@ -205,4 +206,20 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-vision-embedding-generation-smoke-test
            COMMAND svp-vision-embedding-generation-smoke-test)
+
+  add_executable(svp-vision-evidence-crop-linking-tests
+    tests/evidence_crop_linking_tests.cpp
+  )
+
+  target_compile_features(svp-vision-evidence-crop-linking-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-evidence-crop-linking-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-evidence-crop-linking-tests
+           COMMAND svp-vision-evidence-crop-linking-tests)
 endif()

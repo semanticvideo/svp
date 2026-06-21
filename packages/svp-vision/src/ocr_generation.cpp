@@ -1,6 +1,7 @@
 #include "svp/vision/ocr_generation.hpp"
 
 #include "svp/media/media_ingest_plan.hpp"
+#include "svp/vision/evidence_crop.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -18,6 +19,7 @@
 #include <sstream>
 #include <string>
 #include <sys/wait.h>
+#include <unordered_map>
 #include <vector>
 
 namespace svp::vision {
@@ -282,14 +284,22 @@ bool extract_frame_png_from_source(
     return true;
   }
 
-  // Fallback 1: scale + grayscale only (histeq/unsharp may be unavailable)
+  // Fallback 1: scale + grayscale + contrast/threshold (histeq may be unavailable)
+  const std::string threshold_filter =
+      scale_filter + ",format=gray,eq=contrast=1.5:brightness=0.0";
+  if (run_ffmpeg_extract(ffmpeg_path, source_path, seek, threshold_filter, output_png, last_ffmpeg_err)) {
+    selected_fallback = "scale_grayscale_threshold";
+    return true;
+  }
+
+  // Fallback 2: scale + grayscale only
   const std::string gray_filter = scale_filter + ",format=gray";
   if (run_ffmpeg_extract(ffmpeg_path, source_path, seek, gray_filter, output_png, last_ffmpeg_err)) {
     selected_fallback = "scale_grayscale";
     return true;
   }
 
-  // Fallback 2: plain scale (no preprocessing at all)
+  // Fallback 3: plain scale (no preprocessing at all)
   if (run_ffmpeg_extract(ffmpeg_path, source_path, seek, scale_filter, output_png, last_ffmpeg_err)) {
     selected_fallback = "scale_only";
     return true;
@@ -901,6 +911,9 @@ void write_failure_stage_files(const std::filesystem::path& staging_dir, const T
     std::ofstream out(text_dir / "numeric_values.jsonl");
   }
   {
+    std::ofstream out(text_dir / "evidence_crops.jsonl");
+  }
+  {
     std::ofstream out(text_dir / "text_absence.json");
     if (out) {
       out << text_absence_to_json(text_absence).dump(2) << "\n";
@@ -1222,6 +1235,11 @@ OcrGenerationResult generate_ocr_observations(
     result.numeric_values_written = true;
 
     {
+      std::ofstream out(text_dir / "evidence_crops.jsonl");
+    }
+    result.evidence_crops_written = true;
+
+    {
       std::ofstream out(text_dir / "text_absence.json");
       if (out) {
         out << text_absence_to_json(result.text_absence).dump(2) << "\n";
@@ -1321,6 +1339,105 @@ OcrGenerationResult generate_ocr_observations(
   result.text_observation_count = static_cast<std::int64_t>(result.text_observations.size());
   result.numeric_value_count = static_cast<std::int64_t>(result.numeric_values.size());
 
+  // Phase 4: Generate evidence crops for reconciled text regions.
+  // Extracts bounded crop images from the source video, runs ROI-based
+  // Tesseract hardening, and links crops to observations.
+  if (options.generate_evidence_crops &&
+      options.media_plan != nullptr &&
+      !result.text_observations.empty()) {
+    std::vector<CropGenerationInput> crop_inputs;
+    crop_inputs.reserve(result.text_observations.size());
+
+    for (std::size_t i = 0; i < result.text_observations.size(); ++i) {
+      const auto& obs = result.text_observations[i];
+      const auto& robs = reconciled[i];
+
+      CropGenerationInput input;
+      input.text_region_id = obs.text_region_id;
+      input.text_observation_id = obs.text_observation_id;
+      // Use the first source frame for the crop
+      if (!obs.source_frame_ids.empty()) {
+        input.source_frame_id = obs.source_frame_ids[0];
+      }
+      input.source_timestamp_us = robs.start_us;
+      input.bbox_left = robs.bbox_left;
+      input.bbox_top = robs.bbox_top;
+      input.bbox_right = robs.bbox_right;
+      input.bbox_bottom = robs.bbox_bottom;
+      input.frame_width = robs.frame_width;
+      input.frame_height = robs.frame_height;
+      input.confidence = robs.confidence;
+      input.detection_count = robs.detection_count;
+      crop_inputs.push_back(std::move(input));
+    }
+
+    EvidenceCropOptions crop_opts;
+    crop_opts.ffmpeg_path = options.ffmpeg_path;
+    crop_opts.tesseract_path = options.tesseract_path;
+    crop_opts.language = options.language;
+    crop_opts.source_media_path = options.media_plan->source_path;
+    crop_opts.ocr_frame_width = options.ocr_frame_width;
+    crop_opts.ocr_frame_height = options.ocr_frame_height;
+    crop_opts.max_total_crops = options.max_total_crops;
+    crop_opts.max_total_crop_bytes = options.max_total_crop_bytes;
+    crop_opts.crop_image_format = "jpeg";
+    crop_opts.jpeg_quality = 85;
+
+    EvidenceCropResult crop_result;
+    try {
+      crop_result = generate_evidence_crops_internal(
+          crop_opts, crop_inputs, staging_dir);
+    } catch (const std::exception& e) {
+      crop_result.crops_written = false;
+      crop_result.crops_skipped_reason =
+          std::string("Evidence crop generation error: ") + e.what();
+    }
+
+    result.evidence_crops = crop_result.crops;
+    result.evidence_crop_count = crop_result.crop_count;
+    result.evidence_crop_total_bytes = crop_result.total_crop_bytes;
+    result.evidence_crops_written = crop_result.crops_written;
+    result.evidence_crops_skipped = crop_result.crops_skipped_count;
+    result.evidence_crops_skipped_reason = crop_result.crops_skipped_reason;
+    result.roi_hardening_run = true;
+
+    // Link evidence crops to their text observations by stable ID.
+    // We build a map from observation_id → crop_id so that skipped or
+    // failed crops do not shift indices and cause mis-linking.
+    std::unordered_map<std::string, std::string> obs_id_to_crop_id;
+    for (const auto& crop : crop_result.crops) {
+      obs_id_to_crop_id[crop.text_observation_id] = crop.crop_id;
+    }
+    for (auto& obs : result.text_observations) {
+      auto it = obs_id_to_crop_id.find(obs.text_observation_id);
+      if (it != obs_id_to_crop_id.end()) {
+        obs.evidence_crop_refs.push_back(it->second);
+      }
+    }
+
+    // Apply ROI hardening results by matching observation IDs.
+    // roi_ocr_results is parallel to the crop_inputs vector (which is
+    // parallel to text_observations), but we match by observation ID
+    // to be safe against any reordering.
+    std::unordered_map<std::string, std::size_t> obs_id_to_roi_idx;
+    for (std::size_t i = 0; i < crop_inputs.size(); ++i) {
+      obs_id_to_roi_idx[crop_inputs[i].text_observation_id] = i;
+    }
+    for (auto& obs : result.text_observations) {
+      auto it = obs_id_to_roi_idx.find(obs.text_observation_id);
+      if (it == obs_id_to_roi_idx.end()) continue;
+      const auto& roi = crop_result.roi_ocr_results[it->second];
+      if (!roi.succeeded) continue;
+
+      const int current_words = count_words(obs.raw_text);
+      if (roi.word_count > current_words) {
+        obs.raw_text = roi.raw_text;
+        obs.normalized_text = normalize_text(roi.raw_text);
+        obs.confidence = roi.confidence;
+      }
+    }
+  }
+
   // Build text absence record
   result.text_absence.schema_version = "svp-text-absence-v1";
   result.text_absence.ocr_required = true;
@@ -1410,6 +1527,12 @@ OcrGenerationResult generate_ocr_observations(
   }
   result.numeric_values_written = true;
 
+  // Write evidence_crops.jsonl if not already written by crop generation
+  if (!result.evidence_crops_written) {
+    std::ofstream out(text_dir / "evidence_crops.jsonl");
+    result.evidence_crops_written = true;
+  }
+
   // Write text_absence.json
   {
     std::ofstream out(text_dir / "text_absence.json");
@@ -1456,6 +1579,21 @@ nlohmann::json ocr_generation_result_to_json(const OcrGenerationResult& result) 
       {"numeric_values", num_arr},
       {"text_absence", text_absence_to_json(result.text_absence)},
       {"processors", result.processors},
+      {"evidence_crops_written", result.evidence_crops_written},
+      {"evidence_crop_count", result.evidence_crop_count},
+      {"evidence_crop_total_bytes", result.evidence_crop_total_bytes},
+      {"evidence_crops_skipped", result.evidence_crops_skipped},
+      {"evidence_crops_skipped_reason", sanitize_utf8(result.evidence_crops_skipped_reason)},
+      {"roi_hardening_run", result.roi_hardening_run},
+      {"evidence_crops", evidence_crop_result_to_json(
+          EvidenceCropResult{
+              result.evidence_crops,
+              result.evidence_crop_total_bytes,
+              result.evidence_crops_written,
+              result.evidence_crop_count,
+              result.evidence_crops_skipped,
+              result.evidence_crops_skipped_reason,
+              {}})},
   };
 }
 

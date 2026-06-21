@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/vision/canonical_frame_input.hpp"
+#include "svp/vision/evidence_crop.hpp"
 #include "svp/vision/foundation_ocr_staging.hpp"
 
 #include <filesystem>
@@ -28,6 +29,12 @@ struct OcrGenerationOptions {
   int ocr_frame_height = 0;
   int canonical_raster_width = 0;
   int canonical_raster_height = 0;
+  // When true, generate evidence crops for reconciled text regions.
+  bool generate_evidence_crops = false;
+  // Maximum total crops across all regions.
+  std::size_t max_total_crops = 50;
+  // Maximum total bytes for all crop images.
+  std::int64_t max_total_crop_bytes = 2 * 1024 * 1024;
 };
 
 struct OcrGenerationResult {
@@ -48,6 +55,17 @@ struct OcrGenerationResult {
   std::vector<NumericValueRecord> numeric_values;
   TextAbsenceRecord text_absence;
   std::vector<nlohmann::json> processors;
+  // Evidence crops
+  std::vector<EvidenceCropRecord> evidence_crops;
+  std::int64_t evidence_crop_count = 0;
+  std::int64_t evidence_crop_total_bytes = 0;
+  bool evidence_crops_written = false;
+  std::int64_t evidence_crops_skipped = 0;
+  std::string evidence_crops_skipped_reason;
+  // ROI hardening results, parallel to text_observations.
+  // When ROI OCR produced better text, the observation's raw_text
+  // is updated to the ROI result (with provenance preserved).
+  bool roi_hardening_run = false;
 };
 
 [[nodiscard]] OcrGenerationResult generate_ocr_observations(

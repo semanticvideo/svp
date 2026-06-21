@@ -46,6 +46,7 @@ struct TextObservationRecord {
   double confidence = 0.0;
   std::optional<std::string> layout_class;
   std::vector<std::string> source_frame_ids;
+  std::vector<std::string> evidence_crop_refs;
   std::string provenance_id;
 };
 

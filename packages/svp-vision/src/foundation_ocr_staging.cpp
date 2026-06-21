@@ -134,6 +134,13 @@ nlohmann::json text_observation_to_json(const TextObservationRecord& record) {
       {"source_frame_ids", frame_ids},
       {"provenance_id", sanitize_utf8(record.provenance_id)},
   };
+  if (!record.evidence_crop_refs.empty()) {
+    nlohmann::json crop_refs = nlohmann::json::array();
+    for (const auto& ref : record.evidence_crop_refs) {
+      crop_refs.push_back(sanitize_utf8(ref));
+    }
+    j["evidence_crop_refs"] = crop_refs;
+  }
   if (record.language.has_value()) {
     j["language"] = *record.language;
   }
