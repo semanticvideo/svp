@@ -292,6 +292,53 @@ void test_short_duration_safe_end_equals_duration() {
           "when duration < margin, safe_end_us must equal duration");
 }
 
+void test_processor_provenance_round_trip() {
+  OcrSamplingConfig config;
+  config.max_sample_gap_us = 1'000'000;
+  config.safe_end_margin_us = 100'000;
+
+  auto result = compute_ocr_temporal_timestamps(30'000'000, config);
+  auto ts_json = ocr_temporal_sampling_result_to_json(result);
+
+  nlohmann::json processor = {
+      {"id", "processor_ocr_detector_0001"},
+      {"processor_type", "ocr_detector"},
+      {"status", "completed"},
+      {"temporal_sampling", ts_json},
+  };
+
+  std::vector<nlohmann::json> processors = {processor};
+
+  std::string jsonl;
+  for (const auto& p : processors) {
+    jsonl += p.dump() + "\n";
+  }
+
+  nlohmann::json parsed = nlohmann::json::parse(jsonl.substr(0, jsonl.find('\n')));
+  auto ts = parsed["temporal_sampling"];
+
+  require(ts.contains("safe_end_us"), "round-trip temporal_sampling must have safe_end_us");
+  require(ts.contains("safe_end_margin_us"), "round-trip temporal_sampling must have safe_end_margin_us");
+  require(ts.contains("effective_max_sample_gap_us"), "round-trip temporal_sampling must have effective_max_sample_gap_us");
+  require(ts.contains("uncapped_sample_count"), "round-trip temporal_sampling must have uncapped_sample_count");
+  require(ts["safe_end_us"].get<std::int64_t>() == result.safe_end_us,
+          "round-trip safe_end_us must match");
+  require(ts["safe_end_margin_us"].get<std::int64_t>() == result.safe_end_margin_us,
+          "round-trip safe_end_margin_us must match");
+  require(ts["effective_max_sample_gap_us"].get<std::int64_t>() == result.effective_max_sample_gap_us,
+          "round-trip effective_max_sample_gap_us must match");
+  require(ts["uncapped_sample_count"].get<int>() == result.uncapped_sample_count,
+          "round-trip uncapped_sample_count must match");
+  require(ts["sampled_timestamps_us"].is_array(),
+          "round-trip sampled_timestamps_us must be array");
+  require(!ts["sampled_timestamps_us"].empty(),
+          "round-trip sampled_timestamps_us must not be empty");
+  require(ts["sampled_timestamps_us"][0].get<std::int64_t>() == 0,
+          "round-trip first timestamp must be 0");
+  require(ts["sampled_timestamps_us"].back().get<std::int64_t>() == result.safe_end_us,
+          "round-trip last timestamp must be safe_end_us");
+}
+
 }  // namespace
 
 int main() {
@@ -309,6 +356,7 @@ int main() {
   test_capped_reports_effective_gap();
   test_safe_end_fields_in_json();
   test_short_duration_safe_end_equals_duration();
+  test_processor_provenance_round_trip();
   std::cout << "All OCR temporal sampling tests passed.\n";
   return 0;
 }

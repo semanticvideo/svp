@@ -430,6 +430,11 @@ OcrGenerationResult generate_ocr_observations(
         "svp-vision-ocr-generation-v1", "deterministic_cpp",
         "not_run", "No OCR text to parse"));
 
+    if (!result.processors.empty()) {
+      result.processors[0]["temporal_sampling"] =
+          ocr_temporal_sampling_result_to_json(result.temporal_sampling);
+    }
+
     write_failure_stage_files(staging_dir, result.text_absence);
     result.text_regions_written = true;
     result.text_observations_written = true;
@@ -467,6 +472,11 @@ OcrGenerationResult generate_ocr_observations(
         "processor_numeric_parser_0001", "numeric_parser",
         "svp-vision-ocr-generation-v1", "deterministic_cpp",
         "not_run", "No OCR text to parse"));
+
+    if (!result.processors.empty()) {
+      result.processors[0]["temporal_sampling"] =
+          ocr_temporal_sampling_result_to_json(result.temporal_sampling);
+    }
 
     write_failure_stage_files(staging_dir, result.text_absence);
     result.text_regions_written = true;
@@ -587,6 +597,11 @@ OcrGenerationResult generate_ocr_observations(
         "processor_numeric_parser_0001", "numeric_parser",
         "svp-vision-ocr-generation-v1", "deterministic_cpp",
         "not_run", "No OCR text to parse due to OCR execution failure"));
+
+    if (!result.processors.empty()) {
+      result.processors[0]["temporal_sampling"] =
+          ocr_temporal_sampling_result_to_json(result.temporal_sampling);
+    }
 
     const std::filesystem::path text_dir = staging_dir / "text";
     std::filesystem::create_directories(text_dir);
