@@ -34,7 +34,7 @@ struct AsrChunkPlanResult {
     std::int64_t chunk_duration_us = 30000000,
     std::int64_t overlap_us = 2000000,
     const std::string& input_ref = "media/audio/analysis_mono_16k.wav",
-    const std::string& model_id = "model_whisper_large_v3_turbo_q5_0",
+    const std::string& model_id = "model_whisper_small_en",
     const std::string& runtime = "onnxruntime");
 
 [[nodiscard]] nlohmann::json asr_chunk_plan_to_json(const AsrChunkPlanResult& plan);

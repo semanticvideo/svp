@@ -52,6 +52,12 @@ std::string asr_status_string(AsrStatus status) {
   return "unknown";
 }
 
+std::string word_id_for_ordinal(std::size_t ordinal) {
+  std::ostringstream output;
+  output << "word_" << std::setw(6) << std::setfill('0') << ordinal;
+  return output.str();
+}
+
 nlohmann::json blocked_transcript_json(const AsrExecutionBoundary& boundary) {
   nlohmann::json language = {
       {"primary", "und"},
@@ -160,7 +166,19 @@ TranscriptWriteResult write_transcript_artifacts(const AsrExecutionBoundary& bou
                                         boundary.speaker_count));
     result.transcript_written = true;
 
-    write_empty_jsonl(words_path);
+    std::vector<nlohmann::json> word_records;
+    for (std::size_t i = 0; i < boundary.reconciled_words.size(); ++i) {
+      const AsrWord& w = boundary.reconciled_words[i];
+      word_records.push_back({
+          {"id", word_id_for_ordinal(i)},
+          {"text", w.text},
+          {"start_us", w.start_us},
+          {"end_us", w.end_us},
+          {"confidence", w.confidence},
+          {"chunk_ordinal", w.chunk_ordinal},
+      });
+    }
+    write_jsonl_file(words_path, word_records);
     result.words_written = true;
     result.word_count = boundary.reconciled_word_count;
 

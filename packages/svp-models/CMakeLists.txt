@@ -37,8 +37,8 @@ target_include_directories(svp-models
 target_compile_features(svp-models PUBLIC cxx_std_20)
 
 if(SVP_MODEL_ONNX_RUNTIME_AVAILABLE)
-  target_compile_definitions(svp-models PRIVATE SVP_ONNX_RUNTIME_AVAILABLE=1)
-  target_link_libraries(svp-models PRIVATE onnxruntime::onnxruntime)
+  target_compile_definitions(svp-models PUBLIC SVP_ONNX_RUNTIME_AVAILABLE=1)
+  target_link_libraries(svp-models PUBLIC onnxruntime::onnxruntime)
 endif()
 
 target_link_libraries(svp-models

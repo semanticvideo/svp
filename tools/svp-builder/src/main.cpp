@@ -352,12 +352,12 @@ int main(int argc, char** argv) {
 
         const bool asr_model_available =
             svp::audio::check_asr_model_in_cache(
-                "model_whisper_large_v3_turbo_q5_0", model_cache_root);
+                "model_whisper_small_en", model_cache_root);
 
         const bool asr_model_verified =
             asr_model_available &&
             svp::audio::verify_asr_model_files(
-                "model_whisper_large_v3_turbo_q5_0", model_cache_root);
+                "model_whisper_small_en", model_cache_root);
 
         const svp::audio::AsrExecutionBoundary asr_boundary =
             svp::audio::build_asr_execution_boundary(

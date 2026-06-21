@@ -18,7 +18,7 @@ enum class AsrStatus {
 
 struct AsrExecutionBoundary {
   std::string processor_id = "proc_whisper_asr_0001";
-  std::string model_id = "model_whisper_large_v3_turbo_q5_0";
+  std::string model_id = "model_whisper_small_en";
   std::string runtime = "onnxruntime";
   std::string execution_provider = "cpu";
   AsrChunkPlanResult chunk_plan;
@@ -42,6 +42,7 @@ struct AsrExecutionBoundary {
   std::size_t reconciled_word_count = 0;
   std::size_t speaker_count = 0;
   bool one_speaker_mode = true;
+  std::vector<AsrWord> reconciled_words;
 };
 
 [[nodiscard]] bool check_asr_model_in_cache(
