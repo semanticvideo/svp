@@ -21,6 +21,7 @@ add_subdirectory(packages/svp-media)
 add_subdirectory(packages/svp-audio)
 add_subdirectory(packages/svp-vision)
 add_subdirectory(packages/svp-package)
+add_subdirectory(packages/svp-query)
 
 add_subdirectory(tools/svp-validator)
 add_subdirectory(tools/svp-reader)

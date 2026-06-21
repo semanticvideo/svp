@@ -11,4 +11,5 @@ target_link_libraries(svp-inspector
     CLI11::CLI11
     svp::core
     svp::package
+    svp::query
 )
