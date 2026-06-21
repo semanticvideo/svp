@@ -1086,6 +1086,135 @@ void test_transcript_writer_blocked_includes_diarization_provenance() {
   std::filesystem::remove_all(root);
 }
 
+void test_blocked_asr_with_fallback_segments_does_not_create_dangling_speaker_segments() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-diar-blocked-no-dangling-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  svp::audio::AsrExecutionBoundary boundary =
+      svp::audio::build_asr_execution_boundary(plan, true, false, false, false);
+  boundary.asr_status = svp::audio::AsrStatus::blocked;
+  boundary.diarization_status = "fallback_one_speaker";
+  boundary.diarization_note = "One-speaker fallback used (model missing). This is not speaker recognition.";
+  boundary.diarization_blockers = {"model missing"};
+
+  // Even though speaker_segments are populated, blocked ASR must not
+  // write them — that would create dangling references to speaker_0001
+  // while speakers.jsonl is intentionally empty.
+  svp::audio::SpeakerSegment fallback_segment;
+  fallback_segment.id = "speakerseg_000000";
+  fallback_segment.speaker_id = "speaker_0001";
+  fallback_segment.timing = {0, 30000000};
+  fallback_segment.confidence = 0.0;
+  fallback_segment.overlap = false;
+  boundary.speaker_segments.push_back(std::move(fallback_segment));
+
+  const svp::audio::TranscriptWriteResult result =
+      svp::audio::write_transcript_artifacts(boundary, root);
+
+  assert(result.transcript_written);
+  assert(result.transcript_status == "blocked");
+  assert(result.speaker_count == 0);
+
+  // speakers.jsonl must be empty
+  {
+    std::ifstream input(root / "transcript/speakers.jsonl");
+    std::string content((std::istreambuf_iterator<char>(input)),
+                         std::istreambuf_iterator<char>());
+    assert(content.empty());
+  }
+
+  // speaker_segments.jsonl must also be empty — no dangling references
+  {
+    std::ifstream input(root / "transcript/speaker_segments.jsonl");
+    std::string content((std::istreambuf_iterator<char>(input)),
+                         std::istreambuf_iterator<char>());
+    assert(content.empty());
+  }
+
+  std::filesystem::remove_all(root);
+}
+
+void test_fallback_provenance_distinguishes_model_missing_from_inference_not_wired() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-diar-provenance-wording-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  // Case 1: model missing
+  {
+    svp::audio::AsrExecutionBoundary boundary =
+        svp::audio::build_asr_execution_boundary(plan, true, true, true, true);
+    boundary.asr_status = svp::audio::AsrStatus::ran;
+    boundary.reconciled_words.push_back({"hello", 1000000, 1500000, 0.9, 0});
+    boundary.reconciled_word_count = 1;
+    boundary.speaker_count = 1;
+    boundary.one_speaker_mode = true;
+    boundary.diarization_status = "fallback_one_speaker";
+    boundary.diarization_blockers = {"sherpa-onnx diarization model is not available in model cache"};
+    boundary.diarization_note = "One-speaker fallback used (sherpa-onnx diarization model is not available in model cache). This is not speaker recognition.";
+
+    svp::audio::SpeakerSegment seg;
+    seg.id = "speakerseg_000000";
+    seg.speaker_id = "speaker_0001";
+    seg.timing = {0, 30000000};
+    boundary.speaker_segments.push_back(std::move(seg));
+
+    svp::audio::write_transcript_artifacts(boundary, root);
+
+    std::ifstream input(root / "transcript/transcript.json");
+    const nlohmann::json transcript = nlohmann::json::parse(input);
+    assert(transcript["diarization"]["status"] == "fallback_one_speaker");
+    std::string note = transcript["diarization"]["note"];
+    assert(note.find("model is not available") != std::string::npos);
+    assert(note.find("not speaker recognition") != std::string::npos);
+    assert(transcript["diarization"]["blockers"].size() == 1);
+  }
+
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  // Case 2: model present but inference not wired
+  {
+    svp::audio::AsrExecutionBoundary boundary =
+        svp::audio::build_asr_execution_boundary(plan, true, true, true, true);
+    boundary.asr_status = svp::audio::AsrStatus::ran;
+    boundary.reconciled_words.push_back({"hello", 1000000, 1500000, 0.9, 0});
+    boundary.reconciled_word_count = 1;
+    boundary.speaker_count = 1;
+    boundary.one_speaker_mode = true;
+    boundary.diarization_status = "fallback_one_speaker";
+    boundary.diarization_blockers = {"sherpa-onnx diarization model inference is not yet wired; fallback one-speaker segment emitted"};
+    boundary.diarization_note = "One-speaker fallback used (sherpa-onnx diarization model inference is not yet wired; fallback one-speaker segment emitted). This is not speaker recognition.";
+
+    svp::audio::SpeakerSegment seg;
+    seg.id = "speakerseg_000000";
+    seg.speaker_id = "speaker_0001";
+    seg.timing = {0, 30000000};
+    boundary.speaker_segments.push_back(std::move(seg));
+
+    svp::audio::write_transcript_artifacts(boundary, root);
+
+    std::ifstream input(root / "transcript/transcript.json");
+    const nlohmann::json transcript = nlohmann::json::parse(input);
+    assert(transcript["diarization"]["status"] == "fallback_one_speaker");
+    std::string note = transcript["diarization"]["note"];
+    assert(note.find("inference is not yet wired") != std::string::npos);
+    assert(note.find("not speaker recognition") != std::string::npos);
+    // Must NOT say "model unavailable"
+    assert(note.find("model unavailable") == std::string::npos);
+  }
+
+  std::filesystem::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
@@ -1124,5 +1253,7 @@ int main() {
   test_diarization_boundary_json_serialization();
   test_transcript_writer_writes_speaker_segments_with_fallback();
   test_transcript_writer_blocked_includes_diarization_provenance();
+  test_blocked_asr_with_fallback_segments_does_not_create_dangling_speaker_segments();
+  test_fallback_provenance_distinguishes_model_missing_from_inference_not_wired();
   return 0;
 }

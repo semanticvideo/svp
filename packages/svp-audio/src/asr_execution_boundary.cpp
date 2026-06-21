@@ -351,6 +351,8 @@ nlohmann::json asr_execution_boundary_to_json(const AsrExecutionBoundary& bounda
       {"one_speaker_mode", boundary.one_speaker_mode},
       {"diarization_status", boundary.diarization_status},
       {"diarization_processor_id", boundary.diarization_processor_id},
+      {"diarization_note", boundary.diarization_note},
+      {"diarization_blockers", boundary.diarization_blockers},
       {"speaker_segments", segments_json},
       {"asr_limitations", asr_limitations},
       {"blockers", boundary.blockers},

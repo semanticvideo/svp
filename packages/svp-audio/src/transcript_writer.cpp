@@ -59,16 +59,29 @@ std::string word_id_for_ordinal(std::size_t ordinal) {
 }
 
 nlohmann::json diarization_provenance_json(const AsrExecutionBoundary& boundary) {
-  return {
+  std::string note;
+  if (boundary.diarization_status == "ran") {
+    note = "Diarization model ran and produced speaker segments.";
+  } else if (boundary.diarization_status == "fallback_one_speaker") {
+    note = boundary.diarization_note.empty()
+         ? "One-speaker fallback used. This is not speaker recognition."
+         : boundary.diarization_note;
+  } else {
+    note = boundary.diarization_note.empty()
+         ? "Diarization did not run."
+         : boundary.diarization_note;
+  }
+
+  nlohmann::json result = {
       {"status", boundary.diarization_status},
       {"processor_id", boundary.diarization_processor_id},
       {"one_speaker_fallback", boundary.diarization_status == "fallback_one_speaker"},
-      {"note", boundary.diarization_status == "fallback_one_speaker"
-           ? "Diarization model unavailable; one-speaker fallback used. This is not speaker recognition."
-           : boundary.diarization_status == "ran"
-             ? "Diarization model ran and produced speaker segments."
-             : "Diarization did not run."},
+      {"note", note},
   };
+  if (!boundary.diarization_blockers.empty()) {
+    result["blockers"] = boundary.diarization_blockers;
+  }
+  return result;
 }
 
 nlohmann::json blocked_transcript_json(const AsrExecutionBoundary& boundary) {
@@ -253,7 +266,9 @@ TranscriptWriteResult write_transcript_artifacts(const AsrExecutionBoundary& bou
   }
   result.speech_regions_written = true;
 
-  if (!boundary.speaker_segments.empty()) {
+  if (blocked) {
+    write_empty_jsonl(speaker_segments_path);
+  } else if (!boundary.speaker_segments.empty()) {
     std::vector<nlohmann::json> segment_records;
     for (const SpeakerSegment& seg : boundary.speaker_segments) {
       segment_records.push_back(speaker_segment_to_json(seg));

@@ -45,6 +45,8 @@ struct AsrExecutionBoundary {
   bool one_speaker_mode = true;
   std::string diarization_status = "unavailable";
   std::string diarization_processor_id = "proc_sherpa_diar_0001";
+  std::string diarization_note;
+  std::vector<std::string> diarization_blockers;
   std::vector<SpeakerSegment> speaker_segments;
   std::vector<AsrWord> reconciled_words;
 };

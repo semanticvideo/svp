@@ -399,14 +399,37 @@ int main(int argc, char** argv) {
         svp::audio::AsrExecutionBoundary asr_with_diar = executed_asr_boundary;
         asr_with_diar.diarization_status =
             svp::audio::diarization_status_to_string(diar_boundary.diarization_status);
-        asr_with_diar.speaker_segments = std::move(diar_boundary.speaker_segments);
+        asr_with_diar.diarization_blockers = diar_boundary.blockers;
         if (diar_boundary.diarization_status == svp::audio::DiarizationStatus::fallback_one_speaker) {
           asr_with_diar.one_speaker_mode = true;
           asr_with_diar.speaker_count = 1;
+          if (!diar_boundary.blockers.empty()) {
+            std::string note = "One-speaker fallback used (";
+            for (std::size_t i = 0; i < diar_boundary.blockers.size(); ++i) {
+              if (i > 0) note += "; ";
+              note += diar_boundary.blockers[i];
+            }
+            note += "). This is not speaker recognition.";
+            asr_with_diar.diarization_note = std::move(note);
+          } else {
+            asr_with_diar.diarization_note =
+                "One-speaker fallback used. This is not speaker recognition.";
+          }
         } else if (diar_boundary.diarization_status == svp::audio::DiarizationStatus::ran) {
           asr_with_diar.one_speaker_mode = false;
           asr_with_diar.speaker_count = diar_boundary.speaker_count;
+        } else {
+          if (!diar_boundary.blockers.empty()) {
+            std::string note = "Diarization did not run (";
+            for (std::size_t i = 0; i < diar_boundary.blockers.size(); ++i) {
+              if (i > 0) note += "; ";
+              note += diar_boundary.blockers[i];
+            }
+            note += ").";
+            asr_with_diar.diarization_note = std::move(note);
+          }
         }
+        asr_with_diar.speaker_segments = std::move(diar_boundary.speaker_segments);
 
         const svp::audio::TranscriptWriteResult transcript_result =
             svp::audio::write_transcript_artifacts(asr_with_diar, staging_dir);
