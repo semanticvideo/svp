@@ -66,7 +66,7 @@ AudioStagePlan build_audio_stage_plan(const std::filesystem::path& source_path,
     plan.blockers.push_back("VAD model runtime is not wired in this foundation pass");
   }
   plan.blockers.push_back("whisper.cpp transcription is not wired in this foundation pass");
-  plan.blockers.push_back("sherpa-onnx diarization is not wired in this foundation pass");
+  plan.blockers.push_back("sherpa-onnx diarization model inference is not wired; fallback one-speaker boundary is available");
 
   return plan;
 }

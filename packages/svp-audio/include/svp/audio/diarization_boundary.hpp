@@ -1,0 +1,61 @@
+#pragma once
+
+#include "svp/audio/asr_chunk_planner.hpp"
+#include "svp/audio/transcript_records.hpp"
+
+#include <cstddef>
+#include <filesystem>
+#include <nlohmann/json_fwd.hpp>
+#include <string>
+#include <vector>
+
+namespace svp::audio {
+
+enum class DiarizationStatus {
+  planned,
+  unavailable,
+  ran,
+  fallback_one_speaker,
+};
+
+struct DiarizationExecutionBoundary {
+  std::string processor_id = "proc_sherpa_diar_0001";
+  std::string model_id = "model_sherpa_onnx_diarization";
+  std::string runtime = "onnxruntime";
+  std::string execution_provider = "cpu";
+  std::string speaker_segments_output_ref = "transcript/speaker_segments.jsonl";
+  std::vector<std::string> blockers;
+  bool analysis_audio_available = false;
+  bool model_runtime_available = false;
+  bool model_available = false;
+  bool model_verified = false;
+  DiarizationStatus diarization_status = DiarizationStatus::planned;
+  std::size_t speaker_count = 0;
+  std::int64_t total_duration_us = 0;
+  std::vector<SpeakerSegment> speaker_segments;
+};
+
+[[nodiscard]] bool check_diarization_model_in_cache(
+    const std::string& model_id,
+    const std::filesystem::path& model_cache_root);
+
+[[nodiscard]] bool verify_diarization_model_files(
+    const std::string& model_id,
+    const std::filesystem::path& model_cache_root);
+
+[[nodiscard]] DiarizationExecutionBoundary build_diarization_boundary(
+    bool analysis_audio_available,
+    bool model_runtime_available,
+    bool model_available,
+    bool model_verified,
+    std::int64_t total_duration_us);
+
+[[nodiscard]] DiarizationExecutionBoundary execute_diarization_boundary(
+    DiarizationExecutionBoundary boundary);
+
+[[nodiscard]] std::string diarization_status_to_string(DiarizationStatus status);
+
+[[nodiscard]] nlohmann::json diarization_execution_boundary_to_json(
+    const DiarizationExecutionBoundary& boundary);
+
+}  // namespace svp::audio

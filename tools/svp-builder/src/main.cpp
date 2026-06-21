@@ -2,6 +2,7 @@
 #include "svp/audio/asr_execution_boundary.hpp"
 #include "svp/audio/audio_extraction_executor.hpp"
 #include "svp/audio/audio_stage_plan.hpp"
+#include "svp/audio/diarization_boundary.hpp"
 #include "svp/audio/transcript_writer.hpp"
 #include "svp/audio/vad_execution_boundary.hpp"
 #include "svp/core/version.hpp"
@@ -370,16 +371,59 @@ int main(int argc, char** argv) {
         const svp::audio::AsrExecutionBoundary executed_asr_boundary =
             svp::audio::execute_asr_boundary(asr_boundary, staging_dir, model_cache_root);
 
+        // Diarization boundary: check for diarization model in cache.
+        // If unavailable, honest fallback one-speaker segment is produced.
+        const bool diar_model_available =
+            svp::audio::check_diarization_model_in_cache(
+                "model_sherpa_onnx_diarization", model_cache_root);
+        const bool diar_model_verified =
+            diar_model_available &&
+            svp::audio::verify_diarization_model_files(
+                "model_sherpa_onnx_diarization", model_cache_root);
+
+        svp::audio::DiarizationExecutionBoundary diar_boundary =
+            svp::audio::build_diarization_boundary(
+                extraction_run.analysis_audio_written,
+                model_runtime_available,
+                diar_model_available,
+                diar_model_verified,
+                media_duration_us);
+        diar_boundary = svp::audio::execute_diarization_boundary(std::move(diar_boundary));
+
+        // Serialize diarization boundary before moving segments out.
+        audio_json["diarization_execution_boundary"] =
+            svp::audio::diarization_execution_boundary_to_json(diar_boundary);
+
+        // Feed diarization results into the ASR boundary so transcript
+        // artifacts carry diarization status and speaker segments.
+        svp::audio::AsrExecutionBoundary asr_with_diar = executed_asr_boundary;
+        asr_with_diar.diarization_status =
+            svp::audio::diarization_status_to_string(diar_boundary.diarization_status);
+        asr_with_diar.speaker_segments = std::move(diar_boundary.speaker_segments);
+        if (diar_boundary.diarization_status == svp::audio::DiarizationStatus::fallback_one_speaker) {
+          asr_with_diar.one_speaker_mode = true;
+          asr_with_diar.speaker_count = 1;
+        } else if (diar_boundary.diarization_status == svp::audio::DiarizationStatus::ran) {
+          asr_with_diar.one_speaker_mode = false;
+          asr_with_diar.speaker_count = diar_boundary.speaker_count;
+        }
+
         const svp::audio::TranscriptWriteResult transcript_result =
-            svp::audio::write_transcript_artifacts(executed_asr_boundary, staging_dir);
+            svp::audio::write_transcript_artifacts(asr_with_diar, staging_dir);
 
         audio_json["asr_chunk_plan"] =
-            svp::audio::asr_chunk_plan_to_json(executed_asr_boundary.chunk_plan);
+            svp::audio::asr_chunk_plan_to_json(asr_with_diar.chunk_plan);
         audio_json["asr_execution_boundary"] =
-            svp::audio::asr_execution_boundary_to_json(executed_asr_boundary);
+            svp::audio::asr_execution_boundary_to_json(asr_with_diar);
         audio_json["transcript_write_result"] =
             svp::audio::transcript_write_result_to_json(transcript_result);
-        for (const std::string& blocker : executed_asr_boundary.blockers) {
+        for (const std::string& blocker : asr_with_diar.blockers) {
+          if (std::find(audio_json["blockers"].begin(), audio_json["blockers"].end(),
+                        blocker) == audio_json["blockers"].end()) {
+            audio_json["blockers"].push_back(blocker);
+          }
+        }
+        for (const std::string& blocker : diar_boundary.blockers) {
           if (std::find(audio_json["blockers"].begin(), audio_json["blockers"].end(),
                         blocker) == audio_json["blockers"].end()) {
             audio_json["blockers"].push_back(blocker);

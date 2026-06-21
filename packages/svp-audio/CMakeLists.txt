@@ -13,6 +13,7 @@ add_library(svp-audio
   src/audio_extraction_executor.cpp
   src/audio_extraction_plan.cpp
   src/audio_stage_plan.cpp
+  src/diarization_boundary.cpp
   src/transcript_records.cpp
   src/transcript_writer.cpp
   src/vad_execution_boundary.cpp

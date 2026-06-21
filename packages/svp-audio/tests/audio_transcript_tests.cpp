@@ -2,6 +2,7 @@
 #include "svp/audio/asr_execution_boundary.hpp"
 #include "svp/audio/audio_extraction_executor.hpp"
 #include "svp/audio/audio_stage_plan.hpp"
+#include "svp/audio/diarization_boundary.hpp"
 #include "svp/audio/transcript_records.hpp"
 #include "svp/audio/transcript_writer.hpp"
 #include "svp/audio/vad_execution_boundary.hpp"
@@ -932,6 +933,159 @@ void test_whisper_inference_blocks_when_model_dir_missing() {
   std::filesystem::remove_all(fake_dir);
 }
 
+void test_diarization_boundary_fallback_when_model_unavailable() {
+  svp::audio::DiarizationExecutionBoundary boundary =
+      svp::audio::build_diarization_boundary(
+          true, true, false, false, 30000000);
+  assert(boundary.diarization_status == svp::audio::DiarizationStatus::unavailable);
+  assert(!boundary.blockers.empty());
+
+  const svp::audio::DiarizationExecutionBoundary executed =
+      svp::audio::execute_diarization_boundary(std::move(boundary));
+  assert(executed.diarization_status == svp::audio::DiarizationStatus::fallback_one_speaker);
+  assert(executed.speaker_count == 1);
+  assert(executed.speaker_segments.size() == 1);
+  assert(executed.speaker_segments[0].speaker_id == "speaker_0001");
+  assert(executed.speaker_segments[0].timing.start_us == 0);
+  assert(executed.speaker_segments[0].timing.end_us == 30000000);
+  assert(executed.speaker_segments[0].overlap == false);
+}
+
+void test_diarization_boundary_unavailable_when_no_audio() {
+  svp::audio::DiarizationExecutionBoundary boundary =
+      svp::audio::build_diarization_boundary(
+          false, false, false, false, 0);
+  assert(boundary.diarization_status == svp::audio::DiarizationStatus::unavailable);
+
+  const svp::audio::DiarizationExecutionBoundary executed =
+      svp::audio::execute_diarization_boundary(std::move(boundary));
+  assert(executed.diarization_status == svp::audio::DiarizationStatus::unavailable);
+  assert(executed.speaker_segments.empty());
+  assert(executed.speaker_count == 0);
+}
+
+void test_diarization_boundary_json_serialization() {
+  svp::audio::DiarizationExecutionBoundary boundary =
+      svp::audio::build_diarization_boundary(
+          true, true, false, false, 30000000);
+  boundary = svp::audio::execute_diarization_boundary(std::move(boundary));
+  const nlohmann::json json =
+      svp::audio::diarization_execution_boundary_to_json(boundary);
+
+  assert(json["diarization_status"] == "fallback_one_speaker");
+  assert(json["speaker_count"] == 1);
+  assert(json["speaker_segments"].size() == 1);
+  assert(json["speaker_segments"][0]["speaker_id"] == "speaker_0001");
+  assert(json["speaker_segments"][0]["start_us"] == 0);
+  assert(json["speaker_segments"][0]["end_us"] == 30000000);
+  assert(json["speaker_segments"][0]["overlap"] == false);
+}
+
+void test_transcript_writer_writes_speaker_segments_with_fallback() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-diar-transcript-fallback-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  svp::audio::AsrExecutionBoundary boundary =
+      svp::audio::build_asr_execution_boundary(plan, true, true, true, true);
+  boundary.asr_status = svp::audio::AsrStatus::ran;
+  boundary.reconciled_words.push_back({"hello", 1000000, 1500000, 0.9, 0});
+  boundary.reconciled_word_count = 1;
+  boundary.speaker_count = 1;
+  boundary.one_speaker_mode = true;
+  boundary.diarization_status = "fallback_one_speaker";
+
+  svp::audio::SpeakerSegment fallback_segment;
+  fallback_segment.id = "speakerseg_000000";
+  fallback_segment.speaker_id = "speaker_0001";
+  fallback_segment.timing = {0, 30000000};
+  fallback_segment.confidence = 0.0;
+  fallback_segment.overlap = false;
+  boundary.speaker_segments.push_back(std::move(fallback_segment));
+
+  const svp::audio::TranscriptWriteResult result =
+      svp::audio::write_transcript_artifacts(boundary, root);
+
+  assert(result.transcript_written);
+  assert(result.words_written);
+  assert(result.speakers_written);
+  assert(result.speaker_segments_written);
+  assert(result.word_count == 1);
+  assert(result.speaker_count == 1);
+
+  {
+    std::ifstream input(root / "transcript/transcript.json");
+    const nlohmann::json transcript = nlohmann::json::parse(input);
+    assert(transcript["diarization"]["status"] == "fallback_one_speaker");
+    assert(transcript["diarization"]["one_speaker_fallback"] == true);
+    assert(transcript["asr_limitations"]["speaker_mode"] == "one_speaker_fallback");
+  }
+
+  {
+    std::ifstream input(root / "transcript/words.jsonl");
+    std::string line;
+    std::getline(input, line);
+    const nlohmann::json word = nlohmann::json::parse(line);
+    assert(word["speaker_id"] == "speaker_0001");
+  }
+
+  {
+    std::ifstream input(root / "transcript/speakers.jsonl");
+    std::string line;
+    std::getline(input, line);
+    const nlohmann::json speaker = nlohmann::json::parse(line);
+    assert(speaker["id"] == "speaker_0001");
+    assert(speaker["diarization_status"] == "fallback_one_speaker");
+  }
+
+  {
+    std::ifstream input(root / "transcript/speaker_segments.jsonl");
+    std::string line;
+    std::getline(input, line);
+    const nlohmann::json seg = nlohmann::json::parse(line);
+    assert(seg["id"] == "speakerseg_000000");
+    assert(seg["speaker_id"] == "speaker_0001");
+    assert(seg["start_us"] == 0);
+    assert(seg["end_us"] == 30000000);
+    assert(seg["overlap"] == false);
+  }
+
+  std::filesystem::remove_all(root);
+}
+
+void test_transcript_writer_blocked_includes_diarization_provenance() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-diar-transcript-blocked-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  svp::audio::AsrExecutionBoundary boundary =
+      svp::audio::build_asr_execution_boundary(plan, true, false, false, false);
+  boundary.diarization_status = "unavailable";
+
+  const svp::audio::TranscriptWriteResult result =
+      svp::audio::write_transcript_artifacts(boundary, root);
+
+  assert(result.transcript_written);
+  assert(result.transcript_status == "blocked");
+
+  {
+    std::ifstream input(root / "transcript/transcript.json");
+    const nlohmann::json transcript = nlohmann::json::parse(input);
+    assert(transcript["diarization"]["status"] == "unavailable");
+    assert(transcript["diarization"]["one_speaker_fallback"] == false);
+  }
+
+  std::filesystem::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
@@ -965,5 +1119,10 @@ int main() {
   test_transcript_writer_produces_honest_zero_duration_absence();
   test_whisper_runtime_available_reports_honestly();
   test_whisper_inference_blocks_when_model_dir_missing();
+  test_diarization_boundary_fallback_when_model_unavailable();
+  test_diarization_boundary_unavailable_when_no_audio();
+  test_diarization_boundary_json_serialization();
+  test_transcript_writer_writes_speaker_segments_with_fallback();
+  test_transcript_writer_blocked_includes_diarization_provenance();
   return 0;
 }

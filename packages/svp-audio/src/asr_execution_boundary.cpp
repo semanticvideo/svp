@@ -320,6 +320,11 @@ nlohmann::json asr_execution_boundary_to_json(const AsrExecutionBoundary& bounda
       {"speaker_mode", "one_speaker_fallback"},
   };
 
+  nlohmann::json segments_json = nlohmann::json::array();
+  for (const SpeakerSegment& seg : boundary.speaker_segments) {
+    segments_json.push_back(speaker_segment_to_json(seg));
+  }
+
   return {
       {"processor_id", boundary.processor_id},
       {"model_id", boundary.model_id},
@@ -344,6 +349,9 @@ nlohmann::json asr_execution_boundary_to_json(const AsrExecutionBoundary& bounda
       {"reconciled_word_count", boundary.reconciled_word_count},
       {"speaker_count", boundary.speaker_count},
       {"one_speaker_mode", boundary.one_speaker_mode},
+      {"diarization_status", boundary.diarization_status},
+      {"diarization_processor_id", boundary.diarization_processor_id},
+      {"speaker_segments", segments_json},
       {"asr_limitations", asr_limitations},
       {"blockers", boundary.blockers},
       {"chunk_plan", asr_chunk_plan_to_json(boundary.chunk_plan)},
