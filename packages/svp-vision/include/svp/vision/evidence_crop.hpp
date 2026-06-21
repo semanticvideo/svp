@@ -27,13 +27,50 @@ struct EvidenceCropRecord {
   int original_bbox_right = 0;
   int original_bbox_bottom = 0;
 
-  // Crop bbox (may be expanded from original for context)
+  // Crop bbox in OCR-frame space (after margin expansion, before scaling)
+  int crop_bbox_ocr_left = 0;
+  int crop_bbox_ocr_top = 0;
+  int crop_bbox_ocr_right = 0;
+  int crop_bbox_ocr_bottom = 0;
+
+  // Crop bbox in source-frame space (after coordinate transform)
   int crop_bbox_left = 0;
   int crop_bbox_top = 0;
   int crop_bbox_right = 0;
   int crop_bbox_bottom = 0;
 
-  // Source frame dimensions
+  // OCR frame dimensions (resolution at which OCR was run)
+  int ocr_frame_width = 0;
+  int ocr_frame_height = 0;
+
+  // Source frame dimensions (original video resolution)
+  int source_frame_width = 0;
+  int source_frame_height = 0;
+
+  // Canonical raster dimensions (normalized bbox_px coordinate space)
+  int canonical_raster_width = 0;
+  int canonical_raster_height = 0;
+
+  // Coordinate space of original_bbox: "ocr_frame"
+  std::string bbox_coordinate_space;
+
+  // Scale factor applied to transform from OCR-frame to source-frame
+  double transform_scale_x = 1.0;
+  double transform_scale_y = 1.0;
+
+  // Crop extraction method (e.g. "ffmpeg_crop_scaled_to_source")
+  std::string crop_extraction_method;
+
+  // Evidence quality: "strong", "weak", "unsupported", "not_checked"
+  std::string evidence_quality;
+  std::string evidence_quality_reason;
+
+  // ROI OCR re-read result on the saved crop
+  std::string roi_ocr_text;
+  double roi_ocr_confidence = 0.0;
+  int roi_ocr_word_count = 0;
+
+  // Legacy alias for OCR frame dimensions (backward compat)
   int frame_width = 0;
   int frame_height = 0;
 
@@ -76,6 +113,14 @@ struct EvidenceCropOptions {
   int ocr_frame_width = 0;
   int ocr_frame_height = 0;
 
+  // Source video resolution (for coordinate transform)
+  int source_frame_width = 0;
+  int source_frame_height = 0;
+
+  // Canonical raster dimensions (for metadata auditing)
+  int canonical_raster_width = 0;
+  int canonical_raster_height = 0;
+
   // Maximum total number of crops across all regions
   std::size_t max_total_crops = 50;
 
@@ -113,6 +158,8 @@ struct CropGenerationInput {
   int frame_width = 0, frame_height = 0;
   double confidence = 0.0;
   int detection_count = 1;
+  // The observation's raw text, used for evidence quality self-check
+  std::string observation_raw_text;
 };
 
 [[nodiscard]] nlohmann::json evidence_crop_to_json(const EvidenceCropRecord& record);
