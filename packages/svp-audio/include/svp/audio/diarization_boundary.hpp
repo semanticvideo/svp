@@ -5,7 +5,7 @@
 
 #include <cstddef>
 #include <filesystem>
-#include <nlohmann/json_fwd.hpp>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
@@ -33,6 +33,10 @@ struct DiarizationExecutionBoundary {
   std::size_t speaker_count = 0;
   std::int64_t total_duration_us = 0;
   std::vector<SpeakerSegment> speaker_segments;
+  std::string reconciliation_method;
+  int32_t preliminary_cluster_count = 0;
+  nlohmann::json pairwise_similarity_matrix_json = nullptr;
+  nlohmann::json merge_decisions_json = nullptr;
 };
 
 [[nodiscard]] bool check_diarization_model_in_cache(
@@ -51,7 +55,9 @@ struct DiarizationExecutionBoundary {
     std::int64_t total_duration_us);
 
 [[nodiscard]] DiarizationExecutionBoundary execute_diarization_boundary(
-    DiarizationExecutionBoundary boundary);
+    DiarizationExecutionBoundary boundary,
+    const std::filesystem::path& staging_root,
+    const std::filesystem::path& model_cache_root);
 
 [[nodiscard]] std::string diarization_status_to_string(DiarizationStatus status);
 

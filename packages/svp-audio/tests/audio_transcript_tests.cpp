@@ -947,7 +947,7 @@ void test_diarization_boundary_fallback_when_model_unavailable() {
   assert(!boundary.blockers.empty());
 
   const svp::audio::DiarizationExecutionBoundary executed =
-      svp::audio::execute_diarization_boundary(std::move(boundary));
+      svp::audio::execute_diarization_boundary(std::move(boundary), "", "");
   assert(executed.diarization_status == svp::audio::DiarizationStatus::fallback_one_speaker);
   assert(executed.speaker_count == 1);
   assert(executed.speaker_segments.size() == 1);
@@ -964,7 +964,7 @@ void test_diarization_boundary_unavailable_when_no_audio() {
   assert(boundary.diarization_status == svp::audio::DiarizationStatus::unavailable);
 
   const svp::audio::DiarizationExecutionBoundary executed =
-      svp::audio::execute_diarization_boundary(std::move(boundary));
+      svp::audio::execute_diarization_boundary(std::move(boundary), "", "");
   assert(executed.diarization_status == svp::audio::DiarizationStatus::unavailable);
   assert(executed.speaker_segments.empty());
   assert(executed.speaker_count == 0);
@@ -974,7 +974,7 @@ void test_diarization_boundary_json_serialization() {
   svp::audio::DiarizationExecutionBoundary boundary =
       svp::audio::build_diarization_boundary(
           true, true, false, false, 30000000);
-  boundary = svp::audio::execute_diarization_boundary(std::move(boundary));
+  boundary = svp::audio::execute_diarization_boundary(std::move(boundary), "", "");
   const nlohmann::json json =
       svp::audio::diarization_execution_boundary_to_json(boundary);
 

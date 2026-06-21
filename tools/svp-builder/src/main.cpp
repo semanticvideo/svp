@@ -388,7 +388,8 @@ int main(int argc, char** argv) {
                 diar_model_available,
                 diar_model_verified,
                 media_duration_us);
-        diar_boundary = svp::audio::execute_diarization_boundary(std::move(diar_boundary));
+        diar_boundary = svp::audio::execute_diarization_boundary(
+            std::move(diar_boundary), staging_dir, model_cache_root);
 
         // Serialize diarization boundary before moving segments out.
         audio_json["diarization_execution_boundary"] =
