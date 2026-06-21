@@ -1,7 +1,11 @@
+#include "svp/audio/asr_chunk_planner.hpp"
+#include "svp/audio/asr_execution_boundary.hpp"
 #include "svp/audio/audio_extraction_executor.hpp"
 #include "svp/audio/audio_stage_plan.hpp"
+#include "svp/audio/transcript_writer.hpp"
 #include "svp/audio/vad_execution_boundary.hpp"
 #include "svp/core/version.hpp"
+#include "svp/media/canonical_timing.hpp"
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/models/runtime.hpp"
 #include "svp/vision/canonical_frame_input.hpp"
@@ -324,6 +328,59 @@ int main(int argc, char** argv) {
         }
         audio_json["vad_execution_boundary"] =
             svp::audio::vad_execution_boundary_to_json(executed_boundary);
+
+        std::int64_t media_duration_us = 0;
+        if (plan.probe.container_timing.has_value() &&
+            plan.probe.container_timing->duration_pts.has_value()) {
+          media_duration_us = svp::media::pts_to_microseconds(
+              *plan.probe.container_timing->duration_pts,
+              plan.probe.container_timing->timebase);
+        } else if (!plan.probe.audio_streams.empty() &&
+                   plan.probe.audio_streams.front().timing.duration_pts.has_value()) {
+          media_duration_us = svp::media::pts_to_microseconds(
+              *plan.probe.audio_streams.front().timing.duration_pts,
+              plan.probe.audio_streams.front().timing.timebase);
+        }
+
+        const svp::audio::AsrChunkPlanResult asr_chunk_plan =
+            svp::audio::build_asr_chunk_plan(media_duration_us);
+
+        const std::filesystem::path model_cache_root =
+            build_model_cache_dir.empty()
+                ? std::filesystem::path{}
+                : std::filesystem::path(build_model_cache_dir);
+
+        const bool asr_model_available =
+            !model_cache_root.empty() &&
+            std::filesystem::exists(model_cache_root / "model_whisper_large_v3_turbo_q5_0");
+
+        const svp::audio::AsrExecutionBoundary asr_boundary =
+            svp::audio::build_asr_execution_boundary(
+                asr_chunk_plan,
+                extraction_run.analysis_audio_written,
+                model_runtime_available,
+                asr_model_available,
+                asr_model_available);
+
+        const svp::audio::AsrExecutionBoundary executed_asr_boundary =
+            svp::audio::execute_asr_boundary(asr_boundary, staging_dir, model_cache_root);
+
+        const svp::audio::TranscriptWriteResult transcript_result =
+            svp::audio::write_transcript_artifacts(executed_asr_boundary, staging_dir);
+
+        audio_json["asr_chunk_plan"] =
+            svp::audio::asr_chunk_plan_to_json(executed_asr_boundary.chunk_plan);
+        audio_json["asr_execution_boundary"] =
+            svp::audio::asr_execution_boundary_to_json(executed_asr_boundary);
+        audio_json["transcript_write_result"] =
+            svp::audio::transcript_write_result_to_json(transcript_result);
+        for (const std::string& blocker : executed_asr_boundary.blockers) {
+          if (std::find(audio_json["blockers"].begin(), audio_json["blockers"].end(),
+                        blocker) == audio_json["blockers"].end()) {
+            audio_json["blockers"].push_back(blocker);
+          }
+        }
+
         output["audio_foundation"] = audio_json;
       }
 
@@ -562,6 +619,19 @@ int main(int argc, char** argv) {
 
       if (stop_after == "audio") {
         std::cout << "Audio task plan only; no transcription or diarization was generated.\n";
+        if (output.contains("audio_foundation") &&
+            output["audio_foundation"].contains("asr_execution_boundary")) {
+          const auto& asr = output["audio_foundation"]["asr_execution_boundary"];
+          std::cout << "ASR status: " << asr["asr_status"] << "\n";
+          std::cout << "ASR chunk count: " << asr["chunk_plan"]["chunk_count"] << "\n";
+          std::cout << "ASR model available: " << asr["model_available"] << "\n";
+          if (output["audio_foundation"].contains("transcript_write_result")) {
+            const auto& twr = output["audio_foundation"]["transcript_write_result"];
+            std::cout << "Transcript written: " << twr["transcript_written"] << "\n";
+            std::cout << "Words written: " << twr["word_count"] << " words\n";
+            std::cout << "Speakers written: " << twr["speaker_count"] << " speakers\n";
+          }
+        }
       }
       if (stop_after == "vision-plan") {
         std::cout << "Vision/OCR/color task plan only; no observations were generated.\n";

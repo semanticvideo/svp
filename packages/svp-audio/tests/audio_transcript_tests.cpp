@@ -1,6 +1,9 @@
+#include "svp/audio/asr_chunk_planner.hpp"
+#include "svp/audio/asr_execution_boundary.hpp"
 #include "svp/audio/audio_extraction_executor.hpp"
 #include "svp/audio/audio_stage_plan.hpp"
 #include "svp/audio/transcript_records.hpp"
+#include "svp/audio/transcript_writer.hpp"
 #include "svp/audio/vad_execution_boundary.hpp"
 #include "svp/audio/vad_task_plan.hpp"
 #include "svp/audio/waveform_envelope.hpp"
@@ -496,11 +499,259 @@ void test_execute_vad_boundary_handles_runtime_unavailable_honestly() {
     bool found_error = false;
     for (const auto& blocker : result.blockers) {
       if (blocker.find("runtime_unavailable") != std::string::npos ||
-          blocker.find("support is not configured") != std::string::npos) {
+          blocker.find("support is not configured") != std::string::npos ||
+          blocker.find("missing_model") != std::string::npos ||
+          blocker.find("No ONNX model file") != std::string::npos) {
         found_error = true;
       }
     }
     assert(found_error);
+  }
+
+  std::filesystem::remove_all(root);
+}
+
+void test_asr_chunk_plan_produces_correct_overlapping_chunks() {
+  const svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(65000000, 30000000, 5000000);
+  const nlohmann::json encoded = svp::audio::asr_chunk_plan_to_json(plan);
+
+  assert(encoded["chunk_count"] == 3);
+  assert(encoded["chunk_duration_us"] == 30000000);
+  assert(encoded["overlap_us"] == 5000000);
+  assert(encoded["total_duration_us"] == 65000000);
+
+  assert(plan.chunks.size() == 3);
+  assert(plan.chunks[0].source_start_us == 0);
+  assert(plan.chunks[0].source_end_us == 30000000);
+  assert(plan.chunks[0].overlap_before_us == 0);
+  assert(plan.chunks[0].overlap_after_us == 5000000);
+  assert(plan.chunks[0].chunk_id == "asr_chunk_000000");
+  assert(plan.chunks[0].output_ref == "transcript/words.chunk_000000.jsonl");
+
+  assert(plan.chunks[1].source_start_us == 25000000);
+  assert(plan.chunks[1].source_end_us == 55000000);
+  assert(plan.chunks[1].overlap_before_us == 5000000);
+  assert(plan.chunks[1].overlap_after_us == 5000000);
+
+  assert(plan.chunks[2].source_start_us == 50000000);
+  assert(plan.chunks[2].source_end_us == 65000000);
+  assert(plan.chunks[2].overlap_before_us == 5000000);
+  assert(plan.chunks[2].overlap_after_us == 0);
+}
+
+void test_asr_chunk_plan_zero_duration_produces_no_chunks() {
+  const svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(0, 30000000, 5000000);
+  assert(plan.chunks.empty());
+}
+
+void test_asr_chunk_plan_rejects_bad_parameters() {
+  bool threw = false;
+  try {
+    (void)svp::audio::build_asr_chunk_plan(-1, 30000000, 5000000);
+  } catch (const std::invalid_argument&) {
+    threw = true;
+  }
+  assert(threw);
+
+  threw = false;
+  try {
+    (void)svp::audio::build_asr_chunk_plan(1000000, 0, 5000000);
+  } catch (const std::invalid_argument&) {
+    threw = true;
+  }
+  assert(threw);
+
+  threw = false;
+  try {
+    (void)svp::audio::build_asr_chunk_plan(1000000, 30000000, 30000000);
+  } catch (const std::invalid_argument&) {
+    threw = true;
+  }
+  assert(threw);
+}
+
+void test_asr_chunk_plan_exact_multiple_has_no_trailing_chunk() {
+  const svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(60000000, 30000000, 0);
+  assert(plan.chunks.size() == 2);
+  assert(plan.chunks[0].source_start_us == 0);
+  assert(plan.chunks[0].source_end_us == 30000000);
+  assert(plan.chunks[1].source_start_us == 30000000);
+  assert(plan.chunks[1].source_end_us == 60000000);
+  assert(plan.chunks[1].overlap_before_us == 0);
+  assert(plan.chunks[1].overlap_after_us == 0);
+}
+
+void test_overlap_reconciliation_deduplicates_boundary_words() {
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+  assert(plan.chunks.size() == 2);
+
+  std::vector<std::vector<svp::audio::AsrWord>> chunk_words(2);
+
+  chunk_words[0].push_back({"hello", 1000000, 1500000, 0.9, 0});
+  chunk_words[0].push_back({"world", 16000000, 16500000, 0.9, 0});
+  chunk_words[0].push_back({"overlap_word", 17000000, 17500000, 0.85, 0});
+
+  chunk_words[1].push_back({"overlap_word", 17000000 - 15000000, 17500000 - 15000000, 0.85, 1});
+  chunk_words[1].push_back({"final", 25000000 - 15000000, 26000000 - 15000000, 0.9, 1});
+
+  std::vector<svp::audio::AsrWord> reconciled =
+      svp::audio::reconcile_overlapping_chunks(chunk_words, plan.chunks);
+
+  assert(reconciled.size() == 4);
+  assert(reconciled[0].text == "hello");
+  assert(reconciled[0].start_us == 1000000);
+  assert(reconciled[1].text == "world");
+  assert(reconciled[1].start_us == 16000000);
+  assert(reconciled[2].text == "overlap_word");
+  assert(reconciled[2].start_us == 17000000);
+  assert(reconciled[3].text == "final");
+  assert(reconciled[3].start_us == 25000000);
+}
+
+void test_overlap_reconciliation_empty_chunks() {
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+  std::vector<std::vector<svp::audio::AsrWord>> chunk_words(2);
+  std::vector<svp::audio::AsrWord> reconciled =
+      svp::audio::reconcile_overlapping_chunks(chunk_words, plan.chunks);
+  assert(reconciled.empty());
+}
+
+void test_asr_execution_boundary_blocked_when_model_missing() {
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  svp::audio::AsrExecutionBoundary boundary =
+      svp::audio::build_asr_execution_boundary(plan, true, true, false, false);
+  const nlohmann::json encoded =
+      svp::audio::asr_execution_boundary_to_json(boundary);
+
+  assert(encoded["asr_status"] == "blocked");
+  assert(encoded["analysis_audio_available"] == true);
+  assert(encoded["model_runtime_available"] == true);
+  assert(encoded["model_available"] == false);
+  assert(encoded["model_verified"] == false);
+  assert(!encoded["blockers"].empty());
+}
+
+void test_asr_execution_boundary_blocked_when_runtime_missing() {
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  svp::audio::AsrExecutionBoundary boundary =
+      svp::audio::build_asr_execution_boundary(plan, true, false, false, false);
+  assert(boundary.asr_status == svp::audio::AsrStatus::blocked);
+  assert(!boundary.blockers.empty());
+}
+
+void test_asr_execution_boundary_planned_when_all_available() {
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  svp::audio::AsrExecutionBoundary boundary =
+      svp::audio::build_asr_execution_boundary(plan, true, true, true, true);
+  assert(boundary.asr_status == svp::audio::AsrStatus::planned);
+  assert(boundary.blockers.empty());
+}
+
+void test_transcript_writer_produces_honest_blocked_absence() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-asr-transcript-blocked-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  svp::audio::AsrExecutionBoundary boundary =
+      svp::audio::build_asr_execution_boundary(plan, true, false, false, false);
+
+  const svp::audio::TranscriptWriteResult result =
+      svp::audio::write_transcript_artifacts(boundary, root);
+  const nlohmann::json encoded =
+      svp::audio::transcript_write_result_to_json(result);
+
+  assert(encoded["transcript_written"] == true);
+  assert(encoded["words_written"] == true);
+  assert(encoded["speakers_written"] == true);
+  assert(encoded["chunk_provenance_written"] == true);
+  assert(encoded["word_count"] == 0);
+  assert(encoded["speaker_count"] == 0);
+  assert(encoded["transcript_status"] == "blocked");
+
+  assert(std::filesystem::exists(root / "transcript/transcript.json"));
+  assert(std::filesystem::exists(root / "transcript/words.jsonl"));
+  assert(std::filesystem::exists(root / "transcript/speakers.jsonl"));
+  assert(std::filesystem::exists(root / "transcript/asr_chunk_provenance.jsonl"));
+
+  {
+    std::ifstream input(root / "transcript/transcript.json");
+    const nlohmann::json transcript = nlohmann::json::parse(input);
+    assert(transcript["language"]["primary"] == "und");
+    assert(transcript["language"]["mode"] == "undetermined");
+    assert(transcript["word_count"] == 0);
+    assert(transcript["speaker_count"] == 0);
+    assert(transcript["asr_status"] == "blocked");
+  }
+
+  {
+    std::ifstream input(root / "transcript/words.jsonl");
+    std::string line;
+    assert(!std::getline(input, line));
+  }
+
+  {
+    std::ifstream input(root / "transcript/asr_chunk_provenance.jsonl");
+    std::string line;
+    int count = 0;
+    while (std::getline(input, line)) {
+      const nlohmann::json record = nlohmann::json::parse(line);
+      assert(record["asr_status"] == "blocked");
+      assert(record["chunk_id"].get<std::string>().substr(0, 10) == "asr_chunk_");
+      ++count;
+    }
+    assert(count == 2);
+  }
+
+  std::filesystem::remove_all(root);
+}
+
+void test_transcript_writer_produces_honest_zero_duration_absence() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-asr-transcript-zero-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(0, 30000000, 5000000);
+
+  svp::audio::AsrExecutionBoundary boundary =
+      svp::audio::build_asr_execution_boundary(plan, false, false, false, false);
+
+  const svp::audio::TranscriptWriteResult result =
+      svp::audio::write_transcript_artifacts(boundary, root);
+
+  assert(result.transcript_written);
+  assert(result.words_written);
+  assert(result.speakers_written);
+  assert(result.chunk_provenance_written);
+  assert(result.word_count == 0);
+
+  {
+    std::ifstream input(root / "transcript/transcript.json");
+    const nlohmann::json transcript = nlohmann::json::parse(input);
+    assert(transcript["word_count"] == 0);
+    assert(transcript["duration_us"] == 0);
+  }
+
+  {
+    std::ifstream input(root / "transcript/asr_chunk_provenance.jsonl");
+    std::string line;
+    assert(!std::getline(input, line));
   }
 
   std::filesystem::remove_all(root);
@@ -521,5 +772,16 @@ int main() {
   test_vad_task_plan_uses_stable_thirty_second_boundaries();
   test_vad_execution_boundary_preserves_honest_unrun_state();
   test_execute_vad_boundary_handles_runtime_unavailable_honestly();
+  test_asr_chunk_plan_produces_correct_overlapping_chunks();
+  test_asr_chunk_plan_zero_duration_produces_no_chunks();
+  test_asr_chunk_plan_rejects_bad_parameters();
+  test_asr_chunk_plan_exact_multiple_has_no_trailing_chunk();
+  test_overlap_reconciliation_deduplicates_boundary_words();
+  test_overlap_reconciliation_empty_chunks();
+  test_asr_execution_boundary_blocked_when_model_missing();
+  test_asr_execution_boundary_blocked_when_runtime_missing();
+  test_asr_execution_boundary_planned_when_all_available();
+  test_transcript_writer_produces_honest_blocked_absence();
+  test_transcript_writer_produces_honest_zero_duration_absence();
   return 0;
 }
