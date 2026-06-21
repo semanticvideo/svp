@@ -506,6 +506,9 @@
       <div class="note warning">
         <strong>File responsibility guardrail:</strong> line count is a signal, not the real rule. Files should be easy to reason through and have one clear responsibility. Split code into packages, tools, formatters, parsers, report models, readers, writers, and policies according to ownership. Do not create new god files while building the foundation.
       </div>
+      <div class="note danger">
+        <strong>No magic-number fixes:</strong> agents must not patch trial failures with unexplained literals, fixed frame counts, sample timestamps, source filenames, expected text, crop coordinates, or one-off thresholds. Coverage-sensitive behavior such as OCR sampling must define a named policy, record its limits in provenance, and include tests for the general case.
+      </div>
       <div class="timeline">
         <div class="step">
           <h3>Orchestrator Selects The Next Phase</h3>
@@ -541,6 +544,8 @@
         <li>No unrelated cleanup or later-phase implementation.</li>
         <li>Clear file ownership with no new god files.</li>
         <li>Updated docs only when behavior or usage changed.</li>
+        <li>No hard-coded sample-specific constants, timestamps, filenames, expected text, or unexplained thresholds in correctness paths.</li>
+        <li>Named coverage contracts and provenance for sampling, timing, limits, confidence, and other behavior that can miss observations.</li>
         <li>Relevant verification output, or a clear reason verification could not run.</li>
         <li>Honest status of partial or incomplete outputs.</li>
         <li>A final handoff comment containing summary of changes, files changed, verification performed, known limitations, and next recommended task.</li>
@@ -608,6 +613,8 @@
         <li>Whether changed behavior had adequate proof.</li>
         <li>Whether shared contracts were modified safely.</li>
         <li>Whether any god-file or mixed-responsibility risk was introduced.</li>
+        <li>Whether any magic number, one-off threshold, sample-specific timestamp, expected text, filename, or crop coordinate was introduced to make a trial pass.</li>
+        <li>Whether coverage-sensitive behavior has a named policy, tests, and provenance limitations.</li>
         <li>Exact required changes if not approved.</li>
         <li>Next recommended task for the orchestrator.</li>
       </ul>

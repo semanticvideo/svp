@@ -61,6 +61,22 @@ If a phase includes code, it is not done unless the relevant build command was r
 
 Each phase should produce clean commits. Avoid one giant all-purpose commit.
 
+## No magic-number fixes
+
+Do not solve a bug by adding a literal number, timestamp, filename, expected text value, sample count, threshold, or crop coordinate that only works for the current sample.
+
+If a number controls correctness, sampling, coverage, timing, validation, runtime limits, confidence, or model identity, it needs:
+
+- a clear name,
+- a single owner,
+- a reason,
+- tests for the general behavior,
+- and provenance or diagnostics when it limits what SVP can observe.
+
+For temporal media, define coverage. A fixed number of frames is not enough. State the sample cadence, maximum gap, cap behavior, and what duration of event may be missed.
+
+Reviewers should flag unexplained literals or sample-specific behavior as findings.
+
 ## Protect shared files
 
 Coordinate changes to:

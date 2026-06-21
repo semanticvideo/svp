@@ -74,6 +74,15 @@ These files define shared behavior. If your assigned task needs them, say so in 
 - Do not hide unrelated helpers, policies, formatters, or shared logic inside a convenient large file.
 - Keep public interfaces small and boring.
 
+## No Magic-Number Fixes
+
+- Do not fix a real bug by hard-coding a number, timestamp, sample count, frame index, filename, text string, model threshold, path, or dimension that only solves the observed sample.
+- Any constant that affects correctness, coverage, validity, sampling, timing, thresholds, limits, confidence, hashes, package size, or runtime behavior must have a named owner and a documented reason.
+- Prefer explicit policy fields, options, registries, manifests, or shared constants over literals buried in function calls.
+- When behavior depends on temporal or spatial coverage, define the coverage contract in code and provenance. For example, frame sampling must explain maximum sample gap, caps, skipped regions, and what events can be missed.
+- Tests must prove the general policy, not the one video, timestamp, or phrase that exposed the bug.
+- Reviewers must treat unexplained literals in correctness paths as findings, especially in OCR, ASR, diarization, scene segmentation, color sampling, relationship validation, model verification, and package validation.
+
 ## Testing Rules
 
 Run tests or verification commands when code, build files, schemas, fixtures, scripts, or behavior changed.

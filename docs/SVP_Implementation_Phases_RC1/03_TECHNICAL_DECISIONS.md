@@ -87,6 +87,14 @@ The spec is the source of truth. Do not change RC2 semantics while implementing 
 
 Visible text, numeric values extracted from visible text, and measured color distributions are Core observations in RC2. Do not implement them as labels.
 
+## Coverage and constants rule
+
+Correctness behavior must not rely on unexplained magic numbers or sample-specific patches. Any constant that affects validity, observation coverage, sampling cadence, thresholds, caps, confidence, timing, dimensions, or model identity must be named, owned, documented, and tested as a policy.
+
+Temporal and spatial observation layers need explicit coverage contracts. OCR frame sampling, ASR chunking, VAD segmentation, scene/shot segmentation, color sampling, relationship overlap checks, and model/runtime limits must record the strategy and limitations in provenance when the strategy can miss events. A fixed sample count is not a coverage contract.
+
+Agents must not hard-code source filenames, expected text, specific timestamps, frame indexes, hand-measured crop boxes, or one-off thresholds to make a trial video pass. Ground truth may be used for scoring and reports, but production behavior must be general.
+
 ## No Python runtime rule
 
 The reference builder must not require Python for normal operation.
