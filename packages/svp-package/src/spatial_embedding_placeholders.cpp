@@ -222,6 +222,10 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
       }
     }
 
+    // Enable evidence crop generation for text regions.
+    // This extracts bounded crop images and runs ROI-based Tesseract hardening.
+    ocr_opts.generate_evidence_crops = (media_plan != nullptr);
+
     svp::vision::OcrGenerationResult ocr_result;
     try {
       ocr_result = svp::vision::generate_ocr_observations(

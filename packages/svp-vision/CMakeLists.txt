@@ -7,6 +7,7 @@ add_library(svp-vision
   src/color_quantization.cpp
   src/depth_generation.cpp
   src/embedding_generation.cpp
+  src/evidence_crop.cpp
   src/foundation_color_observations.cpp
   src/foundation_color_staging.cpp
   src/foundation_ocr_staging.cpp
