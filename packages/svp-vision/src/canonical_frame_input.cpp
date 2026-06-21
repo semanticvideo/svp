@@ -155,6 +155,24 @@ std::vector<std::int64_t> deterministic_seek_timestamps_us(
 
 }  // namespace
 
+std::int64_t compute_media_duration_us(const media::MediaIngestPlan& plan) {
+  const media::VideoStreamProbe& stream = plan.primary_video_stream;
+  if (stream.timing.duration_pts.has_value() &&
+      media::is_valid(stream.timing.timebase) &&
+      stream.timing.timebase.numerator > 0) {
+    return media::pts_to_microseconds(*stream.timing.duration_pts,
+                                      stream.timing.timebase);
+  }
+  if (plan.probe.container_timing.has_value() &&
+      plan.probe.container_timing->duration_pts.has_value() &&
+      media::is_valid(plan.probe.container_timing->timebase) &&
+      plan.probe.container_timing->timebase.numerator > 0) {
+    return media::pts_to_microseconds(*plan.probe.container_timing->duration_pts,
+                                      plan.probe.container_timing->timebase);
+  }
+  return 0;
+}
+
 DecodedCanonicalFrames decode_canonical_frames(
     const media::MediaIngestPlan& plan,
     const std::filesystem::path& ffmpeg_path) {
@@ -179,22 +197,7 @@ DecodedCanonicalFrames decode_frames_at_resolution(
     return result;
   }
 
-  const media::VideoStreamProbe& stream = plan.primary_video_stream;
-  std::int64_t duration_us = 0;
-
-  if (stream.timing.duration_pts.has_value() &&
-      media::is_valid(stream.timing.timebase) &&
-      stream.timing.timebase.numerator > 0) {
-    duration_us = media::pts_to_microseconds(*stream.timing.duration_pts,
-                                             stream.timing.timebase);
-  } else if (plan.probe.container_timing.has_value() &&
-             plan.probe.container_timing->duration_pts.has_value() &&
-             media::is_valid(plan.probe.container_timing->timebase) &&
-             plan.probe.container_timing->timebase.numerator > 0) {
-    duration_us =
-        media::pts_to_microseconds(*plan.probe.container_timing->duration_pts,
-                                   plan.probe.container_timing->timebase);
-  }
+  const std::int64_t duration_us = compute_media_duration_us(plan);
 
   if (duration_us <= 0) {
     result.decoding_attempted = false;
@@ -217,20 +220,46 @@ DecodedCanonicalFrames decode_frames_at_resolution(
   const std::vector<std::int64_t> timestamps =
       deterministic_seek_timestamps_us(duration_us, frame_count);
 
-  result.frames_attempted = static_cast<int>(timestamps.size());
+  return decode_frames_at_timestamps(plan, ffmpeg_path, width, height, timestamps);
+}
 
-  for (int i = 0; i < static_cast<int>(timestamps.size()); ++i) {
+DecodedCanonicalFrames decode_frames_at_timestamps(
+    const media::MediaIngestPlan& plan,
+    const std::filesystem::path& ffmpeg_path,
+    int target_width,
+    int target_height,
+    const std::vector<std::int64_t>& timestamps_us) {
+  DecodedCanonicalFrames result;
+
+  if (!ffmpeg_is_available(ffmpeg_path)) {
+    result.decoding_attempted = false;
+    result.skipped_reason = "ffmpeg not found at: " + ffmpeg_path.string();
+    return result;
+  }
+
+  const int width = target_width;
+  const int height = target_height;
+  if (width <= 0 || height <= 0) {
+    result.decoding_attempted = false;
+    result.skipped_reason = "target frame dimensions are not positive";
+    return result;
+  }
+
+  result.decoding_attempted = true;
+  result.frames_attempted = static_cast<int>(timestamps_us.size());
+
+  for (int i = 0; i < static_cast<int>(timestamps_us.size()); ++i) {
     std::string decode_error;
     std::vector<Srgb8Pixel> pixels = decode_frame_at(ffmpeg_path,
                                                       plan.source_path,
-                                                      timestamps[i],
+                                                      timestamps_us[static_cast<std::size_t>(i)],
                                                       width,
                                                       height,
                                                       decode_error);
     if (pixels.empty()) {
       ++result.frames_missed;
       if (result.skipped_reason.empty()) {
-        result.skipped_reason = "frame miss at " + std::to_string(timestamps[i]) +
+        result.skipped_reason = "frame miss at " + std::to_string(timestamps_us[static_cast<std::size_t>(i)]) +
                                 "us: " + decode_error;
       }
       continue;
@@ -239,7 +268,7 @@ DecodedCanonicalFrames decode_frames_at_resolution(
     const bool is_keyframe = result.frames.empty();
     result.frames.push_back(ColorRasterFrame{
         frame_id(static_cast<int>(result.frames.size())),
-        timestamps[i],
+        timestamps_us[static_cast<std::size_t>(i)],
         width,
         height,
         is_keyframe,

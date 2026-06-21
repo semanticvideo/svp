@@ -3,6 +3,7 @@
 #include "svp/vision/canonical_frame_input.hpp"
 #include "svp/vision/evidence_crop.hpp"
 #include "svp/vision/foundation_ocr_staging.hpp"
+#include "svp/vision/ocr_temporal_sampling.hpp"
 
 #include <filesystem>
 #include <optional>
@@ -26,6 +27,7 @@ struct OcrGenerationOptions {
   bool generate_evidence_crops = false;
   std::size_t max_total_crops = 50;
   std::int64_t max_total_crop_bytes = 2 * 1024 * 1024;
+  OcrSamplingConfig sampling_config;
 };
 
 struct OcrGenerationResult {
@@ -57,6 +59,7 @@ struct OcrGenerationResult {
   // When ROI OCR produced better text, the observation's raw_text
   // is updated to the ROI result (with provenance preserved).
   bool roi_hardening_run = false;
+  OcrTemporalSamplingResult temporal_sampling;
 };
 
 struct OcrSourceFrameDimensions {
@@ -76,5 +79,9 @@ struct OcrSourceFrameDimensions {
 
 [[nodiscard]] nlohmann::json ocr_generation_result_to_json(
     const OcrGenerationResult& result);
+
+[[nodiscard]] DecodedCanonicalFrames decode_ocr_frames_temporal(
+    const OcrGenerationOptions& options,
+    OcrTemporalSamplingResult& out_sampling);
 
 }  // namespace svp::vision

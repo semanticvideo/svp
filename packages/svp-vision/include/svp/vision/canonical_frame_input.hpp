@@ -65,4 +65,18 @@ struct DecodedCanonicalFrames {
     int target_height,
     int max_frames);
 
+// Extract the media duration in microseconds from the MediaIngestPlan.
+// Returns 0 if the duration cannot be determined.
+[[nodiscard]] std::int64_t compute_media_duration_us(
+    const media::MediaIngestPlan& plan);
+
+// Decode frames at a custom resolution at explicit timestamps.
+// Used by OCR temporal sampling which computes its own timestamp list.
+[[nodiscard]] DecodedCanonicalFrames decode_frames_at_timestamps(
+    const media::MediaIngestPlan& plan,
+    const std::filesystem::path& ffmpeg_path,
+    int target_width,
+    int target_height,
+    const std::vector<std::int64_t>& timestamps_us);
+
 }  // namespace svp::vision
