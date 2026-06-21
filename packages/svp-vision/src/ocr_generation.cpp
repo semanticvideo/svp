@@ -16,7 +16,6 @@
 #include <regex>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace svp::vision {
@@ -104,14 +103,6 @@ bool looks_like_date_context(const std::string& text) {
       R"((january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:,\s*|\s+)\d{2,4})",
       std::regex_constants::icase);
   return std::regex_search(text, date_re);
-}
-
-int count_words(const std::string& text) {
-  std::istringstream iss(text);
-  std::string word;
-  int count = 0;
-  while (iss >> word) ++count;
-  return count;
 }
 
 std::vector<ParsedNumber> parse_numeric_values(const std::string& raw_text,
@@ -254,7 +245,7 @@ double bbox_iou(int a_left, int a_top, int a_right, int a_bottom,
 std::vector<ReconciledObservation> reconcile_detections(
     const std::vector<FrameDetection>& detections,
     int total_frames,
-    double min_confidence = 0.30,
+    double min_confidence = 0.0,
     std::size_t min_text_chars = 3) {
   std::vector<ReconciledObservation> reconciled;
 
@@ -783,35 +774,12 @@ OcrGenerationResult generate_ocr_observations(
     result.evidence_crops_skipped_reason = crop_result.crops_skipped_reason;
     result.roi_hardening_run = true;
 
-    std::unordered_map<std::string, std::string> obs_id_to_crop_id;
-    for (const auto& crop : crop_result.crops) {
-      obs_id_to_crop_id[crop.text_observation_id] = crop.crop_id;
-    }
-    for (auto& obs : result.text_observations) {
-      auto it = obs_id_to_crop_id.find(obs.text_observation_id);
-      if (it != obs_id_to_crop_id.end()) {
-        obs.evidence_crop_refs.push_back(it->second);
-      }
-    }
-
-    // Apply ROI hardening results
-    std::unordered_map<std::string, std::size_t> obs_id_to_roi_idx;
-    for (std::size_t i = 0; i < crop_inputs.size(); ++i) {
-      obs_id_to_roi_idx[crop_inputs[i].text_observation_id] = i;
-    }
-    for (auto& obs : result.text_observations) {
-      auto it = obs_id_to_roi_idx.find(obs.text_observation_id);
-      if (it == obs_id_to_roi_idx.end()) continue;
-      const auto& roi = crop_result.roi_ocr_results[it->second];
-      if (!roi.succeeded) continue;
-
-      const int current_words = count_words(obs.raw_text);
-      if (roi.word_count > current_words) {
-        obs.raw_text = roi.raw_text;
-        obs.normalized_text = normalize_text(roi.raw_text);
-        obs.confidence = roi.confidence;
-      }
-    }
+    // Evidence crops are extracted and written to evidence_crops.jsonl with
+    // evidence_quality="unverified" because PP-OCR re-read on saved crops is
+    // not implemented. We do NOT attach evidence_crop_refs to observations
+    // because unverified crops must not appear as supporting evidence.
+    // The crop records retain text_observation_id for traceability, but
+    // observations do not claim crop support.
   }
 
   // Build text absence record
@@ -856,6 +824,11 @@ OcrGenerationResult generate_ocr_observations(
           std::to_string(all_detections.size()) + " per-frame detection(s)");
   recognizer_proc["model_refs"] = detector_model_refs;
   recognizer_proc["diagnostics"] = frame_diagnostics;
+  recognizer_proc["limitations"] = nlohmann::json::array({
+      "Recognizer confidence is uncalibrated: PP-OCRv6 outputs raw logits over 18710 classes; "
+      "softmax probabilities are near-zero and should not be used as a quality signal.",
+      "Space characters are not emitted by the ONNX CTC decoder; multi-word text runs together."
+  });
   result.processors.push_back(recognizer_proc);
 
   result.processors.push_back(make_ocr_processor_provenance(

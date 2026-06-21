@@ -313,6 +313,8 @@ struct ModelBundlePaths {
   std::string det_bundle_blake3;
   std::string rec_bundle_blake3;
   std::string license;
+  bool det_manifest_loaded = false;
+  bool rec_manifest_loaded = false;
 };
 
 std::optional<ModelBundlePaths> find_pp_ocr_bundles(
@@ -345,6 +347,7 @@ std::optional<ModelBundlePaths> find_pp_ocr_bundles(
           paths.det_model_version = manifest.model_version;
           paths.det_bundle_blake3 = manifest.bundle_blake3.hex_value();
           if (!manifest.license.empty()) paths.license = manifest.license;
+          paths.det_manifest_loaded = true;
         } catch (...) {}
       }
       if (paths.det_model_id.empty()) paths.det_model_id = name;
@@ -370,6 +373,7 @@ std::optional<ModelBundlePaths> find_pp_ocr_bundles(
           paths.rec_bundle_blake3 = manifest.bundle_blake3.hex_value();
           if (!manifest.license.empty() && paths.license.empty())
             paths.license = manifest.license;
+          paths.rec_manifest_loaded = true;
         } catch (...) {}
       }
       if (paths.rec_model_id.empty()) paths.rec_model_id = name;
@@ -483,6 +487,9 @@ PpOcrSession create_pp_ocr_session(const PpOcrOptions& options) {
   session.model_info.license = bundles->license;
   session.model_info.runtime = "onnxruntime";
   session.model_info.execution_provider = options.execution_provider;
+  session.model_info.model_identity_verified =
+      bundles->det_manifest_loaded && bundles->rec_manifest_loaded;
+  session.model_info.confidence_calibrated = false;
 
   return session;
 }
@@ -596,7 +603,11 @@ PpOcrFrameResult run_pp_ocr_on_frame(
 
     if (text.empty()) continue;
 
-    // Compute confidence as mean softmax probability of non-blank tokens
+    // Compute confidence as mean softmax probability of non-blank tokens.
+    // PP-OCRv6 recognizer outputs raw logits (not softmaxed), so softmax
+    // over 18710 classes produces very small probabilities. This is an
+    // honest representation of the model's confidence — it is uncalibrated
+    // and should not be treated as a reliable quality signal.
     double conf = 0.0;
     int non_blank_count = 0;
     for (int t = 0; t < rec_timesteps; ++t) {
@@ -610,24 +621,15 @@ PpOcrFrameResult run_pp_ocr_on_frame(
         }
       }
       if (max_idx != 0) {
-        // Compute softmax probability of the max class
         float sum_exp = 0.0f;
         for (int c = 0; c < rec_num_classes; ++c) {
           sum_exp += std::exp(row[c] - max_val);
         }
-        float prob = 1.0f / sum_exp;
-        conf += prob;
+        conf += 1.0f / sum_exp;
         ++non_blank_count;
       }
     }
     if (non_blank_count > 0) conf /= non_blank_count;
-
-    // If softmax confidence is very low (common with large vocab CTC models
-    // where raw logits haven't been softmax-normalized by the model),
-    // use a simpler confidence: ratio of max logit gap to second-best
-    if (conf < 0.01 && non_blank_count > 0) {
-      conf = 0.5;  // fallback: text was recognized, assign moderate confidence
-    }
 
     PpOcrDetection det;
     det.text = text;
@@ -656,6 +658,8 @@ nlohmann::json pp_ocr_model_info_to_json(const PpOcrModelInfo& info) {
     {"license", info.license},
     {"runtime", info.runtime},
     {"execution_provider", info.execution_provider},
+    {"model_identity_verified", info.model_identity_verified},
+    {"confidence_calibrated", info.confidence_calibrated},
   };
 }
 

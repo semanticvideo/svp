@@ -39,6 +39,8 @@ struct PpOcrModelInfo {
   std::string license;
   std::string runtime;
   std::string execution_provider;
+  bool model_identity_verified = false;
+  bool confidence_calibrated = false;
 };
 
 struct PpOcrOptions {
@@ -50,7 +52,7 @@ struct PpOcrOptions {
   double det_unclip_ratio = 1.5;
   int rec_image_height = 48;
   int rec_max_width = 320;
-  double min_text_score = 0.3;
+  double min_text_score = 0.0;
 };
 
 struct PpOcrSession {

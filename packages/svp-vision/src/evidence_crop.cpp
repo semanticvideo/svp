@@ -404,8 +404,8 @@ EvidenceCropResult generate_evidence_crops_internal(
     crop.transform_scale_x = scale_x;
     crop.transform_scale_y = scale_y;
     crop.crop_extraction_method = "ffmpeg_crop_scaled_to_source";
-    crop.evidence_quality = "not_checked";
-    crop.evidence_quality_reason = "No ROI OCR re-read (PP-OCR only)";
+    crop.evidence_quality = "unverified";
+    crop.evidence_quality_reason = "Crop extracted but not mechanically verified to support linked observation (PP-OCR re-read not implemented for crops)";
     crop.roi_ocr_text = "";
     crop.roi_ocr_confidence = 0.0;
     crop.roi_ocr_word_count = 0;
