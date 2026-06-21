@@ -110,8 +110,10 @@ nlohmann::json chunk_provenance_record(const AsrChunkPlan& chunk,
   };
 }
 
-bool check_model_in_cache(const std::string& model_id,
-                          const std::filesystem::path& model_cache_root) {
+}  // namespace
+
+bool check_asr_model_in_cache(const std::string& model_id,
+                              const std::filesystem::path& model_cache_root) {
   if (model_cache_root.empty()) {
     return false;
   }
@@ -129,8 +131,8 @@ bool check_model_in_cache(const std::string& model_id,
   return true;
 }
 
-bool verify_model_files(const std::string& model_id,
-                        const std::filesystem::path& model_cache_root) {
+bool verify_asr_model_files(const std::string& model_id,
+                            const std::filesystem::path& model_cache_root) {
   if (model_cache_root.empty()) {
     return false;
   }
@@ -166,8 +168,6 @@ std::string asr_status_to_string(AsrStatus status) {
   }
   return "unknown";
 }
-
-}  // namespace
 
 AsrExecutionBoundary build_asr_execution_boundary(const AsrChunkPlanResult& chunk_plan,
                                                    bool analysis_audio_available,

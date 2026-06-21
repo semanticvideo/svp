@@ -44,6 +44,14 @@ struct AsrExecutionBoundary {
   bool one_speaker_mode = true;
 };
 
+[[nodiscard]] bool check_asr_model_in_cache(
+    const std::string& model_id,
+    const std::filesystem::path& model_cache_root);
+
+[[nodiscard]] bool verify_asr_model_files(
+    const std::string& model_id,
+    const std::filesystem::path& model_cache_root);
+
 [[nodiscard]] AsrExecutionBoundary build_asr_execution_boundary(
     const AsrChunkPlanResult& chunk_plan,
     bool analysis_audio_available,

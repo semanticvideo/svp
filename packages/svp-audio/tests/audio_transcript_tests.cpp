@@ -588,6 +588,11 @@ void test_overlap_reconciliation_deduplicates_boundary_words() {
   svp::audio::AsrChunkPlanResult plan =
       svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
   assert(plan.chunks.size() == 2);
+  assert(plan.chunks[0].source_start_us == 0);
+  assert(plan.chunks[0].source_end_us == 20000000);
+  assert(plan.chunks[1].source_start_us == 15000000);
+  assert(plan.chunks[1].source_end_us == 30000000);
+  assert(plan.chunks[1].overlap_before_us == 5000000);
 
   std::vector<std::vector<svp::audio::AsrWord>> chunk_words(2);
 
@@ -610,6 +615,130 @@ void test_overlap_reconciliation_deduplicates_boundary_words() {
   assert(reconciled[2].start_us == 17000000);
   assert(reconciled[3].text == "final");
   assert(reconciled[3].start_us == 25000000);
+}
+
+void test_overlap_reconciliation_duplicate_in_actual_overlap_region() {
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+  assert(plan.chunks[1].source_start_us == 15000000);
+  assert(plan.chunks[1].overlap_before_us == 5000000);
+
+  std::vector<std::vector<svp::audio::AsrWord>> chunk_words(2);
+  chunk_words[0].push_back({"alpha", 16000000, 16500000, 0.9, 0});
+  chunk_words[1].push_back({"alpha", 16000000 - 15000000, 16500000 - 15000000, 0.9, 1});
+  chunk_words[1].push_back({"beta", 22000000 - 15000000, 23000000 - 15000000, 0.9, 1});
+
+  std::vector<svp::audio::AsrWord> reconciled =
+      svp::audio::reconcile_overlapping_chunks(chunk_words, plan.chunks);
+
+  assert(reconciled.size() == 2);
+  assert(reconciled[0].text == "alpha");
+  assert(reconciled[0].start_us == 16000000);
+  assert(reconciled[1].text == "beta");
+  assert(reconciled[1].start_us == 22000000);
+}
+
+void test_overlap_reconciliation_word_start_equals_prior_end_at_boundary() {
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  std::vector<std::vector<svp::audio::AsrWord>> chunk_words(2);
+  chunk_words[0].push_back({"first", 16000000, 17000000, 0.9, 0});
+  chunk_words[1].push_back({"first", 16000000 - 15000000, 17000000 - 15000000, 0.9, 1});
+  chunk_words[1].push_back({"second", 17000000 - 15000000, 18000000 - 15000000, 0.9, 1});
+
+  std::vector<svp::audio::AsrWord> reconciled =
+      svp::audio::reconcile_overlapping_chunks(chunk_words, plan.chunks);
+
+  assert(reconciled.size() == 2);
+  assert(reconciled[0].text == "first");
+  assert(reconciled[0].start_us == 16000000);
+  assert(reconciled[0].end_us == 17000000);
+  assert(reconciled[1].text == "second");
+  assert(reconciled[1].start_us == 17000000);
+  assert(reconciled[1].end_us == 18000000);
+}
+
+void test_overlap_reconciliation_shifted_token_inside_overlap() {
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  std::vector<std::vector<svp::audio::AsrWord>> chunk_words(2);
+  chunk_words[0].push_back({"original", 17000000, 17500000, 0.9, 0});
+  chunk_words[1].push_back({"shifted", 17200000 - 15000000, 17700000 - 15000000, 0.85, 1});
+  chunk_words[1].push_back({"after", 21000000 - 15000000, 22000000 - 15000000, 0.9, 1});
+
+  std::vector<svp::audio::AsrWord> reconciled =
+      svp::audio::reconcile_overlapping_chunks(chunk_words, plan.chunks);
+
+  assert(reconciled.size() == 2);
+  assert(reconciled[0].text == "original");
+  assert(reconciled[0].start_us == 17000000);
+  assert(reconciled[1].text == "after");
+  assert(reconciled[1].start_us == 21000000);
+}
+
+void test_overlap_reconciliation_no_false_dedepe_outside_overlap() {
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+  assert(plan.chunks[1].source_start_us == 15000000);
+  assert(plan.chunks[1].overlap_before_us == 5000000);
+
+  std::vector<std::vector<svp::audio::AsrWord>> chunk_words(2);
+  chunk_words[0].push_back({"early", 1000000, 2000000, 0.9, 0});
+  chunk_words[0].push_back({"mid", 12000000, 13000000, 0.9, 0});
+  chunk_words[1].push_back({"mid_dup", 12000000 - 15000000, 13000000 - 15000000, 0.9, 1});
+  chunk_words[1].push_back({"late", 25000000 - 15000000, 26000000 - 15000000, 0.9, 1});
+
+  std::vector<svp::audio::AsrWord> reconciled =
+      svp::audio::reconcile_overlapping_chunks(chunk_words, plan.chunks);
+
+  assert(reconciled.size() == 3);
+  assert(reconciled[0].text == "early");
+  assert(reconciled[0].start_us == 1000000);
+  assert(reconciled[1].text == "mid");
+  assert(reconciled[1].start_us == 12000000);
+  assert(reconciled[2].text == "late");
+  assert(reconciled[2].start_us == 25000000);
+}
+
+void test_asr_model_present_vs_verified_distinction() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-asr-model-verify-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root / "model_whisper_large_v3_turbo_q5_0");
+
+  const std::string model_id = "model_whisper_large_v3_turbo_q5_0";
+
+  assert(svp::audio::check_asr_model_in_cache(model_id, root) == false);
+  assert(svp::audio::verify_asr_model_files(model_id, root) == false);
+
+  {
+    std::ofstream manifest(root / "model_whisper_large_v3_turbo_q5_0" / "model.svpmodel.json");
+    manifest << R"({"schema_version":"svp-model-bundle-1",)"
+             << R"("model_bundle_id":"model_whisper_large_v3_turbo_q5_0@v1+blake3_000000000000",)"
+             << R"("model_id":")" << model_id << R"(","model_version":"v1",)"
+             << R"("bundle_blake3":"blake3:0000000000000000000000000000000000000000000000000000000000000000",)"
+             << R"("runtime":"onnxruntime","format":"onnx","license":"MIT",)"
+             << R"("supported_execution_providers":["cpu"],)"
+             << R"("files":[{"path":"model.onnx","role":"model",)"
+             << R"("blake3":"blake3:0000000000000000000000000000000000000000000000000000000000000000"}],)"
+             << R"("input_contract":{},"output_contract":{},)"
+             << R"("preprocessor_contract":{},"postprocessor_contract":{}})";
+  }
+
+  assert(svp::audio::check_asr_model_in_cache(model_id, root) == true);
+  assert(svp::audio::verify_asr_model_files(model_id, root) == false);
+
+  {
+    std::ofstream model_file(root / "model_whisper_large_v3_turbo_q5_0" / "model.onnx");
+    model_file << "dummy";
+  }
+
+  assert(svp::audio::check_asr_model_in_cache(model_id, root) == true);
+  assert(svp::audio::verify_asr_model_files(model_id, root) == true);
+
+  std::filesystem::remove_all(root);
 }
 
 void test_overlap_reconciliation_empty_chunks() {
@@ -777,7 +906,12 @@ int main() {
   test_asr_chunk_plan_rejects_bad_parameters();
   test_asr_chunk_plan_exact_multiple_has_no_trailing_chunk();
   test_overlap_reconciliation_deduplicates_boundary_words();
+  test_overlap_reconciliation_duplicate_in_actual_overlap_region();
+  test_overlap_reconciliation_word_start_equals_prior_end_at_boundary();
+  test_overlap_reconciliation_shifted_token_inside_overlap();
+  test_overlap_reconciliation_no_false_dedepe_outside_overlap();
   test_overlap_reconciliation_empty_chunks();
+  test_asr_model_present_vs_verified_distinction();
   test_asr_execution_boundary_blocked_when_model_missing();
   test_asr_execution_boundary_blocked_when_runtime_missing();
   test_asr_execution_boundary_planned_when_all_available();

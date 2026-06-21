@@ -180,11 +180,12 @@ std::vector<AsrWord> reconcile_overlapping_chunks(
     }
 
     if (last_end_us >= 0 && word_start < last_end_us) {
-      const std::int64_t overlap_zone_start =
-          aw.source_start_us - aw.overlap_before_us;
-      const std::int64_t overlap_zone_end = aw.source_start_us;
+      const std::int64_t overlap_zone_start = aw.source_start_us;
+      const std::int64_t overlap_zone_end =
+          aw.source_start_us + aw.overlap_before_us;
 
-      if (word_start >= overlap_zone_start && word_start < overlap_zone_end) {
+      if (aw.overlap_before_us > 0 &&
+          word_start >= overlap_zone_start && word_start < overlap_zone_end) {
         continue;
       }
     }

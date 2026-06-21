@@ -351,8 +351,13 @@ int main(int argc, char** argv) {
                 : std::filesystem::path(build_model_cache_dir);
 
         const bool asr_model_available =
-            !model_cache_root.empty() &&
-            std::filesystem::exists(model_cache_root / "model_whisper_large_v3_turbo_q5_0");
+            svp::audio::check_asr_model_in_cache(
+                "model_whisper_large_v3_turbo_q5_0", model_cache_root);
+
+        const bool asr_model_verified =
+            asr_model_available &&
+            svp::audio::verify_asr_model_files(
+                "model_whisper_large_v3_turbo_q5_0", model_cache_root);
 
         const svp::audio::AsrExecutionBoundary asr_boundary =
             svp::audio::build_asr_execution_boundary(
@@ -360,7 +365,7 @@ int main(int argc, char** argv) {
                 extraction_run.analysis_audio_written,
                 model_runtime_available,
                 asr_model_available,
-                asr_model_available);
+                asr_model_verified);
 
         const svp::audio::AsrExecutionBoundary executed_asr_boundary =
             svp::audio::execute_asr_boundary(asr_boundary, staging_dir, model_cache_root);
