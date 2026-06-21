@@ -223,7 +223,6 @@ int main(int argc, char** argv) {
   std::string build_output_path;
   std::string build_staging_dir;
   std::string build_model_cache_dir;
-  std::string build_tesseract_path = "tesseract";
   std::string stop_after = "media-ingest";
 
   auto* build = app.add_subcommand(
@@ -240,8 +239,6 @@ int main(int argc, char** argv) {
                     "Directory for staged builder outputs");
   build->add_option("--model-cache", build_model_cache_dir,
                     "Path to SVP model cache directory containing model bundles");
-  build->add_option("--tesseract", build_tesseract_path,
-                    "Path to tesseract OCR executable");
   build->add_option("--stop-after", stop_after,
                     "Supported foundation stages: media-ingest, audio, vision-plan, "
                     "foundation-color, foundation-ocr, package-skeleton");
@@ -492,7 +489,7 @@ int main(int argc, char** argv) {
             svp::vision::decode_canonical_frames(plan, build_ffmpeg_path);
 
         svp::vision::OcrGenerationOptions ocr_opts;
-        ocr_opts.tesseract_path = build_tesseract_path;
+        ocr_opts.model_cache_root = std::filesystem::path(build_model_cache_dir);
         ocr_opts.ffmpeg_path = build_ffmpeg_path;
         ocr_opts.media_plan = &plan;
         ocr_opts.canonical_raster_width = plan.canonical_raster.width;
@@ -616,8 +613,7 @@ int main(int argc, char** argv) {
                 build_model_cache_dir.empty() ? std::filesystem::path{} :
                     std::filesystem::path(build_model_cache_dir),
                 &plan,
-                build_ffmpeg_path,
-                build_tesseract_path);
+                build_ffmpeg_path);
         output["spatial_embedding_placeholders"] =
             svp::package::spatial_embedding_placeholder_summary_to_json(
                 placeholder_summary);
@@ -737,7 +733,7 @@ int main(int argc, char** argv) {
                   << output.at("foundation_ocr_staging").value("text_observation_count", 0)
                   << "\n";
         if (ocr_detection_run) {
-          std::cout << "Real media frames were processed for OCR via tesseract.\n";
+          std::cout << "Real media frames were processed for OCR via PP-OCR ONNX.\n";
         } else {
           std::cout << "No real OCR was executed; honest absence was reported.\n";
           if (output.at("foundation_ocr_staging").contains("blocker") &&

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace svp::models {
@@ -65,6 +66,19 @@ class OnnxSession {
       const std::int64_t* attention_mask,
       std::size_t batch_size,
       std::size_t seq_len) const;
+
+  [[nodiscard]] std::vector<float> run_raw(
+      const std::string& input_name,
+      const float* input_data,
+      std::size_t input_count,
+      const std::vector<std::int64_t>& input_shape) const;
+
+  [[nodiscard]] std::pair<std::vector<float>, std::vector<std::int64_t>>
+  run_raw_with_shape(
+      const std::string& input_name,
+      const float* input_data,
+      std::size_t input_count,
+      const std::vector<std::int64_t>& input_shape) const;
 
   [[nodiscard]] std::string model_id() const;
   [[nodiscard]] std::string execution_provider() const;

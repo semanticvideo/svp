@@ -91,8 +91,9 @@ struct EvidenceCropRecord {
   std::string selection_reason;
 };
 
-// Result of running Tesseract on an ROI crop with a specific
-// PSM mode. Used to pick the best OCR result.
+// Result of running ROI OCR on a crop image.
+// Currently not used (PP-OCR only runs on full frames), but kept
+// for future per-crop re-read capabilities.
 struct RoiOcrResult {
   std::string raw_text;
   double confidence = 0.0;
@@ -105,8 +106,6 @@ struct RoiOcrResult {
 // Options controlling evidence crop generation.
 struct EvidenceCropOptions {
   std::filesystem::path ffmpeg_path;
-  std::filesystem::path tesseract_path;
-  std::string language = "eng";
   std::filesystem::path source_media_path;
 
   // OCR frame resolution (the resolution at which OCR was run)
@@ -167,8 +166,8 @@ struct CropGenerationInput {
 [[nodiscard]] nlohmann::json evidence_crop_result_to_json(const EvidenceCropResult& result);
 
 // Generate evidence crops for reconciled text observations.
-// Extracts crop images from the source video, runs ROI-based Tesseract
-// hardening, computes BLAKE3 hashes, and writes crop metadata + images.
+// Extracts crop images from the source video, computes BLAKE3 hashes,
+// and writes crop metadata + images.
 [[nodiscard]] EvidenceCropResult generate_evidence_crops_internal(
     const EvidenceCropOptions& options,
     const std::vector<CropGenerationInput>& inputs,

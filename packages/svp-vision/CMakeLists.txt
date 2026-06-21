@@ -13,6 +13,7 @@ add_library(svp-vision
   src/foundation_ocr_staging.cpp
   src/observation_pipeline_plan.cpp
   src/ocr_generation.cpp
+  src/pp_ocr.cpp
   src/real_frame_color_sampling.cpp
   src/scene_segmentation.cpp
   src/text_tokenizer.cpp
