@@ -1,6 +1,8 @@
 #include "svp/core/version.hpp"
 #include "svp/package/package_layout.hpp"
 #include "svp/package/package_summary.hpp"
+#include "svp/query/query_ops.hpp"
+#include "svp/query/query_reader.hpp"
 
 #include <CLI/CLI.hpp>
 #include <nlohmann/json.hpp>
@@ -9,6 +11,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -325,6 +328,322 @@ int dump_sections(const std::filesystem::path& package_path, std::string_view se
 
 }  // namespace
 
+namespace query_cmd {
+
+nlohmann::json json_string_value(const nlohmann::json& j, std::string_view key) {
+  if (!j.is_object()) {
+    return {};
+  }
+  const auto it = j.find(key);
+  if (it == j.end()) {
+    return {};
+  }
+  return *it;
+}
+
+void print_layers(const std::filesystem::path& package_path, bool json_output) {
+  const auto summary = svp::query::list_layers(package_path);
+
+  if (json_output) {
+    nlohmann::json layers = nlohmann::json::array();
+    for (const auto& layer : summary.layers) {
+      nlohmann::json entry = {
+          {"section", layer.section},
+          {"entry", layer.entry},
+          {"kind", layer.kind},
+          {"present", layer.present},
+          {"record_count", layer.record_count}
+      };
+      if (layer.has_malformed) {
+        entry["has_malformed"] = true;
+        entry["malformed_line_count"] = layer.malformed_line_count;
+        entry["error"] = layer.error_message;
+      }
+      layers.push_back(entry);
+    }
+    std::cout << nlohmann::json{
+        {"total_entries", summary.total_entries},
+        {"layers", layers}
+    }.dump(2) << "\n";
+    return;
+  }
+
+  std::cout << "Package layers (" << summary.total_entries << " present)\n";
+  for (const auto& layer : summary.layers) {
+    std::cout << "  [" << layer.section << "] " << layer.entry;
+    if (layer.present) {
+      std::cout << " (" << layer.record_count << " records)";
+    } else {
+      std::cout << " (missing)";
+    }
+    if (layer.has_malformed) {
+      std::cout << " MALFORMED";
+      if (layer.malformed_line_count > 0) {
+        std::cout << " (" << layer.malformed_line_count << " bad lines)";
+      }
+    }
+    std::cout << "\n";
+  }
+}
+
+void print_transcript(const std::filesystem::path& package_path, bool json_output) {
+  const auto result = svp::query::transcript_summary(package_path);
+
+  if (!result.present) {
+    if (json_output) {
+      std::cout << R"({"present":false})" << "\n";
+    } else {
+      std::cout << "Transcript: not present\n";
+    }
+    return;
+  }
+
+  if (!result.parsed) {
+    if (json_output) {
+      std::cout << nlohmann::json{
+          {"present", true},
+          {"parsed", false},
+          {"error", result.error_message}
+      }.dump(2) << "\n";
+    } else {
+      std::cout << "Transcript: present but JSON parse failed: "
+                << result.error_message << "\n";
+    }
+    return;
+  }
+
+  if (json_output) {
+    nlohmann::json out = result.transcript_json;
+    out["word_count_file"] = result.word_count_file;
+    out["speaker_count_file"] = result.speaker_count_file;
+    out["speech_region_count_file"] = result.speech_region_count;
+    std::cout << out.dump(2) << "\n";
+    return;
+  }
+
+  std::cout << "Transcript summary\n";
+  const auto lang = result.transcript_json.value("language", nlohmann::json{});
+  if (lang.is_object()) {
+    std::cout << "  language: " << lang.value("primary", "unknown");
+    std::cout << " (" << lang.value("mode", "unknown") << ")\n";
+  } else {
+    std::cout << "  language: not present\n";
+  }
+  std::cout << "  word_count (declared): " << result.transcript_json.value("word_count", 0) << "\n";
+  std::cout << "  word_count (file): " << result.word_count_file << "\n";
+  if (result.transcript_json.contains("speaker_count")) {
+    std::cout << "  speaker_count (declared): " << result.transcript_json.value("speaker_count", 0) << "\n";
+  }
+  std::cout << "  speaker_count (file): " << result.speaker_count_file << "\n";
+  std::cout << "  speech_regions (file): " << result.speech_region_count << "\n";
+  if (result.transcript_json.contains("duration_us")) {
+    std::cout << "  duration_us: " << result.transcript_json.value("duration_us", 0) << "\n";
+  }
+
+  if (result.word_count_file > 0) {
+    const auto words = svp::query::read_jsonl_entry(package_path, "transcript/words.jsonl");
+    if (words.readable && !words.records.empty()) {
+      const auto& first = words.records.front();
+      const auto& last = words.records.back();
+      std::cout << "  word range: " << first.value("id", "?") << " to " << last.value("id", "?");
+      std::cout << " (" << first.value("start_us", 0) << "us - " << last.value("end_us", 0) << "us)\n";
+    }
+  }
+}
+
+void print_find_words(const std::filesystem::path& package_path,
+                      const std::string& search_text, std::size_t max_results,
+                      bool json_output) {
+  const auto matches = svp::query::find_words(package_path, search_text, max_results);
+
+  if (json_output) {
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& m : matches) {
+      arr.push_back(m.record);
+    }
+    std::cout << nlohmann::json{
+        {"search_text", search_text},
+        {"match_count", matches.size()},
+        {"matches", arr}
+    }.dump(2) << "\n";
+    return;
+  }
+
+  std::cout << "Found " << matches.size() << " word(s) matching \"" << search_text << "\"\n";
+  for (const auto& m : matches) {
+    std::cout << "  " << m.record.value("id", "?")
+              << " text=\"" << m.record.value("text", "?") << "\""
+              << " start_us=" << m.record.value("start_us", 0)
+              << " end_us=" << m.record.value("end_us", 0)
+              << " speaker=" << m.record.value("speaker_id", "?") << "\n";
+  }
+}
+
+void print_speakers(const std::filesystem::path& package_path, bool json_output) {
+  const auto speakers = svp::query::list_speakers(package_path);
+
+  if (json_output) {
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& s : speakers) {
+      nlohmann::json rec = s.record;
+      rec["word_count"] = s.word_count;
+      arr.push_back(rec);
+    }
+    std::cout << nlohmann::json{
+        {"speaker_count", speakers.size()},
+        {"speakers", arr}
+    }.dump(2) << "\n";
+    return;
+  }
+
+  std::cout << "Speakers (" << speakers.size() << ")\n";
+  for (const auto& s : speakers) {
+    std::cout << "  " << s.record.value("id", "?")
+              << " name=\"" << s.record.value("display_name", "?") << "\""
+              << " words=" << s.word_count
+              << " speech_us=" << s.record.value("total_speech_us", 0) << "\n";
+  }
+}
+
+void print_ocr(const std::filesystem::path& package_path,
+               const std::optional<std::string>& text_filter,
+               std::size_t max_results, bool json_output) {
+  const auto observations = svp::query::list_ocr_observations(
+      package_path, text_filter, max_results);
+
+  if (json_output) {
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& o : observations) {
+      arr.push_back(o.record);
+    }
+    std::cout << nlohmann::json{
+        {"observation_count", observations.size()},
+        {"observations", arr}
+    }.dump(2) << "\n";
+    return;
+  }
+
+  std::cout << "OCR text observations (" << observations.size() << ")\n";
+  for (const auto& o : observations) {
+    std::cout << "  " << o.record.value("text_observation_id", "?")
+              << " type=" << o.record.value("observation_type", "?")
+              << " raw=\"" << o.record.value("raw_text", "") << "\""
+              << " confidence=" << o.record.value("confidence", 0.0);
+
+    const auto crop_refs = o.record.find("evidence_crop_refs");
+    if (crop_refs != o.record.end() && crop_refs->is_array() && !crop_refs->empty()) {
+      std::cout << " crops=[";
+      bool first = true;
+      for (const auto& ref : *crop_refs) {
+        if (!first) std::cout << ", ";
+        first = false;
+        std::cout << ref.get<std::string>();
+      }
+      std::cout << "]";
+    }
+    std::cout << "\n";
+  }
+
+  if (!text_filter.has_value()) {
+    const auto crops = svp::query::read_jsonl_entry(package_path, "text/evidence_crops.jsonl");
+    if (crops.readable && !crops.records.empty()) {
+      std::cout << "\nEvidence crops (" << crops.records.size() << ")\n";
+      for (const auto& c : crops.records) {
+        std::cout << "  " << c.value("crop_id", "?")
+                  << " path=" << c.value("crop_file_path", "?")
+                  << " size=" << c.value("crop_size_bytes", 0) << " bytes\n";
+      }
+    }
+  }
+}
+
+void print_colors(const std::filesystem::path& package_path,
+                  const std::optional<std::string>& dominant_filter,
+                  std::optional<double> min_coverage,
+                  std::size_t max_results, bool json_output) {
+  const auto observations = svp::query::list_color_observations(
+      package_path, dominant_filter, min_coverage, max_results);
+
+  if (json_output) {
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& o : observations) {
+      arr.push_back(o.record);
+    }
+    std::cout << nlohmann::json{
+        {"observation_count", observations.size()},
+        {"observations", arr}
+    }.dump(2) << "\n";
+    return;
+  }
+
+  std::cout << "Color observations (" << observations.size() << ")\n";
+  for (const auto& o : observations) {
+    std::cout << "  " << o.record.value("color_observation_id", "?")
+              << " target=" << o.record.value("target_type", "?")
+              << ":" << o.record.value("target_id", "?")
+              << " dominant=" << o.record.value("dominant_bucket", "?")
+              << " coverage_total=" << o.record.value("coverage_total", 0.0);
+
+    const auto buckets = o.record.find("bucket_coverage");
+    if (buckets != o.record.end() && buckets->is_object()) {
+      std::cout << " buckets={";
+      bool first = true;
+      for (auto it = buckets->begin(); it != buckets->end(); ++it) {
+        if (!first) std::cout << ", ";
+        first = false;
+        std::cout << it.key() << "=" << it.value();
+      }
+      std::cout << "}";
+    }
+    std::cout << "\n";
+  }
+}
+
+void print_validation(const std::filesystem::path& package_path, bool json_output) {
+  const auto info = svp::query::show_validation(package_path);
+
+  if (!info.present) {
+    if (json_output) {
+      std::cout << R"({"present":false})" << "\n";
+    } else {
+      std::cout << "Validation: not present\n";
+    }
+    return;
+  }
+
+  if (!info.parsed) {
+    if (json_output) {
+      std::cout << nlohmann::json{
+          {"present", true},
+          {"parsed", false},
+          {"error", info.error_message}
+      }.dump(2) << "\n";
+    } else {
+      std::cout << "Validation: present but JSON parse failed: "
+                << info.error_message << "\n";
+    }
+    return;
+  }
+
+  if (json_output) {
+    nlohmann::json out = {{"present", true}, {"parsed", true}};
+    out["record"] = info.record;
+    std::cout << out.dump(2) << "\n";
+    return;
+  }
+
+  std::cout << "Validation status\n";
+  std::cout << "  status: " << info.record.value("status", "unknown") << "\n";
+  if (info.record.contains("core_status")) {
+    std::cout << "  core_status: " << info.record.value("core_status", "unknown") << "\n";
+  }
+  if (info.record.contains("authenticity_status")) {
+    std::cout << "  authenticity_status: " << info.record.value("authenticity_status", "unknown") << "\n";
+  }
+}
+
+}  // namespace query_cmd
+
 int main(int argc, char** argv) {
   CLI::App app{"SVP package inspector"};
   app.set_version_flag("--version",
@@ -343,6 +662,26 @@ int main(int argc, char** argv) {
                    "Section to dump: manifest, index_manifest, or all")
       ->check(CLI::IsMember({"manifest", "index_manifest", "all"}));
 
+  std::string query_package_path;
+  std::string query_mode = "layers";
+  std::string query_text;
+  std::string query_color_bucket;
+  double query_min_coverage = -1.0;
+  std::size_t query_limit = 100;
+  bool query_json = false;
+  auto* query = app.add_subcommand("query", "Query SVP package semantic layers");
+  query->add_option("package", query_package_path, "Path to a .svp package")->required();
+  query->add_option("--mode", query_mode,
+                    "Query mode: layers, transcript, words, speakers, ocr, colors, validation")
+      ->check(CLI::IsMember({"layers", "transcript", "words", "speakers",
+                              "ocr", "colors", "validation"}));
+  query->add_option("--text", query_text, "Search text for words or OCR mode");
+  query->add_option("--bucket", query_color_bucket, "Filter color observations by dominant bucket");
+  query->add_option("--min-coverage", query_min_coverage,
+                    "Minimum dominant bucket coverage (0.0-1.0)");
+  query->add_option("--limit", query_limit, "Maximum results to return");
+  query->add_flag("--json", query_json, "Emit JSON output for agent consumption");
+
   CLI11_PARSE(app, argc, argv);
 
   if (*inspect) {
@@ -353,6 +692,38 @@ int main(int argc, char** argv) {
 
   if (*dump) {
     return dump_sections(dump_package_path, dump_section);
+  }
+
+  if (*query) {
+    if (query_mode == "layers") {
+      query_cmd::print_layers(query_package_path, query_json);
+    } else if (query_mode == "transcript") {
+      query_cmd::print_transcript(query_package_path, query_json);
+    } else if (query_mode == "words") {
+      query_cmd::print_find_words(query_package_path, query_text, query_limit, query_json);
+    } else if (query_mode == "speakers") {
+      query_cmd::print_speakers(query_package_path, query_json);
+    } else if (query_mode == "ocr") {
+      std::optional<std::string> text_filter;
+      if (!query_text.empty()) {
+        text_filter = query_text;
+      }
+      query_cmd::print_ocr(query_package_path, text_filter, query_limit, query_json);
+    } else if (query_mode == "colors") {
+      std::optional<std::string> dominant_filter;
+      if (!query_color_bucket.empty()) {
+        dominant_filter = query_color_bucket;
+      }
+      std::optional<double> min_coverage;
+      if (query_min_coverage >= 0.0) {
+        min_coverage = query_min_coverage;
+      }
+      query_cmd::print_colors(query_package_path, dominant_filter, min_coverage,
+                               query_limit, query_json);
+    } else if (query_mode == "validation") {
+      query_cmd::print_validation(query_package_path, query_json);
+    }
+    return 0;
   }
 
   return 0;
