@@ -196,38 +196,26 @@ void test_write_relationships_and_provenance() {
 
   const svp::package::RelationshipProvenanceWriteSummary summary =
       svp::package::write_relationships_and_provenance(staging_dir);
-  assert(summary.relationships_written == 2);
-  assert(summary.type_counts.text_region_shot == 1);
-  assert(summary.type_counts.text_region_scene == 1);
-  assert(summary.processors_written == 3);
+  // No timeline files present, so shot_id/scene_id references are skipped.
+  assert(summary.relationships_written == 0);
+  assert(summary.type_counts.text_region_shot == 0);
+  assert(summary.type_counts.text_region_scene == 0);
+  assert(summary.type_counts.skipped_dangling == 2);
+  // No relationship processor added when no relationships.
+  // The existing processors should still be there (deduped).
+  assert(summary.processors_written == 2);
   assert(summary.duplicate_processors_merged == 1);
 
   const std::vector<nlohmann::json> relationships =
       read_jsonl_records(staging_dir / "relationships" / "relationships.jsonl");
-  assert(relationships.size() == 2);
-  assert(relationships[0]["source_id"] == "text_region_001");
-  assert(relationships[0]["processor_id"] == "processor_relationship_writer_0001");
-  assert(relationships[0]["type"] == "appears_in_scene" ||
-         relationships[0]["type"] == "appears_in_shot");
+  assert(relationships.empty());
 
   const std::vector<nlohmann::json> processors =
       read_jsonl_records(staging_dir / "provenance" / "processors.jsonl");
-  assert(processors.size() == 3);
+  assert(processors.size() == 2);
   assert(processors[0]["id"] == "processor_color_0001");
   assert(processors[1]["id"] == "processor_ocr_0001");
   assert(processors[1]["version"] == "a");
-  assert(processors[2]["id"] == "processor_relationship_writer_0001");
-
-  const std::filesystem::path package_path = root / "output.svp";
-  nlohmann::json manifest = {
-    {"svp_version", "1.0-rc.2"},
-    {"package_id", "svp_relationship_test_pkg"}
-  };
-  assert(svp::package::write_package_skeleton(package_path, staging_dir, "", manifest));
-  auto layout_result = svp::package::read_package_layout(package_path);
-  assert(layout_result.has_value());
-  assert(layout_result.value().has_entry("relationships/relationships.jsonl"));
-  assert(layout_result.value().has_entry("provenance/processors.jsonl"));
 
   std::filesystem::remove_all(root);
 }
@@ -244,7 +232,22 @@ void test_full_relationship_graph() {
   std::filesystem::create_directories(staging_dir / "colors");
   std::filesystem::create_directories(staging_dir / "spatial");
   std::filesystem::create_directories(staging_dir / "embeddings");
+  std::filesystem::create_directories(staging_dir / "timeline");
   std::filesystem::create_directories(staging_dir / "provenance");
+
+  // Timeline artifacts — canonical owners of frame, shot, scene IDs
+  {
+    std::ofstream out(staging_dir / "timeline" / "frames.jsonl");
+    out << nlohmann::json{{"id", "frame_000001"}, {"start_us", 0}, {"end_us", 33333}}.dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "timeline" / "shots.jsonl");
+    out << nlohmann::json{{"id", "shot_001"}, {"start_us", 0}, {"end_us", 10000000}}.dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "timeline" / "scenes.jsonl");
+    out << nlohmann::json{{"id", "scene_001"}, {"start_us", 0}, {"end_us", 30000000}}.dump() << "\n";
+  }
 
   // Text region with shot and scene
   {
@@ -403,10 +406,26 @@ void test_full_relationship_graph() {
   assert(summary.type_counts.numeric_value_observation == 1);
   assert(summary.type_counts.word_speaker == 2);
   assert(summary.type_counts.word_speaker_segment == 2);
+  assert(summary.type_counts.word_speaker_segment_unmatched == 0);
   assert(summary.type_counts.color_observation_target == 1);
   assert(summary.type_counts.depth_frame == 1);
   assert(summary.type_counts.embedding_source == 1);
   assert(summary.type_counts.skipped_dangling == 0);
+
+  // Verify processor provenance includes type counts
+  const auto processors =
+      read_jsonl_records(staging_dir / "provenance" / "processors.jsonl");
+  bool found_rel_processor = false;
+  for (const auto& proc : processors) {
+    if (proc["id"] == "processor_relationship_writer_0001") {
+      found_rel_processor = true;
+      assert(proc.contains("relationship_type_counts"));
+      assert(proc["relationship_type_counts"]["text_region_shot"] == 1);
+      assert(proc["relationship_type_counts"]["skipped_dangling"] == 0);
+      assert(proc["relationship_type_counts"]["word_speaker_segment_unmatched"] == 0);
+    }
+  }
+  assert(found_rel_processor);
 
   // Verify no dangling references: every source_id and target_id
   // must exist in the known ID sets.
@@ -425,6 +444,285 @@ void test_full_relationship_graph() {
     assert(all_known_ids.count(src) > 0);
     assert(all_known_ids.count(tgt) > 0);
   }
+
+  std::filesystem::remove_all(root);
+}
+
+void test_depth_index_alone_no_frame_ids() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-depth-alone-no-frame-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "spatial");
+  std::filesystem::create_directories(staging_dir / "colors");
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  // Depth index with frame_id, but no timeline/frames.jsonl
+  {
+    std::ofstream out(staging_dir / "spatial" / "depth.index.jsonl");
+    out << nlohmann::json{
+      {"id", "depth_000001"},
+      {"frame_id", "frame_000001"},
+      {"start_us", 0},
+      {"end_us", 33333}
+    }.dump() << "\n";
+  }
+
+  // Color observation targeting same frame_id
+  {
+    std::ofstream out(staging_dir / "colors" / "color_observations.jsonl");
+    out << nlohmann::json{
+      {"color_observation_id", "color_001"},
+      {"target_type", "frame"},
+      {"target_id", "frame_000001"},
+      {"dominant_bucket", "orange"},
+      {"confidence", 0.9}
+    }.dump() << "\n";
+  }
+
+  {
+    std::ofstream out(staging_dir / "provenance" / "processors.jsonl");
+    out << nlohmann::json{{"id", "processor_ocr_0001"}, {"version", "a"}}.dump() << "\n";
+  }
+
+  const svp::package::RelationshipProvenanceWriteSummary summary =
+      svp::package::write_relationships_and_provenance(staging_dir);
+
+  // depth_for_frame must NOT be emitted because frame_000001
+  // is only known from depth.index, not from timeline/frames.jsonl.
+  assert(summary.type_counts.depth_frame == 0);
+  // color_observation_of to frame must NOT be emitted for same reason.
+  assert(summary.type_counts.color_observation_target == 0);
+  assert(summary.relationships_written == 0);
+  assert(summary.type_counts.skipped_dangling >= 2);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_color_frame_target_skipped_without_timeline() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-color-skip-no-timeline-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "colors");
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  // Color observation targeting a frame, but no timeline/frames.jsonl
+  {
+    std::ofstream out(staging_dir / "colors" / "color_observations.jsonl");
+    out << nlohmann::json{
+      {"color_observation_id", "color_001"},
+      {"target_type", "frame"},
+      {"target_id", "frame_999"},
+      {"dominant_bucket", "blue"},
+      {"confidence", 0.9}
+    }.dump() << "\n";
+  }
+
+  {
+    std::ofstream out(staging_dir / "provenance" / "processors.jsonl");
+    out << nlohmann::json{{"id", "processor_ocr_0001"}, {"version", "a"}}.dump() << "\n";
+  }
+
+  const svp::package::RelationshipProvenanceWriteSummary summary =
+      svp::package::write_relationships_and_provenance(staging_dir);
+
+  assert(summary.type_counts.color_observation_target == 0);
+  assert(summary.relationships_written == 0);
+  assert(summary.type_counts.skipped_dangling >= 1);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_text_region_shot_scene_skipped_without_timeline() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-tr-shot-skip-no-timeline-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "text");
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  {
+    std::ofstream out(staging_dir / "text" / "text_regions.jsonl");
+    out << nlohmann::json{
+      {"text_region_id", "tr_001"},
+      {"start_us", 1000},
+      {"end_us", 2000},
+      {"shot_id", "shot_001"},
+      {"scene_id", "scene_001"},
+      {"confidence", 0.9}
+    }.dump() << "\n";
+  }
+
+  {
+    std::ofstream out(staging_dir / "provenance" / "processors.jsonl");
+    out << nlohmann::json{{"id", "processor_ocr_0001"}, {"version", "a"}}.dump() << "\n";
+  }
+
+  const svp::package::RelationshipProvenanceWriteSummary summary =
+      svp::package::write_relationships_and_provenance(staging_dir);
+
+  // shot_id and scene_id from text_regions must NOT be treated as known
+  // because timeline/shots.jsonl and timeline/scenes.jsonl are absent.
+  assert(summary.type_counts.text_region_shot == 0);
+  assert(summary.type_counts.text_region_scene == 0);
+  assert(summary.relationships_written == 0);
+  assert(summary.type_counts.skipped_dangling == 2);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_timeline_present_enables_relationships() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-timeline-present-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "text");
+  std::filesystem::create_directories(staging_dir / "colors");
+  std::filesystem::create_directories(staging_dir / "spatial");
+  std::filesystem::create_directories(staging_dir / "timeline");
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  // Timeline files
+  {
+    std::ofstream out(staging_dir / "timeline" / "frames.jsonl");
+    out << nlohmann::json{{"id", "frame_001"}, {"start_us", 0}, {"end_us", 33333}}.dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "timeline" / "shots.jsonl");
+    out << nlohmann::json{{"id", "shot_001"}, {"start_us", 0}, {"end_us", 10000000}}.dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "timeline" / "scenes.jsonl");
+    out << nlohmann::json{{"id", "scene_001"}, {"start_us", 0}, {"end_us", 30000000}}.dump() << "\n";
+  }
+
+  // Text region referencing shot and scene
+  {
+    std::ofstream out(staging_dir / "text" / "text_regions.jsonl");
+    out << nlohmann::json{
+      {"text_region_id", "tr_001"},
+      {"start_us", 1000},
+      {"end_us", 2000},
+      {"shot_id", "shot_001"},
+      {"scene_id", "scene_001"},
+      {"confidence", 0.9}
+    }.dump() << "\n";
+  }
+
+  // Color observation targeting frame
+  {
+    std::ofstream out(staging_dir / "colors" / "color_observations.jsonl");
+    out << nlohmann::json{
+      {"color_observation_id", "color_001"},
+      {"target_type", "frame"},
+      {"target_id", "frame_001"},
+      {"dominant_bucket", "orange"},
+      {"confidence", 0.9}
+    }.dump() << "\n";
+  }
+
+  // Depth index targeting frame
+  {
+    std::ofstream out(staging_dir / "spatial" / "depth.index.jsonl");
+    out << nlohmann::json{
+      {"id", "depth_001"},
+      {"frame_id", "frame_001"},
+      {"start_us", 0},
+      {"end_us", 33333}
+    }.dump() << "\n";
+  }
+
+  {
+    std::ofstream out(staging_dir / "provenance" / "processors.jsonl");
+    out << nlohmann::json{{"id", "processor_ocr_0001"}, {"version", "a"}}.dump() << "\n";
+  }
+
+  const svp::package::RelationshipProvenanceWriteSummary summary =
+      svp::package::write_relationships_and_provenance(staging_dir);
+
+  // With timeline files present, these relationships should now be emitted.
+  assert(summary.type_counts.text_region_shot == 1);
+  assert(summary.type_counts.text_region_scene == 1);
+  assert(summary.type_counts.color_observation_target == 1);
+  assert(summary.type_counts.depth_frame == 1);
+  assert(summary.relationships_written == 4);
+  assert(summary.type_counts.skipped_dangling == 0);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_unmatched_word_segment_counting() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-unmatched-word-seg-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "transcript");
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  // Two words: word_001 overlaps segment, word_002 does not
+  {
+    std::ofstream out(staging_dir / "transcript" / "words.jsonl");
+    out << nlohmann::json{
+      {"id", "word_001"},
+      {"text", "hello"},
+      {"start_us", 1000},
+      {"end_us", 2000},
+      {"speaker_id", "speaker_001"},
+      {"confidence", 0.9}
+    }.dump() << "\n";
+    out << nlohmann::json{
+      {"id", "word_002"},
+      {"text", "world"},
+      {"start_us", 20000},
+      {"end_us", 21000},
+      {"speaker_id", "speaker_001"},
+      {"confidence", 0.9}
+    }.dump() << "\n";
+  }
+
+  {
+    std::ofstream out(staging_dir / "transcript" / "speakers.jsonl");
+    out << nlohmann::json{
+      {"id", "speaker_001"},
+      {"display_name", "Speaker 1"},
+      {"confidence", 0.8}
+    }.dump() << "\n";
+  }
+
+  // Speaker segment covers 0-5000us, word_002 is at 20000us (no overlap)
+  {
+    std::ofstream out(staging_dir / "transcript" / "speaker_segments.jsonl");
+    out << nlohmann::json{
+      {"id", "seg_001"},
+      {"speaker_id", "speaker_001"},
+      {"start_us", 0},
+      {"end_us", 5000},
+      {"confidence", 0.85}
+    }.dump() << "\n";
+  }
+
+  {
+    std::ofstream out(staging_dir / "provenance" / "processors.jsonl");
+    out << nlohmann::json{{"id", "processor_ocr_0001"}, {"version", "a"}}.dump() << "\n";
+  }
+
+  const svp::package::RelationshipProvenanceWriteSummary summary =
+      svp::package::write_relationships_and_provenance(staging_dir);
+
+  assert(summary.type_counts.word_speaker == 2);
+  assert(summary.type_counts.word_speaker_segment == 1);
+  assert(summary.type_counts.word_speaker_segment_unmatched == 1);
 
   std::filesystem::remove_all(root);
 }
@@ -524,17 +822,17 @@ void test_relationships_dangling_reference_prevention() {
   const svp::package::RelationshipProvenanceWriteSummary summary =
       svp::package::write_relationships_and_provenance(staging_dir);
 
-  // shot_001 and scene_001 are in the shot_ids/scene_ids sets because
-  // they were collected from text_regions, so those relationships are valid.
-  // obs_001 -> tr_001 is valid (tr_001 exists).
+  // No timeline files present, so shot_id/scene_id from text_regions
+  // are not known IDs and should be skipped.
+  // obs_001 -> tr_001 is valid (tr_001 exists in text_regions).
   // obs_001 -> crop_nonexistent should be skipped (dangling).
   // word_001 -> speaker_nonexistent should be skipped (dangling).
-  assert(summary.type_counts.text_region_shot == 1);
-  assert(summary.type_counts.text_region_scene == 1);
+  assert(summary.type_counts.text_region_shot == 0);
+  assert(summary.type_counts.text_region_scene == 0);
   assert(summary.type_counts.text_observation_region == 1);
   assert(summary.type_counts.text_observation_evidence_crop == 0);
   assert(summary.type_counts.word_speaker == 0);
-  assert(summary.type_counts.skipped_dangling >= 2);
+  assert(summary.type_counts.skipped_dangling >= 4);
 
   std::filesystem::remove_all(root);
 }
@@ -666,7 +964,9 @@ void test_write_index_foundation() {
 
   const svp::package::RelationshipProvenanceWriteSummary relationship_summary =
       svp::package::write_relationships_and_provenance(staging_dir);
-  assert(relationship_summary.relationships_written == 6);
+  // No timeline files: shot/scene/color-frame/depth-frame relationships skipped.
+  // Expected: obs_001->region_001, num_001->obs_001, 2x embedding_source (region_001 exists)
+  assert(relationship_summary.relationships_written == 4);
 
   bool success = svp::package::write_index_foundation(staging_dir, manifest);
   assert(success);
@@ -884,6 +1184,11 @@ int main() {
   test_writer_fails_on_rename_and_cleans_up_temp();
   test_write_relationships_and_provenance();
   test_full_relationship_graph();
+  test_depth_index_alone_no_frame_ids();
+  test_color_frame_target_skipped_without_timeline();
+  test_text_region_shot_scene_skipped_without_timeline();
+  test_timeline_present_enables_relationships();
+  test_unmatched_word_segment_counting();
   test_relationships_with_missing_sections();
   test_relationships_dangling_reference_prevention();
   test_write_index_foundation();

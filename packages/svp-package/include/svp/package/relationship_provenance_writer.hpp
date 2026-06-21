@@ -14,6 +14,7 @@ struct RelationshipTypeCounts {
   std::size_t numeric_value_observation = 0;
   std::size_t word_speaker = 0;
   std::size_t word_speaker_segment = 0;
+  std::size_t word_speaker_segment_unmatched = 0;
   std::size_t color_observation_target = 0;
   std::size_t depth_frame = 0;
   std::size_t embedding_source = 0;

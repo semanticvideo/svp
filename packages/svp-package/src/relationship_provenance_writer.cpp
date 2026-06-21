@@ -126,13 +126,12 @@ struct KnownIds {
 KnownIds collect_known_ids(const std::filesystem::path& staging_dir) {
   KnownIds ids;
 
+  // Text artifact IDs — text_regions is the owning artifact for text_region_id
   for (const auto& rec : read_jsonl(staging_dir / "text" / "text_regions.jsonl")) {
     const std::string id = string_value(rec, "text_region_id");
     if (!id.empty()) ids.text_region_ids.insert(id);
-    const std::string shot = string_value(rec, "shot_id");
-    if (!shot.empty()) ids.shot_ids.insert(shot);
-    const std::string scene = string_value(rec, "scene_id");
-    if (!scene.empty()) ids.scene_ids.insert(scene);
+    // Do NOT collect shot_id/scene_id from text_regions — those are references,
+    // not canonical definitions. Timeline artifacts own those IDs.
   }
 
   for (const auto& rec : read_jsonl(staging_dir / "text" / "text_observations.jsonl")) {
@@ -153,6 +152,7 @@ KnownIds collect_known_ids(const std::filesystem::path& staging_dir) {
   for (const auto& rec : read_jsonl(staging_dir / "colors" / "color_observations.jsonl")) {
     const std::string id = string_value(rec, "color_observation_id");
     if (!id.empty()) ids.color_observation_ids.insert(id);
+    // Do NOT collect target_id from color_observations — those are references.
   }
 
   for (const auto& rec : read_jsonl(staging_dir / "transcript" / "words.jsonl")) {
@@ -178,8 +178,24 @@ KnownIds collect_known_ids(const std::filesystem::path& staging_dir) {
   for (const auto& rec : read_jsonl(staging_dir / "spatial" / "depth.index.jsonl")) {
     const std::string id = string_value(rec, "id");
     if (!id.empty()) ids.depth_ids.insert(id);
-    const std::string frame = string_value(rec, "frame_id");
-    if (!frame.empty()) ids.frame_ids.insert(frame);
+    // Do NOT collect frame_id from depth.index — depth is not the owning
+    // artifact for frame IDs. Timeline/frames.jsonl owns those.
+  }
+
+  // Timeline artifacts — the canonical owners of frame, shot, and scene IDs.
+  for (const auto& rec : read_jsonl(staging_dir / "timeline" / "frames.jsonl")) {
+    const std::string id = string_value(rec, "id");
+    if (!id.empty()) ids.frame_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "timeline" / "shots.jsonl")) {
+    const std::string id = string_value(rec, "id");
+    if (!id.empty()) ids.shot_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "timeline" / "scenes.jsonl")) {
+    const std::string id = string_value(rec, "id");
+    if (!id.empty()) ids.scene_ids.insert(id);
   }
 
   for (const auto& rec : read_jsonl(staging_dir / "provenance" / "processors.jsonl")) {
@@ -230,8 +246,7 @@ void build_text_region_relationships(
 
     const std::string shot_id = string_value(region, "shot_id");
     if (!shot_id.empty()) {
-      if (builder.ids.shot_ids.count(shot_id) ||
-          builder.ids.text_region_ids.count(shot_id)) {
+      if (builder.ids.shot_ids.count(shot_id)) {
         builder.add("rel_tr_shot_", "appears_in_shot", region_id, shot_id,
                     int_value_or_zero(region, "start_us"),
                     int_value_or_zero(region, "end_us"),
@@ -245,8 +260,7 @@ void build_text_region_relationships(
 
     const std::string scene_id = string_value(region, "scene_id");
     if (!scene_id.empty()) {
-      if (builder.ids.scene_ids.count(scene_id) ||
-          builder.ids.text_region_ids.count(scene_id)) {
+      if (builder.ids.scene_ids.count(scene_id)) {
         builder.add("rel_tr_scene_", "appears_in_scene", region_id, scene_id,
                     int_value_or_zero(region, "start_us"),
                     int_value_or_zero(region, "end_us"),
@@ -344,6 +358,7 @@ void build_transcript_speaker_relationships(
     const std::int64_t word_mid =
         (int_value_or_zero(word, "start_us") +
          int_value_or_zero(word, "end_us")) / 2;
+    bool matched_segment = false;
     for (const auto& seg : speaker_segments) {
       const std::string seg_id = string_value(seg, "id");
       if (seg_id.empty()) continue;
@@ -361,8 +376,12 @@ void build_transcript_speaker_relationships(
         } else {
           ++builder.counts.skipped_dangling;
         }
+        matched_segment = true;
         break;
       }
+    }
+    if (!matched_segment) {
+      ++builder.counts.word_speaker_segment_unmatched;
     }
   }
 }
@@ -483,11 +502,11 @@ std::vector<nlohmann::json> build_relationships(const std::filesystem::path& sta
   return builder.relationships;
 }
 
-nlohmann::json make_relationship_processor_record() {
+nlohmann::json make_relationship_processor_record(const RelationshipTypeCounts& counts) {
   return {
       {"id", kRelationshipProcessorId},
       {"name", "svp package relationship writer"},
-      {"version", "svp-package-relationship-writer-v2"},
+      {"version", "svp-package-relationship-writer-v3"},
       {"input_refs", {
           "text/text_regions.jsonl",
           "text/text_observations.jsonl",
@@ -498,18 +517,36 @@ nlohmann::json make_relationship_processor_record() {
           "transcript/speaker_segments.jsonl",
           "colors/color_observations.jsonl",
           "spatial/depth.index.jsonl",
-          "embeddings/embeddings.index.jsonl"
+          "embeddings/embeddings.index.jsonl",
+          "timeline/frames.jsonl",
+          "timeline/shots.jsonl",
+          "timeline/scenes.jsonl"
       }},
       {"output_refs", {"relationships/relationships.jsonl"}},
       {"model_refs", nlohmann::json::array()},
       {"task_ids", {"task.relationships.full_graph"}},
       {"cache_keys", nlohmann::json::array()},
+      {"relationship_type_counts", {
+          {"text_region_shot", counts.text_region_shot},
+          {"text_region_scene", counts.text_region_scene},
+          {"text_observation_region", counts.text_observation_region},
+          {"text_observation_evidence_crop", counts.text_observation_evidence_crop},
+          {"numeric_value_observation", counts.numeric_value_observation},
+          {"word_speaker", counts.word_speaker},
+          {"word_speaker_segment", counts.word_speaker_segment},
+          {"word_speaker_segment_unmatched", counts.word_speaker_segment_unmatched},
+          {"color_observation_target", counts.color_observation_target},
+          {"depth_frame", counts.depth_frame},
+          {"embedding_source", counts.embedding_source},
+          {"skipped_dangling", counts.skipped_dangling}
+      }},
   };
 }
 
 RelationshipProvenanceWriteSummary rewrite_processors(
     const std::filesystem::path& staging_dir,
-    bool include_relationship_processor) {
+    bool include_relationship_processor,
+    const RelationshipTypeCounts& counts) {
   RelationshipProvenanceWriteSummary summary;
   const std::filesystem::path processors_path = staging_dir / "provenance" / "processors.jsonl";
   std::map<std::string, nlohmann::json> processors_by_id;
@@ -535,7 +572,7 @@ RelationshipProvenanceWriteSummary rewrite_processors(
   }
 
   if (include_relationship_processor) {
-    const nlohmann::json processor = make_relationship_processor_record();
+    const nlohmann::json processor = make_relationship_processor_record(counts);
     processors_by_id[kRelationshipProcessorId] = processor;
     canonical_by_id[kRelationshipProcessorId] = processor.dump();
   }
@@ -564,7 +601,7 @@ RelationshipProvenanceWriteSummary write_relationships_and_provenance(
   summary.type_counts = counts;
 
   RelationshipProvenanceWriteSummary provenance_summary =
-      rewrite_processors(staging_dir, !relationships.empty());
+      rewrite_processors(staging_dir, !relationships.empty(), counts);
   summary.processors_written = provenance_summary.processors_written;
   summary.duplicate_processors_merged = provenance_summary.duplicate_processors_merged;
   return summary;
@@ -584,6 +621,7 @@ nlohmann::json relationship_provenance_write_summary_to_json(
           {"numeric_value_observation", summary.type_counts.numeric_value_observation},
           {"word_speaker", summary.type_counts.word_speaker},
           {"word_speaker_segment", summary.type_counts.word_speaker_segment},
+          {"word_speaker_segment_unmatched", summary.type_counts.word_speaker_segment_unmatched},
           {"color_observation_target", summary.type_counts.color_observation_target},
           {"depth_frame", summary.type_counts.depth_frame},
           {"embedding_source", summary.type_counts.embedding_source},
