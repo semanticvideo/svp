@@ -121,11 +121,61 @@ void test_roi_hardening_linking_with_skipped_crop() {
   std::cout << "test_roi_hardening_linking_with_skipped_crop: passed\n";
 }
 
+// Test that the byte cap is enforced as a hard upper bound.
+// Simulates the cap-check logic from generate_evidence_crops_internal:
+// after measuring a crop's bytes, if total + crop > cap, the crop is
+// skipped and total never exceeds the cap.
+void test_byte_cap_hard_limit() {
+  const std::int64_t max_total_crop_bytes = 10000;
+
+  // Simulate crop sizes: 4000, 4000, 4000
+  // After 2 crops: total = 8000. Third crop (4000) would make 12000 > 10000.
+  // The third crop must be skipped and total must stay at 8000.
+  std::int64_t total_bytes = 0;
+  std::size_t crops_accepted = 0;
+  std::size_t crops_skipped = 0;
+  std::string skip_reason;
+
+  const std::int64_t crop_sizes[] = {4000, 4000, 4000};
+
+  for (std::size_t i = 0; i < 3; ++i) {
+    const std::int64_t crop_bytes = crop_sizes[i];
+
+    // Pre-check (advisory, same as before extraction)
+    if (total_bytes >= max_total_crop_bytes) {
+      crops_skipped++;
+      continue;
+    }
+
+    // Post-extraction hard check (the fix)
+    if (total_bytes + crop_bytes > max_total_crop_bytes) {
+      crops_skipped++;
+      if (skip_reason.empty()) {
+        skip_reason = "Total crop bytes cap reached";
+      }
+      continue;
+    }
+
+    total_bytes += crop_bytes;
+    crops_accepted++;
+  }
+
+  require(crops_accepted == 2, "should accept 2 crops, not 3");
+  require(crops_skipped == 1, "should skip 1 crop for byte cap");
+  require(total_bytes == 8000, "total_bytes should be 8000, not 12000");
+  require(total_bytes <= max_total_crop_bytes,
+          "total_bytes must never exceed max_total_crop_bytes");
+  require(!skip_reason.empty(), "skip reason should be set for byte cap");
+
+  std::cout << "test_byte_cap_hard_limit: passed\n";
+}
+
 }  // namespace
 
 int main() {
   test_crop_linking_with_skipped_crop();
   test_roi_hardening_linking_with_skipped_crop();
+  test_byte_cap_hard_limit();
   std::cout << "All evidence crop linking tests passed.\n";
   return 0;
 }

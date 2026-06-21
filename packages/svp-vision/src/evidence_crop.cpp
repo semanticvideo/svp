@@ -510,6 +510,29 @@ EvidenceCropResult generate_evidence_crops_internal(
       continue;
     }
 
+    // Measure the extracted crop file size.
+    const std::int64_t crop_bytes = get_file_size(crop_path);
+
+    // Enforce the byte cap as a hard upper bound: if accepting this
+    // crop would push total_bytes over max_total_crop_bytes, skip it
+    // and remove the orphaned file so no stray crops remain on disk.
+    if (total_bytes + crop_bytes > options.max_total_crop_bytes) {
+      std::error_code rm_ec;
+      std::filesystem::remove(crop_path, rm_ec);
+      crops_skipped++;
+      result.roi_ocr_results[i].succeeded = false;
+      if (result.crops_skipped_reason.empty()) {
+        result.crops_skipped_reason =
+            "Total crop bytes cap reached (" +
+            std::to_string(options.max_total_crop_bytes) +
+            "); crop of " + std::to_string(crop_bytes) +
+            " bytes would exceed remaining budget of " +
+            std::to_string(options.max_total_crop_bytes - total_bytes) +
+            " bytes";
+      }
+      continue;
+    }
+
     // Run ROI-based Tesseract hardening on the crop
     RoiOcrResult roi_result = run_roi_tesseract(
         options.tesseract_path, crop_path, options.language);
@@ -523,7 +546,6 @@ EvidenceCropResult generate_evidence_crops_internal(
       blake3_hash = "";
     }
 
-    const std::int64_t crop_bytes = get_file_size(crop_path);
     total_bytes += crop_bytes;
 
     // Build the crop record
