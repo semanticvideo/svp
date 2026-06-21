@@ -606,12 +606,6 @@ int main(int argc, char** argv) {
           }}
         };
 
-        const svp::package::RelationshipProvenanceWriteSummary relationship_summary =
-            svp::package::write_relationships_and_provenance(staging_dir);
-        output["package_relationships_provenance"] =
-            svp::package::relationship_provenance_write_summary_to_json(
-                relationship_summary);
-
         // Write honest spatial/embedding placeholder entries
         // This also runs real OCR generation on decoded frames before
         // embedding generation so text_observations.jsonl is populated.
@@ -627,6 +621,15 @@ int main(int argc, char** argv) {
         output["spatial_embedding_placeholders"] =
             svp::package::spatial_embedding_placeholder_summary_to_json(
                 placeholder_summary);
+
+        // Write relationships and provenance after all source artifacts exist
+        // (OCR text observations, evidence crops, depth, embeddings, etc.)
+        // so the relationship graph has no dangling references.
+        const svp::package::RelationshipProvenanceWriteSummary relationship_summary =
+            svp::package::write_relationships_and_provenance(staging_dir);
+        output["package_relationships_provenance"] =
+            svp::package::relationship_provenance_write_summary_to_json(
+                relationship_summary);
 
         // Generate SQLite index foundation and manifest
         if (!svp::package::write_index_foundation(staging_dir, manifest_json)) {
