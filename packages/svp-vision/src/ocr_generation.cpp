@@ -1368,7 +1368,17 @@ OcrGenerationResult generate_ocr_observations(
       input.frame_height = robs.frame_height;
       input.confidence = robs.confidence;
       input.detection_count = robs.detection_count;
+      input.observation_raw_text = obs.raw_text;
       crop_inputs.push_back(std::move(input));
+    }
+
+    // Derive source frame dimensions from the media plan, accounting
+    // for rotation. These are the native video resolution that ffmpeg
+    // will operate on when extracting crops.
+    int src_w = static_cast<int>(options.media_plan->primary_video_stream.width);
+    int src_h = static_cast<int>(options.media_plan->primary_video_stream.height);
+    if (std::abs(options.media_plan->primary_video_stream.rotation_degrees) == 90) {
+      std::swap(src_w, src_h);
     }
 
     EvidenceCropOptions crop_opts;
@@ -1378,10 +1388,14 @@ OcrGenerationResult generate_ocr_observations(
     crop_opts.source_media_path = options.media_plan->source_path;
     crop_opts.ocr_frame_width = options.ocr_frame_width;
     crop_opts.ocr_frame_height = options.ocr_frame_height;
+    crop_opts.source_frame_width = src_w;
+    crop_opts.source_frame_height = src_h;
+    crop_opts.canonical_raster_width = options.canonical_raster_width;
+    crop_opts.canonical_raster_height = options.canonical_raster_height;
     crop_opts.max_total_crops = options.max_total_crops;
     crop_opts.max_total_crop_bytes = options.max_total_crop_bytes;
     crop_opts.crop_image_format = "jpeg";
-    crop_opts.jpeg_quality = 85;
+    crop_opts.jpeg_quality = 95;
 
     EvidenceCropResult crop_result;
     try {

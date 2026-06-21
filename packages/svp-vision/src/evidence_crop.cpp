@@ -3,6 +3,7 @@
 #include "svp/models/hash.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -224,21 +225,38 @@ bool extract_crop_from_source(
       std::to_string(crop_left) + ":" +
       std::to_string(crop_top);
 
-  // Scale up the crop for better OCR (2x, capped at 2000px wide)
-  const int scaled_width = std::min(target_width * 2, 2000);
-  const int scaled_height = static_cast<int>(
-      std::round(static_cast<double>(target_height) * scaled_width /
-                 std::max(1, target_width)));
-  crop_filter += ",scale=" + std::to_string(scaled_width) + ":" +
-                  std::to_string(scaled_height);
+  // Normalize crop dimensions for OCR and storage efficiency.
+  // - Upscale small crops (below min_ocr_width) for better OCR accuracy.
+  // - Downscale very large crops (above max_crop_width) to cap file size.
+  // This is resolution-agnostic: works for SD, HD, 4K, 8K, or any source.
+  const int min_ocr_width = 500;
+  const int max_crop_width = 2000;
+  if (target_width < min_ocr_width) {
+    const int scaled_width = std::min(target_width * 2, max_crop_width);
+    const int scaled_height = static_cast<int>(
+        std::round(static_cast<double>(target_height) * scaled_width /
+                   std::max(1, target_width)));
+    crop_filter += ",scale=" + std::to_string(scaled_width) + ":" +
+                    std::to_string(scaled_height);
+  } else if (target_width > max_crop_width) {
+    const int scaled_width = max_crop_width;
+    const int scaled_height = static_cast<int>(
+        std::round(static_cast<double>(target_height) * scaled_width /
+                   std::max(1, target_width)));
+    crop_filter += ",scale=" + std::to_string(scaled_width) + ":" +
+                    std::to_string(scaled_height);
+  }
 
   // Apply preprocessing variant
   if (preprocessing == "grayscale_sharpen") {
-    crop_filter += ",format=gray,unsharp=5:5:1.0";
+    crop_filter += ",format=gray,unsharp=5:5:0.5";
   } else if (preprocessing == "grayscale_threshold") {
     crop_filter += ",format=gray,eq=contrast=1.5:brightness=0.0";
   } else if (preprocessing == "grayscale") {
     crop_filter += ",format=gray";
+  } else if (preprocessing == "color") {
+    // Keep color. Tesseract handles color internally, and color preserves
+    // more visual information for audit purposes.
   }
 
   // Output format
@@ -327,14 +345,18 @@ RoiOcrResult run_roi_tesseract(
   RoiOcrResult best;
 
   // Try different PSM modes on the same preprocessed crop image.
+  // PSM 3 = fully automatic page segmentation (default, best for multi-line).
   // PSM 6 = assume a single uniform block of text.
+  // PSM 7 = treat the image as a single text line.
   // PSM 11 = sparse text, find as much text as possible.
   struct Variant {
     const char* name;
     int psm;
   };
   static const Variant variants[] = {
+    {"psm3", 3},
     {"psm6", 6},
+    {"psm7", 7},
     {"psm11", 11},
   };
 
@@ -388,6 +410,38 @@ void expand_bbox(
   if (crop_height < 1) crop_height = 1;
 }
 
+// Expand a text bbox into a centered same-line evidence window, clamped to
+// frame dimensions. OCR boxes can cover only part of a handwritten line, but
+// evidence crops need to preserve surrounding line context without assuming the
+// missing context is on the left or right.
+void expand_text_line_bbox(
+    int bbox_left, int bbox_top, int bbox_right, int bbox_bottom,
+    int frame_width, int frame_height,
+    int& crop_left, int& crop_top, int& crop_width, int& crop_height) {
+  const int bw = std::max(1, bbox_right - bbox_left);
+  const int bh = std::max(1, bbox_bottom - bbox_top);
+  const int target_width = std::min(
+      frame_width,
+      std::max(
+          bw + static_cast<int>(std::round(static_cast<double>(bh) * 4.0)),
+          static_cast<int>(std::round(static_cast<double>(bh) * 14.0))));
+  const int center_x = bbox_left + bw / 2;
+  const int margin_y = static_cast<int>(
+      std::round(static_cast<double>(bh) * 0.55));
+
+  crop_left = center_x - target_width / 2;
+  crop_left = std::max(0, std::min(crop_left, frame_width - target_width));
+  crop_top = std::max(0, bbox_top - margin_y);
+  int crop_right = crop_left + target_width;
+  int crop_bottom = std::min(frame_height, bbox_bottom + margin_y);
+
+  crop_width = crop_right - crop_left;
+  crop_height = crop_bottom - crop_top;
+
+  if (crop_width < 1) crop_width = 1;
+  if (crop_height < 1) crop_height = 1;
+}
+
 // Read file size
 std::int64_t get_file_size(const std::filesystem::path& path) {
   std::error_code ec;
@@ -396,10 +450,59 @@ std::int64_t get_file_size(const std::filesystem::path& path) {
   return static_cast<std::int64_t>(size);
 }
 
+// Extract only alphanumeric characters from a string (for text comparison).
+std::string alphanumeric_only(const std::string& s) {
+  std::string result;
+  for (char c : s) {
+    if (std::isalnum(static_cast<unsigned char>(c))) {
+      result += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+  }
+  return result;
+}
+
+// Check if two text strings share exact alphanumeric content.
+// This intentionally avoids fuzzy prefix/suffix scoring because evidence
+// quality should not mark a crop strong when OCR misreads important digits.
+bool texts_share_content(const std::string& a, const std::string& b) {
+  const std::string aa = alphanumeric_only(a);
+  const std::string ab = alphanumeric_only(b);
+  if (aa.empty() || ab.empty()) return false;
+
+  const std::string& shorter = (aa.size() <= ab.size()) ? aa : ab;
+  const std::string& longer = (aa.size() <= ab.size()) ? ab : aa;
+
+  if (shorter.size() <= 2) return longer.find(shorter) != std::string::npos;
+
+  return longer.find(shorter) != std::string::npos;
+}
+
+// Assess evidence quality by comparing ROI OCR text with the linked
+// observation's text.
+struct EvidenceQuality {
+  std::string quality;
+  std::string reason;
+};
+
+EvidenceQuality assess_evidence_quality(
+    const RoiOcrResult& roi_result,
+    const std::string& observation_raw_text) {
+  if (observation_raw_text.empty()) {
+    return {"not_checked", "No observation text available for comparison"};
+  }
+  if (!roi_result.succeeded || roi_result.word_count == 0) {
+    return {"unsupported", "ROI OCR on saved crop produced no words"};
+  }
+  if (texts_share_content(roi_result.raw_text, observation_raw_text)) {
+    return {"strong", "ROI OCR on saved crop reproduces or supports linked observation"};
+  }
+  return {"weak", "ROI OCR on saved crop does not reproduce linked observation text"};
+}
+
 }  // namespace
 
 nlohmann::json evidence_crop_to_json(const EvidenceCropRecord& record) {
-  return {
+  nlohmann::json j = {
       {"crop_id", record.crop_id},
       {"text_region_id", record.text_region_id},
       {"text_observation_id", record.text_observation_id},
@@ -411,12 +514,28 @@ nlohmann::json evidence_crop_to_json(const EvidenceCropRecord& record) {
           record.original_bbox_right,
           record.original_bbox_bottom
       }},
+      {"crop_bbox_ocr", {
+          record.crop_bbox_ocr_left,
+          record.crop_bbox_ocr_top,
+          record.crop_bbox_ocr_right,
+          record.crop_bbox_ocr_bottom
+      }},
       {"crop_bbox", {
           record.crop_bbox_left,
           record.crop_bbox_top,
           record.crop_bbox_right,
           record.crop_bbox_bottom
       }},
+      {"ocr_frame_width", record.ocr_frame_width},
+      {"ocr_frame_height", record.ocr_frame_height},
+      {"source_frame_width", record.source_frame_width},
+      {"source_frame_height", record.source_frame_height},
+      {"canonical_raster_width", record.canonical_raster_width},
+      {"canonical_raster_height", record.canonical_raster_height},
+      {"bbox_coordinate_space", record.bbox_coordinate_space},
+      {"transform_scale_x", record.transform_scale_x},
+      {"transform_scale_y", record.transform_scale_y},
+      {"crop_extraction_method", record.crop_extraction_method},
       {"frame_width", record.frame_width},
       {"frame_height", record.frame_height},
       {"crop_transform", record.crop_transform},
@@ -425,7 +544,13 @@ nlohmann::json evidence_crop_to_json(const EvidenceCropRecord& record) {
       {"crop_size_bytes", record.crop_size_bytes},
       {"blake3_hash", record.blake3_hash},
       {"selection_reason", record.selection_reason},
+      {"evidence_quality", record.evidence_quality},
+      {"evidence_quality_reason", record.evidence_quality_reason},
+      {"roi_ocr_text", record.roi_ocr_text},
+      {"roi_ocr_confidence", record.roi_ocr_confidence},
+      {"roi_ocr_word_count", record.roi_ocr_word_count},
   };
+  return j;
 }
 
 nlohmann::json evidence_crop_result_to_json(const EvidenceCropResult& result) {
@@ -461,6 +586,29 @@ EvidenceCropResult generate_evidence_crops_internal(
 
   result.roi_ocr_results.resize(inputs.size());
 
+  // Determine effective dimensions for coordinate transform.
+  // OCR frame dimensions come from options (set by caller from media plan).
+  // Source frame dimensions come from options (set by caller from media plan).
+  // If source dimensions are not provided, fall back to OCR frame dimensions
+  // (no scaling needed in that case: source == OCR resolution).
+  const int ocr_w = options.ocr_frame_width > 0 ?
+      options.ocr_frame_width : 0;
+  const int ocr_h = options.ocr_frame_height > 0 ?
+      options.ocr_frame_height : 0;
+  const int src_w = options.source_frame_width > 0 ?
+      options.source_frame_width : ocr_w;
+  const int src_h = options.source_frame_height > 0 ?
+      options.source_frame_height : ocr_h;
+
+  // Compute scale factors from OCR-frame to source-frame coordinates.
+  // When OCR runs at a lower resolution than the source video, bbox
+  // coordinates must be scaled up before applying ffmpeg crop on the
+  // source video. This is the root cause fix for the coordinate-space bug.
+  const double scale_x = (ocr_w > 0) ?
+      static_cast<double>(src_w) / static_cast<double>(ocr_w) : 1.0;
+  const double scale_y = (ocr_h > 0) ?
+      static_cast<double>(src_h) / static_cast<double>(ocr_h) : 1.0;
+
   for (std::size_t i = 0; i < inputs.size(); ++i) {
     const auto& input = inputs[i];
 
@@ -478,28 +626,54 @@ EvidenceCropResult generate_evidence_crops_internal(
       continue;
     }
 
-    // Expand bbox with 20% margin for context
-    int crop_left, crop_top, crop_width, crop_height;
-    expand_bbox(
+    // Step 1: Expand bbox with same-line context in OCR-frame coordinate space.
+    // Use the OCR frame dimensions (input.frame_width/height) for clamping.
+    const int clamp_w = (ocr_w > 0) ? ocr_w : input.frame_width;
+    const int clamp_h = (ocr_h > 0) ? ocr_h : input.frame_height;
+
+    int ocr_crop_left, ocr_crop_top, ocr_crop_width, ocr_crop_height;
+    expand_text_line_bbox(
         input.bbox_left, input.bbox_top,
         input.bbox_right, input.bbox_bottom,
-        input.frame_width, input.frame_height,
-        0.20,
-        crop_left, crop_top, crop_width, crop_height);
+        clamp_w, clamp_h,
+        ocr_crop_left, ocr_crop_top, ocr_crop_width, ocr_crop_height);
+
+    // Step 2: Scale the expanded OCR-frame bbox to source-frame coordinates.
+    // This is the critical fix: ffmpeg operates on the source video at its
+    // native resolution, so crop coordinates must be in source-frame space.
+    int src_crop_left = static_cast<int>(std::round(ocr_crop_left * scale_x));
+    int src_crop_top = static_cast<int>(std::round(ocr_crop_top * scale_y));
+    int src_crop_width = static_cast<int>(std::round(ocr_crop_width * scale_x));
+    int src_crop_height = static_cast<int>(std::round(ocr_crop_height * scale_y));
+
+    // Clamp to source frame dimensions
+    src_crop_left = std::max(0, std::min(src_crop_left, src_w));
+    src_crop_top = std::max(0, std::min(src_crop_top, src_h));
+    src_crop_width = std::min(src_crop_width, src_w - src_crop_left);
+    src_crop_height = std::min(src_crop_height, src_h - src_crop_top);
+
+    if (src_crop_width < 1 || src_crop_height < 1) {
+      crops_skipped++;
+      result.roi_ocr_results[i].succeeded = false;
+      continue;
+    }
 
     // Determine crop file name
     const std::string crop_id = pad_id("crop_", static_cast<int>(total_crops + 1));
     const std::string crop_filename = crop_id + "." + ext;
     const std::filesystem::path crop_path = crops_dir / crop_filename;
 
-    // Extract the crop with grayscale_sharpen preprocessing
+    // Step 3: Extract the crop from the source video using source-frame
+    // coordinates. The ffmpeg crop filter operates on the full-resolution
+    // source video, so coordinates must be in source-frame space.
+    // Use color preprocessing to preserve maximum visual information.
     std::string extract_error;
     bool crop_ok = extract_crop_from_source(
         options.ffmpeg_path, options.source_media_path,
         input.source_timestamp_us,
-        crop_left, crop_top, crop_width, crop_height,
-        crop_width, crop_height,
-        "grayscale_sharpen",
+        src_crop_left, src_crop_top, src_crop_width, src_crop_height,
+        src_crop_width, src_crop_height,
+        "color",
         options.crop_image_format,
         options.jpeg_quality,
         crop_path, extract_error);
@@ -538,6 +712,9 @@ EvidenceCropResult generate_evidence_crops_internal(
         options.tesseract_path, crop_path, options.language);
     result.roi_ocr_results[i] = roi_result;
 
+    // Assess evidence quality by comparing ROI OCR text with observation text
+    EvidenceQuality eq = assess_evidence_quality(roi_result, input.observation_raw_text);
+
     // Compute BLAKE3 hash of the crop file
     std::string blake3_hash;
     try {
@@ -555,17 +732,42 @@ EvidenceCropResult generate_evidence_crops_internal(
     crop.text_observation_id = input.text_observation_id;
     crop.source_frame_id = input.source_frame_id;
     crop.source_timestamp_us = input.source_timestamp_us;
+    // Original bbox in OCR-frame coordinates
     crop.original_bbox_left = input.bbox_left;
     crop.original_bbox_top = input.bbox_top;
     crop.original_bbox_right = input.bbox_right;
     crop.original_bbox_bottom = input.bbox_bottom;
-    crop.crop_bbox_left = crop_left;
-    crop.crop_bbox_top = crop_top;
-    crop.crop_bbox_right = crop_left + crop_width;
-    crop.crop_bbox_bottom = crop_top + crop_height;
+    // Crop bbox in OCR-frame space (after margin expansion)
+    crop.crop_bbox_ocr_left = ocr_crop_left;
+    crop.crop_bbox_ocr_top = ocr_crop_top;
+    crop.crop_bbox_ocr_right = ocr_crop_left + ocr_crop_width;
+    crop.crop_bbox_ocr_bottom = ocr_crop_top + ocr_crop_height;
+    // Crop bbox in source-frame space (after coordinate transform)
+    crop.crop_bbox_left = src_crop_left;
+    crop.crop_bbox_top = src_crop_top;
+    crop.crop_bbox_right = src_crop_left + src_crop_width;
+    crop.crop_bbox_bottom = src_crop_top + src_crop_height;
+    // Dimension metadata for auditing
+    crop.ocr_frame_width = ocr_w;
+    crop.ocr_frame_height = ocr_h;
+    crop.source_frame_width = src_w;
+    crop.source_frame_height = src_h;
+    crop.canonical_raster_width = options.canonical_raster_width;
+    crop.canonical_raster_height = options.canonical_raster_height;
+    crop.bbox_coordinate_space = "ocr_frame";
+    crop.transform_scale_x = scale_x;
+    crop.transform_scale_y = scale_y;
+    crop.crop_extraction_method = "ffmpeg_crop_scaled_to_source";
+    // Evidence quality
+    crop.evidence_quality = eq.quality;
+    crop.evidence_quality_reason = eq.reason;
+    crop.roi_ocr_text = roi_result.raw_text;
+    crop.roi_ocr_confidence = roi_result.confidence;
+    crop.roi_ocr_word_count = roi_result.word_count;
+    // Legacy compat
     crop.frame_width = input.frame_width;
     crop.frame_height = input.frame_height;
-    crop.crop_transform = "grayscale_sharpen";
+    crop.crop_transform = "color";
     crop.image_format = options.crop_image_format;
     crop.crop_file_path = "text/evidence_crops/" + crop_filename;
     crop.crop_size_bytes = crop_bytes;
