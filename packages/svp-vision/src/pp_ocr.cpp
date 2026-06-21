@@ -1,6 +1,7 @@
 #include "svp/vision/pp_ocr.hpp"
 
 #include "svp/core/hash_string.hpp"
+#include "svp/models/hash.hpp"
 #include "svp/models/manifest.hpp"
 #include "svp/models/runtime.hpp"
 
@@ -315,7 +316,31 @@ struct ModelBundlePaths {
   std::string license;
   bool det_manifest_loaded = false;
   bool rec_manifest_loaded = false;
+  std::optional<svp::models::ModelBundleManifest> det_manifest;
+  std::optional<svp::models::ModelBundleManifest> rec_manifest;
 };
+
+// Verify that a file's BLAKE3 hash matches the manifest entry for that file.
+// Returns true if the file is found in the manifest and its hash matches.
+bool verify_file_hash(
+    const svp::models::ModelBundleManifest& manifest,
+    const std::filesystem::path& bundle_dir,
+    const std::string& filename) {
+  for (const auto& mf : manifest.files) {
+    if (mf.path == filename) {
+      const auto file_path = bundle_dir / filename;
+      if (!std::filesystem::exists(file_path)) return false;
+      std::string computed;
+      try {
+        computed = svp::models::blake3_hex_for_file(file_path);
+      } catch (...) {
+        return false;
+      }
+      return computed == mf.blake3.hex_value();
+    }
+  }
+  return false;
+}
 
 std::optional<ModelBundlePaths> find_pp_ocr_bundles(
     const std::filesystem::path& cache_root) {
@@ -347,6 +372,7 @@ std::optional<ModelBundlePaths> find_pp_ocr_bundles(
           paths.det_model_version = manifest.model_version;
           paths.det_bundle_blake3 = manifest.bundle_blake3.hex_value();
           if (!manifest.license.empty()) paths.license = manifest.license;
+          paths.det_manifest = std::move(manifest);
           paths.det_manifest_loaded = true;
         } catch (...) {}
       }
@@ -373,6 +399,7 @@ std::optional<ModelBundlePaths> find_pp_ocr_bundles(
           paths.rec_bundle_blake3 = manifest.bundle_blake3.hex_value();
           if (!manifest.license.empty() && paths.license.empty())
             paths.license = manifest.license;
+          paths.rec_manifest = std::move(manifest);
           paths.rec_manifest_loaded = true;
         } catch (...) {}
       }
@@ -415,6 +442,43 @@ PpOcrSession create_pp_ocr_session(const PpOcrOptions& options) {
   if (!bundles) {
     session.blocker = "PP-OCR model bundles not found in model cache: " +
                       options.model_cache_root.string();
+    return session;
+  }
+
+  // Verify model file hashes against manifests before loading sessions.
+  // If manifests are missing or hashes don't match, PP-OCR cannot claim
+  // trusted model identity. We block the session entirely because trusted
+  // OCR requires verified model identity.
+  bool identity_verified = false;
+  if (bundles->det_manifest_loaded && bundles->rec_manifest_loaded &&
+      bundles->det_manifest && bundles->rec_manifest) {
+    const auto& dm = *bundles->det_manifest;
+    const auto& rm = *bundles->rec_manifest;
+
+    bool det_ok = verify_file_hash(
+        dm, bundles->det_bundle_dir, bundles->det_onnx.filename().string());
+    bool rec_onnx_ok = verify_file_hash(
+        rm, bundles->rec_bundle_dir, bundles->rec_onnx.filename().string());
+    bool rec_yml_ok = !bundles->rec_yml.empty() &&
+        verify_file_hash(
+            rm, bundles->rec_bundle_dir, bundles->rec_yml.filename().string());
+
+    if (det_ok && rec_onnx_ok && rec_yml_ok) {
+      identity_verified = true;
+    } else {
+      session.blocker =
+          "PP-OCR model file hash verification failed: "
+          "det_onnx=" + std::string(det_ok ? "ok" : "FAIL") +
+          ", rec_onnx=" + std::string(rec_onnx_ok ? "ok" : "FAIL") +
+          ", rec_yml=" + std::string(rec_yml_ok ? "ok" : "FAIL");
+      return session;
+    }
+  } else {
+    session.blocker =
+        "PP-OCR model manifests missing or malformed; "
+        "trusted OCR requires verified model identity. "
+        "det_manifest=" + std::string(bundles->det_manifest_loaded ? "loaded" : "missing") +
+        ", rec_manifest=" + std::string(bundles->rec_manifest_loaded ? "loaded" : "missing");
     return session;
   }
 
@@ -487,8 +551,7 @@ PpOcrSession create_pp_ocr_session(const PpOcrOptions& options) {
   session.model_info.license = bundles->license;
   session.model_info.runtime = "onnxruntime";
   session.model_info.execution_provider = options.execution_provider;
-  session.model_info.model_identity_verified =
-      bundles->det_manifest_loaded && bundles->rec_manifest_loaded;
+  session.model_info.model_identity_verified = identity_verified;
   session.model_info.confidence_calibrated = false;
 
   return session;
