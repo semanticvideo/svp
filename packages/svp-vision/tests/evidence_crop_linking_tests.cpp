@@ -1,5 +1,6 @@
 #include "svp/vision/evidence_crop.hpp"
 #include "svp/vision/foundation_ocr_staging.hpp"
+#include "svp/vision/ocr_generation.hpp"
 
 #include <cmath>
 #include <cstdlib>
@@ -272,6 +273,34 @@ void test_coordinate_transform_nonuniform() {
   std::cout << "test_coordinate_transform_nonuniform: passed\n";
 }
 
+void test_ocr_source_frame_dimensions_rotation_270() {
+  const svp::vision::OcrSourceFrameDimensions dims =
+      svp::vision::derive_ocr_source_frame_dimensions(3840, 2160, 270);
+
+  require(dims.width == 2160,
+      "rotation 270 should swap source frame width to stored height");
+  require(dims.height == 3840,
+      "rotation 270 should swap source frame height to stored width");
+
+  const svp::vision::OcrSourceFrameDimensions negative =
+      svp::vision::derive_ocr_source_frame_dimensions(3840, 2160, -90);
+
+  require(negative.width == 2160,
+      "rotation -90 should normalize to 270 and swap width");
+  require(negative.height == 3840,
+      "rotation -90 should normalize to 270 and swap height");
+
+  const svp::vision::OcrSourceFrameDimensions full_turn =
+      svp::vision::derive_ocr_source_frame_dimensions(3840, 2160, 450);
+
+  require(full_turn.width == 2160,
+      "rotation 450 should normalize to 90 and swap width");
+  require(full_turn.height == 3840,
+      "rotation 450 should normalize to 90 and swap height");
+
+  std::cout << "test_ocr_source_frame_dimensions_rotation_270: passed\n";
+}
+
 // Test that evidence crop metadata includes the coordinate space
 // information needed for auditing.
 void test_crop_metadata_coordinate_space() {
@@ -397,6 +426,7 @@ int main() {
   test_coordinate_transform_scaling();
   test_coordinate_transform_identity();
   test_coordinate_transform_nonuniform();
+  test_ocr_source_frame_dimensions_rotation_270();
   test_crop_metadata_coordinate_space();
   test_observation_region_crop_linkage();
   std::cout << "All evidence crop linking tests passed.\n";

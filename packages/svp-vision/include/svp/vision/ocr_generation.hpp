@@ -68,6 +68,16 @@ struct OcrGenerationResult {
   bool roi_hardening_run = false;
 };
 
+struct OcrSourceFrameDimensions {
+  int width = 0;
+  int height = 0;
+};
+
+[[nodiscard]] OcrSourceFrameDimensions derive_ocr_source_frame_dimensions(
+    int stored_width,
+    int stored_height,
+    int rotation_degrees);
+
 [[nodiscard]] OcrGenerationResult generate_ocr_observations(
     const OcrGenerationOptions& options,
     const DecodedCanonicalFrames& frame_input,

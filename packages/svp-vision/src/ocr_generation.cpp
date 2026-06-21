@@ -923,6 +923,18 @@ void write_failure_stage_files(const std::filesystem::path& staging_dir, const T
 
 }  // namespace
 
+OcrSourceFrameDimensions derive_ocr_source_frame_dimensions(
+    int stored_width,
+    int stored_height,
+    int rotation_degrees) {
+  const int normalized_rotation = ((rotation_degrees % 360) + 360) % 360;
+  const bool swaps_axes =
+      normalized_rotation == 90 || normalized_rotation == 270;
+  return swaps_axes
+      ? OcrSourceFrameDimensions{stored_height, stored_width}
+      : OcrSourceFrameDimensions{stored_width, stored_height};
+}
+
 OcrGenerationResult generate_ocr_observations(
     const OcrGenerationOptions& options,
     const DecodedCanonicalFrames& frame_input,
@@ -1373,13 +1385,14 @@ OcrGenerationResult generate_ocr_observations(
     }
 
     // Derive source frame dimensions from the media plan, accounting
-    // for rotation. These are the native video resolution that ffmpeg
-    // will operate on when extracting crops.
-    int src_w = static_cast<int>(options.media_plan->primary_video_stream.width);
-    int src_h = static_cast<int>(options.media_plan->primary_video_stream.height);
-    if (std::abs(options.media_plan->primary_video_stream.rotation_degrees) == 90) {
-      std::swap(src_w, src_h);
-    }
+    // for rotation with the same normalization used by canonical raster.
+    // These are the video dimensions that ffmpeg will operate on when
+    // extracting crops.
+    const OcrSourceFrameDimensions source_dims =
+        derive_ocr_source_frame_dimensions(
+            static_cast<int>(options.media_plan->primary_video_stream.width),
+            static_cast<int>(options.media_plan->primary_video_stream.height),
+            static_cast<int>(options.media_plan->primary_video_stream.rotation_degrees));
 
     EvidenceCropOptions crop_opts;
     crop_opts.ffmpeg_path = options.ffmpeg_path;
@@ -1388,8 +1401,8 @@ OcrGenerationResult generate_ocr_observations(
     crop_opts.source_media_path = options.media_plan->source_path;
     crop_opts.ocr_frame_width = options.ocr_frame_width;
     crop_opts.ocr_frame_height = options.ocr_frame_height;
-    crop_opts.source_frame_width = src_w;
-    crop_opts.source_frame_height = src_h;
+    crop_opts.source_frame_width = source_dims.width;
+    crop_opts.source_frame_height = source_dims.height;
     crop_opts.canonical_raster_width = options.canonical_raster_width;
     crop_opts.canonical_raster_height = options.canonical_raster_height;
     crop_opts.max_total_crops = options.max_total_crops;
