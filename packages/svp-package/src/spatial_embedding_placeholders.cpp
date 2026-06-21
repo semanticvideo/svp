@@ -158,8 +158,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     const nlohmann::json& media_plan_json,
     const std::filesystem::path& model_cache_root,
     const svp::media::MediaIngestPlan* media_plan,
-    const std::filesystem::path& ffmpeg_path,
-    const std::filesystem::path& tesseract_path) {
+    const std::filesystem::path& ffmpeg_path) {
   SpatialEmbeddingPlaceholderSummary summary;
   summary.model_runtime_available = model_runtime_available;
 
@@ -186,11 +185,10 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
 
     // Run OCR generation on decoded frames before embedding generation so
     // that text_observations.jsonl is populated when embedding generation
-    // reads it.  OCR uses tesseract as a subprocess (native, no Python).
+    // reads it.  OCR uses PP-OCR ONNX models (native, no Python).
     // OCR decodes its own higher-resolution frames for text detection.
     svp::vision::OcrGenerationOptions ocr_opts;
-    ocr_opts.tesseract_path = tesseract_path.empty() ?
-        std::filesystem::path("tesseract") : tesseract_path;
+    ocr_opts.model_cache_root = model_cache_root;
     ocr_opts.ffmpeg_path = ffmpeg_path;
     ocr_opts.media_plan = media_plan;
     ocr_opts.canonical_raster_width = static_cast<int>(raster_w);
@@ -223,7 +221,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     }
 
     // Enable evidence crop generation for text regions.
-    // This extracts bounded crop images and runs ROI-based Tesseract hardening.
+    // This extracts bounded crop images as visual evidence.
     ocr_opts.generate_evidence_crops = (media_plan != nullptr);
 
     svp::vision::OcrGenerationResult ocr_result;
@@ -344,7 +342,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
   summary.depth_generation_run = false;
   summary.embedding_generation_run = false;
 
-  // Even without ONNX Runtime, tesseract OCR can run independently.
+  // Even without ONNX Runtime, PP-OCR can run if model bundles are available.
   // Decode frames and run OCR so text artifacts are produced.
   svp::vision::DecodedCanonicalFrames decoded_frames;
   if (media_plan != nullptr && !ffmpeg_path.empty()) {
@@ -363,8 +361,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
   }
 
   svp::vision::OcrGenerationOptions ocr_opts;
-  ocr_opts.tesseract_path = tesseract_path.empty() ?
-      std::filesystem::path("tesseract") : tesseract_path;
+  ocr_opts.model_cache_root = model_cache_root;
   ocr_opts.ffmpeg_path = ffmpeg_path;
   ocr_opts.media_plan = media_plan;
   ocr_opts.canonical_raster_width = static_cast<int>(raster_w);

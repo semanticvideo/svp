@@ -14,26 +14,17 @@ namespace svp::media { struct MediaIngestPlan; }
 namespace svp::vision {
 
 struct OcrGenerationOptions {
-  std::filesystem::path tesseract_path = "tesseract";
+  std::filesystem::path model_cache_root;
   std::filesystem::path ffmpeg_path = "ffmpeg";
   std::string language = "eng";
-  // Minimum confidence threshold (0-100) for accepting a word from tesseract.
-  int min_word_confidence = 30;
-  // Maximum number of OCR text observations to produce per build run.
   std::size_t max_observations = 100;
-  // When provided, OCR decodes its own frames at ocr_frame_width x ocr_frame_height
-  // from the source media (higher resolution than canonical raster for text detection).
-  // Bounding boxes are normalized to canonical_raster_width x canonical_raster_height.
   const svp::media::MediaIngestPlan* media_plan = nullptr;
   int ocr_frame_width = 0;
   int ocr_frame_height = 0;
   int canonical_raster_width = 0;
   int canonical_raster_height = 0;
-  // When true, generate evidence crops for reconciled text regions.
   bool generate_evidence_crops = false;
-  // Maximum total crops across all regions.
   std::size_t max_total_crops = 50;
-  // Maximum total bytes for all crop images.
   std::int64_t max_total_crop_bytes = 2 * 1024 * 1024;
 };
 

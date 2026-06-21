@@ -65,8 +65,7 @@ struct SpatialEmbeddingPlaceholderSummary {
     const nlohmann::json& media_plan_json = {},
     const std::filesystem::path& model_cache_root = {},
     const svp::media::MediaIngestPlan* media_plan = nullptr,
-    const std::filesystem::path& ffmpeg_path = {},
-    const std::filesystem::path& tesseract_path = {});
+    const std::filesystem::path& ffmpeg_path = {});
 
 [[nodiscard]] nlohmann::json spatial_embedding_placeholder_summary_to_json(
     const SpatialEmbeddingPlaceholderSummary& summary);
