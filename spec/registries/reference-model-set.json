@@ -12,9 +12,9 @@
       ]
     },
     {
-      "model_id": "model_whisper_large_v3_turbo_q5_0",
-      "display_name": "Whisper Large v3 Turbo Q5_0",
-      "source_slug": "openai/whisper-large-v3-turbo",
+      "model_id": "model_whisper_small_en",
+      "display_name": "Whisper Small (English) — sherpa-onnx ONNX int8",
+      "source_slug": "csukuangfj/sherpa-onnx-whisper-small.en",
       "required_for": [
         "transcript",
         "words"

@@ -1,5 +1,12 @@
 find_package(nlohmann_json CONFIG REQUIRED)
 
+find_package(onnxruntime CONFIG QUIET)
+if(onnxruntime_FOUND)
+  set(SVP_AUDIO_ONNX_RUNTIME_AVAILABLE TRUE)
+else()
+  set(SVP_AUDIO_ONNX_RUNTIME_AVAILABLE FALSE)
+endif()
+
 add_library(svp-audio
   src/asr_chunk_planner.cpp
   src/asr_execution_boundary.cpp
@@ -11,6 +18,9 @@ add_library(svp-audio
   src/vad_execution_boundary.cpp
   src/vad_task_plan.cpp
   src/waveform_envelope.cpp
+  src/whisper_mel.cpp
+  src/whisper_model.cpp
+  src/whisper_token_table.cpp
 )
 
 add_library(svp::audio ALIAS svp-audio)
@@ -21,6 +31,10 @@ target_include_directories(svp-audio
 )
 
 target_compile_features(svp-audio PUBLIC cxx_std_20)
+
+if(SVP_AUDIO_ONNX_RUNTIME_AVAILABLE)
+  target_compile_definitions(svp-audio PUBLIC SVP_AUDIO_ONNX_RUNTIME_AVAILABLE=1)
+endif()
 
 target_link_libraries(svp-audio
   PUBLIC

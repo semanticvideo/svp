@@ -7,6 +7,7 @@
 #include "svp/audio/vad_execution_boundary.hpp"
 #include "svp/audio/vad_task_plan.hpp"
 #include "svp/audio/waveform_envelope.hpp"
+#include "svp/audio/whisper_model.hpp"
 
 #include <cassert>
 #include <algorithm>
@@ -706,17 +707,17 @@ void test_asr_model_present_vs_verified_distinction() {
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "svp-asr-model-verify-test";
   std::filesystem::remove_all(root);
-  std::filesystem::create_directories(root / "model_whisper_large_v3_turbo_q5_0");
+  std::filesystem::create_directories(root / "model_whisper_small_en");
 
-  const std::string model_id = "model_whisper_large_v3_turbo_q5_0";
+  const std::string model_id = "model_whisper_small_en";
 
   assert(svp::audio::check_asr_model_in_cache(model_id, root) == false);
   assert(svp::audio::verify_asr_model_files(model_id, root) == false);
 
   {
-    std::ofstream manifest(root / "model_whisper_large_v3_turbo_q5_0" / "model.svpmodel.json");
+    std::ofstream manifest(root / "model_whisper_small_en" / "model.svpmodel.json");
     manifest << R"({"schema_version":"svp-model-bundle-1",)"
-             << R"("model_bundle_id":"model_whisper_large_v3_turbo_q5_0@v1+blake3_000000000000",)"
+             << R"("model_bundle_id":"model_whisper_small_en@v1+blake3_000000000000",)"
              << R"("model_id":")" << model_id << R"(","model_version":"v1",)"
              << R"("bundle_blake3":"blake3:0000000000000000000000000000000000000000000000000000000000000000",)"
              << R"("runtime":"onnxruntime","format":"onnx","license":"MIT",)"
@@ -731,7 +732,7 @@ void test_asr_model_present_vs_verified_distinction() {
   assert(svp::audio::verify_asr_model_files(model_id, root) == false);
 
   {
-    std::ofstream model_file(root / "model_whisper_large_v3_turbo_q5_0" / "model.onnx");
+    std::ofstream model_file(root / "model_whisper_small_en" / "model.onnx");
     model_file << "dummy";
   }
 
@@ -886,6 +887,51 @@ void test_transcript_writer_produces_honest_zero_duration_absence() {
   std::filesystem::remove_all(root);
 }
 
+void test_whisper_runtime_available_reports_honestly() {
+  const bool available = svp::audio::is_whisper_runtime_available();
+#ifdef SVP_AUDIO_ONNX_RUNTIME_AVAILABLE
+  assert(available);
+#else
+  assert(!available);
+#endif
+}
+
+void test_whisper_inference_blocks_when_model_dir_missing() {
+  const std::filesystem::path fake_dir =
+      std::filesystem::temp_directory_path() / "svp-whisper-fake-model";
+  std::filesystem::remove_all(fake_dir);
+  std::filesystem::create_directories(fake_dir);
+
+  const std::filesystem::path fake_wav = fake_dir / "test.wav";
+  {
+    std::ofstream output(fake_wav, std::ios::binary);
+    write_u32_le(output, 0x46464952);
+    write_u32_le(output, 36 + 16000 * 2);
+    output.write("WAVE", 4);
+    output.write("fmt ", 4);
+    write_u32_le(output, 16);
+    write_u16_le(output, 1);
+    write_u16_le(output, 1);
+    write_u32_le(output, 16000);
+    write_u32_le(output, 32000);
+    write_u16_le(output, 2);
+    write_u16_le(output, 16);
+    output.write("data", 4);
+    write_u32_le(output, 16000 * 2);
+    for (int i = 0; i < 16000; ++i) {
+      write_u16_le(output, 0);
+    }
+  }
+
+  const svp::audio::WhisperInferenceResult result =
+      svp::audio::run_whisper_inference(fake_wav, fake_dir, "test_chunk", 0, 1000000);
+
+  assert(!result.ran);
+  assert(!result.blockers.empty());
+
+  std::filesystem::remove_all(fake_dir);
+}
+
 }  // namespace
 
 int main() {
@@ -917,5 +963,7 @@ int main() {
   test_asr_execution_boundary_planned_when_all_available();
   test_transcript_writer_produces_honest_blocked_absence();
   test_transcript_writer_produces_honest_zero_duration_absence();
+  test_whisper_runtime_available_reports_honestly();
+  test_whisper_inference_blocks_when_model_dir_missing();
   return 0;
 }
