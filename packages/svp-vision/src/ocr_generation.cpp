@@ -3,6 +3,7 @@
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/vision/evidence_crop.hpp"
 #include "svp/vision/foundation_ocr_staging.hpp"
+#include "svp/vision/ocr_temporal_sampling.hpp"
 #include "svp/vision/pp_ocr.hpp"
 
 #include <algorithm>
@@ -393,14 +394,12 @@ OcrGenerationResult generate_ocr_observations(
   result.ocr_frame_input_available =
       frame_input.decoding_succeeded && !frame_input.frames.empty();
 
-  // Decode higher-resolution frames for OCR if media_plan is provided
+  // Decode higher-resolution frames for OCR using temporal sampling
   DecodedCanonicalFrames ocr_frames;
   bool using_high_res_frames = false;
   if (options.media_plan != nullptr &&
       options.ocr_frame_width > 0 && options.ocr_frame_height > 0) {
-    ocr_frames = decode_frames_at_resolution(
-        *options.media_plan, options.ffmpeg_path,
-        options.ocr_frame_width, options.ocr_frame_height, 5);
+    ocr_frames = decode_ocr_frames_temporal(options, result.temporal_sampling);
     if (ocr_frames.decoding_succeeded && !ocr_frames.frames.empty()) {
       using_high_res_frames = true;
       result.ocr_frame_input_available = true;
@@ -430,6 +429,11 @@ OcrGenerationResult generate_ocr_observations(
         "processor_numeric_parser_0001", "numeric_parser",
         "svp-vision-ocr-generation-v1", "deterministic_cpp",
         "not_run", "No OCR text to parse"));
+
+    if (!result.processors.empty()) {
+      result.processors[0]["temporal_sampling"] =
+          ocr_temporal_sampling_result_to_json(result.temporal_sampling);
+    }
 
     write_failure_stage_files(staging_dir, result.text_absence);
     result.text_regions_written = true;
@@ -468,6 +472,11 @@ OcrGenerationResult generate_ocr_observations(
         "processor_numeric_parser_0001", "numeric_parser",
         "svp-vision-ocr-generation-v1", "deterministic_cpp",
         "not_run", "No OCR text to parse"));
+
+    if (!result.processors.empty()) {
+      result.processors[0]["temporal_sampling"] =
+          ocr_temporal_sampling_result_to_json(result.temporal_sampling);
+    }
 
     write_failure_stage_files(staging_dir, result.text_absence);
     result.text_regions_written = true;
@@ -588,6 +597,11 @@ OcrGenerationResult generate_ocr_observations(
         "processor_numeric_parser_0001", "numeric_parser",
         "svp-vision-ocr-generation-v1", "deterministic_cpp",
         "not_run", "No OCR text to parse due to OCR execution failure"));
+
+    if (!result.processors.empty()) {
+      result.processors[0]["temporal_sampling"] =
+          ocr_temporal_sampling_result_to_json(result.temporal_sampling);
+    }
 
     const std::filesystem::path text_dir = staging_dir / "text";
     std::filesystem::create_directories(text_dir);
@@ -838,6 +852,12 @@ OcrGenerationResult generate_ocr_observations(
       "Parsed " + std::to_string(result.numeric_value_count) +
           " numeric value(s) from recognized text"));
 
+  // Attach temporal sampling provenance to the detector processor
+  if (!result.processors.empty()) {
+    result.processors[0]["temporal_sampling"] =
+        ocr_temporal_sampling_result_to_json(result.temporal_sampling);
+  }
+
   // Write text artifacts to staging
   const std::filesystem::path text_dir = staging_dir / "text";
   std::filesystem::create_directories(text_dir);
@@ -934,6 +954,7 @@ nlohmann::json ocr_generation_result_to_json(const OcrGenerationResult& result) 
       {"evidence_crops_skipped", result.evidence_crops_skipped},
       {"evidence_crops_skipped_reason", sanitize_utf8(result.evidence_crops_skipped_reason)},
       {"roi_hardening_run", result.roi_hardening_run},
+      {"temporal_sampling", ocr_temporal_sampling_result_to_json(result.temporal_sampling)},
       {"evidence_crops", evidence_crop_result_to_json(
           EvidenceCropResult{
               result.evidence_crops,
@@ -944,6 +965,32 @@ nlohmann::json ocr_generation_result_to_json(const OcrGenerationResult& result) 
               result.evidence_crops_skipped_reason,
               {}})},
   };
+}
+
+DecodedCanonicalFrames decode_ocr_frames_temporal(
+    const OcrGenerationOptions& options,
+    OcrTemporalSamplingResult& out_sampling) {
+  if (options.media_plan == nullptr ||
+      options.ocr_frame_width <= 0 || options.ocr_frame_height <= 0) {
+    return {};
+  }
+
+  const std::int64_t duration_us =
+      compute_media_duration_us(*options.media_plan);
+
+  out_sampling = compute_ocr_temporal_timestamps(duration_us, options.sampling_config);
+
+  if (out_sampling.timestamps_us.empty()) {
+    DecodedCanonicalFrames empty;
+    empty.decoding_attempted = false;
+    empty.skipped_reason = "no OCR temporal timestamps computed (duration unknown?)";
+    return empty;
+  }
+
+  return decode_frames_at_timestamps(
+      *options.media_plan, options.ffmpeg_path,
+      options.ocr_frame_width, options.ocr_frame_height,
+      out_sampling.timestamps_us);
 }
 
 }  // namespace svp::vision
