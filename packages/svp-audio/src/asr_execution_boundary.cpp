@@ -197,7 +197,7 @@ AsrExecutionBoundary build_asr_execution_boundary(const AsrChunkPlanResult& chun
     boundary.blockers.push_back("Whisper ASR model is not available in model cache");
   }
   if (model_available && !model_verified) {
-    boundary.blockers.push_back("Whisper ASR model manifest file hashes could not be verified");
+    boundary.blockers.push_back("Whisper ASR model manifest/required files could not be verified");
   }
   if (chunk_plan.chunks.empty()) {
     boundary.blockers.push_back("no ASR chunks are available to process");
