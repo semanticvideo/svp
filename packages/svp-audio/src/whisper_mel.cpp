@@ -14,8 +14,10 @@ constexpr int kNFft = 400;
 constexpr int kNHop = 160;
 constexpr int kNMels = 80;
 constexpr int kNFrames = 3000;
-constexpr int kTargetSamples = kSampleRate * 30;
+[[maybe_unused]] constexpr int kTargetSamples = kSampleRate * 30;
+constexpr int kRequiredSamples = (kNFrames - 1) * kNHop + kNFft;
 constexpr int kFftBins = kNFft / 2 + 1;
+constexpr int kTailPadding = 50;
 
 struct PcmWavData {
   std::vector<float> samples;
@@ -172,10 +174,10 @@ WhisperMelFeatures compute_whisper_mel_from_wav(const std::filesystem::path& wav
   PcmWavData wav = read_pcm_s16le_mono_wav(wav_path);
 
   std::vector<float> audio = std::move(wav.samples);
-  if (static_cast<int>(audio.size()) < kTargetSamples) {
-    audio.resize(kTargetSamples, 0.0f);
-  } else if (static_cast<int>(audio.size()) > kTargetSamples) {
-    audio.resize(kTargetSamples);
+  if (static_cast<int>(audio.size()) < kRequiredSamples) {
+    audio.resize(kRequiredSamples, 0.0f);
+  } else if (static_cast<int>(audio.size()) > kRequiredSamples) {
+    audio.resize(kRequiredSamples);
   }
 
   const auto filterbank = create_mel_filterbank();
@@ -214,6 +216,12 @@ WhisperMelFeatures compute_whisper_mel_from_wav(const std::filesystem::path& wav
   for (int i = 0; i < kNMels * kNFrames; ++i) {
     mel_data[i] = std::max(mel_data[i], clamp_low);
     mel_data[i] = (mel_data[i] + 4.0f) / 4.0f;
+  }
+
+  for (int t = kNFrames - kTailPadding; t < kNFrames; ++t) {
+    for (int m = 0; m < kNMels; ++m) {
+      mel_data[m * kNFrames + t] = 0.0f;
+    }
   }
 
   return {std::move(mel_data), kNMels, kNFrames};

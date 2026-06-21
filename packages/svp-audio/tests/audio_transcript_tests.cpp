@@ -9,13 +9,16 @@
 #include "svp/audio/vad_execution_boundary.hpp"
 #include "svp/audio/vad_task_plan.hpp"
 #include "svp/audio/waveform_envelope.hpp"
+#include "svp/audio/whisper_mel.hpp"
 #include "svp/audio/whisper_model.hpp"
 
 #include <cassert>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <string>
@@ -1310,6 +1313,114 @@ void test_reconcile_three_cluster_min_gap_merges_all_to_one() {
   assert(result.cluster_to_final.at(1) == result.cluster_to_final.at(2));
 }
 
+void test_whisper_mel_30s_chunk_produces_valid_output_without_overread() {
+  // A 30-second chunk at 16 kHz is exactly 480000 samples.
+  // The STFT loop needs (kNFrames-1)*kNHop + kNFft = 480240 samples.
+  // The old code resized to 480000, causing a 240-sample buffer overread
+  // in the last STFT frame (t=2999, start=479840, reads through 480239).
+  std::vector<std::int16_t> samples(480000, 16384);
+  const auto wav_path =
+      std::filesystem::temp_directory_path() / "svp_mel_test_30s.wav";
+  write_pcm_s16le_mono_wav(wav_path, samples);
+
+  svp::audio::WhisperMelFeatures features =
+      svp::audio::compute_whisper_mel_from_wav(wav_path);
+  assert(features.n_mels == 80);
+  assert(features.n_frames == 3000);
+  assert(static_cast<int>(features.data.size()) == 80 * 3000);
+
+  for (float v : features.data) {
+    assert(std::isfinite(v));
+  }
+
+  // The last non-tail-padded frame (t=2949) must carry signal from real
+  // audio samples. With the buffer fix, all STFT reads are in-bounds.
+  // The last 50 frames (2950-2999) are zeroed for tail padding (EOT
+  // detection), so we check frame 2949 instead of 2999.
+  float max_last_audio_frame = -std::numeric_limits<float>::max();
+  for (int m = 0; m < 80; ++m) {
+    max_last_audio_frame =
+        std::max(max_last_audio_frame, features.data[m * 3000 + 2949]);
+  }
+  assert(max_last_audio_frame > 1.5f);
+
+  // Tail-padded frames must be exactly 0.0.
+  for (int m = 0; m < 80; ++m) {
+    assert(features.data[m * 3000 + 2999] == 0.0f);
+  }
+
+  std::filesystem::remove(wav_path);
+}
+
+void test_whisper_mel_buffer_includes_samples_for_last_stft_frame() {
+  // The old code resized the audio buffer to 480000 samples. The STFT loop
+  // needs 480240 samples for all 3000 frames. Without the fix, frame 2999
+  // reads 240 samples past the buffer end (undefined behavior).
+  // This test verifies the function completes safely with exactly 480000
+  // samples (the old buffer size) and produces valid output.
+  std::vector<std::int16_t> samples(480000, 16384);
+  const auto wav_path =
+      std::filesystem::temp_directory_path() / "svp_mel_test_tail.wav";
+  write_pcm_s16le_mono_wav(wav_path, samples);
+
+  svp::audio::WhisperMelFeatures features =
+      svp::audio::compute_whisper_mel_from_wav(wav_path);
+  assert(features.n_mels == 80);
+  assert(features.n_frames == 3000);
+
+  // All values must be finite (no NaN/inf from buffer overread garbage).
+  for (float v : features.data) {
+    assert(std::isfinite(v));
+  }
+
+  // The last non-tail-padded frame (t=2949) must carry signal.
+  float max_last_audio_frame = -std::numeric_limits<float>::max();
+  for (int m = 0; m < 80; ++m) {
+    max_last_audio_frame =
+        std::max(max_last_audio_frame, features.data[m * 3000 + 2949]);
+  }
+  assert(max_last_audio_frame > 0.5f);
+
+  // Tail-padded frames (t=2950..2999) must be exactly 0.0.
+  for (int t = 2950; t < 3000; ++t) {
+    for (int m = 0; m < 80; ++m) {
+      assert(features.data[m * 3000 + t] == 0.0f);
+    }
+  }
+
+  std::filesystem::remove(wav_path);
+}
+
+void test_whisper_mel_uses_log10_for_compression() {
+  // Whisper and sherpa-onnx both use log10 (not natural log) for mel
+  // power compression. For a constant signal of amplitude ~0.5, the DC
+  // bin power is roughly (0.5 * 200)^2 = 10000. After log10: log10(10000) = 4.0.
+  // The final normalization is (val + 4) / 4, giving:
+  //   log10: (4.0 + 4) / 4 = 2.0
+  //   ln:    (9.21 + 4) / 4 ≈ 3.30
+  // A threshold of 2.5 confirms log10 is used (max ≈ 2.0, not 3.3).
+  std::vector<std::int16_t> samples(16000, 16384);
+  const auto wav_path =
+      std::filesystem::temp_directory_path() / "svp_mel_test_log.wav";
+  write_pcm_s16le_mono_wav(wav_path, samples);
+
+  svp::audio::WhisperMelFeatures features =
+      svp::audio::compute_whisper_mel_from_wav(wav_path);
+  assert(features.n_mels == 80);
+  assert(features.n_frames == 3000);
+
+  float max_val = -std::numeric_limits<float>::max();
+  for (float v : features.data) {
+    max_val = std::max(max_val, v);
+  }
+
+  // With log10, max_val should be ≈2.0. With natural log, ≈3.3.
+  // Threshold of 2.5 confirms log10 is used.
+  assert(max_val < 2.5f);
+
+  std::filesystem::remove(wav_path);
+}
+
 }  // namespace
 
 int main() {
@@ -1356,5 +1467,10 @@ int main() {
   test_reconcile_single_pair_high_similarity_merges_to_one();
   test_reconcile_three_cluster_largest_gap_keeps_two_speakers();
   test_reconcile_three_cluster_min_gap_merges_all_to_one();
+
+  // Whisper mel preprocessing tests
+  test_whisper_mel_30s_chunk_produces_valid_output_without_overread();
+  test_whisper_mel_buffer_includes_samples_for_last_stft_frame();
+  test_whisper_mel_uses_log10_for_compression();
   return 0;
 }
