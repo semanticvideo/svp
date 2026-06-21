@@ -13,6 +13,7 @@ struct FoundationColorStagingArtifact {
   ColorObservationRecordPlan records;
   nlohmann::json processor_provenance;
   nlohmann::json manifest;
+  ColorFrameSamplingInput sampling_input;
 };
 
 // Build a staging artifact from the deterministic 2x2 synthetic sample input.

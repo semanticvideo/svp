@@ -4,7 +4,10 @@
 #include "svp/package/index_writer.hpp"
 #include "svp/package/relationship_provenance_writer.hpp"
 #include "svp/package/spatial_embedding_placeholders.hpp"
+#include "svp/package/timeline_writer.hpp"
 #include "svp/package/validation_report_storage.hpp"
+#include "svp/media/media_ingest_plan.hpp"
+#include "svp/vision/foundation_color_staging.hpp"
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
 
@@ -1176,6 +1179,96 @@ void test_package_skeleton_includes_placeholders_and_validation_report() {
   std::filesystem::remove_all(root);
 }
 
+void test_timeline_writer() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-timeline-writer-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir);
+
+  svp::media::MediaIngestPlan plan;
+  plan.source_path = "test.mp4";
+  plan.primary_video_stream.id = "vstream_0001";
+  plan.primary_video_stream.width = 1920;
+  plan.primary_video_stream.height = 1080;
+  plan.primary_video_stream.rotation_degrees = 90;
+  plan.primary_video_stream.pixel_aspect_ratio = {1, 1};
+  plan.canonical_raster.width = 360;
+  plan.canonical_raster.height = 640;
+  plan.canonical_raster.display.oriented_width = 1080;
+  plan.canonical_raster.display.oriented_height = 1920;
+
+  svp::vision::FoundationColorStagingArtifact color_artifact =
+      svp::vision::build_foundation_color_staging_artifact();
+
+  // Write timeline
+  svp::package::TimelineWriteSummary summary =
+      svp::package::write_timeline_artifacts(staging_dir, plan, color_artifact);
+
+  assert(summary.frames_written);
+  assert(summary.shots_written);
+  assert(summary.scenes_written);
+  assert(summary.frame_count == 3);
+  assert(summary.shot_count == 2);
+  assert(summary.scene_count == 1);
+
+  // Check frames.jsonl
+  auto frames = read_jsonl_records(staging_dir / "timeline" / "frames.jsonl");
+  assert(frames.size() == 3);
+  assert(frames[0].value("id", "") == "frame_000001");
+  assert(frames[0].value("frame_index", -1) == 0);
+  assert(frames[0].value("pts_us", -1) == 0);
+  assert(frames[0].value("pts_sec", "") == "0.000000");
+  assert(frames[0].value("source_width", -1) == 1920);
+  assert(frames[0].value("source_height", -1) == 1080);
+  assert(frames[0].value("display_width", -1) == 1080);
+  assert(frames[0].value("display_height", -1) == 1920);
+  assert(frames[0].value("analysis_width", -1) == 360);
+  assert(frames[0].value("analysis_height", -1) == 640);
+  assert(frames[0].value("shot_id", "") == "shot_000001");
+  assert(frames[0].value("scene_id", "") == "scene_000001");
+
+  // Check shots.jsonl
+  auto shots = read_jsonl_records(staging_dir / "timeline" / "shots.jsonl");
+  assert(shots.size() == 2);
+  assert(shots[0].value("id", "") == "shot_000001");
+  assert(shots[0].value("start_us", -1) == 0);
+  assert(shots[0].value("end_us", -1) == 500000);
+  assert(shots[0].value("start_frame_id", "") == "frame_000001");
+  assert(shots[0].value("end_frame_id", "") == "frame_000002");
+  assert(shots[0].value("cut_type_in", "") == "source_start");
+  assert(shots[0].value("cut_type_out", "") == "hard_cut");
+
+  assert(shots[1].value("id", "") == "shot_000002");
+  assert(shots[1].value("cut_type_in", "") == "hard_cut");
+  assert(shots[1].value("cut_type_out", "") == "source_end");
+
+  // Check scenes.jsonl
+  auto scenes = read_jsonl_records(staging_dir / "timeline" / "scenes.jsonl");
+  assert(scenes.size() == 1);
+  assert(scenes[0].value("id", "") == "scene_000001");
+  assert(scenes[0].value("start_us", -1) == 0);
+  assert(scenes[0].value("end_us", -1) == 1000000);
+  assert(scenes[0]["shot_ids"].size() == 2);
+  assert(scenes[0]["shot_ids"][0] == "shot_000001");
+  assert(scenes[0]["shot_ids"][1] == "shot_000002");
+
+  // Check processors.jsonl
+  auto processors = read_jsonl_records(staging_dir / "provenance" / "processors.jsonl");
+  bool found_timeline_proc = false;
+  for (const auto& proc : processors) {
+    if (proc.value("id", "") == "processor_timeline_generator_0001") {
+      found_timeline_proc = true;
+      assert(proc.value("name", "") == "svp timeline generator");
+    }
+  }
+  assert(found_timeline_proc);
+
+  std::filesystem::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
@@ -1193,6 +1286,7 @@ int main() {
   test_relationships_dangling_reference_prevention();
   test_write_index_foundation();
   test_spatial_embedding_placeholders();
+  test_timeline_writer();
   test_validation_report_storage();
   test_package_skeleton_includes_placeholders_and_validation_report();
   std::cout << "All svp-package-tests passed!\n";

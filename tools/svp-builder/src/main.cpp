@@ -18,6 +18,7 @@
 #include "svp/package/index_writer.hpp"
 #include "svp/package/relationship_provenance_writer.hpp"
 #include "svp/package/spatial_embedding_placeholders.hpp"
+#include "svp/package/timeline_writer.hpp"
 #include "svp/package/validation_report_storage.hpp"
 #include "svp/validation/report_json.hpp"
 #include "svp/validation/validator.hpp"
@@ -467,6 +468,9 @@ int main(int argc, char** argv) {
                 plan, build_ffmpeg_path);
         write_foundation_color_staging_files(staging_dir, color_artifact);
 
+        const svp::package::TimelineWriteSummary timeline_summary =
+            svp::package::write_timeline_artifacts(staging_dir, plan, color_artifact);
+
         nlohmann::json color_json =
             svp::vision::foundation_color_staging_artifact_to_json(color_artifact);
         color_json["staging_paths"] = {
@@ -478,6 +482,20 @@ int main(int argc, char** argv) {
              (staging_dir / "colors" / "color_absence.json").string()},
             {"processors_jsonl",
              (staging_dir / "provenance" / "processors.jsonl").string()},
+            {"frames_jsonl",
+             (staging_dir / "timeline" / "frames.jsonl").string()},
+            {"shots_jsonl",
+             (staging_dir / "timeline" / "shots.jsonl").string()},
+            {"scenes_jsonl",
+             (staging_dir / "timeline" / "scenes.jsonl").string()},
+        };
+        color_json["timeline_summary"] = {
+            {"frames_written", timeline_summary.frames_written},
+            {"shots_written", timeline_summary.shots_written},
+            {"scenes_written", timeline_summary.scenes_written},
+            {"frame_count", timeline_summary.frame_count},
+            {"shot_count", timeline_summary.shot_count},
+            {"scene_count", timeline_summary.scene_count}
         };
         output["foundation_color_staging"] = color_json;
       }
