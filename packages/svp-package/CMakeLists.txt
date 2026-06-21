@@ -14,6 +14,7 @@ add_library(svp-package
   src/index_writer.cpp
   src/relationship_provenance_writer.cpp
   src/spatial_embedding_placeholders.cpp
+  src/timeline_writer.cpp
   src/validation_report_storage.cpp
 )
 
@@ -50,6 +51,8 @@ if(BUILD_TESTING)
   target_link_libraries(svp-package-tests
     PRIVATE
       svp::package
+      svp::media
+      svp::vision
   )
 
   add_test(NAME svp-package-tests COMMAND svp-package-tests)

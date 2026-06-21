@@ -221,8 +221,9 @@ ColorFrameSamplingInput build_foundation_color_staging_sample_input() {
 FoundationColorStagingArtifact build_foundation_color_staging_artifact() {
   constexpr const char* provenance_id = "processor_color_quantizer_0001";
   FoundationColorStagingArtifact artifact;
+  artifact.sampling_input = build_foundation_color_staging_sample_input();
   artifact.records = build_foundation_color_observations(
-      build_foundation_color_staging_sample_input(),
+      artifact.sampling_input,
       FoundationColorObservationOptions{provenance_id, 1});
   artifact.processor_provenance = make_processor_provenance(provenance_id);
   artifact.manifest = make_manifest(artifact.records, provenance_id);
@@ -251,8 +252,9 @@ FoundationColorStagingArtifact build_real_frame_color_staging_artifact(
       build_real_frame_color_sampling_input(plan, ffmpeg_path);
 
   FoundationColorStagingArtifact artifact;
+  artifact.sampling_input = sampling_result.input;
   artifact.records = build_foundation_color_observations(
-      sampling_result.input,
+      artifact.sampling_input,
       FoundationColorObservationOptions{provenance_id, 1});
   artifact.processor_provenance =
       make_real_processor_provenance(provenance_id, plan,
