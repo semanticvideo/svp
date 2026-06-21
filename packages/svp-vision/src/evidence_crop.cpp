@@ -316,26 +316,26 @@ RoiOcrResult build_roi_ocr_result(
   return result;
 }
 
-// Run ROI-based Tesseract on a crop with multiple preprocessing variants
-// and PSM modes. Returns the best result.
+// Run ROI-based Tesseract on a crop with multiple PSM modes.
+// The crop image has already been extracted with grayscale_sharpen
+// preprocessing by extract_crop_from_source. Here we only vary the
+// Tesseract page segmentation mode (PSM) to find the best result.
 RoiOcrResult run_roi_tesseract(
     const std::filesystem::path& tesseract_path,
     const std::filesystem::path& crop_image_path,
     const std::string& language) {
   RoiOcrResult best;
 
-  // Try preprocessing variants x PSM modes
+  // Try different PSM modes on the same preprocessed crop image.
+  // PSM 6 = assume a single uniform block of text.
+  // PSM 11 = sparse text, find as much text as possible.
   struct Variant {
     const char* name;
     int psm;
   };
   static const Variant variants[] = {
-    {"grayscale_sharpen", 6},
-    {"grayscale_sharpen", 11},
-    {"grayscale_threshold", 6},
-    {"grayscale_threshold", 11},
-    {"grayscale", 6},
-    {"grayscale", 11},
+    {"psm6", 6},
+    {"psm11", 11},
   };
 
   for (const auto& v : variants) {

@@ -31,8 +31,6 @@ struct OcrGenerationOptions {
   int canonical_raster_height = 0;
   // When true, generate evidence crops for reconciled text regions.
   bool generate_evidence_crops = false;
-  // Maximum crops per reconciled text region.
-  int max_crops_per_region = 2;
   // Maximum total crops across all regions.
   std::size_t max_total_crops = 50;
   // Maximum total bytes for all crop images.

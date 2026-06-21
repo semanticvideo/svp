@@ -19,6 +19,7 @@
 #include <sstream>
 #include <string>
 #include <sys/wait.h>
+#include <unordered_map>
 #include <vector>
 
 namespace svp::vision {
@@ -1377,7 +1378,6 @@ OcrGenerationResult generate_ocr_observations(
     crop_opts.source_media_path = options.media_plan->source_path;
     crop_opts.ocr_frame_width = options.ocr_frame_width;
     crop_opts.ocr_frame_height = options.ocr_frame_height;
-    crop_opts.max_crops_per_region = options.max_crops_per_region;
     crop_opts.max_total_crops = options.max_total_crops;
     crop_opts.max_total_crop_bytes = options.max_total_crop_bytes;
     crop_opts.crop_image_format = "jpeg";
@@ -1401,30 +1401,39 @@ OcrGenerationResult generate_ocr_observations(
     result.evidence_crops_skipped_reason = crop_result.crops_skipped_reason;
     result.roi_hardening_run = true;
 
-    // Link evidence crops to their text observations
-    for (std::size_t i = 0; i < result.text_observations.size() && i < crop_result.crops.size(); ++i) {
-      if (crop_result.crops[i].text_observation_id ==
-          result.text_observations[i].text_observation_id) {
-        result.text_observations[i].evidence_crop_refs.push_back(
-            crop_result.crops[i].crop_id);
+    // Link evidence crops to their text observations by stable ID.
+    // We build a map from observation_id → crop_id so that skipped or
+    // failed crops do not shift indices and cause mis-linking.
+    std::unordered_map<std::string, std::string> obs_id_to_crop_id;
+    for (const auto& crop : crop_result.crops) {
+      obs_id_to_crop_id[crop.text_observation_id] = crop.crop_id;
+    }
+    for (auto& obs : result.text_observations) {
+      auto it = obs_id_to_crop_id.find(obs.text_observation_id);
+      if (it != obs_id_to_crop_id.end()) {
+        obs.evidence_crop_refs.push_back(it->second);
       }
     }
 
-    // Apply ROI hardening results: when ROI OCR produced more words
-    // than the full-frame OCR, use the ROI text as the raw_text.
-    // This is source-derived from the crop, not inferred.
-    for (std::size_t i = 0; i < result.text_observations.size() &&
-         i < crop_result.roi_ocr_results.size(); ++i) {
-      const auto& roi = crop_result.roi_ocr_results[i];
+    // Apply ROI hardening results by matching observation IDs.
+    // roi_ocr_results is parallel to the crop_inputs vector (which is
+    // parallel to text_observations), but we match by observation ID
+    // to be safe against any reordering.
+    std::unordered_map<std::string, std::size_t> obs_id_to_roi_idx;
+    for (std::size_t i = 0; i < crop_inputs.size(); ++i) {
+      obs_id_to_roi_idx[crop_inputs[i].text_observation_id] = i;
+    }
+    for (auto& obs : result.text_observations) {
+      auto it = obs_id_to_roi_idx.find(obs.text_observation_id);
+      if (it == obs_id_to_roi_idx.end()) continue;
+      const auto& roi = crop_result.roi_ocr_results[it->second];
       if (!roi.succeeded) continue;
 
-      // Count words in current observation text
-      const int current_words = count_words(result.text_observations[i].raw_text);
+      const int current_words = count_words(obs.raw_text);
       if (roi.word_count > current_words) {
-        result.text_observations[i].raw_text = roi.raw_text;
-        result.text_observations[i].normalized_text =
-            normalize_text(roi.raw_text);
-        result.text_observations[i].confidence = roi.confidence;
+        obs.raw_text = roi.raw_text;
+        obs.normalized_text = normalize_text(roi.raw_text);
+        obs.confidence = roi.confidence;
       }
     }
   }

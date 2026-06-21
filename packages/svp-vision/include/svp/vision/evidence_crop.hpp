@@ -55,7 +55,7 @@ struct EvidenceCropRecord {
 };
 
 // Result of running Tesseract on an ROI crop with a specific
-// preprocessing variant. Used to pick the best OCR result.
+// PSM mode. Used to pick the best OCR result.
 struct RoiOcrResult {
   std::string raw_text;
   double confidence = 0.0;
@@ -75,9 +75,6 @@ struct EvidenceCropOptions {
   // OCR frame resolution (the resolution at which OCR was run)
   int ocr_frame_width = 0;
   int ocr_frame_height = 0;
-
-  // Maximum crops per reconciled text region
-  int max_crops_per_region = 2;
 
   // Maximum total number of crops across all regions
   std::size_t max_total_crops = 50;
