@@ -38,15 +38,15 @@ def get_det_boxes(pred, ratio, thresh=0.3, box_thresh=0.6, unclip_ratio=1.5):
     """Simple DB post-process to get bounding boxes."""
     pred = pred[0, 0, :, :]
     segmentation = pred > thresh
-    
+
     h, w = segmentation.shape
     boxes = []
-    
+
     # Simple connected component approach
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
         segmentation.astype(np.uint8), connectivity=8
     )
-    
+
     for i in range(1, num_labels):
         x, y, bw, bh, area = stats[i]
         if area < 10:
@@ -59,7 +59,7 @@ def get_det_boxes(pred, ratio, thresh=0.3, box_thresh=0.6, unclip_ratio=1.5):
         x2 = int((x + bw) / ratio + bw * (unclip_ratio - 1) / 2 / ratio)
         y2 = int((y + bh) / ratio + bh * (unclip_ratio - 1) / 2 / ratio)
         boxes.append([x1, y1, x2, y2])
-    
+
     return boxes
 
 def crop_text_region(img, box, padding=0.1):
@@ -132,30 +132,30 @@ def main():
     # Load ONNX models
     det_session = ort.InferenceSession(args.det_model, providers=['CPUExecutionProvider'])
     rec_session = ort.InferenceSession(args.rec_model, providers=['CPUExecutionProvider'])
-    
+
     det_input_name = det_session.get_inputs()[0].name
     rec_input_name = rec_session.get_inputs()[0].name
-    
+
     dict_chars = load_rec_dict(args.rec_yml)
-    
+
     results = []
     for img_path in args.images:
         if not os.path.exists(img_path):
             continue
-        
+
         img = cv2.imread(img_path)
         if img is None:
             continue
-        
+
         t0 = time.time()
-        
+
         # Detection
         det_input, ratio = preprocess_det_image(img)
         det_output = det_session.run(None, {det_input_name: det_input})
         det_pred = det_output[0]
-        
+
         boxes = get_det_boxes(det_pred, ratio)
-        
+
         # Recognition
         detections = []
         for box in boxes:
@@ -168,7 +168,7 @@ def main():
             text = ctc_decode(rec_pred, dict_chars)
             if text.strip():
                 detections.append({"text": text, "score": 0.0, "box": box})
-        
+
         elapsed = time.time() - t0
         entry = {
             "image": img_path,
@@ -176,20 +176,20 @@ def main():
             "detections": detections
         }
         results.append(entry)
-        
+
         print(f"\n{os.path.basename(img_path)} ({elapsed:.2f}s):")
         if not detections:
             print("  (no text detected)")
         for d in detections:
             print(f'  text="{d["text"]}" box={d["box"]}')
-    
+
     output = {
         "model": "PP-OCRv6_medium_ONNX",
         "det_model": args.det_model,
         "rec_model": args.rec_model,
         "results": results
     }
-    
+
     if args.output:
         with open(args.output, "w") as f:
             json.dump(output, f, indent=2)
