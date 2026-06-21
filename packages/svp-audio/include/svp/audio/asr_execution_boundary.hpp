@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/audio/asr_chunk_planner.hpp"
+#include "svp/audio/transcript_records.hpp"
 
 #include <cstddef>
 #include <filesystem>
@@ -42,6 +43,11 @@ struct AsrExecutionBoundary {
   std::size_t reconciled_word_count = 0;
   std::size_t speaker_count = 0;
   bool one_speaker_mode = true;
+  std::string diarization_status = "unavailable";
+  std::string diarization_processor_id = "proc_sherpa_diar_0001";
+  std::string diarization_note;
+  std::vector<std::string> diarization_blockers;
+  std::vector<SpeakerSegment> speaker_segments;
   std::vector<AsrWord> reconciled_words;
 };
 

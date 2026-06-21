@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
+#include <limits>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 
@@ -58,6 +60,32 @@ std::string word_id_for_ordinal(std::size_t ordinal) {
   return output.str();
 }
 
+nlohmann::json diarization_provenance_json(const AsrExecutionBoundary& boundary) {
+  std::string note;
+  if (boundary.diarization_status == "ran") {
+    note = "Diarization model ran and produced speaker segments.";
+  } else if (boundary.diarization_status == "fallback_one_speaker") {
+    note = boundary.diarization_note.empty()
+         ? "One-speaker fallback used. This is not speaker recognition."
+         : boundary.diarization_note;
+  } else {
+    note = boundary.diarization_note.empty()
+         ? "Diarization did not run."
+         : boundary.diarization_note;
+  }
+
+  nlohmann::json result = {
+      {"status", boundary.diarization_status},
+      {"processor_id", boundary.diarization_processor_id},
+      {"one_speaker_fallback", boundary.diarization_status == "fallback_one_speaker"},
+      {"note", note},
+  };
+  if (!boundary.diarization_blockers.empty()) {
+    result["blockers"] = boundary.diarization_blockers;
+  }
+  return result;
+}
+
 nlohmann::json blocked_transcript_json(const AsrExecutionBoundary& boundary) {
   nlohmann::json language = {
       {"primary", "und"},
@@ -75,6 +103,7 @@ nlohmann::json blocked_transcript_json(const AsrExecutionBoundary& boundary) {
       {"processor_id", boundary.processor_id},
       {"asr_status", asr_status_string(boundary.asr_status)},
       {"one_speaker_mode", boundary.one_speaker_mode},
+      {"diarization", diarization_provenance_json(boundary)},
       {"blockers", boundary.blockers},
   };
 }
@@ -95,8 +124,12 @@ nlohmann::json ran_transcript_json(const AsrExecutionBoundary& boundary,
       {"timestamp_note", "Word start_us/end_us are derived from Whisper decoder timestamp tokens (50357+). Words are distributed evenly within each timestamp segment, not cross-attention aligned."},
       {"confidence_status", "unimplemented"},
       {"confidence_note", "Per-word confidence is not yet extracted from decoder logits. All confidence values are 0.0."},
-      {"speaker_mode", "one_speaker_fallback"},
-      {"speaker_note", "Single speaker assigned without diarization. All words have speaker_id speaker_0001."},
+      {"speaker_mode", boundary.diarization_status == "fallback_one_speaker"
+           ? "one_speaker_fallback"
+           : "diarization_assigned"},
+      {"speaker_note", boundary.diarization_status == "fallback_one_speaker"
+           ? "Single speaker assigned without diarization. All words have speaker_id speaker_0001. This is fallback behavior, not speaker recognition."
+           : "Speaker IDs assigned by diarization processor."},
   };
 
   return {
@@ -108,6 +141,7 @@ nlohmann::json ran_transcript_json(const AsrExecutionBoundary& boundary,
       {"processor_id", boundary.processor_id},
       {"asr_status", asr_status_string(boundary.asr_status)},
       {"one_speaker_mode", boundary.one_speaker_mode},
+      {"diarization", diarization_provenance_json(boundary)},
       {"asr_limitations", asr_limitations},
   };
 }
@@ -137,13 +171,17 @@ nlohmann::json chunk_provenance_json(const AsrChunkPlan& chunk,
 }
 
 nlohmann::json speaker_json(const std::string& speaker_id,
-                            const std::string& processor_id) {
+                            const std::string& processor_id,
+                            const std::string& diarization_status,
+                            int speaker_number) {
+  std::string display_name = "Speaker " + std::to_string(speaker_number);
   return {
       {"id", speaker_id},
-      {"display_name", "Speaker 1"},
+      {"display_name", display_name},
       {"total_speech_us", 0},
       {"confidence", 0.0},
       {"processor_id", processor_id},
+      {"diarization_status", diarization_status},
   };
 }
 
@@ -186,9 +224,26 @@ TranscriptWriteResult write_transcript_artifacts(const AsrExecutionBoundary& bou
     result.transcript_written = true;
 
     std::vector<nlohmann::json> word_records;
-    const std::string speaker_id = "speaker_0001";
     for (std::size_t i = 0; i < boundary.reconciled_words.size(); ++i) {
       const AsrWord& w = boundary.reconciled_words[i];
+      std::string word_speaker_id = "speaker_0001";
+      if (!boundary.one_speaker_mode && !boundary.speaker_segments.empty()) {
+        const std::int64_t word_mid = (w.start_us + w.end_us) / 2;
+        const SpeakerSegment* best_seg = nullptr;
+        std::int64_t best_duration = std::numeric_limits<std::int64_t>::max();
+        for (const SpeakerSegment& seg : boundary.speaker_segments) {
+          if (word_mid >= seg.timing.start_us && word_mid < seg.timing.end_us) {
+            std::int64_t dur = seg.timing.end_us - seg.timing.start_us;
+            if (dur < best_duration) {
+              best_duration = dur;
+              best_seg = &seg;
+            }
+          }
+        }
+        if (best_seg) {
+          word_speaker_id = best_seg->speaker_id;
+        }
+      }
       word_records.push_back({
           {"id", word_id_for_ordinal(i)},
           {"text", w.text},
@@ -196,7 +251,7 @@ TranscriptWriteResult write_transcript_artifacts(const AsrExecutionBoundary& bou
           {"end_us", w.end_us},
           {"confidence", w.confidence},
           {"chunk_ordinal", w.chunk_ordinal},
-          {"speaker_id", speaker_id},
+          {"speaker_id", word_speaker_id},
       });
     }
     write_jsonl_file(words_path, word_records);
@@ -205,13 +260,25 @@ TranscriptWriteResult write_transcript_artifacts(const AsrExecutionBoundary& bou
 
     if (boundary.one_speaker_mode) {
       write_jsonl_file(speakers_path,
-                       {speaker_json("speaker_0001", boundary.processor_id)});
+                       {speaker_json("speaker_0001", boundary.diarization_processor_id,
+                                     boundary.diarization_status, 1)});
       result.speakers_written = true;
       result.speaker_count = 1;
     } else {
-      write_empty_jsonl(speakers_path);
+      std::set<std::string> unique_speaker_ids;
+      for (const SpeakerSegment& seg : boundary.speaker_segments) {
+        unique_speaker_ids.insert(seg.speaker_id);
+      }
+      std::vector<nlohmann::json> speaker_records;
+      int speaker_number = 1;
+      for (const std::string& sid : unique_speaker_ids) {
+        speaker_records.push_back(speaker_json(sid, boundary.diarization_processor_id,
+                                               boundary.diarization_status, speaker_number));
+        speaker_number++;
+      }
+      write_jsonl_file(speakers_path, speaker_records);
       result.speakers_written = true;
-      result.speaker_count = boundary.speaker_count;
+      result.speaker_count = unique_speaker_ids.size();
     }
 
     result.transcript_status = "ran";
@@ -231,7 +298,15 @@ TranscriptWriteResult write_transcript_artifacts(const AsrExecutionBoundary& bou
   }
   result.speech_regions_written = true;
 
-  if (!std::filesystem::exists(speaker_segments_path)) {
+  if (blocked) {
+    write_empty_jsonl(speaker_segments_path);
+  } else if (!boundary.speaker_segments.empty()) {
+    std::vector<nlohmann::json> segment_records;
+    for (const SpeakerSegment& seg : boundary.speaker_segments) {
+      segment_records.push_back(speaker_segment_to_json(seg));
+    }
+    write_jsonl_file(speaker_segments_path, segment_records);
+  } else if (!std::filesystem::exists(speaker_segments_path)) {
     write_empty_jsonl(speaker_segments_path);
   }
   result.speaker_segments_written = true;

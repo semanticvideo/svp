@@ -2,6 +2,8 @@
 #include "svp/audio/asr_execution_boundary.hpp"
 #include "svp/audio/audio_extraction_executor.hpp"
 #include "svp/audio/audio_stage_plan.hpp"
+#include "svp/audio/diarization_boundary.hpp"
+#include "svp/audio/sherpa_diarization.hpp"
 #include "svp/audio/transcript_records.hpp"
 #include "svp/audio/transcript_writer.hpp"
 #include "svp/audio/vad_execution_boundary.hpp"
@@ -192,7 +194,7 @@ void test_audio_extraction_plan_documents_ffmpeg_commands_when_available() {
   assert(extraction["analysis_audio_written"] == false);
 }
 
-void test_multi_stream_analysis_audio_waits_for_vad_selection() {
+void test_multi_stream_analysis_audio_selects_first_stream() {
   svp::media::MediaProbe probe;
   probe.audio_streams.push_back({"astream_0001", 1, "aac", 48000, 2, {}});
   probe.audio_streams.push_back({"astream_0002", 2, "aac", 48000, 2, {}});
@@ -203,14 +205,20 @@ void test_multi_stream_analysis_audio_waits_for_vad_selection() {
       svp::audio::audio_stage_plan_to_json(plan)["audio_extraction"];
 
   assert(extraction["original_streams"].size() == 2);
-  assert(extraction["analysis_audio"]["task_id"] ==
-         "task.audio.analysis.pending_vad_selection");
-  assert(extraction["analysis_audio"]["selected_source_audio_stream_id"] ==
-         "pending_vad_speech_positive_selection");
-  assert(extraction["analysis_audio"]["depends_on"].size() == 2);
-  assert(extraction["analysis_audio"]["arguments"].empty());
-  assert(extraction["analysis_audio"]["command_available"] == false);
+  assert(extraction["analysis_audio"]["task_id"] == "task.audio.analysis.astream_000");
+  assert(extraction["analysis_audio"]["selected_source_audio_stream_id"] == "astream_0001");
+  assert(extraction["analysis_audio"]["depends_on"].size() == 1);
+  assert(extraction["analysis_audio"]["command_available"] == true);
+  assert(!extraction["analysis_audio"]["arguments"].empty());
   assert(!extraction["blockers"].empty());
+  bool has_multi_stream_blocker = false;
+  for (const auto& blocker : extraction["blockers"]) {
+    if (blocker.get<std::string>().find("multiple audio streams") != std::string::npos) {
+      has_multi_stream_blocker = true;
+      break;
+    }
+  }
+  assert(has_multi_stream_blocker);
 }
 
 void test_waveform_envelope_generates_ten_millisecond_json_records() {
@@ -932,6 +940,376 @@ void test_whisper_inference_blocks_when_model_dir_missing() {
   std::filesystem::remove_all(fake_dir);
 }
 
+void test_diarization_boundary_fallback_when_model_unavailable() {
+  svp::audio::DiarizationExecutionBoundary boundary =
+      svp::audio::build_diarization_boundary(
+          true, true, false, false, 30000000);
+  assert(boundary.diarization_status == svp::audio::DiarizationStatus::unavailable);
+  assert(!boundary.blockers.empty());
+
+  const svp::audio::DiarizationExecutionBoundary executed =
+      svp::audio::execute_diarization_boundary(std::move(boundary), "", "");
+  assert(executed.diarization_status == svp::audio::DiarizationStatus::fallback_one_speaker);
+  assert(executed.speaker_count == 1);
+  assert(executed.speaker_segments.size() == 1);
+  assert(executed.speaker_segments[0].speaker_id == "speaker_0001");
+  assert(executed.speaker_segments[0].timing.start_us == 0);
+  assert(executed.speaker_segments[0].timing.end_us == 30000000);
+  assert(executed.speaker_segments[0].overlap == false);
+}
+
+void test_diarization_boundary_unavailable_when_no_audio() {
+  svp::audio::DiarizationExecutionBoundary boundary =
+      svp::audio::build_diarization_boundary(
+          false, false, false, false, 0);
+  assert(boundary.diarization_status == svp::audio::DiarizationStatus::unavailable);
+
+  const svp::audio::DiarizationExecutionBoundary executed =
+      svp::audio::execute_diarization_boundary(std::move(boundary), "", "");
+  assert(executed.diarization_status == svp::audio::DiarizationStatus::unavailable);
+  assert(executed.speaker_segments.empty());
+  assert(executed.speaker_count == 0);
+}
+
+void test_diarization_boundary_json_serialization() {
+  svp::audio::DiarizationExecutionBoundary boundary =
+      svp::audio::build_diarization_boundary(
+          true, true, false, false, 30000000);
+  boundary = svp::audio::execute_diarization_boundary(std::move(boundary), "", "");
+  const nlohmann::json json =
+      svp::audio::diarization_execution_boundary_to_json(boundary);
+
+  assert(json["diarization_status"] == "fallback_one_speaker");
+  assert(json["speaker_count"] == 1);
+  assert(json["speaker_segments"].size() == 1);
+  assert(json["speaker_segments"][0]["speaker_id"] == "speaker_0001");
+  assert(json["speaker_segments"][0]["start_us"] == 0);
+  assert(json["speaker_segments"][0]["end_us"] == 30000000);
+  assert(json["speaker_segments"][0]["overlap"] == false);
+}
+
+void test_transcript_writer_writes_speaker_segments_with_fallback() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-diar-transcript-fallback-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  svp::audio::AsrExecutionBoundary boundary =
+      svp::audio::build_asr_execution_boundary(plan, true, true, true, true);
+  boundary.asr_status = svp::audio::AsrStatus::ran;
+  boundary.reconciled_words.push_back({"hello", 1000000, 1500000, 0.9, 0});
+  boundary.reconciled_word_count = 1;
+  boundary.speaker_count = 1;
+  boundary.one_speaker_mode = true;
+  boundary.diarization_status = "fallback_one_speaker";
+
+  svp::audio::SpeakerSegment fallback_segment;
+  fallback_segment.id = "speakerseg_000000";
+  fallback_segment.speaker_id = "speaker_0001";
+  fallback_segment.timing = {0, 30000000};
+  fallback_segment.confidence = 0.0;
+  fallback_segment.overlap = false;
+  boundary.speaker_segments.push_back(std::move(fallback_segment));
+
+  const svp::audio::TranscriptWriteResult result =
+      svp::audio::write_transcript_artifacts(boundary, root);
+
+  assert(result.transcript_written);
+  assert(result.words_written);
+  assert(result.speakers_written);
+  assert(result.speaker_segments_written);
+  assert(result.word_count == 1);
+  assert(result.speaker_count == 1);
+
+  {
+    std::ifstream input(root / "transcript/transcript.json");
+    const nlohmann::json transcript = nlohmann::json::parse(input);
+    assert(transcript["diarization"]["status"] == "fallback_one_speaker");
+    assert(transcript["diarization"]["one_speaker_fallback"] == true);
+    assert(transcript["asr_limitations"]["speaker_mode"] == "one_speaker_fallback");
+  }
+
+  {
+    std::ifstream input(root / "transcript/words.jsonl");
+    std::string line;
+    std::getline(input, line);
+    const nlohmann::json word = nlohmann::json::parse(line);
+    assert(word["speaker_id"] == "speaker_0001");
+  }
+
+  {
+    std::ifstream input(root / "transcript/speakers.jsonl");
+    std::string line;
+    std::getline(input, line);
+    const nlohmann::json speaker = nlohmann::json::parse(line);
+    assert(speaker["id"] == "speaker_0001");
+    assert(speaker["diarization_status"] == "fallback_one_speaker");
+  }
+
+  {
+    std::ifstream input(root / "transcript/speaker_segments.jsonl");
+    std::string line;
+    std::getline(input, line);
+    const nlohmann::json seg = nlohmann::json::parse(line);
+    assert(seg["id"] == "speakerseg_000000");
+    assert(seg["speaker_id"] == "speaker_0001");
+    assert(seg["start_us"] == 0);
+    assert(seg["end_us"] == 30000000);
+    assert(seg["overlap"] == false);
+  }
+
+  std::filesystem::remove_all(root);
+}
+
+void test_transcript_writer_blocked_includes_diarization_provenance() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-diar-transcript-blocked-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  svp::audio::AsrExecutionBoundary boundary =
+      svp::audio::build_asr_execution_boundary(plan, true, false, false, false);
+  boundary.diarization_status = "unavailable";
+
+  const svp::audio::TranscriptWriteResult result =
+      svp::audio::write_transcript_artifacts(boundary, root);
+
+  assert(result.transcript_written);
+  assert(result.transcript_status == "blocked");
+
+  {
+    std::ifstream input(root / "transcript/transcript.json");
+    const nlohmann::json transcript = nlohmann::json::parse(input);
+    assert(transcript["diarization"]["status"] == "unavailable");
+    assert(transcript["diarization"]["one_speaker_fallback"] == false);
+  }
+
+  std::filesystem::remove_all(root);
+}
+
+void test_blocked_asr_with_fallback_segments_does_not_create_dangling_speaker_segments() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-diar-blocked-no-dangling-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  svp::audio::AsrExecutionBoundary boundary =
+      svp::audio::build_asr_execution_boundary(plan, true, false, false, false);
+  boundary.asr_status = svp::audio::AsrStatus::blocked;
+  boundary.diarization_status = "fallback_one_speaker";
+  boundary.diarization_note = "One-speaker fallback used (model missing). This is not speaker recognition.";
+  boundary.diarization_blockers = {"model missing"};
+
+  // Even though speaker_segments are populated, blocked ASR must not
+  // write them — that would create dangling references to speaker_0001
+  // while speakers.jsonl is intentionally empty.
+  svp::audio::SpeakerSegment fallback_segment;
+  fallback_segment.id = "speakerseg_000000";
+  fallback_segment.speaker_id = "speaker_0001";
+  fallback_segment.timing = {0, 30000000};
+  fallback_segment.confidence = 0.0;
+  fallback_segment.overlap = false;
+  boundary.speaker_segments.push_back(std::move(fallback_segment));
+
+  const svp::audio::TranscriptWriteResult result =
+      svp::audio::write_transcript_artifacts(boundary, root);
+
+  assert(result.transcript_written);
+  assert(result.transcript_status == "blocked");
+  assert(result.speaker_count == 0);
+
+  // speakers.jsonl must be empty
+  {
+    std::ifstream input(root / "transcript/speakers.jsonl");
+    std::string content((std::istreambuf_iterator<char>(input)),
+                         std::istreambuf_iterator<char>());
+    assert(content.empty());
+  }
+
+  // speaker_segments.jsonl must also be empty — no dangling references
+  {
+    std::ifstream input(root / "transcript/speaker_segments.jsonl");
+    std::string content((std::istreambuf_iterator<char>(input)),
+                         std::istreambuf_iterator<char>());
+    assert(content.empty());
+  }
+
+  std::filesystem::remove_all(root);
+}
+
+void test_fallback_provenance_distinguishes_model_missing_from_inference_not_wired() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-diar-provenance-wording-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  // Case 1: model missing
+  {
+    svp::audio::AsrExecutionBoundary boundary =
+        svp::audio::build_asr_execution_boundary(plan, true, true, true, true);
+    boundary.asr_status = svp::audio::AsrStatus::ran;
+    boundary.reconciled_words.push_back({"hello", 1000000, 1500000, 0.9, 0});
+    boundary.reconciled_word_count = 1;
+    boundary.speaker_count = 1;
+    boundary.one_speaker_mode = true;
+    boundary.diarization_status = "fallback_one_speaker";
+    boundary.diarization_blockers = {"sherpa-onnx diarization model is not available in model cache"};
+    boundary.diarization_note = "One-speaker fallback used (sherpa-onnx diarization model is not available in model cache). This is not speaker recognition.";
+
+    svp::audio::SpeakerSegment seg;
+    seg.id = "speakerseg_000000";
+    seg.speaker_id = "speaker_0001";
+    seg.timing = {0, 30000000};
+    boundary.speaker_segments.push_back(std::move(seg));
+
+    svp::audio::write_transcript_artifacts(boundary, root);
+
+    std::ifstream input(root / "transcript/transcript.json");
+    const nlohmann::json transcript = nlohmann::json::parse(input);
+    assert(transcript["diarization"]["status"] == "fallback_one_speaker");
+    std::string note = transcript["diarization"]["note"];
+    assert(note.find("model is not available") != std::string::npos);
+    assert(note.find("not speaker recognition") != std::string::npos);
+    assert(transcript["diarization"]["blockers"].size() == 1);
+  }
+
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  // Case 2: model present but inference not wired
+  {
+    svp::audio::AsrExecutionBoundary boundary =
+        svp::audio::build_asr_execution_boundary(plan, true, true, true, true);
+    boundary.asr_status = svp::audio::AsrStatus::ran;
+    boundary.reconciled_words.push_back({"hello", 1000000, 1500000, 0.9, 0});
+    boundary.reconciled_word_count = 1;
+    boundary.speaker_count = 1;
+    boundary.one_speaker_mode = true;
+    boundary.diarization_status = "fallback_one_speaker";
+    boundary.diarization_blockers = {"sherpa-onnx diarization model inference is not yet wired; fallback one-speaker segment emitted"};
+    boundary.diarization_note = "One-speaker fallback used (sherpa-onnx diarization model inference is not yet wired; fallback one-speaker segment emitted). This is not speaker recognition.";
+
+    svp::audio::SpeakerSegment seg;
+    seg.id = "speakerseg_000000";
+    seg.speaker_id = "speaker_0001";
+    seg.timing = {0, 30000000};
+    boundary.speaker_segments.push_back(std::move(seg));
+
+    svp::audio::write_transcript_artifacts(boundary, root);
+
+    std::ifstream input(root / "transcript/transcript.json");
+    const nlohmann::json transcript = nlohmann::json::parse(input);
+    assert(transcript["diarization"]["status"] == "fallback_one_speaker");
+    std::string note = transcript["diarization"]["note"];
+    assert(note.find("inference is not yet wired") != std::string::npos);
+    assert(note.find("not speaker recognition") != std::string::npos);
+    // Must NOT say "model unavailable"
+    assert(note.find("model unavailable") == std::string::npos);
+  }
+
+  std::filesystem::remove_all(root);
+}
+
+// ---- Reconciliation unit tests ----
+
+void test_reconcile_single_pair_low_similarity_keeps_two_speakers() {
+  // Two clusters with low similarity (0.2) should remain 2 speakers.
+  std::vector<std::vector<float>> sim_matrix = {
+      {1.0f, 0.2f},
+      {0.2f, 1.0f}
+  };
+  std::vector<int32_t> cluster_ids = {0, 1};
+
+  svp::audio::ReconciliationResult result =
+      svp::audio::reconcile_clusters(sim_matrix, cluster_ids);
+
+  assert(result.final_speaker_count == 2);
+  assert(result.merge_decisions.size() == 1);
+  assert(result.merge_decisions[0].merged == false);
+  assert(result.merge_decisions[0].cosine_similarity == 0.2f);
+  assert(result.cluster_to_final.at(0) != result.cluster_to_final.at(1));
+}
+
+void test_reconcile_single_pair_high_similarity_merges_to_one() {
+  // Two clusters with high similarity (0.8) should merge to 1 speaker.
+  std::vector<std::vector<float>> sim_matrix = {
+      {1.0f, 0.8f},
+      {0.8f, 1.0f}
+  };
+  std::vector<int32_t> cluster_ids = {0, 1};
+
+  svp::audio::ReconciliationResult result =
+      svp::audio::reconcile_clusters(sim_matrix, cluster_ids);
+
+  assert(result.final_speaker_count == 1);
+  assert(result.merge_decisions.size() == 1);
+  assert(result.merge_decisions[0].merged == true);
+  assert(result.merge_decisions[0].cosine_similarity == 0.8f);
+  assert(result.cluster_to_final.at(0) == result.cluster_to_final.at(1));
+}
+
+void test_reconcile_three_cluster_largest_gap_keeps_two_speakers() {
+  // 3 clusters with similarities [0.456, 0.101, -0.045].
+  // Largest gap = 0.356 (between 0.456 and 0.101), above 0.25 min-gap.
+  // Clusters 0&1 merge, cluster 2 stays separate -> 2 final speakers.
+  std::vector<std::vector<float>> sim_matrix = {
+      {1.0f, 0.456f, 0.101f},
+      {0.456f, 1.0f, -0.045f},
+      {0.101f, -0.045f, 1.0f}
+  };
+  std::vector<int32_t> cluster_ids = {0, 1, 2};
+
+  svp::audio::ReconciliationResult result =
+      svp::audio::reconcile_clusters(sim_matrix, cluster_ids);
+
+  assert(result.final_speaker_count == 2);
+  assert(result.merge_decisions.size() == 3);
+  // Highest sim pair (0&1, sim=0.456) should merge
+  bool found_merge = false;
+  bool found_no_merge = false;
+  for (const auto& md : result.merge_decisions) {
+    if (md.merged) found_merge = true;
+    if (!md.merged) found_no_merge = true;
+  }
+  assert(found_merge);
+  assert(found_no_merge);
+}
+
+void test_reconcile_three_cluster_min_gap_merges_all_to_one() {
+  // 3 clusters with similarities [0.649, 0.471, 0.343].
+  // Largest gap = 0.178, below 0.25 min-gap threshold.
+  // All clusters merge -> 1 final speaker.
+  std::vector<std::vector<float>> sim_matrix = {
+      {1.0f, 0.471f, 0.649f},
+      {0.471f, 1.0f, 0.343f},
+      {0.649f, 0.343f, 1.0f}
+  };
+  std::vector<int32_t> cluster_ids = {0, 1, 2};
+
+  svp::audio::ReconciliationResult result =
+      svp::audio::reconcile_clusters(sim_matrix, cluster_ids);
+
+  assert(result.final_speaker_count == 1);
+  assert(result.merge_decisions.size() == 3);
+  for (const auto& md : result.merge_decisions) {
+    assert(md.merged == true);
+  }
+  assert(result.cluster_to_final.at(0) == result.cluster_to_final.at(1));
+  assert(result.cluster_to_final.at(1) == result.cluster_to_final.at(2));
+}
+
 }  // namespace
 
 int main() {
@@ -940,7 +1318,7 @@ int main() {
   test_attached_punctuation_can_have_zero_duration();
   test_audio_stage_plan_is_honest_about_pending_processors();
   test_audio_extraction_plan_documents_ffmpeg_commands_when_available();
-  test_multi_stream_analysis_audio_waits_for_vad_selection();
+  test_multi_stream_analysis_audio_selects_first_stream();
   test_waveform_envelope_generates_ten_millisecond_json_records();
   test_audio_extraction_executor_writes_staged_single_stream_outputs();
   test_audio_extraction_executor_leaves_multi_stream_analysis_unrun();
@@ -965,5 +1343,18 @@ int main() {
   test_transcript_writer_produces_honest_zero_duration_absence();
   test_whisper_runtime_available_reports_honestly();
   test_whisper_inference_blocks_when_model_dir_missing();
+  test_diarization_boundary_fallback_when_model_unavailable();
+  test_diarization_boundary_unavailable_when_no_audio();
+  test_diarization_boundary_json_serialization();
+  test_transcript_writer_writes_speaker_segments_with_fallback();
+  test_transcript_writer_blocked_includes_diarization_provenance();
+  test_blocked_asr_with_fallback_segments_does_not_create_dangling_speaker_segments();
+  test_fallback_provenance_distinguishes_model_missing_from_inference_not_wired();
+
+  // Reconciliation tests
+  test_reconcile_single_pair_low_similarity_keeps_two_speakers();
+  test_reconcile_single_pair_high_similarity_merges_to_one();
+  test_reconcile_three_cluster_largest_gap_keeps_two_speakers();
+  test_reconcile_three_cluster_min_gap_merges_all_to_one();
   return 0;
 }
