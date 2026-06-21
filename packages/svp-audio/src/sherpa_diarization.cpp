@@ -294,6 +294,127 @@ std::vector<float> compute_cluster_embedding(
 
 }  // namespace
 
+ReconciliationResult reconcile_clusters(
+    const std::vector<std::vector<float>>& similarity_matrix,
+    const std::vector<int32_t>& cluster_ids) {
+
+  ReconciliationResult result;
+  int32_t num_clusters = static_cast<int32_t>(similarity_matrix.size());
+
+  if (num_clusters <= 1) {
+    result.cluster_to_final[0] = 0;
+    result.final_speaker_count = 1;
+    result.method_description = "single cluster; no merging needed";
+    return result;
+  }
+
+  // Collect pairwise similarities (upper triangle)
+  struct PairSim { int32_t a; int32_t b; float sim; };
+  std::vector<PairSim> pairs;
+  for (int32_t i = 0; i < num_clusters; ++i) {
+    for (int32_t j = i + 1; j < num_clusters; ++j) {
+      pairs.push_back({i, j, similarity_matrix[i][j]});
+    }
+  }
+  std::sort(pairs.begin(), pairs.end(),
+            [](const PairSim& p1, const PairSim& p2) { return p1.sim > p2.sim; });
+
+  // Minimum gap required to consider clusters as different speakers.
+  // Below this, the embedding evidence is ambiguous — all clusters merge.
+  const float kMinGap = 0.25f;
+
+  // Fixed similarity threshold for the single-pair case.
+  // Below this, two clusters are clearly different speakers.
+  // Above this, they are likely the same speaker and should merge.
+  const float kSinglePairThreshold = 0.5f;
+
+  float merge_threshold = 0.0f;
+  float largest_gap = 0.0f;
+  int32_t gap_index = -1;
+
+  if (pairs.size() == 1) {
+    // Single pair: use a fixed similarity threshold to decide merge vs split.
+    // If similarity >= 0.5, merge (same speaker).
+    // If similarity < 0.5, keep separate (different speakers).
+    if (pairs[0].sim >= kSinglePairThreshold) {
+      merge_threshold = pairs[0].sim;  // will merge
+      gap_index = 0;
+    } else {
+      merge_threshold = 2.0f;  // impossible to reach — won't merge
+      gap_index = -1;
+    }
+    largest_gap = 1.0f - pairs[0].sim;
+  } else {
+    for (std::size_t i = 0; i + 1 < pairs.size(); ++i) {
+      float gap = pairs[i].sim - pairs[i + 1].sim;
+      if (gap > largest_gap) {
+        largest_gap = gap;
+        gap_index = static_cast<int32_t>(i);
+        merge_threshold = pairs[i].sim;
+      }
+    }
+  }
+
+  // If the largest gap is too small, there's no clear voice separation.
+  // Merge all clusters into one speaker.
+  if (largest_gap < kMinGap && pairs.size() > 1) {
+    merge_threshold = -2.0f;  // merge everything
+    gap_index = -2;  // signal that min-gap override was used
+  }
+
+  // Union-find for transitive merging
+  std::vector<int32_t> parent(num_clusters);
+  std::iota(parent.begin(), parent.end(), 0);
+  auto find = [&](int32_t x) -> int32_t {
+    while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+    return x;
+  };
+  auto unite = [&](int32_t x, int32_t y) {
+    int32_t px = find(x), py = find(y);
+    if (px != py) parent[px] = py;
+  };
+
+  for (const auto& p : pairs) {
+    bool will_merge;
+    if (gap_index == -2) {
+      will_merge = true;
+    } else if (gap_index >= 0) {
+      will_merge = (p.sim >= merge_threshold);
+    } else {
+      will_merge = false;
+    }
+    if (will_merge) unite(p.a, p.b);
+    result.merge_decisions.push_back({cluster_ids[p.a], cluster_ids[p.b], p.sim, will_merge});
+  }
+
+  // Assign final speaker IDs
+  std::map<int32_t, int32_t> root_to_final;
+  int32_t next_final_id = 0;
+  for (std::size_t i = 0; i < cluster_ids.size(); ++i) {
+    int32_t root = find(static_cast<int32_t>(i));
+    if (root_to_final.find(root) == root_to_final.end()) {
+      root_to_final[root] = next_final_id++;
+    }
+    result.cluster_to_final[cluster_ids[i]] = root_to_final[root];
+  }
+  result.final_speaker_count = next_final_id;
+
+  // Build method description
+  std::string desc = "largest_gap_separation: sorted_similarities=[";
+  for (std::size_t i = 0; i < pairs.size(); ++i) {
+    if (i > 0) desc += ",";
+    desc += std::to_string(pairs[i].sim);
+  }
+  desc += "], gap_index=" + std::to_string(gap_index);
+  desc += ", merge_threshold=" + std::to_string(merge_threshold);
+  desc += ", largest_gap=" + std::to_string(largest_gap);
+  desc += ", preliminary_clusters=" + std::to_string(num_clusters);
+  desc += ", final_speakers=" + std::to_string(next_final_id);
+  result.method_description = std::move(desc);
+
+  return result;
+}
+
 bool is_sherpa_diarization_available() {
   const SherpaDiarizationApi& api = get_api();
   return api.lib_handle != nullptr && api.create != nullptr;
@@ -457,110 +578,22 @@ SherpaDiarizationResult run_sherpa_diarization(
     }
   }
 
-  // Adaptive merging: sort pairwise similarities, find largest gap
-  struct PairSim { int32_t a; int32_t b; float sim; };
-  std::vector<PairSim> pairs;
-  for (int32_t i = 0; i < num_clusters; ++i) {
-    for (int32_t j = i + 1; j < num_clusters; ++j) {
-      pairs.push_back({i, j, result.pairwise_similarity_matrix[i][j]});
-    }
-  }
-  std::sort(pairs.begin(), pairs.end(),
-            [](const PairSim& p1, const PairSim& p2) { return p1.sim > p2.sim; });
-
-  float merge_threshold = 0.0f;
-  float largest_gap = 0.0f;
-  int32_t gap_index = -1;
-
-  // Minimum gap required to consider clusters as different speakers.
-  // Below this, the embedding evidence is ambiguous — all clusters merge.
-  const float kMinGap = 0.25f;
-
-  if (pairs.size() == 1) {
-    // Single pair: merge if similarity is high (same speaker)
-    merge_threshold = pairs[0].sim;
-    gap_index = 0;
-    largest_gap = 1.0f - pairs[0].sim;  // gap from 1.0 (self-similarity)
-  } else {
-    for (std::size_t i = 0; i + 1 < pairs.size(); ++i) {
-      float gap = pairs[i].sim - pairs[i + 1].sim;
-      if (gap > largest_gap) {
-        largest_gap = gap;
-        gap_index = static_cast<int32_t>(i);
-        merge_threshold = pairs[i].sim;
-      }
-    }
-  }
-
-  // If the largest gap is too small, there's no clear voice separation.
-  // Merge all clusters into one speaker.
-  if (largest_gap < kMinGap) {
-    merge_threshold = -2.0f;  // merge everything (all sims >= -2.0)
-    gap_index = -2;  // signal that min-gap override was used
-  }
-
-  // Union-find for transitive merging
-  std::vector<int32_t> parent(num_clusters);
-  std::iota(parent.begin(), parent.end(), 0);
-  auto find = [&](int32_t x) -> int32_t {
-    while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
-    return x;
-  };
-  auto unite = [&](int32_t x, int32_t y) {
-    int32_t px = find(x), py = find(y);
-    if (px != py) parent[px] = py;
-  };
-
-  for (const auto& p : pairs) {
-    bool will_merge;
-    if (gap_index == -2) {
-      // Min-gap override: merge everything
-      will_merge = true;
-    } else if (gap_index >= 0) {
-      will_merge = (p.sim >= merge_threshold);
-    } else {
-      will_merge = false;
-    }
-    if (will_merge) unite(p.a, p.b);
-    result.merge_decisions.push_back({cluster_ids[p.a], cluster_ids[p.b], p.sim, will_merge});
-  }
-
-  // Assign final speaker IDs
-  std::map<int32_t, int32_t> root_to_final;
-  int32_t next_final_id = 0;
-  std::map<int32_t, int32_t> preliminary_to_final;
-  for (std::size_t i = 0; i < cluster_ids.size(); ++i) {
-    int32_t root = find(static_cast<int32_t>(i));
-    if (root_to_final.find(root) == root_to_final.end()) {
-      root_to_final[root] = next_final_id++;
-    }
-    preliminary_to_final[cluster_ids[i]] = root_to_final[root];
-  }
+  // Reconcile clusters using adaptive largest-gap separation
+  ReconciliationResult recon = reconcile_clusters(result.pairwise_similarity_matrix, cluster_ids);
+  result.merge_decisions = recon.merge_decisions;
+  result.reconciliation_method = recon.method_description;
 
   // Remap segments
   for (const auto& seg : preliminary_segments) {
     SherpaDiarizationSegment final_seg = seg;
-    auto it = preliminary_to_final.find(seg.speaker_id);
-    if (it != preliminary_to_final.end()) {
+    auto it = recon.cluster_to_final.find(seg.speaker_id);
+    if (it != recon.cluster_to_final.end()) {
       final_seg.speaker_id = it->second;
     }
     result.segments.push_back(final_seg);
   }
 
-  result.final_speaker_count = next_final_id;
-
-  // Build method description
-  std::string desc = "largest_gap_separation: sorted_similarities=[";
-  for (std::size_t i = 0; i < pairs.size(); ++i) {
-    if (i > 0) desc += ",";
-    desc += std::to_string(pairs[i].sim);
-  }
-  desc += "], gap_index=" + std::to_string(gap_index);
-  desc += ", merge_threshold=" + std::to_string(merge_threshold);
-  desc += ", largest_gap=" + std::to_string(largest_gap);
-  desc += ", preliminary_clusters=" + std::to_string(preliminary_speakers);
-  desc += ", final_speakers=" + std::to_string(next_final_id);
-  result.reconciliation_method = std::move(desc);
+  result.final_speaker_count = recon.final_speaker_count;
 
   result.ran = true;
   return result;

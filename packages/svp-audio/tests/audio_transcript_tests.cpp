@@ -3,6 +3,7 @@
 #include "svp/audio/audio_extraction_executor.hpp"
 #include "svp/audio/audio_stage_plan.hpp"
 #include "svp/audio/diarization_boundary.hpp"
+#include "svp/audio/sherpa_diarization.hpp"
 #include "svp/audio/transcript_records.hpp"
 #include "svp/audio/transcript_writer.hpp"
 #include "svp/audio/vad_execution_boundary.hpp"
@@ -1221,6 +1222,94 @@ void test_fallback_provenance_distinguishes_model_missing_from_inference_not_wir
   std::filesystem::remove_all(root);
 }
 
+// ---- Reconciliation unit tests ----
+
+void test_reconcile_single_pair_low_similarity_keeps_two_speakers() {
+  // Two clusters with low similarity (0.2) should remain 2 speakers.
+  std::vector<std::vector<float>> sim_matrix = {
+      {1.0f, 0.2f},
+      {0.2f, 1.0f}
+  };
+  std::vector<int32_t> cluster_ids = {0, 1};
+
+  svp::audio::ReconciliationResult result =
+      svp::audio::reconcile_clusters(sim_matrix, cluster_ids);
+
+  assert(result.final_speaker_count == 2);
+  assert(result.merge_decisions.size() == 1);
+  assert(result.merge_decisions[0].merged == false);
+  assert(result.merge_decisions[0].cosine_similarity == 0.2f);
+  assert(result.cluster_to_final.at(0) != result.cluster_to_final.at(1));
+}
+
+void test_reconcile_single_pair_high_similarity_merges_to_one() {
+  // Two clusters with high similarity (0.8) should merge to 1 speaker.
+  std::vector<std::vector<float>> sim_matrix = {
+      {1.0f, 0.8f},
+      {0.8f, 1.0f}
+  };
+  std::vector<int32_t> cluster_ids = {0, 1};
+
+  svp::audio::ReconciliationResult result =
+      svp::audio::reconcile_clusters(sim_matrix, cluster_ids);
+
+  assert(result.final_speaker_count == 1);
+  assert(result.merge_decisions.size() == 1);
+  assert(result.merge_decisions[0].merged == true);
+  assert(result.merge_decisions[0].cosine_similarity == 0.8f);
+  assert(result.cluster_to_final.at(0) == result.cluster_to_final.at(1));
+}
+
+void test_reconcile_three_cluster_largest_gap_keeps_two_speakers() {
+  // 3 clusters with similarities [0.456, 0.101, -0.045].
+  // Largest gap = 0.356 (between 0.456 and 0.101), above 0.25 min-gap.
+  // Clusters 0&1 merge, cluster 2 stays separate -> 2 final speakers.
+  std::vector<std::vector<float>> sim_matrix = {
+      {1.0f, 0.456f, 0.101f},
+      {0.456f, 1.0f, -0.045f},
+      {0.101f, -0.045f, 1.0f}
+  };
+  std::vector<int32_t> cluster_ids = {0, 1, 2};
+
+  svp::audio::ReconciliationResult result =
+      svp::audio::reconcile_clusters(sim_matrix, cluster_ids);
+
+  assert(result.final_speaker_count == 2);
+  assert(result.merge_decisions.size() == 3);
+  // Highest sim pair (0&1, sim=0.456) should merge
+  bool found_merge = false;
+  bool found_no_merge = false;
+  for (const auto& md : result.merge_decisions) {
+    if (md.merged) found_merge = true;
+    if (!md.merged) found_no_merge = true;
+  }
+  assert(found_merge);
+  assert(found_no_merge);
+}
+
+void test_reconcile_three_cluster_min_gap_merges_all_to_one() {
+  // 3 clusters with similarities [0.649, 0.471, 0.343].
+  // Largest gap = 0.178, below 0.25 min-gap threshold.
+  // All clusters merge -> 1 final speaker.
+  std::vector<std::vector<float>> sim_matrix = {
+      {1.0f, 0.471f, 0.649f},
+      {0.471f, 1.0f, 0.343f},
+      {0.649f, 0.343f, 1.0f}
+  };
+  std::vector<int32_t> cluster_ids = {0, 1, 2};
+
+  svp::audio::ReconciliationResult result =
+      svp::audio::reconcile_clusters(sim_matrix, cluster_ids);
+
+  assert(result.final_speaker_count == 1);
+  assert(result.merge_decisions.size() == 3);
+  for (const auto& md : result.merge_decisions) {
+    assert(md.merged == true);
+  }
+  assert(result.cluster_to_final.at(0) == result.cluster_to_final.at(1));
+  assert(result.cluster_to_final.at(1) == result.cluster_to_final.at(2));
+}
+
 }  // namespace
 
 int main() {
@@ -1261,5 +1350,11 @@ int main() {
   test_transcript_writer_blocked_includes_diarization_provenance();
   test_blocked_asr_with_fallback_segments_does_not_create_dangling_speaker_segments();
   test_fallback_provenance_distinguishes_model_missing_from_inference_not_wired();
+
+  // Reconciliation tests
+  test_reconcile_single_pair_low_similarity_keeps_two_speakers();
+  test_reconcile_single_pair_high_similarity_merges_to_one();
+  test_reconcile_three_cluster_largest_gap_keeps_two_speakers();
+  test_reconcile_three_cluster_min_gap_merges_all_to_one();
   return 0;
 }

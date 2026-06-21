@@ -3,6 +3,7 @@
 #include "svp/audio/transcript_records.hpp"
 
 #include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,17 @@ struct SherpaDiarizationResult {
   std::string reconciliation_method;
   std::vector<std::string> blockers;
 };
+
+struct ReconciliationResult {
+  std::vector<ClusterMergeDecision> merge_decisions;
+  std::map<int32_t, int32_t> cluster_to_final;
+  int32_t final_speaker_count = 0;
+  std::string method_description;
+};
+
+[[nodiscard]] ReconciliationResult reconcile_clusters(
+    const std::vector<std::vector<float>>& similarity_matrix,
+    const std::vector<int32_t>& cluster_ids);
 
 [[nodiscard]] SherpaDiarizationResult run_sherpa_diarization(
     const std::filesystem::path& wav_path,
