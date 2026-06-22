@@ -3,6 +3,7 @@
 #include "svp/audio/audio_extraction_executor.hpp"
 #include "svp/audio/audio_stage_plan.hpp"
 #include "svp/audio/diarization_boundary.hpp"
+#include "svp/audio/sherpa_diarization.hpp"
 #include "svp/audio/transcript_writer.hpp"
 #include "svp/audio/vad_execution_boundary.hpp"
 #include "svp/core/version.hpp"
@@ -225,6 +226,7 @@ int main(int argc, char** argv) {
   std::string build_staging_dir;
   std::string build_model_cache_dir;
   std::string stop_after = "media-ingest";
+  std::string build_sherpa_lib_path;
 
   auto* build = app.add_subcommand(
       "build", "Write an honest builder foundation JSON artifact");
@@ -243,6 +245,8 @@ int main(int argc, char** argv) {
   build->add_option("--stop-after", stop_after,
                     "Supported foundation stages: media-ingest, audio, vision-plan, "
                     "foundation-color, foundation-ocr, package-skeleton");
+  build->add_option("--sherpa-lib", build_sherpa_lib_path,
+                    "Explicit path to libsherpa-onnx-c-api.dylib for diarization");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -282,6 +286,10 @@ int main(int argc, char** argv) {
               ? default_staging_dir_for_output(build_output_path)
               : std::filesystem::path(build_staging_dir);
       const bool model_runtime_available = svp::models::OnnxSession::is_available();
+
+      if (!build_sherpa_lib_path.empty()) {
+        svp::audio::set_sherpa_lib_path(build_sherpa_lib_path);
+      }
 
       if (stop_after == "audio" || stop_after == "package-skeleton") {
         const svp::audio::AudioStagePlan audio_plan =

@@ -99,20 +99,75 @@ struct SherpaDiarizationApi {
   bool loaded = false;
 };
 
+struct SherpaLibState {
+  std::string explicit_path;
+  std::string loaded_path;
+  std::vector<std::string> attempted_paths;
+};
+
+SherpaLibState& lib_state() {
+  static SherpaLibState state;
+  return state;
+}
+
+std::vector<std::string> build_candidate_paths() {
+  std::vector<std::string> candidates;
+
+  // 1. Explicit path set via set_sherpa_lib_path()
+  if (!lib_state().explicit_path.empty()) {
+    candidates.push_back(lib_state().explicit_path);
+  }
+
+  // 2. SHERPA_ONNX_LIB_PATH env var
+  const char* env_path = std::getenv("SHERPA_ONNX_LIB_PATH");
+  if (env_path && env_path[0]) {
+    candidates.push_back(env_path);
+  }
+
+  // 3. Common macOS pip site-packages paths (using HOME, no hardcoded username)
+  const char* home = std::getenv("HOME");
+  if (home && home[0]) {
+    std::string home_str(home);
+    const std::string suffix =
+        "/Library/Python/3.9/lib/python/site-packages/sherpa_onnx/lib/libsherpa-onnx-c-api.dylib";
+    candidates.push_back(home_str + suffix);
+    const std::string suffix_310 =
+        "/Library/Python/3.10/lib/python/site-packages/sherpa_onnx/lib/libsherpa-onnx-c-api.dylib";
+    candidates.push_back(home_str + suffix_310);
+    const std::string suffix_311 =
+        "/Library/Python/3.11/lib/python/site-packages/sherpa_onnx/lib/libsherpa-onnx-c-api.dylib";
+    candidates.push_back(home_str + suffix_311);
+    const std::string suffix_312 =
+        "/Library/Python/3.12/lib/python/site-packages/sherpa_onnx/lib/libsherpa-onnx-c-api.dylib";
+    candidates.push_back(home_str + suffix_312);
+    const std::string suffix_313 =
+        "/Library/Python/3.13/lib/python/site-packages/sherpa_onnx/lib/libsherpa-onnx-c-api.dylib";
+    candidates.push_back(home_str + suffix_313);
+  }
+
+  // 4. Homebrew and system library paths
+  candidates.push_back("/opt/homebrew/lib/libsherpa-onnx-c-api.dylib");
+  candidates.push_back("/usr/local/lib/libsherpa-onnx-c-api.dylib");
+
+  return candidates;
+}
+
 SherpaDiarizationApi& get_api() {
   static SherpaDiarizationApi api;
   if (api.loaded) return api;
   api.loaded = true;
 
-  const char* lib_path = std::getenv("SHERPA_ONNX_LIB_PATH");
-  std::string path;
-  if (lib_path && lib_path[0]) {
-    path = lib_path;
-  } else {
-    path = "/Users/domesposito/Library/Python/3.9/lib/python/site-packages/sherpa_onnx/lib/libsherpa-onnx-c-api.dylib";
+  std::vector<std::string> candidates = build_candidate_paths();
+  lib_state().attempted_paths = candidates;
+
+  for (const auto& path : candidates) {
+    api.lib_handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
+    if (api.lib_handle) {
+      lib_state().loaded_path = path;
+      break;
+    }
   }
 
-  api.lib_handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
   if (!api.lib_handle) {
     return api;
   }
@@ -294,6 +349,18 @@ std::vector<float> compute_cluster_embedding(
 
 }  // namespace
 
+void set_sherpa_lib_path(const std::string& path) {
+  lib_state().explicit_path = path;
+}
+
+std::string sherpa_lib_path_used() {
+  return lib_state().loaded_path;
+}
+
+std::vector<std::string> sherpa_lib_paths_attempted() {
+  return lib_state().attempted_paths;
+}
+
 ReconciliationResult reconcile_clusters(
     const std::vector<std::vector<float>>& similarity_matrix,
     const std::vector<int32_t>& cluster_ids) {
@@ -427,7 +494,16 @@ SherpaDiarizationResult run_sherpa_diarization(
 
   const SherpaDiarizationApi& api = get_api();
   if (!api.lib_handle || !api.create) {
-    result.blockers.push_back("sherpa-onnx C API library not loaded");
+    std::string blocker = "sherpa-onnx C API library not loaded. Attempted paths:";
+    std::vector<std::string> attempted = sherpa_lib_paths_attempted();
+    if (attempted.empty()) {
+      blocker += " (none — library discovery was not triggered)";
+    } else {
+      for (std::size_t i = 0; i < attempted.size(); ++i) {
+        blocker += "\n  [" + std::to_string(i + 1) + "] " + attempted[i];
+      }
+    }
+    result.blockers.push_back(blocker);
     return result;
   }
 
