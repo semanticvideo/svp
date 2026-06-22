@@ -13,6 +13,17 @@ else()
   set(SVP_MODEL_ONNX_RUNTIME_AVAILABLE FALSE)
 endif()
 
+if(SVP_MODEL_ONNX_RUNTIME_AVAILABLE)
+  find_path(SVP_ONNXRUNTIME_INCLUDE_DIR
+    NAMES onnxruntime_cxx_api.h
+    PATH_SUFFIXES onnxruntime onnxruntime/core/session
+    REQUIRED)
+
+  find_path(SVP_COREML_PROVIDER_INCLUDE_DIR
+    NAMES coreml_provider_factory.h
+    PATH_SUFFIXES onnxruntime onnxruntime/core/providers/coreml)
+endif()
+
 add_library(svp-models
   src/cache.cpp
   src/error.cpp
@@ -38,6 +49,11 @@ target_compile_features(svp-models PUBLIC cxx_std_20)
 
 if(SVP_MODEL_ONNX_RUNTIME_AVAILABLE)
   target_compile_definitions(svp-models PUBLIC SVP_ONNX_RUNTIME_AVAILABLE=1)
+  target_include_directories(svp-models PUBLIC ${SVP_ONNXRUNTIME_INCLUDE_DIR})
+  if(SVP_COREML_PROVIDER_INCLUDE_DIR)
+    target_compile_definitions(svp-models PRIVATE SVP_COREML_AVAILABLE=1)
+    target_include_directories(svp-models PRIVATE ${SVP_COREML_PROVIDER_INCLUDE_DIR})
+  endif()
   target_link_libraries(svp-models PUBLIC onnxruntime::onnxruntime)
 endif()
 
