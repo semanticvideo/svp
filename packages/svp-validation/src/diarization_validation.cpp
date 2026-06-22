@@ -18,6 +18,7 @@ void add_diarization_findings_impl(ValidationReport& report,
                                    const std::filesystem::path& package_path,
                                    const svp::package::PackageLayout& layout) {
   constexpr std::string_view entry = "transcript/transcript.json";
+  const std::string entry_path = "/transcript/transcript.json";
   if (!has_entry(layout, std::string{entry})) {
     return;
   }
@@ -25,13 +26,21 @@ void add_diarization_findings_impl(ValidationReport& report,
   const auto read_result =
       svp::package::read_package_entry(package_path, std::string{entry});
   if (!read_result.has_value()) {
+    add_finding(report, make_finding(registry, kCodeDiarizationUnavailable,
+                                     entry_path,
+                                     "transcript/transcript.json exists in layout but "
+                                     "cannot be read: " + read_result.error_message()));
     return;
   }
 
   nlohmann::json transcript;
   try {
     transcript = nlohmann::json::parse(read_result.value());
-  } catch (const nlohmann::json::exception&) {
+  } catch (const nlohmann::json::exception& error) {
+    add_finding(report, make_finding(registry, kCodeDiarizationUnavailable,
+                                     entry_path,
+                                     "transcript/transcript.json is not valid JSON: " +
+                                         std::string(error.what())));
     return;
   }
 
@@ -70,7 +79,11 @@ void add_diarization_findings(ValidationReport& report,
                               const svp::package::PackageLayout& layout) {
   try {
     add_diarization_findings_impl(report, registry, package_path, layout);
-  } catch (const std::exception&) {
+  } catch (const std::exception& error) {
+    add_finding(report, make_finding(registry, kCodeDiarizationUnavailable,
+                                     "/transcript/transcript.json",
+                                     std::string("Unexpected error during diarization "
+                                                 "validation: ") + error.what()));
   }
 }
 

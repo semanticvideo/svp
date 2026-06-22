@@ -42,3 +42,21 @@ target_link_libraries(svp-validation
     svp::blocks
     svp::package
 )
+
+if(BUILD_TESTING)
+  add_executable(svp-diarization-validation-tests
+    tests/diarization_validation_tests.cpp
+  )
+
+  target_compile_features(svp-diarization-validation-tests PRIVATE cxx_std_20)
+
+  target_link_libraries(svp-diarization-validation-tests
+    PRIVATE
+      svp::validation
+      svp::package
+  )
+
+  add_test(NAME svp-diarization-validation-tests
+           COMMAND svp-diarization-validation-tests
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endif()

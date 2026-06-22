@@ -302,7 +302,7 @@ int main(int argc, char** argv) {
                   << "  Diarization cannot run. Speaker detection will NOT be performed.\n\n"
                   << "  To fix:\n"
                   << "    pip3 install sherpa-onnx\n"
-                  << "  Or set SHERPA_ONNX_LIB_PATH to the dylib path.\n"
+                  << "  Or set SHERPA_ONNX_LIB_PATH to the library path.\n"
                   << "  Or use --sherpa-lib <path> to specify it explicitly.\n\n"
                   << "  To proceed WITHOUT diarization (NOT RECOMMENDED):\n"
                   << "    --allow-fallback-diarization\n\n";
@@ -420,6 +420,23 @@ int main(int argc, char** argv) {
         diar_boundary = svp::audio::execute_diarization_boundary(
             std::move(diar_boundary), staging_dir, model_cache_root,
             build_allow_fallback_diarization);
+
+        if ((stop_after == "audio" || stop_after == "package-skeleton") &&
+            diar_boundary.diarization_status == svp::audio::DiarizationStatus::unavailable &&
+            !build_allow_fallback_diarization) {
+          std::cerr << "\n  ERROR: Diarization is unavailable. Speaker detection will NOT be performed.\n"
+                    << "  Cause:";
+          for (const auto& blocker : diar_boundary.blockers) {
+            std::cerr << "\n    - " << blocker;
+          }
+          std::cerr << "\n\n  To fix:\n"
+                    << "    pip3 install sherpa-onnx\n"
+                    << "    Ensure the diarization model is in the model cache.\n"
+                    << "    Ensure analysis audio was extracted successfully.\n\n"
+                    << "  To proceed WITHOUT diarization (NOT RECOMMENDED):\n"
+                    << "    --allow-fallback-diarization\n\n";
+          return 1;
+        }
 
         // Serialize diarization boundary before moving segments out.
         audio_json["diarization_execution_boundary"] =
