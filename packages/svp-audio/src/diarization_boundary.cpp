@@ -161,8 +161,18 @@ DiarizationExecutionBoundary execute_diarization_boundary(
   }
 
   if (!svp::audio::is_sherpa_diarization_available()) {
-    boundary.blockers.push_back(
-        "sherpa-onnx C API library not loaded; fallback one-speaker segment emitted");
+    std::string blocker_msg =
+        "sherpa-onnx C API library not loaded; fallback one-speaker segment emitted. "
+        "Attempted paths:";
+    std::vector<std::string> attempted = svp::audio::sherpa_lib_paths_attempted();
+    if (attempted.empty()) {
+      blocker_msg += " (none — library discovery was not triggered)";
+    } else {
+      for (std::size_t i = 0; i < attempted.size(); ++i) {
+        blocker_msg += "\n  [" + std::to_string(i + 1) + "] " + attempted[i];
+      }
+    }
+    boundary.blockers.push_back(blocker_msg);
     SpeakerSegment fallback_segment;
     fallback_segment.id = segment_id_for_ordinal(0);
     fallback_segment.speaker_id = "speaker_0001";

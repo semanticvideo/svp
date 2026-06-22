@@ -50,4 +50,10 @@ struct ReconciliationResult {
 
 [[nodiscard]] bool is_sherpa_diarization_available();
 
+void set_sherpa_lib_path(const std::string& path);
+
+[[nodiscard]] std::string sherpa_lib_path_used();
+
+[[nodiscard]] std::vector<std::string> sherpa_lib_paths_attempted();
+
 }  // namespace svp::audio

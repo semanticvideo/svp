@@ -1652,6 +1652,49 @@ void test_transcript_confidence_provenance_is_decoder_token_softmax_mean() {
 
 }  // namespace
 
+void test_set_sherpa_lib_path_with_invalid_path_leaves_unavailable() {
+  svp::audio::set_sherpa_lib_path("/nonexistent/path/to/libsherpa-onnx-c-api.dylib");
+  bool available = svp::audio::is_sherpa_diarization_available();
+  assert(!available);
+
+  std::vector<std::string> attempted = svp::audio::sherpa_lib_paths_attempted();
+  assert(!attempted.empty());
+  bool found_explicit = false;
+  for (const auto& p : attempted) {
+    if (p.find("/nonexistent/path/to/libsherpa-onnx-c-api.dylib") != std::string::npos) {
+      found_explicit = true;
+      break;
+    }
+  }
+  assert(found_explicit);
+}
+
+void test_multi_candidate_search_does_not_crash_when_no_candidate_exists() {
+  svp::audio::set_sherpa_lib_path("/definitely/not/here/libsherpa-onnx-c-api.dylib");
+  bool available = svp::audio::is_sherpa_diarization_available();
+  assert(!available);
+
+  std::string used = svp::audio::sherpa_lib_path_used();
+  assert(used.empty());
+
+  std::vector<std::string> attempted = svp::audio::sherpa_lib_paths_attempted();
+  assert(!attempted.empty());
+}
+
+void test_reconcile_clusters_still_works_after_lib_discovery() {
+  std::vector<std::vector<float>> sim_matrix = {
+      {1.0f, 0.3f},
+      {0.3f, 1.0f},
+  };
+  std::vector<int32_t> cluster_ids = {0, 1};
+  svp::audio::ReconciliationResult result =
+      svp::audio::reconcile_clusters(sim_matrix, cluster_ids);
+  assert(result.final_speaker_count == 2);
+  assert(result.cluster_to_final.size() == 2);
+  assert(result.cluster_to_final[0] == 0);
+  assert(result.cluster_to_final[1] == 1);
+}
+
 int main() {
   test_word_serialization_uses_canonical_time_strings();
   test_zero_duration_span_is_rejected_for_core_span_records();
@@ -1712,5 +1755,10 @@ int main() {
   test_speaker_total_speech_us_overlapping_not_double_counted();
   test_speaker_total_speech_us_multi_speaker();
   test_transcript_confidence_provenance_is_decoder_token_softmax_mean();
+
+  // Sherpa library discovery tests
+  test_set_sherpa_lib_path_with_invalid_path_leaves_unavailable();
+  test_multi_candidate_search_does_not_crash_when_no_candidate_exists();
+  test_reconcile_clusters_still_works_after_lib_discovery();
   return 0;
 }
