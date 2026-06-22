@@ -9,7 +9,7 @@
 
 #if defined(SVP_ONNX_RUNTIME_AVAILABLE)
 #include <onnxruntime_cxx_api.h>
-#if defined(__APPLE__)
+#if defined(SVP_COREML_AVAILABLE)
 #include <coreml_provider_factory.h>
 #endif
 #endif
@@ -83,10 +83,16 @@ OnnxSession OnnxSession::load(const ModelBundleManifest& manifest,
     session_options.SetInterOpNumThreads(options.inter_op_num_threads);
   }
 
-#if defined(__APPLE__)
+#if defined(SVP_COREML_AVAILABLE)
   if (options.execution_provider == "coreml") {
     Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_CoreML(
         session_options, 0));
+  }
+#else
+  if (options.execution_provider == "coreml") {
+    throw ModelError(ModelErrorCode::runtime_unavailable,
+                     "CoreML execution provider requested but CoreML support "
+                     "is not available in this build");
   }
 #endif
 
