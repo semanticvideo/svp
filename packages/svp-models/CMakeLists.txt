@@ -54,7 +54,16 @@ if(SVP_MODEL_ONNX_RUNTIME_AVAILABLE)
     target_compile_definitions(svp-models PRIVATE SVP_COREML_AVAILABLE=1)
     target_include_directories(svp-models PRIVATE ${SVP_COREML_PROVIDER_INCLUDE_DIR})
   endif()
-  target_link_libraries(svp-models PUBLIC onnxruntime::onnxruntime)
+
+  # Check for sherpa-onnx dynamic onnxruntime library to avoid the static
+  # vcpkg ONNX 1.19.0 schema double-registration bug.
+  set(SVP_SHERPA_ORT_LIB "" CACHE PATH "Path to dynamic libonnxruntime.dylib from sherpa-onnx")
+  if(SVP_SHERPA_ORT_LIB AND EXISTS "${SVP_SHERPA_ORT_LIB}")
+    target_link_libraries(svp-models PUBLIC ${SVP_SHERPA_ORT_LIB})
+    target_compile_definitions(svp-models PUBLIC SVP_DYNAMIC_ORT=1)
+  else()
+    target_link_libraries(svp-models PUBLIC onnxruntime::onnxruntime)
+  endif()
 endif()
 
 target_link_libraries(svp-models

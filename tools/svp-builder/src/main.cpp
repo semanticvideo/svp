@@ -295,25 +295,6 @@ int main(int argc, char** argv) {
         svp::audio::set_sherpa_lib_path(build_sherpa_lib_path);
       }
 
-      if ((stop_after == "audio" || stop_after == "package-skeleton") &&
-          !svp::audio::is_sherpa_diarization_available() &&
-          !build_allow_fallback_diarization) {
-        std::cerr << "\n  ERROR: sherpa-onnx C API library not found.\n"
-                  << "  Diarization cannot run. Speaker detection will NOT be performed.\n\n"
-                  << "  To fix:\n"
-                  << "    pip3 install sherpa-onnx\n"
-                  << "  Or set SHERPA_ONNX_LIB_PATH to the library path.\n"
-                  << "  Or use --sherpa-lib <path> to specify it explicitly.\n\n"
-                  << "  To proceed WITHOUT diarization (NOT RECOMMENDED):\n"
-                  << "    --allow-fallback-diarization\n\n";
-        return 1;
-      }
-      if (build_allow_fallback_diarization && !svp::audio::is_sherpa_diarization_available()) {
-        std::cerr << "  WARNING: --allow-fallback-diarization is active. "
-                  << "sherpa-onnx is not available. "
-                  << "Speaker data will be FABRICATED FALLBACK, not real.\n";
-      }
-
       if (stop_after == "audio" || stop_after == "package-skeleton") {
         const svp::audio::AudioStagePlan audio_plan =
             svp::audio::build_audio_stage_plan(build_source_path,
@@ -417,6 +398,27 @@ int main(int argc, char** argv) {
                 diar_model_available,
                 diar_model_verified,
                 media_duration_us);
+        // Check sherpa-onnx availability AFTER ASR has loaded its models.
+        // Loading sherpa's dylib (which bundles its own onnxruntime) before
+        // ASR model loading corrupts the ONNX schema registry.
+        if (!svp::audio::is_sherpa_diarization_available() &&
+            !build_allow_fallback_diarization) {
+          std::cerr << "\n  ERROR: sherpa-onnx C API library not found.\n"
+                    << "  Diarization cannot run. Speaker detection will NOT be performed.\n\n"
+                    << "  To fix:\n"
+                    << "    pip3 install sherpa-onnx\n"
+                    << "  Or set SHERPA_ONNX_LIB_PATH to the library path.\n"
+                    << "  Or use --sherpa-lib <path> to specify it explicitly.\n\n"
+                    << "  To proceed WITHOUT diarization (NOT RECOMMENDED):\n"
+                    << "    --allow-fallback-diarization\n\n";
+          return 1;
+        }
+        if (build_allow_fallback_diarization && !svp::audio::is_sherpa_diarization_available()) {
+          std::cerr << "  WARNING: --allow-fallback-diarization is active. "
+                    << "sherpa-onnx is not available. "
+                    << "Speaker data will be FABRICATED FALLBACK, not real.\n";
+        }
+
         diar_boundary = svp::audio::execute_diarization_boundary(
             std::move(diar_boundary), staging_dir, model_cache_root,
             build_allow_fallback_diarization);
