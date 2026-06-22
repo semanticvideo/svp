@@ -799,6 +799,20 @@ void test_asr_execution_boundary_planned_when_all_available() {
   assert(boundary.blockers.empty());
 }
 
+void test_asr_execution_boundary_json_reports_decoder_token_softmax_mean() {
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  svp::audio::AsrExecutionBoundary boundary =
+      svp::audio::build_asr_execution_boundary(plan, true, true, true, true);
+  const nlohmann::json encoded =
+      svp::audio::asr_execution_boundary_to_json(boundary);
+
+  assert(encoded["asr_limitations"]["confidence_status"] == "decoder_token_softmax_mean");
+  std::string note = encoded["asr_limitations"]["confidence_note"];
+  assert(note.find("uncalibrated") != std::string::npos);
+}
+
 void test_transcript_writer_produces_honest_blocked_absence() {
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "svp-asr-transcript-blocked-test";
@@ -1665,6 +1679,7 @@ int main() {
   test_asr_execution_boundary_blocked_when_model_missing();
   test_asr_execution_boundary_blocked_when_runtime_missing();
   test_asr_execution_boundary_planned_when_all_available();
+  test_asr_execution_boundary_json_reports_decoder_token_softmax_mean();
   test_transcript_writer_produces_honest_blocked_absence();
   test_transcript_writer_produces_honest_zero_duration_absence();
   test_whisper_runtime_available_reports_honestly();
