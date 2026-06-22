@@ -60,6 +60,8 @@ inline constexpr std::string_view kCodeColorInvalidDominantBucket =
 inline constexpr std::string_view kCodeColorInvalidSamplingBasis =
     "ERR_COLOR_INVALID_SAMPLING_BASIS";
 inline constexpr std::string_view kCodeColorIndexMismatch = "ERR_COLOR_INDEX_MISMATCH";
+inline constexpr std::string_view kCodeDiarizationFallback = "WARN_DIARIZATION_FALLBACK";
+inline constexpr std::string_view kCodeDiarizationUnavailable = "ERR_DIARIZATION_UNAVAILABLE";
 
 inline constexpr std::string_view kTempCodeInputMissing = "X_VALIDATOR_INPUT_MISSING";
 inline constexpr std::string_view kTempCodeInputNotRegularFile = "X_VALIDATOR_INPUT_NOT_REGULAR_FILE";

@@ -110,6 +110,45 @@ SherpaLibState& lib_state() {
   return state;
 }
 
+void add_sherpa_lib_from_dir(std::vector<std::string>& candidates,
+                              const std::filesystem::path& lib_dir,
+                              const std::string& filename) {
+  if (!std::filesystem::exists(lib_dir)) return;
+  for (const auto& entry : std::filesystem::directory_iterator(lib_dir)) {
+    if (!entry.is_directory()) continue;
+    const std::string name = entry.path().filename().string();
+    if (name.find("python3.") == std::string::npos) continue;
+    // Check both site-packages and dist-packages layouts
+    for (const auto& pkg_dir : {"site-packages", "dist-packages"}) {
+      const std::filesystem::path sherpa_lib =
+          entry.path() / pkg_dir / "sherpa_onnx" / "lib" / filename;
+      if (std::filesystem::exists(sherpa_lib)) {
+        candidates.push_back(sherpa_lib.string());
+      }
+    }
+  }
+}
+
+void add_sherpa_lib_from_env(std::vector<std::string>& candidates,
+                              const char* env_var,
+                              const std::string& filename) {
+  const char* env_val = std::getenv(env_var);
+  if (!env_val || !env_val[0]) return;
+  std::filesystem::path env_path(env_val);
+  // venv/Conda lib directories: <env>/lib/python3.*/site-packages/sherpa_onnx/lib/
+  add_sherpa_lib_from_dir(candidates, env_path / "lib", filename);
+  // Also check <env>/lib/sherpa_onnx/ (some installs place libs directly)
+  const std::filesystem::path direct_lib = env_path / "lib" / "sherpa_onnx" / "lib" / filename;
+  if (std::filesystem::exists(direct_lib)) {
+    candidates.push_back(direct_lib.string());
+  }
+  // Conda sometimes places libs in <env>/lib/ directly
+  const std::filesystem::path conda_lib = env_path / "lib" / filename;
+  if (std::filesystem::exists(conda_lib)) {
+    candidates.push_back(conda_lib.string());
+  }
+}
+
 std::vector<std::string> build_candidate_paths() {
   std::vector<std::string> candidates;
 
@@ -124,30 +163,44 @@ std::vector<std::string> build_candidate_paths() {
     candidates.push_back(env_path);
   }
 
-  // 3. Common macOS pip site-packages paths (using HOME, no hardcoded username)
+  // 3. macOS user site-packages: ~/Library/Python/3.{9..14}/lib/python/site-packages/
   const char* home = std::getenv("HOME");
   if (home && home[0]) {
     std::string home_str(home);
-    const std::string suffix =
-        "/Library/Python/3.9/lib/python/site-packages/sherpa_onnx/lib/libsherpa-onnx-c-api.dylib";
-    candidates.push_back(home_str + suffix);
-    const std::string suffix_310 =
-        "/Library/Python/3.10/lib/python/site-packages/sherpa_onnx/lib/libsherpa-onnx-c-api.dylib";
-    candidates.push_back(home_str + suffix_310);
-    const std::string suffix_311 =
-        "/Library/Python/3.11/lib/python/site-packages/sherpa_onnx/lib/libsherpa-onnx-c-api.dylib";
-    candidates.push_back(home_str + suffix_311);
-    const std::string suffix_312 =
-        "/Library/Python/3.12/lib/python/site-packages/sherpa_onnx/lib/libsherpa-onnx-c-api.dylib";
-    candidates.push_back(home_str + suffix_312);
-    const std::string suffix_313 =
-        "/Library/Python/3.13/lib/python/site-packages/sherpa_onnx/lib/libsherpa-onnx-c-api.dylib";
-    candidates.push_back(home_str + suffix_313);
+    for (int minor = 9; minor <= 14; ++minor) {
+      candidates.push_back(home_str +
+          "/Library/Python/3." + std::to_string(minor) +
+          "/lib/python/site-packages/sherpa_onnx/lib/libsherpa-onnx-c-api.dylib");
+    }
+    // Linux pip --user: ~/.local/lib/python3.*/site-packages/ and dist-packages/
+    add_sherpa_lib_from_dir(candidates,
+        std::filesystem::path(home_str) / ".local" / "lib",
+        "libsherpa-onnx-c-api.so");
   }
 
-  // 4. Homebrew and system library paths
+  // 4. Virtual environments (venv, Conda)
+  add_sherpa_lib_from_env(candidates, "VIRTUAL_ENV", "libsherpa-onnx-c-api.dylib");
+  add_sherpa_lib_from_env(candidates, "CONDA_PREFIX", "libsherpa-onnx-c-api.dylib");
+  // On Linux venvs the shared lib is .so
+  add_sherpa_lib_from_env(candidates, "VIRTUAL_ENV", "libsherpa-onnx-c-api.so");
+  add_sherpa_lib_from_env(candidates, "CONDA_PREFIX", "libsherpa-onnx-c-api.so");
+
+  // 5. Homebrew site-packages (Apple Silicon and Intel)
+  add_sherpa_lib_from_dir(candidates, "/opt/homebrew/lib", "libsherpa-onnx-c-api.dylib");
+  add_sherpa_lib_from_dir(candidates, "/usr/local/lib", "libsherpa-onnx-c-api.dylib");
+
+  // 6. Direct Homebrew and system library paths (macOS)
   candidates.push_back("/opt/homebrew/lib/libsherpa-onnx-c-api.dylib");
   candidates.push_back("/usr/local/lib/libsherpa-onnx-c-api.dylib");
+
+  // 7. Linux system paths (site-packages and dist-packages scanned above via HOME)
+  //    Also check common system-level Python directories
+  add_sherpa_lib_from_dir(candidates, "/usr/lib", "libsherpa-onnx-c-api.so");
+  add_sherpa_lib_from_dir(candidates, "/usr/local/lib", "libsherpa-onnx-c-api.so");
+  candidates.push_back("/usr/local/lib/libsherpa-onnx-c-api.so");
+  candidates.push_back("/usr/lib/libsherpa-onnx-c-api.so");
+  candidates.push_back("/usr/lib/x86_64-linux-gnu/libsherpa-onnx-c-api.so");
+  candidates.push_back("/usr/lib/aarch64-linux-gnu/libsherpa-onnx-c-api.so");
 
   return candidates;
 }

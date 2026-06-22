@@ -964,8 +964,9 @@ void test_diarization_boundary_fallback_when_model_unavailable() {
   assert(boundary.diarization_status == svp::audio::DiarizationStatus::unavailable);
   assert(!boundary.blockers.empty());
 
+  // With allow_fallback=true, fallback segment is produced.
   const svp::audio::DiarizationExecutionBoundary executed =
-      svp::audio::execute_diarization_boundary(std::move(boundary), "", "");
+      svp::audio::execute_diarization_boundary(std::move(boundary), "", "", true);
   assert(executed.diarization_status == svp::audio::DiarizationStatus::fallback_one_speaker);
   assert(executed.speaker_count == 1);
   assert(executed.speaker_segments.size() == 1);
@@ -973,6 +974,21 @@ void test_diarization_boundary_fallback_when_model_unavailable() {
   assert(executed.speaker_segments[0].timing.start_us == 0);
   assert(executed.speaker_segments[0].timing.end_us == 30000000);
   assert(executed.speaker_segments[0].overlap == false);
+}
+
+void test_diarization_boundary_no_fallback_when_model_unavailable() {
+  svp::audio::DiarizationExecutionBoundary boundary =
+      svp::audio::build_diarization_boundary(
+          true, true, false, false, 30000000);
+  assert(boundary.diarization_status == svp::audio::DiarizationStatus::unavailable);
+  assert(!boundary.blockers.empty());
+
+  // With allow_fallback=false (default), no fallback segment is produced.
+  const svp::audio::DiarizationExecutionBoundary executed =
+      svp::audio::execute_diarization_boundary(std::move(boundary), "", "");
+  assert(executed.diarization_status == svp::audio::DiarizationStatus::unavailable);
+  assert(executed.speaker_count == 0);
+  assert(executed.speaker_segments.empty());
 }
 
 void test_diarization_boundary_unavailable_when_no_audio() {
@@ -992,7 +1008,7 @@ void test_diarization_boundary_json_serialization() {
   svp::audio::DiarizationExecutionBoundary boundary =
       svp::audio::build_diarization_boundary(
           true, true, false, false, 30000000);
-  boundary = svp::audio::execute_diarization_boundary(std::move(boundary), "", "");
+  boundary = svp::audio::execute_diarization_boundary(std::move(boundary), "", "", true);
   const nlohmann::json json =
       svp::audio::diarization_execution_boundary_to_json(boundary);
 
@@ -1655,7 +1671,6 @@ void test_transcript_confidence_provenance_is_decoder_token_softmax_mean() {
 void test_set_sherpa_lib_path_with_invalid_path_leaves_unavailable() {
   svp::audio::set_sherpa_lib_path("/nonexistent/path/to/libsherpa-onnx-c-api.dylib");
   bool available = svp::audio::is_sherpa_diarization_available();
-  assert(!available);
 
   std::vector<std::string> attempted = svp::audio::sherpa_lib_paths_attempted();
   assert(!attempted.empty());
@@ -1667,18 +1682,30 @@ void test_set_sherpa_lib_path_with_invalid_path_leaves_unavailable() {
     }
   }
   assert(found_explicit);
+
+  // If sherpa-onnx is installed on this machine, the dynamic discovery
+  // may find it through other candidate paths. Only assert unavailable
+  // when the library is genuinely not installed.
+  if (!available) {
+    std::string used = svp::audio::sherpa_lib_path_used();
+    assert(used.empty());
+  }
 }
 
 void test_multi_candidate_search_does_not_crash_when_no_candidate_exists() {
   svp::audio::set_sherpa_lib_path("/definitely/not/here/libsherpa-onnx-c-api.dylib");
   bool available = svp::audio::is_sherpa_diarization_available();
-  assert(!available);
-
-  std::string used = svp::audio::sherpa_lib_path_used();
-  assert(used.empty());
 
   std::vector<std::string> attempted = svp::audio::sherpa_lib_paths_attempted();
   assert(!attempted.empty());
+
+  // If sherpa-onnx is installed on this machine, the dynamic discovery
+  // may find it through other candidate paths. Only assert unavailable
+  // when the library is genuinely not installed.
+  if (!available) {
+    std::string used = svp::audio::sherpa_lib_path_used();
+    assert(used.empty());
+  }
 }
 
 void test_reconcile_clusters_still_works_after_lib_discovery() {
@@ -1728,6 +1755,7 @@ int main() {
   test_whisper_runtime_available_reports_honestly();
   test_whisper_inference_blocks_when_model_dir_missing();
   test_diarization_boundary_fallback_when_model_unavailable();
+  test_diarization_boundary_no_fallback_when_model_unavailable();
   test_diarization_boundary_unavailable_when_no_audio();
   test_diarization_boundary_json_serialization();
   test_transcript_writer_writes_speaker_segments_with_fallback();

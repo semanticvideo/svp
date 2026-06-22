@@ -227,6 +227,7 @@ int main(int argc, char** argv) {
   std::string build_model_cache_dir;
   std::string stop_after = "media-ingest";
   std::string build_sherpa_lib_path;
+  bool build_allow_fallback_diarization = false;
 
   auto* build = app.add_subcommand(
       "build", "Write an honest builder foundation JSON artifact");
@@ -247,6 +248,9 @@ int main(int argc, char** argv) {
                     "foundation-color, foundation-ocr, package-skeleton");
   build->add_option("--sherpa-lib", build_sherpa_lib_path,
                     "Explicit path to libsherpa-onnx-c-api.dylib for diarization");
+  build->add_flag("--allow-fallback-diarization", build_allow_fallback_diarization,
+                  "Proceed without diarization if sherpa-onnx is not available. "
+                  "Speaker data will be fabricated fallback, not real. NOT RECOMMENDED.");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -394,8 +398,47 @@ int main(int argc, char** argv) {
                 diar_model_available,
                 diar_model_verified,
                 media_duration_us);
+        // Check sherpa-onnx availability AFTER ASR has loaded its models.
+        // Loading sherpa's dylib (which bundles its own onnxruntime) before
+        // ASR model loading corrupts the ONNX schema registry.
+        if (!svp::audio::is_sherpa_diarization_available() &&
+            !build_allow_fallback_diarization) {
+          std::cerr << "\n  ERROR: sherpa-onnx C API library not found.\n"
+                    << "  Diarization cannot run. Speaker detection will NOT be performed.\n\n"
+                    << "  To fix:\n"
+                    << "    pip3 install sherpa-onnx\n"
+                    << "  Or set SHERPA_ONNX_LIB_PATH to the library path.\n"
+                    << "  Or use --sherpa-lib <path> to specify it explicitly.\n\n"
+                    << "  To proceed WITHOUT diarization (NOT RECOMMENDED):\n"
+                    << "    --allow-fallback-diarization\n\n";
+          return 1;
+        }
+        if (build_allow_fallback_diarization && !svp::audio::is_sherpa_diarization_available()) {
+          std::cerr << "  WARNING: --allow-fallback-diarization is active. "
+                    << "sherpa-onnx is not available. "
+                    << "Speaker data will be FABRICATED FALLBACK, not real.\n";
+        }
+
         diar_boundary = svp::audio::execute_diarization_boundary(
-            std::move(diar_boundary), staging_dir, model_cache_root);
+            std::move(diar_boundary), staging_dir, model_cache_root,
+            build_allow_fallback_diarization);
+
+        if ((stop_after == "audio" || stop_after == "package-skeleton") &&
+            diar_boundary.diarization_status == svp::audio::DiarizationStatus::unavailable &&
+            !build_allow_fallback_diarization) {
+          std::cerr << "\n  ERROR: Diarization is unavailable. Speaker detection will NOT be performed.\n"
+                    << "  Cause:";
+          for (const auto& blocker : diar_boundary.blockers) {
+            std::cerr << "\n    - " << blocker;
+          }
+          std::cerr << "\n\n  To fix:\n"
+                    << "    pip3 install sherpa-onnx\n"
+                    << "    Ensure the diarization model is in the model cache.\n"
+                    << "    Ensure analysis audio was extracted successfully.\n\n"
+                    << "  To proceed WITHOUT diarization (NOT RECOMMENDED):\n"
+                    << "    --allow-fallback-diarization\n\n";
+          return 1;
+        }
 
         // Serialize diarization boundary before moving segments out.
         audio_json["diarization_execution_boundary"] =
@@ -728,6 +771,13 @@ int main(int argc, char** argv) {
             std::cout << "Transcript written: " << twr["transcript_written"] << "\n";
             std::cout << "Words written: " << twr["word_count"] << " words\n";
             std::cout << "Speakers written: " << twr["speaker_count"] << " speakers\n";
+            if (output["audio_foundation"].contains("diarization_execution_boundary")) {
+              const auto& deb = output["audio_foundation"]["diarization_execution_boundary"];
+              if (deb["diarization_status"] == "fallback_one_speaker") {
+                std::cout << "  WARNING: Diarization did NOT run. Speaker count is UNKNOWN.\n"
+                          << "  Package speaker data is FABRICATED FALLBACK, not real.\n";
+              }
+            }
           }
         }
       }
@@ -858,6 +908,9 @@ int main(int argc, char** argv) {
         }
       } else {
         std::cout << "No .svp package was created by this foundation command.\n";
+      }
+      if (stop_after == "package-skeleton" && package_written && !validator_passes) {
+        return validator_exit_code;
       }
       return 0;
     }
