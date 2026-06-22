@@ -33,4 +33,11 @@ struct WhisperInferenceResult {
 
 [[nodiscard]] bool is_whisper_runtime_available();
 
+[[nodiscard]] double softmax_probability_for_token(
+    const std::vector<float>& logits, int token_id);
+
+[[nodiscard]] double aggregate_word_confidence(
+    const std::vector<double>& token_probs,
+    const std::vector<std::size_t>& token_indices);
+
 }  // namespace svp::audio

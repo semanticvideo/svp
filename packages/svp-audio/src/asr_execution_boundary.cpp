@@ -102,7 +102,8 @@ nlohmann::json chunk_provenance_record(const AsrChunkPlan& chunk,
   nlohmann::json asr_limitations = {
       {"timestamp_method", "whisper_timestamp_token_segments"},
       {"timestamp_precision", "words_distributed_evenly_within_segment"},
-      {"confidence_status", "unimplemented"},
+      {"confidence_status", "decoder_token_softmax_mean"},
+      {"confidence_note", "Per-word confidence is the mean of selected-token decoder softmax probabilities for the word's constituent tokens. This is uncalibrated model confidence, not a calibrated probability."},
       {"speaker_mode", "one_speaker_fallback"},
   };
 
@@ -316,7 +317,8 @@ nlohmann::json asr_execution_boundary_to_json(const AsrExecutionBoundary& bounda
   nlohmann::json asr_limitations = {
       {"timestamp_method", "whisper_timestamp_token_segments"},
       {"timestamp_precision", "words_distributed_evenly_within_segment"},
-      {"confidence_status", "unimplemented"},
+      {"confidence_status", "decoder_token_softmax_mean"},
+      {"confidence_note", "Per-word confidence is the mean of selected-token decoder softmax probabilities for the word's constituent tokens. This is uncalibrated model confidence, not a calibrated probability."},
       {"speaker_mode", "one_speaker_fallback"},
   };
 
