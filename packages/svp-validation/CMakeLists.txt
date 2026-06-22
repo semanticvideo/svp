@@ -8,6 +8,7 @@ add_library(svp-validation
   src/block_stream_validation.cpp
   src/color_record_validation.cpp
   src/code_registry.cpp
+  src/diarization_validation.cpp
   src/index_validation.cpp
   src/json_schema_subset.cpp
   src/ocr_color_spec.cpp

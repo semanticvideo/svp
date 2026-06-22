@@ -492,6 +492,26 @@
       "section": "23.1-23.2",
       "description": "The SQLite index does not match /colors package records.",
       "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "WARN_DIARIZATION_FALLBACK",
+      "severity": "warning",
+      "report_bucket": "warnings",
+      "affects_core_status": true,
+      "status_effect": "valid_with_warnings",
+      "section": "11",
+      "description": "Speaker diarization did not run. Speaker count is unverified fallback, not real diarization.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_DIARIZATION_UNAVAILABLE",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "11",
+      "description": "Speaker diarization is unavailable. Package does not contain speaker data.",
+      "introduced": "1.0-rc.2"
     }
   ]
 }

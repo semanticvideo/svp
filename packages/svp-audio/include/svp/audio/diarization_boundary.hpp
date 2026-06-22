@@ -57,7 +57,8 @@ struct DiarizationExecutionBoundary {
 [[nodiscard]] DiarizationExecutionBoundary execute_diarization_boundary(
     DiarizationExecutionBoundary boundary,
     const std::filesystem::path& staging_root,
-    const std::filesystem::path& model_cache_root);
+    const std::filesystem::path& model_cache_root,
+    bool allow_fallback = false);
 
 [[nodiscard]] std::string diarization_status_to_string(DiarizationStatus status);
 
