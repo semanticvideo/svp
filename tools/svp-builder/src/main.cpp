@@ -909,6 +909,9 @@ int main(int argc, char** argv) {
       } else {
         std::cout << "No .svp package was created by this foundation command.\n";
       }
+      if (stop_after == "package-skeleton" && package_written && !validator_passes) {
+        return validator_exit_code;
+      }
       return 0;
     }
   } catch (const std::exception& error) {
