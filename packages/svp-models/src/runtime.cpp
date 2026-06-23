@@ -312,6 +312,64 @@ TextEmbeddingOutput OnnxSession::run_text_embedding(
   return result;
 }
 
+std::vector<float> OnnxSession::run_visual_embedding(
+    const float* input_data,
+    std::size_t input_count,
+    std::uint32_t width,
+    std::uint32_t height) const {
+  if (impl_->input_names.empty() || impl_->output_names.empty()) {
+    throw ModelError(ModelErrorCode::runtime_unavailable,
+                     "Session has no input or output names");
+  }
+
+  Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
+      OrtArenaAllocator, OrtMemTypeDefault);
+
+  // Nomic Embed Vision expects NCHW float32 input [1, 3, 224, 224]
+  std::vector<std::int64_t> input_shape = {1, 3,
+      static_cast<std::int64_t>(height),
+      static_cast<std::int64_t>(width)};
+
+  Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+      memory_info, const_cast<float*>(input_data), input_count,
+      input_shape.data(), input_shape.size());
+
+  const char* input_names_cstr = impl_->input_names[0].c_str();
+  const char* output_names_cstr = impl_->output_names[0].c_str();
+
+  auto output_tensors = impl_->session.Run(
+      Ort::RunOptions{nullptr},
+      &input_names_cstr, &input_tensor, 1,
+      &output_names_cstr, 1);
+
+  if (output_tensors.empty()) {
+    throw ModelError(ModelErrorCode::runtime_unavailable,
+                     "ONNX Runtime produced no output tensors");
+  }
+
+  auto& output_tensor = output_tensors[0];
+  auto type_info = output_tensor.GetTensorTypeAndShapeInfo();
+  auto output_shape = type_info.GetShape();
+  auto element_count = type_info.GetElementCount();
+
+  const float* output_data = output_tensor.GetTensorData<float>();
+
+  // Nomic Embed Vision outputs last_hidden_state of shape [batch, seq_len, 768]
+  // where seq_len = num_patches + 1 (CLS token at index 0).
+  // Extract CLS token (index 0) for a 768-dimensional embedding.
+  if (output_shape.size() == 3 && output_shape[2] == 768) {
+    return std::vector<float>(output_data, output_data + 768);
+  }
+
+  // Fallback: if shape is [batch, 768], return directly
+  if (output_shape.size() == 2 && output_shape[1] == 768) {
+    return std::vector<float>(output_data, output_data + 768);
+  }
+
+  // Unknown shape: return all elements
+  return std::vector<float>(output_data, output_data + element_count);
+}
+
 std::string OnnxSession::model_id() const {
   return impl_ ? impl_->model_id_value : "";
 }
@@ -453,6 +511,12 @@ std::vector<float> OnnxSession::run_embedding(const float*, std::size_t) const {
 TextEmbeddingOutput OnnxSession::run_text_embedding(
     const std::int64_t*, const std::int64_t*, const std::int64_t*,
     std::size_t, std::size_t) const {
+  throw ModelError(ModelErrorCode::runtime_unavailable,
+                   "ONNX Runtime is not available");
+}
+
+std::vector<float> OnnxSession::run_visual_embedding(
+    const float*, std::size_t, std::uint32_t, std::uint32_t) const {
   throw ModelError(ModelErrorCode::runtime_unavailable,
                    "ONNX Runtime is not available");
 }

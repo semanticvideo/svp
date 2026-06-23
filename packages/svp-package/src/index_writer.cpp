@@ -161,6 +161,26 @@ const std::vector<std::string> kIndexTables = {
     "  start_us INTEGER,"
     "  end_us INTEGER,"
     "  confidence REAL"
+    ")",
+
+    "CREATE TABLE spatial_regions ("
+    "  region_id TEXT PRIMARY KEY,"
+    "  entity_id TEXT,"
+    "  track_id TEXT,"
+    "  frame_id TEXT,"
+    "  pts_us INTEGER,"
+    "  screen_area_ratio REAL,"
+    "  confidence REAL"
+    ")",
+
+    "CREATE TABLE spatial_masks ("
+    "  mask_id TEXT PRIMARY KEY,"
+    "  entity_id TEXT,"
+    "  track_id TEXT,"
+    "  region_id TEXT,"
+    "  frame_id TEXT,"
+    "  width INTEGER,"
+    "  height INTEGER"
     ")"
 };
 
@@ -554,6 +574,72 @@ bool write_index_foundation(
       }
     }
 
+    // Load and insert spatial region records
+    const auto region_records = read_jsonl(staging_dir / "spatial" / "regions.jsonl");
+    if (!region_records.empty()) {
+      const std::string insert_region_sql =
+          "INSERT INTO spatial_regions (region_id, entity_id, track_id, "
+          "frame_id, pts_us, screen_area_ratio, confidence) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?)";
+      sqlite3_stmt* stmt_region = nullptr;
+      if (sqlite3_prepare_v2(db.get(), insert_region_sql.c_str(), -1, &stmt_region, nullptr) == SQLITE_OK) {
+        std::unique_ptr<sqlite3_stmt, StatementDeleter> stmt_region_guard{stmt_region};
+        for (const auto& region : region_records) {
+          const auto region_id = region.value("id", "");
+          if (region_id.empty()) continue;
+          sqlite3_bind_text(stmt_region, 1, region_id.c_str(), -1, SQLITE_TRANSIENT);
+          bind_json_string(stmt_region, 2, region, "entity_id");
+          bind_json_string(stmt_region, 3, region, "track_id");
+          bind_json_string(stmt_region, 4, region, "frame_id");
+          bind_json_int(stmt_region, 5, region, "pts_us");
+          const auto area_it = region.find("screen_area_ratio");
+          if (area_it != region.end() && area_it->is_number()) {
+            sqlite3_bind_double(stmt_region, 6, area_it->get<double>());
+          } else {
+            sqlite3_bind_null(stmt_region, 6);
+          }
+          const auto conf_it = region.find("confidence");
+          if (conf_it != region.end() && conf_it->is_number()) {
+            sqlite3_bind_double(stmt_region, 7, conf_it->get<double>());
+          } else {
+            sqlite3_bind_null(stmt_region, 7);
+          }
+          sqlite3_step(stmt_region);
+          sqlite3_reset(stmt_region);
+        }
+      } else {
+        if (stmt_region) sqlite3_finalize(stmt_region);
+      }
+    }
+
+    // Load and insert spatial mask records
+    const auto mask_records = read_jsonl(staging_dir / "spatial" / "masks.index.jsonl");
+    if (!mask_records.empty()) {
+      const std::string insert_mask_sql =
+          "INSERT INTO spatial_masks (mask_id, entity_id, track_id, "
+          "region_id, frame_id, width, height) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?)";
+      sqlite3_stmt* stmt_mask = nullptr;
+      if (sqlite3_prepare_v2(db.get(), insert_mask_sql.c_str(), -1, &stmt_mask, nullptr) == SQLITE_OK) {
+        std::unique_ptr<sqlite3_stmt, StatementDeleter> stmt_mask_guard{stmt_mask};
+        for (const auto& mask : mask_records) {
+          const auto mask_id = mask.value("id", "");
+          if (mask_id.empty()) continue;
+          sqlite3_bind_text(stmt_mask, 1, mask_id.c_str(), -1, SQLITE_TRANSIENT);
+          bind_json_string(stmt_mask, 2, mask, "entity_id");
+          bind_json_string(stmt_mask, 3, mask, "track_id");
+          bind_json_string(stmt_mask, 4, mask, "region_id");
+          bind_json_string(stmt_mask, 5, mask, "frame_id");
+          bind_json_int(stmt_mask, 6, mask, "width");
+          bind_json_int(stmt_mask, 7, mask, "height");
+          sqlite3_step(stmt_mask);
+          sqlite3_reset(stmt_mask);
+        }
+      } else {
+        if (stmt_mask) sqlite3_finalize(stmt_mask);
+      }
+    }
+
     const auto relationships = read_jsonl(staging_dir / "relationships" / "relationships.jsonl");
     if (!relationships.empty()) {
       const std::string insert_sql =
@@ -631,6 +717,8 @@ bool write_index_foundation(
         "numeric_values",
         "objects",
         "relationships",
+        "spatial_masks",
+        "spatial_regions",
         "svp_meta",
         "temporal_spans",
         "text_fts",

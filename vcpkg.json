@@ -4,6 +4,7 @@
   "version-string": "1.0.0-rc1",
   "description": "Semantic Video Package reference tools",
   "license": "MIT",
+  "builtin-baseline": "a0b1c8d3a477c1cb4813d8e127a56961707ca42b",
   "dependencies": [
     "cli11",
     "nlohmann-json",
@@ -11,7 +12,12 @@
     "libzip",
     "blake3",
     "zstd",
-    "onnxruntime"
+    "onnxruntime",
+    {
+      "name": "opencv4",
+      "version>=": "4.8.0",
+      "features": ["contrib"]
+    }
   ]
 }
 

@@ -1,4 +1,5 @@
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(OpenCV REQUIRED)
 
 add_library(svp-vision
   src/canonical_frame_input.cpp
@@ -18,6 +19,8 @@ add_library(svp-vision
   src/real_frame_color_sampling.cpp
   src/scene_segmentation.cpp
   src/text_tokenizer.cpp
+  src/visual_entity_tracker.cpp
+  src/mask_writer.cpp
 )
 
 add_library(svp::vision ALIAS svp-vision)
@@ -35,6 +38,8 @@ target_link_libraries(svp-vision
     svp::blocks
     svp::media
     svp::models
+  PRIVATE
+    ${OpenCV_LIBS}
 )
 
 if(BUILD_TESTING)
@@ -240,4 +245,20 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-vision-ocr-temporal-sampling-tests
            COMMAND svp-vision-ocr-temporal-sampling-tests)
+
+  add_executable(svp-vision-visual-entity-tracker-tests
+    tests/visual_entity_tracker_tests.cpp
+  )
+
+  target_compile_features(svp-vision-visual-entity-tracker-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-visual-entity-tracker-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-visual-entity-tracker-tests
+           COMMAND svp-vision-visual-entity-tracker-tests)
 endif()

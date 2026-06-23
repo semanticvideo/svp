@@ -370,6 +370,11 @@ DepthGenerationResult generate_depth_blocks(
       return result;
     }
 
+    // Accumulate raw depth data for downstream consumers (visual entity tracker)
+    result.raw_depth_data.insert(
+        result.raw_depth_data.end(),
+        depth_uint16.begin(), depth_uint16.end());
+
     // Write SVPB block
     svp::blocks::BlockWriteSpec spec;
     spec.block_type = svp::blocks::BlockType::depth;

@@ -67,6 +67,12 @@ class OnnxSession {
       std::size_t batch_size,
       std::size_t seq_len) const;
 
+  [[nodiscard]] std::vector<float> run_visual_embedding(
+      const float* input_data,
+      std::size_t input_count,
+      std::uint32_t width,
+      std::uint32_t height) const;
+
   [[nodiscard]] std::vector<float> run_raw(
       const std::string& input_name,
       const float* input_data,

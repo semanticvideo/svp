@@ -1,6 +1,7 @@
 #include "svp/package/relationship_provenance_writer.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <map>
 #include <set>
@@ -123,6 +124,8 @@ struct KnownIds {
   std::set<std::string> entity_ids;
   std::set<std::string> track_ids;
   std::set<std::string> processor_ids;
+  std::set<std::string> spatial_region_ids;
+  std::set<std::string> spatial_mask_ids;
 };
 
 KnownIds collect_known_ids(const std::filesystem::path& staging_dir) {
@@ -208,6 +211,16 @@ KnownIds collect_known_ids(const std::filesystem::path& staging_dir) {
   for (const auto& rec : read_jsonl(staging_dir / "entities" / "entity_tracks.jsonl")) {
     const std::string id = string_value(rec, "id");
     if (!id.empty()) ids.track_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "spatial" / "regions.jsonl")) {
+    const std::string id = string_value(rec, "id");
+    if (!id.empty()) ids.spatial_region_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "spatial" / "masks.index.jsonl")) {
+    const std::string id = string_value(rec, "id");
+    if (!id.empty()) ids.spatial_mask_ids.insert(id);
   }
 
   for (const auto& rec : read_jsonl(staging_dir / "provenance" / "processors.jsonl")) {
@@ -492,6 +505,80 @@ void build_embedding_source_relationships(
   }
 }
 
+void build_spatial_region_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto regions = read_jsonl(staging_dir / "spatial" / "regions.jsonl");
+  const auto masks = read_jsonl(staging_dir / "spatial" / "masks.index.jsonl");
+
+  // Build entity -> region relationships (appears_in_frame)
+  for (const auto& region : regions) {
+    const std::string region_id = string_value(region, "id");
+    const std::string entity_id = string_value(region, "entity_id");
+    const std::string frame_id = string_value(region, "frame_id");
+    const std::string track_id = string_value(region, "track_id");
+    const std::int64_t ts = int_value_or_zero(region, "pts_us");
+
+    if (region_id.empty()) continue;
+
+    // entity -> region (appears_in_frame)
+    if (builder.ids.entity_ids.count(entity_id)) {
+      builder.add("rel_entity_region_", "appears_in_frame",
+                  entity_id, region_id, ts, ts, 1.0,
+                  "spatial/regions.jsonl");
+    }
+
+    // track -> region (track_observation)
+    if (builder.ids.track_ids.count(track_id)) {
+      builder.add("rel_track_region_", "track_observation",
+                  track_id, region_id, ts, ts, 1.0,
+                  "spatial/regions.jsonl");
+    }
+
+    // region -> frame (region_in_frame)
+    if (builder.ids.frame_ids.count(frame_id)) {
+      builder.add("rel_region_frame_", "region_in_frame",
+                  region_id, frame_id, ts, ts, 1.0,
+                  "spatial/regions.jsonl");
+    }
+  }
+
+  // Build region_id -> pts_us lookup for mask relationship timestamps
+  std::map<std::string, std::int64_t> region_pts;
+  for (const auto& region : regions) {
+    const std::string rid = string_value(region, "id");
+    if (!rid.empty()) {
+      region_pts[rid] = int_value_or_zero(region, "pts_us");
+    }
+  }
+
+  // Build region -> mask relationships (has_mask)
+  for (const auto& mask : masks) {
+    const std::string mask_id = string_value(mask, "id");
+    const std::string region_id = string_value(mask, "region_id");
+
+    if (mask_id.empty() || region_id.empty()) continue;
+
+    // Use the owning region's pts_us for the relationship timestamp
+    auto pts_it = region_pts.find(region_id);
+    const std::int64_t ts = (pts_it != region_pts.end()) ? pts_it->second : 0;
+
+    if (builder.ids.spatial_region_ids.count(region_id)) {
+      builder.add("rel_region_mask_", "has_mask",
+                  region_id, mask_id, ts, ts, 1.0,
+                  "spatial/masks.index.jsonl");
+    }
+  }
+
+  // Region-to-region visual spatial relationships (overlaps, contains, occludes)
+  // per §20.8 require mask-based intersection and depth comparison.
+  // These are not yet implemented because the relationship builder operates on
+  // JSONL records which do not carry mask pixel data.  Emitting box-based
+  // approximations under spec-named relationship types would be dishonest.
+  // TODO: implement mask-based spatial relationships when mask block reading
+  // is available in the relationship builder.
+}
+
 std::vector<nlohmann::json> build_relationships(const std::filesystem::path& staging_dir,
                                                  RelationshipTypeCounts& counts) {
   const KnownIds ids = collect_known_ids(staging_dir);
@@ -504,6 +591,7 @@ std::vector<nlohmann::json> build_relationships(const std::filesystem::path& sta
   build_color_observation_relationships(builder, staging_dir);
   build_depth_frame_relationships(builder, staging_dir);
   build_embedding_source_relationships(builder, staging_dir);
+  build_spatial_region_relationships(builder, staging_dir);
 
   counts = builder.counts;
 

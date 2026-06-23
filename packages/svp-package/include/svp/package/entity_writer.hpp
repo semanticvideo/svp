@@ -1,5 +1,7 @@
 #pragma once
 
+#include "svp/vision/visual_entity_tracker.hpp"
+
 #include <cstddef>
 #include <filesystem>
 #include <nlohmann/json.hpp>
@@ -9,8 +11,12 @@ namespace svp::package {
 struct EntityWriteSummary {
   bool entities_written = false;
   bool tracks_written = false;
+  bool regions_written = false;
+  bool masks_written = false;
   std::size_t entity_count = 0;
   std::size_t track_count = 0;
+  std::size_t region_count = 0;
+  std::size_t mask_count = 0;
   std::size_t processors_written = 0;
   std::size_t duplicate_processors_merged = 0;
   std::size_t skipped_missing_evidence = 0;
@@ -35,6 +41,20 @@ struct EntityWriteSummary {
  */
 [[nodiscard]] EntityWriteSummary write_entity_artifacts(
     const std::filesystem::path& staging_dir);
+
+/**
+ * Writes visual entity, track, region, and mask artifacts to staging:
+ * - entities/entities.jsonl (merged with any existing text-based entities)
+ * - entities/entity_tracks.jsonl (merged with any existing text-based tracks)
+ * - spatial/regions.jsonl
+ * - spatial/masks.index.jsonl + spatial/masks.blocks.svpmz
+ *
+ * Evidence source: EntityTrackResult from the visual entity tracker (§20.6).
+ * Also writes processor provenance for the visual entity tracker.
+ */
+[[nodiscard]] EntityWriteSummary write_visual_entity_artifacts(
+    const std::filesystem::path& staging_dir,
+    const svp::vision::EntityTrackResult& tracker_result);
 
 [[nodiscard]] nlohmann::json entity_write_summary_to_json(
     const EntityWriteSummary& summary);

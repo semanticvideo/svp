@@ -1,9 +1,13 @@
 #include "svp/package/entity_writer.hpp"
 
+#include "svp/vision/mask_writer.hpp"
+
 #include <algorithm>
 #include <fstream>
+#include <iomanip>
 #include <map>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -452,13 +456,25 @@ EntityWriteSummary write_entity_artifacts(
   const std::filesystem::path entities_path = staging_dir / "entities" / "entities.jsonl";
   const std::filesystem::path tracks_path = staging_dir / "entities" / "entity_tracks.jsonl";
 
-  write_jsonl(entities_path, entities);
-  write_jsonl(tracks_path, tracks);
+  // Read existing entities/tracks (may have been written by visual entity tracker)
+  auto existing_entities = read_jsonl(entities_path);
+  auto existing_tracks = read_jsonl(tracks_path);
+
+  // Merge: append text-based entities to existing visual entities
+  for (auto& e : entities) {
+    existing_entities.push_back(std::move(e));
+  }
+  for (auto& t : tracks) {
+    existing_tracks.push_back(std::move(t));
+  }
+
+  write_jsonl(entities_path, existing_entities);
+  write_jsonl(tracks_path, existing_tracks);
 
   summary.entities_written = true;
   summary.tracks_written = true;
-  summary.entity_count = entities.size();
-  summary.track_count = tracks.size();
+  summary.entity_count = existing_entities.size();
+  summary.track_count = existing_tracks.size();
 
   append_processor_record(
       staging_dir / "provenance" / "processors.jsonl",
@@ -468,12 +484,176 @@ EntityWriteSummary write_entity_artifacts(
   return summary;
 }
 
+EntityWriteSummary write_visual_entity_artifacts(
+    const std::filesystem::path& staging_dir,
+    const svp::vision::EntityTrackResult& tracker_result) {
+  EntityWriteSummary summary;
+
+  const std::filesystem::path entities_dir = staging_dir / "entities";
+  const std::filesystem::path spatial_dir = staging_dir / "spatial";
+  std::filesystem::create_directories(entities_dir);
+  std::filesystem::create_directories(spatial_dir);
+
+  // Read existing entities and tracks (from text-based entity writer)
+  auto existing_entities = read_jsonl(entities_dir / "entities.jsonl");
+  auto existing_tracks = read_jsonl(entities_dir / "entity_tracks.jsonl");
+
+  // Append visual entities
+  std::vector<nlohmann::json> all_entities = existing_entities;
+  std::vector<nlohmann::json> all_tracks = existing_tracks;
+
+  for (const auto& entity : tracker_result.entities) {
+    nlohmann::json entity_record;
+    entity_record["id"] = entity.entity_id;
+    entity_record["entity_type"] = entity.entity_type;
+    entity_record["first_seen_us"] = entity.first_seen_us;
+    entity_record["last_seen_us"] = entity.last_seen_us;
+    entity_record["average_visibility"] = entity.average_visibility;
+    entity_record["average_screen_area"] = entity.average_screen_area;
+    entity_record["track_ids"] = entity.track_ids;
+    entity_record["evidence_sources"] = entity.evidence_sources;
+    all_entities.push_back(entity_record);
+  }
+
+  for (const auto& track : tracker_result.tracks) {
+    nlohmann::json track_record;
+    track_record["id"] = track.track_id;
+    track_record["entity_id"] = track.entity_id;
+    track_record["start_us"] = track.start_us;
+    track_record["end_us"] = track.end_us;
+    track_record["start_frame_id"] = track.start_frame_id;
+    track_record["end_frame_id"] = track.end_frame_id;
+    track_record["region_count"] = track.region_count;
+    track_record["lost_frame_count"] = track.lost_frame_count;
+    track_record["reacquired"] = track.reacquired;
+    track_record["confidence"] = track.confidence;
+    track_record["tracking_method"] = track.tracking_method;
+    track_record["candidate_source"] = track.candidate_source;
+    all_tracks.push_back(track_record);
+  }
+
+  // Write merged entities and tracks
+  write_jsonl(entities_dir / "entities.jsonl", all_entities);
+  write_jsonl(entities_dir / "entity_tracks.jsonl", all_tracks);
+
+  summary.entities_written = true;
+  summary.tracks_written = true;
+  summary.entity_count = all_entities.size();
+  summary.track_count = all_tracks.size();
+
+  // Write spatial regions per spec §14.2
+  std::vector<nlohmann::json> region_records;
+  for (const auto& region : tracker_result.regions) {
+    nlohmann::json record;
+    record["id"] = region.region_id;
+    record["entity_id"] = region.entity_id;
+    record["track_id"] = region.track_id;
+    record["frame_id"] = region.frame_id;
+    record["pts_us"] = region.timestamp_us;
+    record["box_norm"] = {region.box_norm[0], region.box_norm[1],
+                          region.box_norm[2], region.box_norm[3]};
+    record["box_px"] = {region.box_px[0], region.box_px[1],
+                        region.box_px[2], region.box_px[3]};
+    record["centroid_norm"] = {region.centroid_norm[0], region.centroid_norm[1]};
+    record["screen_area_ratio"] = region.screen_area_ratio;
+    record["mask_ref"] = "mask_" + region.region_id;
+    record["depth_ref"] = region.depth_ref;
+    record["depth_summary"] = {
+      {"median_inverse_depth", region.median_inverse_depth},
+      {"near_percentile_10", region.near_percentile_10},
+      {"far_percentile_90", region.far_percentile_90}
+    };
+    record["confidence"] = region.confidence;
+    record["candidate_source"] = region.candidate_source;
+    region_records.push_back(record);
+  }
+
+  write_jsonl(spatial_dir / "regions.jsonl", region_records);
+  summary.regions_written = true;
+  summary.region_count = region_records.size();
+
+  // Write masks via mask_writer
+  std::vector<svp::vision::MaskWriteEntry> mask_entries;
+  for (const auto& region : tracker_result.regions) {
+    if (region.mask_pixels.empty() || region.mask_width <= 0 || region.mask_height <= 0) {
+      continue;
+    }
+    svp::vision::MaskWriteEntry entry;
+    entry.mask_id = "mask_" + region.region_id;
+    entry.entity_id = region.entity_id;
+    entry.track_id = region.track_id;
+    entry.region_id = region.region_id;
+    entry.frame_id = region.frame_id;
+    entry.timestamp_us = region.timestamp_us;
+    entry.width = region.mask_width;
+    entry.height = region.mask_height;
+    entry.rle_data = svp::vision::encode_mask_rle(
+        region.mask_pixels.data(), region.mask_width, region.mask_height);
+    mask_entries.push_back(entry);
+  }
+
+  auto mask_summary = svp::vision::write_masks(staging_dir, mask_entries);
+  summary.masks_written = !mask_entries.empty();
+  summary.mask_count = mask_entries.size();
+
+  // If no masks were written, ensure the required empty block file exists
+  if (mask_entries.empty()) {
+    const auto masks_block = staging_dir / "spatial" / "masks.blocks.svpmz";
+    if (!std::filesystem::exists(masks_block)) {
+      std::ofstream empty_block(masks_block, std::ios::binary);
+    }
+  }
+
+  // Append processor record for visual entity tracker
+  nlohmann::json processor_record;
+  processor_record["id"] = tracker_result.processor_id;
+  processor_record["name"] = "svp visual entity tracker";
+  processor_record["version"] = "svp-visual-entity-tracker-v1";
+  processor_record["input_refs"] = {
+    "canonical_analysis_raster_frames",
+    "spatial/depth.index.jsonl"
+  };
+  processor_record["output_refs"] = {
+    "entities/entities.jsonl",
+    "entities/entity_tracks.jsonl",
+    "spatial/regions.jsonl",
+    "spatial/masks.index.jsonl",
+    "spatial/masks.blocks.svpmz"
+  };
+  processor_record["model_refs"] = tracker_result.model_refs;
+  processor_record["task_ids"] = {
+    "task.vision.visual_entity_tracking",
+    "task.vision.mask_generation",
+    "task.vision.spatial_region_generation"
+  };
+  processor_record["cache_keys"] = nlohmann::json::array();
+  processor_record["status"] = "completed";
+  processor_record["runtime"] = tracker_result.runtime;
+  processor_record["execution_provider"] = tracker_result.execution_provider;
+  processor_record["opencv_version"] = tracker_result.opencv_version;
+  processor_record["confidence_calibration_status"] =
+      tracker_result.confidence_calibration_status;
+  processor_record["limitations"] = tracker_result.limitations_note;
+  processor_record["parameters"] = tracker_result.parameters_json;
+
+  append_processor_record(
+      staging_dir / "provenance" / "processors.jsonl",
+      processor_record,
+      summary);
+
+  return summary;
+}
+
 nlohmann::json entity_write_summary_to_json(const EntityWriteSummary& summary) {
   return {
       {"entities_written", summary.entities_written},
       {"tracks_written", summary.tracks_written},
+      {"regions_written", summary.regions_written},
+      {"masks_written", summary.masks_written},
       {"entity_count", summary.entity_count},
       {"track_count", summary.track_count},
+      {"region_count", summary.region_count},
+      {"mask_count", summary.mask_count},
       {"processors_written", summary.processors_written},
       {"duplicate_processors_merged", summary.duplicate_processors_merged},
       {"skipped_missing_evidence", summary.skipped_missing_evidence},
