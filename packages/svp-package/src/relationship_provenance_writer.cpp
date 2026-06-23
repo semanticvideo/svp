@@ -543,13 +543,25 @@ void build_spatial_region_relationships(
     }
   }
 
+  // Build region_id -> pts_us lookup for mask relationship timestamps
+  std::map<std::string, std::int64_t> region_pts;
+  for (const auto& region : regions) {
+    const std::string rid = string_value(region, "id");
+    if (!rid.empty()) {
+      region_pts[rid] = int_value_or_zero(region, "pts_us");
+    }
+  }
+
   // Build region -> mask relationships (has_mask)
   for (const auto& mask : masks) {
     const std::string mask_id = string_value(mask, "id");
     const std::string region_id = string_value(mask, "region_id");
-    const std::int64_t ts = 0;
 
     if (mask_id.empty() || region_id.empty()) continue;
+
+    // Use the owning region's pts_us for the relationship timestamp
+    auto pts_it = region_pts.find(region_id);
+    const std::int64_t ts = (pts_it != region_pts.end()) ? pts_it->second : 0;
 
     if (builder.ids.spatial_region_ids.count(region_id)) {
       builder.add("rel_region_mask_", "has_mask",

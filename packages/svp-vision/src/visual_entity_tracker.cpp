@@ -734,8 +734,7 @@ EntityTrackResult run_visual_entity_tracker(
   result.confidence_calibration_status = "uncalibrated";
   result.limitations_note =
       "Visual entity tracking uses classical OpenCV methods (Shi-Tomasi, LK, "
-      "Farneback, RANSAC, GrabCut, Kalman). Appearance embeddings from "
-      + options.embedding_model_id + ". Confidence values are derived from "
+      "Farneback, RANSAC, GrabCut, Kalman). Confidence values are derived from "
       "tracking stability and IoU, not calibrated against ground truth.";
 
   // Record parameters for provenance
@@ -811,12 +810,17 @@ EntityTrackResult run_visual_entity_tracker(
           embedding_session = std::make_unique<svp::models::OnnxSession>(std::move(session));
           embeddings_available = true;
           result.model_refs.push_back(options.embedding_model_id);
+          result.limitations_note += "Appearance embeddings from " + options.embedding_model_id + ". ";
         }
       } catch (const std::exception& e) {
         // Model load failed; continue without embeddings
         result.limitations_note += std::string("Visual embedding model load failed: ") + e.what() + ". ";
       }
+    } else {
+      result.limitations_note += "Visual embedding model not found in cache; embeddings not used. ";
     }
+  } else {
+    result.limitations_note += "No model cache provided; visual embeddings not used. ";
   }
 
   // Tracking state
