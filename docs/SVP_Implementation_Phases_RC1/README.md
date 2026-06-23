@@ -8,7 +8,7 @@ It is written for agents working inside the repository at:
 /Users/domesposito/Projects/svp
 ```
 
-The RC1 repo foundation is complete, and SVP v1.0 RC2 is now the active implementation target. RC2 adds first-class OCR / visible-text observations and structured color observations to Core.
+The RC1 repo foundation is complete, and SVP v1.0 RC2 is now the active implementation target. RC2 adds first-class OCR / visible-text observations and structured color observations to Core. The original first-video-package milestone has been reached; current work is now RC2/reference-completion hardening over real builder output.
 
 The folder name still says `RC1` because this package began as the RC1 implementation plan. Active RC2 deltas live in:
 
@@ -16,7 +16,7 @@ The folder name still says `RC1` because this package began as the RC1 implement
 docs/SVP_Implementation_Phases_RC2_Update/
 ```
 
-Do not continue Phase 03+ work until those deltas are represented in the active implementation plan.
+The RC2 pause gate has been satisfied. Continue using the RC2 deltas as the active contract for validator, builder, index/query, package, and inspection work.
 
 ## What this package contains
 
@@ -50,11 +50,11 @@ SVP_Implementation_Phases_RC1/
 
 ## The one-sentence strategy
 
-Build the validator and package infrastructure first, integrate RC2 OCR/color requirements into validator, fixtures, index/query, builder roadmap, and inspector, then build the media/audio/vision/OCR/color pipelines, then integrate the full builder and run a 30-second video through it.
+Preserve the validator-clean real builder path while filling the remaining RC2 semantic layers, tightening validator coverage, and hardening quality based on real-video trials.
 
-## The milestone that matters
+## The milestone that matters now
 
-The target milestone is:
+The original target milestone was:
 
 ```bash
 svp build samples/dom-30s.mov --out out/dom-30s.svp
@@ -62,4 +62,11 @@ svp validate out/dom-30s.svp --json
 svp inspect out/dom-30s.svp
 ```
 
-The resulting `.svp` does not have to be perfect yet, but it must be structurally valid, inspectable, and produced by the actual pipeline rather than assembled by hand. For RC2, it must include valid `/text/` and `/colors/` Core sections, with scene/shot color summaries that can support queries such as "find all orange scenes."
+That milestone is now met in principle by the actual pipeline: real sample videos can build validator-clean packages with transcript, OCR, color, timeline, relationship, depth, embedding, index, provenance, and validation artifacts when local tools and model bundles are present.
+
+The current milestone is completion and hardening:
+
+- Fill missing entity/entity-track and mask/spatial-region layers.
+- Add relationship traversal queries.
+- Tighten validator coverage for diarization fallback, relationships, model identity, and package hygiene.
+- Improve OCR spacing/evidence verification, ASR confidence/alignment, scene/timeline quality, and model-bundle conformance.

@@ -22,7 +22,9 @@ That command should pass before any implementation begins or resumes.
 
 ## RC2 pause rule
 
-Do not continue Phase 03+, fixture lab, media ingest, vision pipeline, relationships/index packaging, or first-video-trial work until OCR and structured color observations are represented in the implementation plan.
+The original pause rule was: do not continue Phase 03+, fixture lab, media ingest, vision pipeline, relationships/index packaging, or first-video-trial work until OCR and structured color observations are represented in the implementation plan.
+
+That gate has now been satisfied. Keep using the rule as a guardrail: any future validator, builder, fixture, index/query, or package change must continue treating visible text and measured color as Core observations.
 
 RC2 makes these Core package sections:
 
@@ -43,27 +45,29 @@ Visible text and measured color distribution are observations, not labels. Examp
 
 ## What happens next
 
-The original phase plan got the project to a real 30-second video processing trial with valid `/text/` and `/colors/` Core sections. That milestone has now been reached in the implementation: real video packages can be validator-clean with OCR text, numeric values, color observations, depth, OCR evidence crops, OCR-derived embeddings, and ONNX Whisper ASR transcript words when the local model cache and native tools are available.
+The original phase plan got the project to a real 30-second video processing trial with valid `/text/` and `/colors/` Core sections. That milestone has now been reached in the implementation: real video packages can be validator-clean with OCR text, numeric values, color observations, depth, OCR evidence crops, OCR-derived embeddings, ONNX Whisper ASR transcript words, diarization, timeline artifacts, relationship records, SQLite index output, and stored validation reports when the local model cache and native tools are available.
+
+Recent hardening has also fixed ASR full-chunk coverage, decoder-derived word confidence, speaker `total_speech_us`, ONNX Runtime/CoreML include portability, sherpa-onnx library discovery, and validator-visible diarization fallback behavior. `speakers.MOV` is again the 2-speaker diarization proof path when sherpa-onnx and the diarization model bundle are available.
 
 The next work is completion and hardening. It is still organized through the same phases, but the active backlog is now stackable lanes:
 
-1. Query and inspection usability, including `svp query`.
-2. Speaker diarization and speaker embeddings.
-3. Visual tracks, spatial regions, and mask blocks.
-4. Relationship graph completion.
+1. Entity and entity-track artifacts.
+2. Relationship traversal queries over timeline-backed graph output.
+3. Spatial regions and mask blocks.
+4. Timeline/scene quality hardening beyond sampled-frame interval evidence.
 5. Transcript chunk embeddings and vision embeddings.
-6. Strict validator/spec enforcement.
+6. Strict validator/spec enforcement, including relationship, diarization, entity, and model-bundle checks.
 7. Canonical model-bundle BLAKE3 verification.
-8. OCR, scene, color, and ASR quality hardening.
+8. OCR spacing/evidence verification, scene/color, ASR confidence/alignment, and diarization quality hardening.
 9. Installable SVP agent skill and developer guide.
 
 The phases are not all sequential. Some can run in parallel once dependencies and shared contract zones are clear.
 
 ## Critical sequencing rule
 
-Do not start with the full video builder.
+The project already followed the validator-first path. Keep this sequence as historical context and as a guardrail for future large features: new package-producing behavior must still be validator-backed before it is treated as complete.
 
-The correct order is:
+The original order was:
 
 1. Commit the RC1 repo baseline.
 2. Add native build system and CLI skeleton.
@@ -79,7 +83,7 @@ The correct order is:
 12. Build index/relationships/package writer with text/color query tables.
 13. Run the first 30-second video trial.
 
-The builder needs the validator. The validator needs fixtures. The fixtures need package libraries. This is how the project avoids building blind.
+The builder still needs the validator. New builder features must produce inspectable artifacts and validator-readable failures instead of relying on manual package inspection.
 
 ## What agents should read
 
