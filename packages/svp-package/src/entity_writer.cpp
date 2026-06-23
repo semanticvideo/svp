@@ -1,0 +1,446 @@
+#include "svp/package/entity_writer.hpp"
+
+#include <algorithm>
+#include <fstream>
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
+
+namespace svp::package {
+namespace {
+
+constexpr const char* kEntityProcessorId = "processor_entity_writer_0001";
+
+std::vector<nlohmann::json> read_jsonl(const std::filesystem::path& path) {
+  std::vector<nlohmann::json> records;
+  if (!std::filesystem::exists(path)) {
+    return records;
+  }
+  std::ifstream input(path);
+  if (!input) {
+    return records;
+  }
+  std::string line;
+  while (std::getline(input, line)) {
+    if (line.empty()) {
+      continue;
+    }
+    try {
+      records.push_back(nlohmann::json::parse(line));
+    } catch (...) {
+    }
+  }
+  return records;
+}
+
+void write_jsonl(const std::filesystem::path& path,
+                 const std::vector<nlohmann::json>& records) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream output(path);
+  for (const nlohmann::json& record : records) {
+    output << record.dump() << "\n";
+  }
+}
+
+std::string string_value(const nlohmann::json& record, const char* key) {
+  const auto iterator = record.find(key);
+  if (iterator == record.end() || !iterator->is_string()) {
+    return {};
+  }
+  return iterator->get<std::string>();
+}
+
+std::int64_t int_value_or_zero(const nlohmann::json& record, const char* key) {
+  const auto iterator = record.find(key);
+  if (iterator == record.end() || !iterator->is_number_integer()) {
+    return 0;
+  }
+  return iterator->get<std::int64_t>();
+}
+
+double confidence_value_or_one(const nlohmann::json& record) {
+  const auto iterator = record.find("confidence");
+  if (iterator == record.end() || !iterator->is_number()) {
+    return 1.0;
+  }
+  return iterator->get<double>();
+}
+
+struct TextRegionInfo {
+  std::string text_region_id;
+  std::int64_t start_us = 0;
+  std::int64_t end_us = 0;
+  double confidence = 1.0;
+  std::string shot_id;
+  std::string scene_id;
+  std::string frame_start;
+  std::string frame_end;
+  std::vector<double> bbox_norm;
+};
+
+struct EntityGroup {
+  std::string normalized_text;
+  std::vector<TextRegionInfo> regions;
+};
+
+std::string frame_id_from_optional(const nlohmann::json& record,
+                                   const char* key) {
+  const auto it = record.find(key);
+  if (it == record.end() || it->is_null()) {
+    return {};
+  }
+  if (it->is_string()) {
+    return it->get<std::string>();
+  }
+  if (it->is_number_integer()) {
+    return "frame_" + std::to_string(it->get<std::int64_t>());
+  }
+  return {};
+}
+
+std::map<std::string, std::string> build_region_to_text_map(
+    const std::filesystem::path& staging_dir) {
+  std::map<std::string, std::string> result;
+  const auto observations = read_jsonl(staging_dir / "text" / "text_observations.jsonl");
+  for (const auto& obs : observations) {
+    const std::string region_id = string_value(obs, "text_region_id");
+    const std::string normalized = string_value(obs, "normalized_text");
+    if (!region_id.empty() && !normalized.empty()) {
+      result[region_id] = normalized;
+    }
+  }
+  return result;
+}
+
+std::vector<EntityGroup> group_text_regions(
+    const std::filesystem::path& staging_dir,
+    std::size_t& skipped_missing_evidence) {
+  const auto text_regions = read_jsonl(staging_dir / "text" / "text_regions.jsonl");
+  const auto region_to_text = build_region_to_text_map(staging_dir);
+
+  std::map<std::string, EntityGroup> groups_by_text;
+
+  for (const auto& region : text_regions) {
+    const std::string region_id = string_value(region, "text_region_id");
+    if (region_id.empty()) {
+      ++skipped_missing_evidence;
+      continue;
+    }
+
+    const auto text_it = region_to_text.find(region_id);
+    if (text_it == region_to_text.end()) {
+      ++skipped_missing_evidence;
+      continue;
+    }
+
+    TextRegionInfo info;
+    info.text_region_id = region_id;
+    info.start_us = int_value_or_zero(region, "start_us");
+    info.end_us = int_value_or_zero(region, "end_us");
+    info.confidence = confidence_value_or_one(region);
+    info.shot_id = string_value(region, "shot_id");
+    info.scene_id = string_value(region, "scene_id");
+    info.frame_start = frame_id_from_optional(region, "frame_start");
+    info.frame_end = frame_id_from_optional(region, "frame_end");
+
+    if (region.contains("bbox_norm") && region["bbox_norm"].is_array()) {
+      for (const auto& val : region["bbox_norm"]) {
+        if (val.is_number()) {
+          info.bbox_norm.push_back(val.get<double>());
+        }
+      }
+    }
+
+    groups_by_text[text_it->second].regions.push_back(std::move(info));
+  }
+
+  std::vector<EntityGroup> groups;
+  groups.reserve(groups_by_text.size());
+  for (auto& [text, group] : groups_by_text) {
+    group.normalized_text = text;
+    std::sort(group.regions.begin(), group.regions.end(),
+              [](const TextRegionInfo& a, const TextRegionInfo& b) {
+                return a.start_us < b.start_us;
+              });
+    groups.push_back(std::move(group));
+  }
+
+  std::sort(groups.begin(), groups.end(),
+            [](const EntityGroup& a, const EntityGroup& b) {
+              if (a.regions.empty() || b.regions.empty()) {
+                return a.normalized_text < b.normalized_text;
+              }
+              return a.regions[0].start_us < b.regions[0].start_us;
+            });
+
+  return groups;
+}
+
+std::string deterministic_entity_id(std::size_t index) {
+  return "entity_" + std::string(6 - std::min<std::size_t>(6, std::to_string(index + 1).length()), '0') +
+         std::to_string(index + 1);
+}
+
+std::string deterministic_track_id(std::size_t index) {
+  return "track_" + std::string(6 - std::min<std::size_t>(6, std::to_string(index + 1).length()), '0') +
+         std::to_string(index + 1) + "_a";
+}
+
+double compute_average_screen_area(const EntityGroup& group) {
+  double total = 0.0;
+  std::size_t count = 0;
+  for (const auto& region : group.regions) {
+    if (region.bbox_norm.size() >= 4) {
+      const double width = region.bbox_norm[2] - region.bbox_norm[0];
+      const double height = region.bbox_norm[3] - region.bbox_norm[1];
+      if (width > 0.0 && height > 0.0) {
+        total += width * height;
+        ++count;
+      }
+    }
+  }
+  return count > 0 ? total / static_cast<double>(count) : 0.0;
+}
+
+double compute_average_visibility(const EntityGroup& group,
+                                  std::int64_t media_duration_us) {
+  if (group.regions.empty() || media_duration_us <= 0) {
+    return 0.0;
+  }
+  std::int64_t total_visible = 0;
+  for (const auto& region : group.regions) {
+    total_visible += (region.end_us - region.start_us);
+  }
+  return static_cast<double>(total_visible) / static_cast<double>(media_duration_us);
+}
+
+std::int64_t media_duration_from_timeline(const std::filesystem::path& staging_dir) {
+  const auto shots = read_jsonl(staging_dir / "timeline" / "shots.jsonl");
+  std::int64_t max_end = 0;
+  for (const auto& shot : shots) {
+    const std::int64_t end = int_value_or_zero(shot, "end_us");
+    if (end > max_end) {
+      max_end = end;
+    }
+  }
+  if (max_end > 0) {
+    return max_end;
+  }
+  const auto frames = read_jsonl(staging_dir / "timeline" / "frames.jsonl");
+  for (const auto& frame : frames) {
+    const std::int64_t ts = int_value_or_zero(frame, "timestamp_us");
+    if (ts > max_end) {
+      max_end = ts;
+    }
+  }
+  return max_end;
+}
+
+nlohmann::json make_entity_record(std::size_t entity_index,
+                                  const EntityGroup& group,
+                                  const std::string& track_id,
+                                  std::int64_t media_duration_us) {
+  const std::string entity_id = deterministic_entity_id(entity_index);
+  const std::int64_t first_seen = group.regions.front().start_us;
+  const std::int64_t last_seen = group.regions.back().end_us;
+  const double avg_area = compute_average_screen_area(group);
+  const double avg_visibility = compute_average_visibility(group, media_duration_us);
+
+  nlohmann::json record = {
+      {"id", entity_id},
+      {"entity_type", "unknown_region"},
+      {"first_seen_us", first_seen},
+      {"last_seen_us", last_seen},
+      {"track_ids", nlohmann::json::array({track_id})},
+      {"average_visibility", avg_visibility},
+      {"average_screen_area", avg_area},
+      {"processor_id", kEntityProcessorId},
+  };
+
+  nlohmann::json evidence = {
+      {"source", "text/text_regions.jsonl"},
+      {"evidence_type", "ocr_text_region"},
+      {"normalized_text", group.normalized_text},
+      {"region_count", group.regions.size()},
+      {"region_ids", nlohmann::json::array()},
+  };
+  for (const auto& region : group.regions) {
+    evidence["region_ids"].push_back(region.text_region_id);
+  }
+  record["evidence"] = std::move(evidence);
+
+  return record;
+}
+
+nlohmann::json make_track_record(std::size_t entity_index,
+                                 const EntityGroup& group) {
+  const std::string entity_id = deterministic_entity_id(entity_index);
+  const std::string track_id = deterministic_track_id(entity_index);
+  const std::int64_t start_us = group.regions.front().start_us;
+  const std::int64_t end_us = group.regions.back().end_us;
+  const std::string start_frame = group.regions.front().frame_start;
+  const std::string end_frame = group.regions.back().frame_end;
+
+  double avg_confidence = 0.0;
+  for (const auto& region : group.regions) {
+    avg_confidence += region.confidence;
+  }
+  avg_confidence /= static_cast<double>(group.regions.size());
+
+  nlohmann::json record = {
+      {"id", track_id},
+      {"entity_id", entity_id},
+      {"start_us", start_us},
+      {"end_us", end_us},
+      {"region_count", group.regions.size()},
+      {"lost_frame_count", 0},
+      {"reacquired", false},
+      {"confidence", avg_confidence},
+      {"processor_id", kEntityProcessorId},
+  };
+
+  if (!start_frame.empty()) {
+    record["start_frame_id"] = start_frame;
+  }
+  if (!end_frame.empty()) {
+    record["end_frame_id"] = end_frame;
+  }
+
+  nlohmann::json evidence = {
+      {"source", "text/text_regions.jsonl"},
+      {"evidence_type", "ocr_text_region"},
+      {"tracking_method", "text_content_match"},
+      {"tracking_note", "Single-observation or text-content-matched track. "
+                        "Cross-frame matching is based on identical normalized "
+                        "text content, not visual tracking."},
+  };
+  record["evidence"] = std::move(evidence);
+
+  return record;
+}
+
+nlohmann::json make_entity_processor_record(const EntityWriteSummary& summary) {
+  return {
+      {"id", kEntityProcessorId},
+      {"name", "svp package entity writer"},
+      {"version", "svp-package-entity-writer-v1"},
+      {"input_refs", {
+          "text/text_regions.jsonl",
+          "text/text_observations.jsonl",
+          "timeline/shots.jsonl",
+          "timeline/frames.jsonl"
+      }},
+      {"output_refs", {
+          "entities/entities.jsonl",
+          "entities/entity_tracks.jsonl"
+      }},
+      {"model_refs", nlohmann::json::array()},
+      {"task_ids", {"task.entity.derive_from_text_regions"}},
+      {"cache_keys", nlohmann::json::array()},
+      {"entity_count", summary.entity_count},
+      {"track_count", summary.track_count},
+      {"skipped_missing_evidence", summary.skipped_missing_evidence},
+      {"provenance_note", "Entities are derived from OCR text region evidence. "
+                          "Entity type is 'unknown_region' because no object "
+                          "recognition model is used. Labels are not assigned. "
+                          "Tracks represent text-content-matched observations, "
+                          "not robust visual tracking."},
+  };
+}
+
+void append_processor_record(
+    const std::filesystem::path& processors_path,
+    const nlohmann::json& new_processor,
+    EntityWriteSummary& summary) {
+  std::map<std::string, nlohmann::json> processors_by_id;
+  std::map<std::string, std::string> canonical_by_id;
+
+  for (const nlohmann::json& processor : read_jsonl(processors_path)) {
+    const std::string id = string_value(processor, "id");
+    if (id.empty()) {
+      continue;
+    }
+    const std::string canonical = processor.dump();
+    const auto existing = canonical_by_id.find(id);
+    if (existing != canonical_by_id.end()) {
+      ++summary.duplicate_processors_merged;
+      if (canonical >= existing->second) {
+        continue;
+      }
+    }
+    canonical_by_id[id] = canonical;
+    processors_by_id[id] = processor;
+  }
+
+  const std::string id = string_value(new_processor, "id");
+  if (!id.empty()) {
+    processors_by_id[id] = new_processor;
+    canonical_by_id[id] = new_processor.dump();
+  }
+
+  std::vector<nlohmann::json> processors;
+  processors.reserve(processors_by_id.size());
+  for (const auto& [pid, processor] : processors_by_id) {
+    processors.push_back(processor);
+  }
+  write_jsonl(processors_path, processors);
+  summary.processors_written = processors.size();
+}
+
+}  // namespace
+
+EntityWriteSummary write_entity_artifacts(
+    const std::filesystem::path& staging_dir) {
+  EntityWriteSummary summary;
+
+  std::size_t skipped_missing_evidence = 0;
+  const std::vector<EntityGroup> groups =
+      group_text_regions(staging_dir, skipped_missing_evidence);
+  summary.skipped_missing_evidence = skipped_missing_evidence;
+
+  const std::int64_t media_duration_us = media_duration_from_timeline(staging_dir);
+
+  std::vector<nlohmann::json> entities;
+  std::vector<nlohmann::json> tracks;
+  entities.reserve(groups.size());
+  tracks.reserve(groups.size());
+
+  for (std::size_t i = 0; i < groups.size(); ++i) {
+    const std::string track_id = deterministic_track_id(i);
+    entities.push_back(make_entity_record(i, groups[i], track_id, media_duration_us));
+    tracks.push_back(make_track_record(i, groups[i]));
+  }
+
+  const std::filesystem::path entities_path = staging_dir / "entities" / "entities.jsonl";
+  const std::filesystem::path tracks_path = staging_dir / "entities" / "entity_tracks.jsonl";
+
+  write_jsonl(entities_path, entities);
+  write_jsonl(tracks_path, tracks);
+
+  summary.entities_written = true;
+  summary.tracks_written = true;
+  summary.entity_count = entities.size();
+  summary.track_count = tracks.size();
+
+  append_processor_record(
+      staging_dir / "provenance" / "processors.jsonl",
+      make_entity_processor_record(summary),
+      summary);
+
+  return summary;
+}
+
+nlohmann::json entity_write_summary_to_json(const EntityWriteSummary& summary) {
+  return {
+      {"entities_written", summary.entities_written},
+      {"tracks_written", summary.tracks_written},
+      {"entity_count", summary.entity_count},
+      {"track_count", summary.track_count},
+      {"processors_written", summary.processors_written},
+      {"duplicate_processors_merged", summary.duplicate_processors_merged},
+      {"skipped_missing_evidence", summary.skipped_missing_evidence},
+  };
+}
+
+}  // namespace svp::package

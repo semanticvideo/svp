@@ -15,6 +15,7 @@
 #include "svp/vision/foundation_ocr_staging.hpp"
 #include "svp/vision/observation_pipeline_plan.hpp"
 #include "svp/vision/ocr_generation.hpp"
+#include "svp/package/entity_writer.hpp"
 #include "svp/package/package_writer.hpp"
 #include "svp/package/index_writer.hpp"
 #include "svp/package/relationship_provenance_writer.hpp"
@@ -687,8 +688,15 @@ int main(int argc, char** argv) {
             svp::package::spatial_embedding_placeholder_summary_to_json(
                 placeholder_summary);
 
+        // Write entity and entity-track artifacts after OCR text regions
+        // and observations exist, so entities have real evidence.
+        const svp::package::EntityWriteSummary entity_summary =
+            svp::package::write_entity_artifacts(staging_dir);
+        output["entity_artifacts"] =
+            svp::package::entity_write_summary_to_json(entity_summary);
+
         // Write relationships and provenance after all source artifacts exist
-        // (OCR text observations, evidence crops, depth, embeddings, etc.)
+        // (OCR text observations, evidence crops, depth, embeddings, entities, etc.)
         // so the relationship graph has no dangling references.
         const svp::package::RelationshipProvenanceWriteSummary relationship_summary =
             svp::package::write_relationships_and_provenance(staging_dir);
@@ -824,6 +832,11 @@ int main(int argc, char** argv) {
         std::cout << "Relationships written: "
                   << output.at("package_relationships_provenance").at("relationships_written")
                   << "\n";
+        std::cout << "Entities written: "
+                  << output.at("entity_artifacts").at("entity_count")
+                  << " entities, "
+                  << output.at("entity_artifacts").at("track_count")
+                  << " tracks\n";
         std::cout << "Processor provenance records written: "
                   << output.at("package_relationships_provenance").at("processors_written")
                   << "\n";
