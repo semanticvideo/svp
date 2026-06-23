@@ -84,8 +84,23 @@ struct EntityGroup {
   std::vector<TextRegionInfo> regions;
 };
 
-std::string frame_id_from_optional(const nlohmann::json& record,
-                                   const char* key) {
+std::map<std::int64_t, std::string> build_frame_index_to_id_map(
+    const std::filesystem::path& staging_dir) {
+  std::map<std::int64_t, std::string> result;
+  const auto frames = read_jsonl(staging_dir / "timeline" / "frames.jsonl");
+  for (const auto& frame : frames) {
+    const std::string id = string_value(frame, "id");
+    const auto idx_it = frame.find("frame_index");
+    if (!id.empty() && idx_it != frame.end() && idx_it->is_number_integer()) {
+      result[idx_it->get<std::int64_t>()] = id;
+    }
+  }
+  return result;
+}
+
+std::string resolve_frame_ref(const nlohmann::json& record,
+                              const char* key,
+                              const std::map<std::int64_t, std::string>& frame_index_to_id) {
   const auto it = record.find(key);
   if (it == record.end() || it->is_null()) {
     return {};
@@ -94,7 +109,10 @@ std::string frame_id_from_optional(const nlohmann::json& record,
     return it->get<std::string>();
   }
   if (it->is_number_integer()) {
-    return "frame_" + std::to_string(it->get<std::int64_t>());
+    const auto map_it = frame_index_to_id.find(it->get<std::int64_t>());
+    if (map_it != frame_index_to_id.end()) {
+      return map_it->second;
+    }
   }
   return {};
 }
@@ -118,6 +136,7 @@ std::vector<EntityGroup> group_text_regions(
     std::size_t& skipped_missing_evidence) {
   const auto text_regions = read_jsonl(staging_dir / "text" / "text_regions.jsonl");
   const auto region_to_text = build_region_to_text_map(staging_dir);
+  const auto frame_index_to_id = build_frame_index_to_id_map(staging_dir);
 
   std::map<std::string, EntityGroup> groups_by_text;
 
@@ -141,8 +160,8 @@ std::vector<EntityGroup> group_text_regions(
     info.confidence = confidence_value_or_one(region);
     info.shot_id = string_value(region, "shot_id");
     info.scene_id = string_value(region, "scene_id");
-    info.frame_start = frame_id_from_optional(region, "frame_start");
-    info.frame_end = frame_id_from_optional(region, "frame_end");
+    info.frame_start = resolve_frame_ref(region, "frame_start", frame_index_to_id);
+    info.frame_end = resolve_frame_ref(region, "frame_end", frame_index_to_id);
 
     if (region.contains("bbox_norm") && region["bbox_norm"].is_array()) {
       for (const auto& val : region["bbox_norm"]) {
