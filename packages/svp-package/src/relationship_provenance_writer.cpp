@@ -1,6 +1,7 @@
 #include "svp/package/relationship_provenance_writer.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <map>
 #include <set>
@@ -123,6 +124,8 @@ struct KnownIds {
   std::set<std::string> entity_ids;
   std::set<std::string> track_ids;
   std::set<std::string> processor_ids;
+  std::set<std::string> spatial_region_ids;
+  std::set<std::string> spatial_mask_ids;
 };
 
 KnownIds collect_known_ids(const std::filesystem::path& staging_dir) {
@@ -208,6 +211,16 @@ KnownIds collect_known_ids(const std::filesystem::path& staging_dir) {
   for (const auto& rec : read_jsonl(staging_dir / "entities" / "entity_tracks.jsonl")) {
     const std::string id = string_value(rec, "id");
     if (!id.empty()) ids.track_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "spatial" / "regions.jsonl")) {
+    const std::string id = string_value(rec, "region_id");
+    if (!id.empty()) ids.spatial_region_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "spatial" / "masks.index.jsonl")) {
+    const std::string id = string_value(rec, "mask_id");
+    if (!id.empty()) ids.spatial_mask_ids.insert(id);
   }
 
   for (const auto& rec : read_jsonl(staging_dir / "provenance" / "processors.jsonl")) {
@@ -492,6 +505,134 @@ void build_embedding_source_relationships(
   }
 }
 
+void build_spatial_region_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto regions = read_jsonl(staging_dir / "spatial" / "regions.jsonl");
+  const auto masks = read_jsonl(staging_dir / "spatial" / "masks.index.jsonl");
+
+  // Build entity -> region relationships (appears_in_frame)
+  for (const auto& region : regions) {
+    const std::string region_id = string_value(region, "region_id");
+    const std::string entity_id = string_value(region, "entity_id");
+    const std::string frame_id = string_value(region, "frame_id");
+    const std::string track_id = string_value(region, "track_id");
+    const std::int64_t ts = int_value_or_zero(region, "timestamp_us");
+
+    if (region_id.empty()) continue;
+
+    // entity -> region (appears_in_frame)
+    if (builder.ids.entity_ids.count(entity_id)) {
+      builder.add("rel_entity_region_", "appears_in_frame",
+                  entity_id, region_id, ts, ts, 1.0,
+                  "spatial/regions.jsonl");
+    }
+
+    // track -> region (track_observation)
+    if (builder.ids.track_ids.count(track_id)) {
+      builder.add("rel_track_region_", "track_observation",
+                  track_id, region_id, ts, ts, 1.0,
+                  "spatial/regions.jsonl");
+    }
+
+    // region -> frame (region_in_frame)
+    if (builder.ids.frame_ids.count(frame_id)) {
+      builder.add("rel_region_frame_", "region_in_frame",
+                  region_id, frame_id, ts, ts, 1.0,
+                  "spatial/regions.jsonl");
+    }
+  }
+
+  // Build region -> mask relationships (has_mask)
+  for (const auto& mask : masks) {
+    const std::string mask_id = string_value(mask, "mask_id");
+    const std::string region_id = string_value(mask, "region_id");
+    const std::int64_t ts = int_value_or_zero(mask, "timestamp_us");
+
+    if (mask_id.empty() || region_id.empty()) continue;
+
+    if (builder.ids.spatial_region_ids.count(region_id)) {
+      builder.add("rel_region_mask_", "has_mask",
+                  region_id, mask_id, ts, ts, 1.0,
+                  "spatial/masks.index.jsonl");
+    }
+  }
+
+  // Build region -> region spatial relationships (overlaps, near, contains)
+  // per §20.8
+  for (std::size_t i = 0; i < regions.size(); ++i) {
+    const auto& r1 = regions[i];
+    const std::string r1_id = string_value(r1, "region_id");
+    if (r1_id.empty()) continue;
+
+    const auto& r1_box = r1.value("box_norm", nlohmann::json::array());
+    if (r1_box.size() < 4) continue;
+    double r1_x0 = r1_box[0].get<double>();
+    double r1_y0 = r1_box[1].get<double>();
+    double r1_x1 = r1_box[2].get<double>();
+    double r1_y1 = r1_box[3].get<double>();
+    double r1_cx = (r1_x0 + r1_x1) / 2.0;
+    double r1_cy = (r1_y0 + r1_y1) / 2.0;
+    double r1_area = (r1_x1 - r1_x0) * (r1_y1 - r1_y0);
+
+    for (std::size_t j = i + 1; j < regions.size(); ++j) {
+      const auto& r2 = regions[j];
+      const std::string r2_id = string_value(r2, "region_id");
+      if (r2_id.empty()) continue;
+
+      // Only compare regions from the same frame
+      if (string_value(r1, "frame_id") != string_value(r2, "frame_id")) continue;
+
+      const auto& r2_box = r2.value("box_norm", nlohmann::json::array());
+      if (r2_box.size() < 4) continue;
+      double r2_x0 = r2_box[0].get<double>();
+      double r2_y0 = r2_box[1].get<double>();
+      double r2_x1 = r2_box[2].get<double>();
+      double r2_y1 = r2_box[3].get<double>();
+      double r2_cx = (r2_x0 + r2_x1) / 2.0;
+      double r2_cy = (r2_y0 + r2_y1) / 2.0;
+      double r2_area = (r2_x1 - r2_x0) * (r2_y1 - r2_y0);
+
+      // IoU computation
+      double ix0 = std::max(r1_x0, r2_x0);
+      double iy0 = std::max(r1_y0, r2_y0);
+      double ix1 = std::min(r1_x1, r2_x1);
+      double iy1 = std::min(r1_y1, r2_y1);
+      double iw = std::max(0.0, ix1 - ix0);
+      double ih = std::max(0.0, iy1 - iy0);
+      double intersection = iw * ih;
+      double union_area = r1_area + r2_area - intersection;
+      double iou = union_area > 0 ? intersection / union_area : 0;
+
+      const std::int64_t ts = int_value_or_zero(r1, "timestamp_us");
+
+      // overlaps: IoU > 0.3
+      if (iou > 0.3) {
+        builder.add("rel_overlaps_", "overlaps",
+                    r1_id, r2_id, ts, ts, iou,
+                    "spatial/regions.jsonl");
+      }
+
+      // near: centroid distance < 0.15 (normalized)
+      double dist = std::sqrt(
+        (r1_cx - r2_cx) * (r1_cx - r2_cx) +
+        (r1_cy - r2_cy) * (r1_cy - r2_cy));
+      if (dist < 0.15 && iou == 0) {
+        builder.add("rel_near_", "near",
+                    r1_id, r2_id, ts, ts, 1.0 - dist / 0.15,
+                    "spatial/regions.jsonl");
+      }
+
+      // contains: r1 contains r2 if r2 is mostly inside r1
+      if (r2_area > 0 && intersection / r2_area > 0.7) {
+        builder.add("rel_contains_", "contains",
+                    r1_id, r2_id, ts, ts, intersection / r2_area,
+                    "spatial/regions.jsonl");
+      }
+    }
+  }
+}
+
 std::vector<nlohmann::json> build_relationships(const std::filesystem::path& staging_dir,
                                                  RelationshipTypeCounts& counts) {
   const KnownIds ids = collect_known_ids(staging_dir);
@@ -504,6 +645,7 @@ std::vector<nlohmann::json> build_relationships(const std::filesystem::path& sta
   build_color_observation_relationships(builder, staging_dir);
   build_depth_frame_relationships(builder, staging_dir);
   build_embedding_source_relationships(builder, staging_dir);
+  build_spatial_region_relationships(builder, staging_dir);
 
   counts = builder.counts;
 

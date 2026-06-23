@@ -15,6 +15,7 @@
 #include "svp/vision/foundation_ocr_staging.hpp"
 #include "svp/vision/observation_pipeline_plan.hpp"
 #include "svp/vision/ocr_generation.hpp"
+#include "svp/vision/visual_entity_tracker.hpp"
 #include "svp/package/entity_writer.hpp"
 #include "svp/package/package_writer.hpp"
 #include "svp/package/index_writer.hpp"

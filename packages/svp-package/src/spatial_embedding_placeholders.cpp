@@ -5,6 +5,8 @@
 #include "svp/vision/depth_generation.hpp"
 #include "svp/vision/embedding_generation.hpp"
 #include "svp/vision/ocr_generation.hpp"
+#include "svp/vision/visual_entity_tracker.hpp"
+#include "svp/package/entity_writer.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -306,10 +308,60 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
       // blocks were generated. The placeholder is an honest empty file.
     }
 
-    write_empty_file(staging_dir / "spatial" / "masks.index.jsonl");
-    summary.masks_index_written = true;
-    write_empty_file(staging_dir / "spatial" / "masks.blocks.svpmz");
-    summary.masks_blocks_written = true;
+    // Run visual entity tracker on decoded frames with depth data
+    // per spec §20.6. This produces spatial regions, masks, entity tracks,
+    // and visual embeddings.
+    if (decoded_frames.decoding_succeeded && !decoded_frames.frames.empty()) {
+      svp::vision::VisualEntityTrackerOptions tracker_opts;
+      tracker_opts.embedding_model_id = "model_nomic_embed_vision_v1_5";
+      tracker_opts.execution_provider = "cpu";
+
+      // Read shot boundaries from timeline
+      std::vector<std::pair<std::string, std::int64_t>> shot_boundaries;
+      auto shots = read_jsonl(staging_dir / "timeline" / "shots.jsonl");
+      for (const auto& shot : shots) {
+        if (shot.contains("id") && shot.contains("start_us")) {
+          shot_boundaries.emplace_back(
+              shot["id"].get<std::string>(),
+              shot["start_us"].get<std::int64_t>());
+        }
+      }
+
+      // Read depth frame IDs from depth index
+      std::vector<std::string> depth_frame_ids;
+      auto depth_index = read_jsonl(staging_dir / "spatial" / "depth.index.jsonl");
+      for (const auto& entry : depth_index) {
+        if (entry.contains("frame_id")) {
+          depth_frame_ids.push_back(entry["frame_id"].get<std::string>());
+        }
+      }
+
+      // Extract depth data from depth result if available
+      std::vector<std::uint16_t> depth_data;
+      // Depth data is written to blocks; we pass empty and let the tracker
+      // handle missing depth gracefully (depth_summary will be zeros).
+
+      auto tracker_result = svp::vision::run_visual_entity_tracker(
+          decoded_frames.frames,
+          depth_data,
+          depth_frame_ids,
+          shot_boundaries,
+          model_cache_root,
+          tracker_opts);
+
+      // Write visual entity artifacts (entities, tracks, regions, masks)
+      auto visual_entity_summary = svp::package::write_visual_entity_artifacts(
+          staging_dir, tracker_result);
+      summary.masks_index_written = visual_entity_summary.masks_written;
+      summary.masks_blocks_written = visual_entity_summary.masks_written;
+    }
+
+    if (!summary.masks_index_written) {
+      write_empty_file(staging_dir / "spatial" / "masks.index.jsonl");
+      summary.masks_index_written = true;
+      write_empty_file(staging_dir / "spatial" / "masks.blocks.svpmz");
+      summary.masks_blocks_written = true;
+    }
 
     if (!emb_result.embeddings_blocks_written) {
       write_text_file(staging_dir / "embeddings" / "embedding_sets.json",
