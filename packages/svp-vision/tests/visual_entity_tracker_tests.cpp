@@ -1,10 +1,12 @@
 #include "svp/vision/visual_entity_tracker.hpp"
+#include "svp/vision/mask_writer.hpp"
 
 #include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -214,8 +216,9 @@ static void test_provenance_fields() {
 
 // Test 10: Integration test with moving object sequence
 // Creates synthetic frames with a moving white block on black background,
-// runs the tracker, and verifies entities, tracks, regions with unique IDs,
-// mask_ref/depth_ref fields, and non-empty masks.
+// passes real synthetic depth data, runs the tracker, verifies entities,
+// tracks, regions with unique IDs, mask_ref/depth_ref fields, non-zero depth
+// summaries, no duplicate track_id per frame, and exercises mask writer output.
 static void test_moving_object_integration() {
   // Create 8 frames of 64x64 with a 16x16 white block moving right
   const int w = 64, h = 64;
@@ -243,12 +246,24 @@ static void test_moving_object_integration() {
     }
   }
 
-  // Provide synthetic depth data (one frame worth, all same = blocked by float_depth_to_uint16)
-  // So pass empty depth — tracker handles gracefully
+  // Provide real synthetic depth data: varying values per pixel so it's not
+  // constant.  The block area gets closer (higher uint16), background gets
+  // farther (lower uint16).  This ensures depth_summary is non-zero.
   std::vector<std::uint16_t> depth_data;
   std::vector<std::string> depth_frame_ids;
   for (int i = 0; i < 8; ++i) {
     depth_frame_ids.push_back(frames[i].frame_id);
+    int bx = 4 + i * 4;
+    int by = 24;
+    for (int y = 0; y < h; ++y) {
+      for (int x = 0; x < w; ++x) {
+        if (x >= bx && x < bx + block_size && y >= by && y < by + block_size) {
+          depth_data.push_back(50000);  // near
+        } else {
+          depth_data.push_back(10000);  // far
+        }
+      }
+    }
   }
 
   svp::vision::VisualEntityTrackerOptions opts;
@@ -263,57 +278,106 @@ static void test_moving_object_integration() {
   assert(!result.opencv_version.empty());
   assert(result.runtime == "onnxruntime");
 
-  // If the tracker found regions, verify structure
-  if (!result.regions.empty()) {
-    // Verify all region IDs are unique
-    std::set<std::string> region_ids;
-    for (const auto& r : result.regions) {
-      assert(region_ids.insert(r.region_id).second);
-      // mask_ref must be set
-      assert(!r.mask_ref.empty());
-      // mask_ref must follow "mask_" + region_id pattern
-      assert(r.mask_ref == "mask_" + r.region_id);
-      // depth_ref must be set (we provided depth_frame_ids)
-      assert(!r.depth_ref.empty());
-      // Mask pixels must be non-empty
-      assert(!r.mask_pixels.empty());
-      assert(r.mask_width > 0);
-      assert(r.mask_height > 0);
-      // Entity and track IDs must be set
-      assert(!r.entity_id.empty());
-      assert(!r.track_id.empty());
-    }
+  // Require non-empty regions — the moving block should produce tracks
+  assert(!result.regions.empty());
 
-    // Verify entities have correct type
-    for (const auto& e : result.entities) {
-      assert(!e.entity_id.empty());
-      assert(e.entity_type == "visual_entity" || e.entity_type == "background_region");
-      assert(!e.track_ids.empty());
-    }
-
-    // Verify tracks have tracking method
-    for (const auto& t : result.tracks) {
-      assert(!t.track_id.empty());
-      assert(!t.tracking_method.empty());
-      assert(t.tracking_method == "optical_flow_kalman");
-    }
-
-    // Verify all track IDs are unique
-    std::set<std::string> track_ids;
-    for (const auto& t : result.tracks) {
-      assert(track_ids.insert(t.track_id).second);
-    }
-
-    // Verify all entity IDs are unique
-    std::set<std::string> entity_ids;
-    for (const auto& e : result.entities) {
-      assert(entity_ids.insert(e.entity_id).second);
-    }
+  // Verify all region IDs are unique
+  std::set<std::string> region_ids;
+  for (const auto& r : result.regions) {
+    assert(region_ids.insert(r.region_id).second);
+    // mask_ref must be set and follow "mask_" + region_id pattern
+    assert(!r.mask_ref.empty());
+    assert(r.mask_ref == "mask_" + r.region_id);
+    // depth_ref must be set (we provided depth_frame_ids)
+    assert(!r.depth_ref.empty());
+    // Mask pixels must be non-empty
+    assert(!r.mask_pixels.empty());
+    assert(r.mask_width > 0);
+    assert(r.mask_height > 0);
+    // Entity and track IDs must be set
+    assert(!r.entity_id.empty());
+    assert(!r.track_id.empty());
+    // Depth summary should have non-zero values from real depth data
+    assert(r.median_inverse_depth != 0 || r.near_percentile_10 != 0 || r.far_percentile_90 != 0);
   }
+
+  // Verify no duplicate track_id per frame (one-region-per-track-per-frame)
+  std::map<std::string, std::set<std::string>> tracks_per_frame;
+  for (const auto& r : result.regions) {
+    auto& tracks = tracks_per_frame[r.frame_id];
+    assert(tracks.insert(r.track_id).second);
+  }
+
+  // Verify entities have correct type
+  for (const auto& e : result.entities) {
+    assert(!e.entity_id.empty());
+    assert(e.entity_type == "visual_entity" || e.entity_type == "background_region");
+    assert(!e.track_ids.empty());
+  }
+
+  // Verify tracks have tracking method
+  for (const auto& t : result.tracks) {
+    assert(!t.track_id.empty());
+    assert(!t.tracking_method.empty());
+    assert(t.tracking_method == "optical_flow_kalman");
+  }
+
+  // Verify all track IDs are unique
+  std::set<std::string> track_ids;
+  for (const auto& t : result.tracks) {
+    assert(track_ids.insert(t.track_id).second);
+  }
+
+  // Verify all entity IDs are unique
+  std::set<std::string> entity_ids;
+  for (const auto& e : result.entities) {
+    assert(entity_ids.insert(e.entity_id).second);
+  }
+
+  // Exercise mask writer: write masks to a temp staging dir and verify output
+  auto tmp_dir = std::filesystem::temp_directory_path() / "svp-tracker-test-staging";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir / "spatial");
+
+  std::vector<svp::vision::MaskWriteEntry> mask_entries;
+  for (const auto& r : result.regions) {
+    if (r.mask_pixels.empty() || r.mask_width <= 0 || r.mask_height <= 0) continue;
+    svp::vision::MaskWriteEntry entry;
+    entry.mask_id = "mask_" + r.region_id;
+    entry.entity_id = r.entity_id;
+    entry.track_id = r.track_id;
+    entry.region_id = r.region_id;
+    entry.frame_id = r.frame_id;
+    entry.timestamp_us = r.timestamp_us;
+    entry.width = r.mask_width;
+    entry.height = r.mask_height;
+    entry.rle_data = svp::vision::encode_mask_rle(
+        r.mask_pixels.data(), r.mask_width, r.mask_height);
+    mask_entries.push_back(entry);
+  }
+
+  assert(!mask_entries.empty());
+  auto mask_summary = svp::vision::write_masks(tmp_dir, mask_entries);
+  assert(mask_summary.mask_count == static_cast<int>(mask_entries.size()));
+  assert(std::filesystem::exists(tmp_dir / "spatial" / "masks.blocks.svpmz"));
+  assert(std::filesystem::exists(tmp_dir / "spatial" / "masks.index.jsonl"));
+  assert(!mask_summary.index_records.empty());
+
+  // Verify mask index records use "id" not "mask_id"
+  for (const auto& rec : mask_summary.index_records) {
+    assert(rec.contains("id"));
+    assert(!rec.contains("mask_id"));
+    assert(rec["encoding"] == "svp-rle-v1");
+    assert(rec["block_file"] == "spatial/masks.blocks.svpmz");
+  }
+
+  // Cleanup
+  std::filesystem::remove_all(tmp_dir);
 
   std::cout << "test_moving_object_integration: PASS (regions=" << result.regions.size()
             << ", entities=" << result.entities.size()
-            << ", tracks=" << result.tracks.size() << ")\n";
+            << ", tracks=" << result.tracks.size()
+            << ", masks=" << mask_entries.size() << ")\n";
 }
 
 int main() {

@@ -731,7 +731,6 @@ EntityTrackResult run_visual_entity_tracker(
   result.processor_id = "proc_visual_entity_tracker_0001";
   result.runtime = "onnxruntime";
   result.execution_provider = options.execution_provider;
-  result.model_refs = {options.embedding_model_id};
   result.confidence_calibration_status = "uncalibrated";
   result.limitations_note =
       "Visual entity tracking uses classical OpenCV methods (Shi-Tomasi, LK, "
@@ -811,6 +810,7 @@ EntityTrackResult run_visual_entity_tracker(
           auto session = svp::models::OnnxSession::load(manifest, *model_dir, session_opts);
           embedding_session = std::make_unique<svp::models::OnnxSession>(std::move(session));
           embeddings_available = true;
+          result.model_refs.push_back(options.embedding_model_id);
         }
       } catch (const std::exception& e) {
         // Model load failed; continue without embeddings
@@ -1043,6 +1043,7 @@ EntityTrackResult run_visual_entity_tracker(
         entity_id = new_track.entity_id;
         track_id = new_track.track_id;
         active_tracks.push_back(std::move(new_track));
+        assigned_this_frame.insert(static_cast<int>(active_tracks.size() - 1));
       }
 
       // Compute normalized coordinates

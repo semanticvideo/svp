@@ -32,7 +32,7 @@ struct MaskWriteSummary {
   std::vector<nlohmann::json> block_manifest_entries;
 };
 
-// Write masks to spatial/masks.index.jsonl and spatial/masks.blocks.svpdz
+// Write masks to spatial/masks.index.jsonl and spatial/masks.blocks.svpmz
 // per spec §14.3. Each mask is written as an SVP block with dtype=svp_rle_v1.
 [[nodiscard]] MaskWriteSummary write_masks(
     const std::filesystem::path& staging_dir,

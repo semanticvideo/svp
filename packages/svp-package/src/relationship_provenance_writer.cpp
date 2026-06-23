@@ -558,79 +558,13 @@ void build_spatial_region_relationships(
     }
   }
 
-  // Build region -> region spatial relationships (overlaps, near, contains)
-  // per §20.8
-  for (std::size_t i = 0; i < regions.size(); ++i) {
-    const auto& r1 = regions[i];
-    const std::string r1_id = string_value(r1, "id");
-    if (r1_id.empty()) continue;
-
-    const auto& r1_box = r1.value("box_norm", nlohmann::json::array());
-    if (r1_box.size() < 4) continue;
-    double r1_x0 = r1_box[0].get<double>();
-    double r1_y0 = r1_box[1].get<double>();
-    double r1_x1 = r1_box[2].get<double>();
-    double r1_y1 = r1_box[3].get<double>();
-    double r1_cx = (r1_x0 + r1_x1) / 2.0;
-    double r1_cy = (r1_y0 + r1_y1) / 2.0;
-    double r1_area = (r1_x1 - r1_x0) * (r1_y1 - r1_y0);
-
-    for (std::size_t j = i + 1; j < regions.size(); ++j) {
-      const auto& r2 = regions[j];
-      const std::string r2_id = string_value(r2, "id");
-      if (r2_id.empty()) continue;
-
-      // Only compare regions from the same frame
-      if (string_value(r1, "frame_id") != string_value(r2, "frame_id")) continue;
-
-      const auto& r2_box = r2.value("box_norm", nlohmann::json::array());
-      if (r2_box.size() < 4) continue;
-      double r2_x0 = r2_box[0].get<double>();
-      double r2_y0 = r2_box[1].get<double>();
-      double r2_x1 = r2_box[2].get<double>();
-      double r2_y1 = r2_box[3].get<double>();
-      double r2_cx = (r2_x0 + r2_x1) / 2.0;
-      double r2_cy = (r2_y0 + r2_y1) / 2.0;
-      double r2_area = (r2_x1 - r2_x0) * (r2_y1 - r2_y0);
-
-      // IoU computation
-      double ix0 = std::max(r1_x0, r2_x0);
-      double iy0 = std::max(r1_y0, r2_y0);
-      double ix1 = std::min(r1_x1, r2_x1);
-      double iy1 = std::min(r1_y1, r2_y1);
-      double iw = std::max(0.0, ix1 - ix0);
-      double ih = std::max(0.0, iy1 - iy0);
-      double intersection = iw * ih;
-      double union_area = r1_area + r2_area - intersection;
-      double iou = union_area > 0 ? intersection / union_area : 0;
-
-      const std::int64_t ts = int_value_or_zero(r1, "timestamp_us");
-
-      // overlaps: IoU > 0.3
-      if (iou > 0.3) {
-        builder.add("rel_overlaps_", "overlaps",
-                    r1_id, r2_id, ts, ts, iou,
-                    "spatial/regions.jsonl");
-      }
-
-      // near: centroid distance < 0.15 (normalized)
-      double dist = std::sqrt(
-        (r1_cx - r2_cx) * (r1_cx - r2_cx) +
-        (r1_cy - r2_cy) * (r1_cy - r2_cy));
-      if (dist < 0.15 && iou == 0) {
-        builder.add("rel_near_", "near",
-                    r1_id, r2_id, ts, ts, 1.0 - dist / 0.15,
-                    "spatial/regions.jsonl");
-      }
-
-      // contains: r1 contains r2 if r2 is mostly inside r1
-      if (r2_area > 0 && intersection / r2_area > 0.7) {
-        builder.add("rel_contains_", "contains",
-                    r1_id, r2_id, ts, ts, intersection / r2_area,
-                    "spatial/regions.jsonl");
-      }
-    }
-  }
+  // Region-to-region visual spatial relationships (overlaps, contains, occludes)
+  // per §20.8 require mask-based intersection and depth comparison.
+  // These are not yet implemented because the relationship builder operates on
+  // JSONL records which do not carry mask pixel data.  Emitting box-based
+  // approximations under spec-named relationship types would be dishonest.
+  // TODO: implement mask-based spatial relationships when mask block reading
+  // is available in the relationship builder.
 }
 
 std::vector<nlohmann::json> build_relationships(const std::filesystem::path& staging_dir,
