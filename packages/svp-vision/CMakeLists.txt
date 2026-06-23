@@ -1,5 +1,5 @@
 find_package(nlohmann_json CONFIG REQUIRED)
-find_package(OpenCV REQUIRED)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc video calib3d)
 
 add_library(svp-vision
   src/canonical_frame_input.cpp
@@ -39,7 +39,12 @@ target_link_libraries(svp-vision
     svp::media
     svp::models
   PRIVATE
-    ${OpenCV_LIBS}
+    opencv_core
+    opencv_imgproc
+    # vcpkg's opencv_video target pulls opencv_dnn into this static binary,
+    # which conflicts with ONNX Runtime's schema registry during OCR model load.
+    $<TARGET_FILE:opencv_video>
+    opencv_calib3d
 )
 
 if(BUILD_TESTING)
