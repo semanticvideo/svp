@@ -60,6 +60,10 @@ struct DepthGenerationResult {
   std::string execution_provider;
   std::string blocker;
   std::vector<DepthBlockEntry> entries;
+  // Raw per-frame uint16 depth data, concatenated in frame order.
+  // Each frame contributes width*height uint16 values.
+  // Populated when depth generation succeeds; empty when blocked.
+  std::vector<std::uint16_t> raw_depth_data;
   nlohmann::json processor_provenance;
 };
 

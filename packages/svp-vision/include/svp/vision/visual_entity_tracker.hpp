@@ -139,7 +139,9 @@ struct TrackedRegion {
   std::string embedding_model_id;
   // Confidence
   double confidence = 0;
-  // Depth reference
+  // Mask reference (id of the mask in spatial/masks.index.jsonl)
+  std::string mask_ref;
+  // Depth reference (id of the depth entry in spatial/depth.index.jsonl)
   std::string depth_ref;
 };
 

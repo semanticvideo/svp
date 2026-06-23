@@ -337,9 +337,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
       }
 
       // Extract depth data from depth result if available
-      std::vector<std::uint16_t> depth_data;
-      // Depth data is written to blocks; we pass empty and let the tracker
-      // handle missing depth gracefully (depth_summary will be zeros).
+      std::vector<std::uint16_t> depth_data = depth_result.raw_depth_data;
 
       auto tracker_result = svp::vision::run_visual_entity_tracker(
           decoded_frames.frames,

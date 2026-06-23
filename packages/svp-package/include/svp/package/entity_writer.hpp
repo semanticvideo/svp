@@ -47,7 +47,7 @@ struct EntityWriteSummary {
  * - entities/entities.jsonl (merged with any existing text-based entities)
  * - entities/entity_tracks.jsonl (merged with any existing text-based tracks)
  * - spatial/regions.jsonl
- * - spatial/masks.index.jsonl + spatial/masks.blocks.svpdz
+ * - spatial/masks.index.jsonl + spatial/masks.blocks.svpmz
  *
  * Evidence source: EntityTrackResult from the visual entity tracker (§20.6).
  * Also writes processor provenance for the visual entity tracker.

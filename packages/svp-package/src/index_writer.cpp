@@ -168,7 +168,7 @@ const std::vector<std::string> kIndexTables = {
     "  entity_id TEXT,"
     "  track_id TEXT,"
     "  frame_id TEXT,"
-    "  timestamp_us INTEGER,"
+    "  pts_us INTEGER,"
     "  screen_area_ratio REAL,"
     "  confidence REAL"
     ")",
@@ -179,7 +179,6 @@ const std::vector<std::string> kIndexTables = {
     "  track_id TEXT,"
     "  region_id TEXT,"
     "  frame_id TEXT,"
-    "  timestamp_us INTEGER,"
     "  width INTEGER,"
     "  height INTEGER"
     ")"
@@ -580,19 +579,19 @@ bool write_index_foundation(
     if (!region_records.empty()) {
       const std::string insert_region_sql =
           "INSERT INTO spatial_regions (region_id, entity_id, track_id, "
-          "frame_id, timestamp_us, screen_area_ratio, confidence) "
+          "frame_id, pts_us, screen_area_ratio, confidence) "
           "VALUES (?, ?, ?, ?, ?, ?, ?)";
       sqlite3_stmt* stmt_region = nullptr;
       if (sqlite3_prepare_v2(db.get(), insert_region_sql.c_str(), -1, &stmt_region, nullptr) == SQLITE_OK) {
         std::unique_ptr<sqlite3_stmt, StatementDeleter> stmt_region_guard{stmt_region};
         for (const auto& region : region_records) {
-          const auto region_id = region.value("region_id", "");
+          const auto region_id = region.value("id", "");
           if (region_id.empty()) continue;
           sqlite3_bind_text(stmt_region, 1, region_id.c_str(), -1, SQLITE_TRANSIENT);
           bind_json_string(stmt_region, 2, region, "entity_id");
           bind_json_string(stmt_region, 3, region, "track_id");
           bind_json_string(stmt_region, 4, region, "frame_id");
-          bind_json_int(stmt_region, 5, region, "timestamp_us");
+          bind_json_int(stmt_region, 5, region, "pts_us");
           const auto area_it = region.find("screen_area_ratio");
           if (area_it != region.end() && area_it->is_number()) {
             sqlite3_bind_double(stmt_region, 6, area_it->get<double>());
@@ -618,22 +617,21 @@ bool write_index_foundation(
     if (!mask_records.empty()) {
       const std::string insert_mask_sql =
           "INSERT INTO spatial_masks (mask_id, entity_id, track_id, "
-          "region_id, frame_id, timestamp_us, width, height) "
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+          "region_id, frame_id, width, height) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?)";
       sqlite3_stmt* stmt_mask = nullptr;
       if (sqlite3_prepare_v2(db.get(), insert_mask_sql.c_str(), -1, &stmt_mask, nullptr) == SQLITE_OK) {
         std::unique_ptr<sqlite3_stmt, StatementDeleter> stmt_mask_guard{stmt_mask};
         for (const auto& mask : mask_records) {
-          const auto mask_id = mask.value("mask_id", "");
+          const auto mask_id = mask.value("id", "");
           if (mask_id.empty()) continue;
           sqlite3_bind_text(stmt_mask, 1, mask_id.c_str(), -1, SQLITE_TRANSIENT);
           bind_json_string(stmt_mask, 2, mask, "entity_id");
           bind_json_string(stmt_mask, 3, mask, "track_id");
           bind_json_string(stmt_mask, 4, mask, "region_id");
           bind_json_string(stmt_mask, 5, mask, "frame_id");
-          bind_json_int(stmt_mask, 6, mask, "timestamp_us");
-          bind_json_int(stmt_mask, 7, mask, "width");
-          bind_json_int(stmt_mask, 8, mask, "height");
+          bind_json_int(stmt_mask, 6, mask, "width");
+          bind_json_int(stmt_mask, 7, mask, "height");
           sqlite3_step(stmt_mask);
           sqlite3_reset(stmt_mask);
         }

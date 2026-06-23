@@ -30,7 +30,7 @@ MaskWriteSummary write_masks(
   std::filesystem::create_directories(spatial_dir);
 
   const std::filesystem::path index_path = spatial_dir / "masks.index.jsonl";
-  const std::filesystem::path block_path = spatial_dir / "masks.blocks.svpdz";
+  const std::filesystem::path block_path = spatial_dir / "masks.blocks.svpmz";
 
   summary.masks_index_path = index_path.string();
   summary.masks_block_path = block_path.string();
@@ -56,31 +56,28 @@ MaskWriteSummary write_masks(
         reinterpret_cast<const std::byte*>(mask.rle_data.data()),
         mask.rle_data.size());
 
-    // Build index record
+    // Build index record per spec §14.3
     nlohmann::json record;
-    record["mask_id"] = mask.mask_id;
-    record["entity_id"] = mask.entity_id;
-    record["track_id"] = mask.track_id;
+    record["id"] = mask.mask_id;
     record["region_id"] = mask.region_id;
     record["frame_id"] = mask.frame_id;
-    record["timestamp_us"] = mask.timestamp_us;
     record["width"] = mask.width;
     record["height"] = mask.height;
-    record["encoding"] = "svp_rle_v1";
-    record["block_file"] = "spatial/masks.blocks.svpdz";
+    record["encoding"] = "svp-rle-v1";
+    record["block_file"] = "spatial/masks.blocks.svpmz";
     record["block_offset"] = block_info.block_offset;
     record["block_length"] = block_info.block_length;
     record["payload_offset"] = block_info.payload_offset;
     record["uncompressed_size"] = block_info.uncompressed_size;
     record["compressed_size"] = block_info.compressed_size;
-    record["payload_blake3"] = "blake3:" + hash_to_hex(block_info.payload_blake3);
-    record["header_blake3"] = "blake3:" + hash_to_hex(block_info.header_blake3);
+    record["payload_blake3"] = hash_to_hex(block_info.payload_blake3);
+    record["block_blake3"] = hash_to_hex(block_info.header_blake3);
 
     // Block manifest entry
     nlohmann::json block_entry;
     block_entry["block_id"] = mask.mask_id;
     block_entry["block_type"] = "mask";
-    block_entry["block_file"] = "spatial/masks.blocks.svpdz";
+    block_entry["block_file"] = "spatial/masks.blocks.svpmz";
     block_entry["block_offset"] = block_info.block_offset;
     block_entry["block_length"] = block_info.block_length;
     block_entry["payload_offset"] = block_info.payload_offset;

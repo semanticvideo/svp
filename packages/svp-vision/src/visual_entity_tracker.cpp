@@ -614,9 +614,10 @@ std::optional<std::filesystem::path> find_model_bundle_dir(
 // ID generation
 // ---------------------------------------------------------------------------
 
-std::string make_region_id(int entity_idx, int frame_idx) {
+std::string make_region_id(int entity_idx, int region_seq, int frame_idx) {
   std::ostringstream oss;
   oss << "region_" << std::setfill('0') << std::setw(4) << entity_idx
+      << "_" << std::setw(6) << region_seq
       << "_" << std::setw(6) << frame_idx;
   return oss.str();
 }
@@ -792,6 +793,7 @@ EntityTrackResult run_visual_entity_tracker(
   // Load visual embedding model
   std::unique_ptr<svp::models::OnnxSession> embedding_session;
   std::optional<std::filesystem::path> model_dir;
+  bool embeddings_available = false;
 
   if (!model_cache_root.empty()) {
     model_dir = find_model_bundle_dir(model_cache_root, options.embedding_model_id);
@@ -800,14 +802,19 @@ EntityTrackResult run_visual_entity_tracker(
         auto manifest = svp::models::load_model_bundle_manifest(
             *model_dir / "model.svpmodel.json");
         auto verify_report = svp::models::verify_manifest_files(manifest, *model_dir);
-        (void)verify_report;  // Verification result logged but not blocking
-
-        svp::models::OnnxSessionOptions session_opts;
-        session_opts.execution_provider = options.execution_provider;
-        auto session = svp::models::OnnxSession::load(manifest, *model_dir, session_opts);
-        embedding_session = std::make_unique<svp::models::OnnxSession>(std::move(session));
+        if (!verify_report.ok()) {
+          // Model hash verification failed — do not trust the model
+          result.limitations_note += "Visual embedding model verification failed; embeddings unavailable. ";
+        } else {
+          svp::models::OnnxSessionOptions session_opts;
+          session_opts.execution_provider = options.execution_provider;
+          auto session = svp::models::OnnxSession::load(manifest, *model_dir, session_opts);
+          embedding_session = std::make_unique<svp::models::OnnxSession>(std::move(session));
+          embeddings_available = true;
+        }
       } catch (const std::exception& e) {
         // Model load failed; continue without embeddings
+        result.limitations_note += std::string("Visual embedding model load failed: ") + e.what() + ". ";
       }
     }
   }
@@ -831,6 +838,7 @@ EntityTrackResult run_visual_entity_tracker(
   std::vector<ActiveTrack> active_tracks;
   int next_entity_idx = 0;
   int next_track_idx = 0;
+  int total_region_count = 0;
 
   // Process keyframe pairs
   for (std::size_t k = 0; k + 1 < keyframes.frame_indices.size(); ++k) {
@@ -891,6 +899,10 @@ EntityTrackResult run_visual_entity_tracker(
         options.min_region_area_ratio,
         frame_width, frame_height);
 
+    // Track which tracks have been assigned a region this frame
+    // to enforce one-region-per-track-per-frame assignment
+    std::set<int> assigned_this_frame;
+
     // Step 9: Region proposal from clusters (§20.6 step 9)
     // Each cluster becomes a region proposal
     for (std::size_t c = 0; c < clusters.size(); ++c) {
@@ -935,6 +947,7 @@ EntityTrackResult run_visual_entity_tracker(
       double best_iou = 0;
 
       for (std::size_t t = 0; t < active_tracks.size(); ++t) {
+        if (assigned_this_frame.count(static_cast<int>(t))) continue;
         if (active_tracks[t].lost_count > options.max_lost_frames) continue;
         cv::Rect predicted = active_tracks[t].kalman.predict();
         double iou = compute_iou(predicted, bbox);
@@ -972,6 +985,7 @@ EntityTrackResult run_visual_entity_tracker(
         if (!region_embedding.empty()) {
           double best_sim = -1;
           for (std::size_t t = 0; t < active_tracks.size(); ++t) {
+            if (assigned_this_frame.count(static_cast<int>(t))) continue;
             if (active_tracks[t].lost_count == 0) continue;  // Only lost tracks
             if (active_tracks[t].lost_count > options.max_lost_frames) continue;
             if (active_tracks[t].last_embedding.empty()) continue;
@@ -1009,6 +1023,7 @@ EntityTrackResult run_visual_entity_tracker(
         }
         entity_id = track.entity_id;
         track_id = track.track_id;
+        assigned_this_frame.insert(best_track_idx);
       } else {
         // Create new track
         ActiveTrack new_track;
@@ -1047,7 +1062,7 @@ EntityTrackResult run_visual_entity_tracker(
 
       // Build TrackedRegion
       TrackedRegion region;
-      region.region_id = make_region_id(next_entity_idx, idx_next);
+      region.region_id = make_region_id(next_entity_idx, total_region_count, idx_next);
       region.entity_id = entity_id;
       region.track_id = track_id;
       region.frame_id = frame_next.frame_id;
@@ -1077,8 +1092,17 @@ EntityTrackResult run_visual_entity_tracker(
       region.embedding = region_embedding;
       region.embedding_model_id = options.embedding_model_id;
       region.confidence = std::min(1.0, best_iou > 0 ? best_iou : 0.5);
+      region.mask_ref = "mask_" + region.region_id;
+      // depth_ref: find the depth entry for this frame
+      for (std::size_t di = 0; di < depth_frame_ids.size(); ++di) {
+        if (depth_frame_ids[di] == frame_next.frame_id) {
+          region.depth_ref = "depth_" + frame_next.frame_id;
+          break;
+        }
+      }
 
       result.regions.push_back(std::move(region));
+      ++total_region_count;
     }
 
     // Mark tracks that weren't updated as lost

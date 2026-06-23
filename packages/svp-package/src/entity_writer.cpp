@@ -540,30 +540,28 @@ EntityWriteSummary write_visual_entity_artifacts(
   summary.entity_count = all_entities.size();
   summary.track_count = all_tracks.size();
 
-  // Write spatial regions
+  // Write spatial regions per spec §14.2
   std::vector<nlohmann::json> region_records;
   for (const auto& region : tracker_result.regions) {
     nlohmann::json record;
-    record["region_id"] = region.region_id;
+    record["id"] = region.region_id;
     record["entity_id"] = region.entity_id;
     record["track_id"] = region.track_id;
     record["frame_id"] = region.frame_id;
-    record["timestamp_us"] = region.timestamp_us;
+    record["pts_us"] = region.timestamp_us;
     record["box_norm"] = {region.box_norm[0], region.box_norm[1],
                           region.box_norm[2], region.box_norm[3]};
     record["box_px"] = {region.box_px[0], region.box_px[1],
                         region.box_px[2], region.box_px[3]};
     record["centroid_norm"] = {region.centroid_norm[0], region.centroid_norm[1]};
     record["screen_area_ratio"] = region.screen_area_ratio;
+    record["mask_ref"] = "mask_" + region.region_id;
+    record["depth_ref"] = region.depth_ref;
     record["depth_summary"] = {
       {"median_inverse_depth", region.median_inverse_depth},
       {"near_percentile_10", region.near_percentile_10},
       {"far_percentile_90", region.far_percentile_90}
     };
-    if (!region.embedding.empty()) {
-      record["embedding_model_id"] = region.embedding_model_id;
-      record["embedding_dim"] = region.embedding.size();
-    }
     record["confidence"] = region.confidence;
     region_records.push_back(record);
   }
@@ -593,8 +591,16 @@ EntityWriteSummary write_visual_entity_artifacts(
   }
 
   auto mask_summary = svp::vision::write_masks(staging_dir, mask_entries);
-  summary.masks_written = true;
+  summary.masks_written = !mask_entries.empty();
   summary.mask_count = mask_entries.size();
+
+  // If no masks were written, ensure the required empty block file exists
+  if (mask_entries.empty()) {
+    const auto masks_block = staging_dir / "spatial" / "masks.blocks.svpmz";
+    if (!std::filesystem::exists(masks_block)) {
+      std::ofstream empty_block(masks_block, std::ios::binary);
+    }
+  }
 
   // Append processor record for visual entity tracker
   nlohmann::json processor_record;
@@ -610,7 +616,7 @@ EntityWriteSummary write_visual_entity_artifacts(
     "entities/entity_tracks.jsonl",
     "spatial/regions.jsonl",
     "spatial/masks.index.jsonl",
-    "spatial/masks.blocks.svpdz"
+    "spatial/masks.blocks.svpmz"
   };
   processor_record["model_refs"] = tracker_result.model_refs;
   processor_record["task_ids"] = {

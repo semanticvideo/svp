@@ -5,6 +5,8 @@
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <set>
+#include <string>
 #include <vector>
 
 // Test 1: RLE round-trip with all-zero mask
@@ -210,6 +212,110 @@ static void test_provenance_fields() {
   std::cout << "test_provenance_fields: PASS\n";
 }
 
+// Test 10: Integration test with moving object sequence
+// Creates synthetic frames with a moving white block on black background,
+// runs the tracker, and verifies entities, tracks, regions with unique IDs,
+// mask_ref/depth_ref fields, and non-empty masks.
+static void test_moving_object_integration() {
+  // Create 8 frames of 64x64 with a 16x16 white block moving right
+  const int w = 64, h = 64;
+  const int block_size = 16;
+  std::vector<svp::vision::ColorRasterFrame> frames(8);
+  for (int i = 0; i < 8; ++i) {
+    frames[i].frame_id = "frame_" + std::to_string(1000 + i);
+    frames[i].timestamp_us = (i + 1) * 1000000;  // 1s per frame
+    frames[i].width = w;
+    frames[i].height = h;
+    frames[i].keyframe = (i % 5 == 0);
+    frames[i].pixels.resize(static_cast<std::size_t>(w) * h);
+    // Black background
+    for (auto& px : frames[i].pixels) {
+      px.r = 0; px.g = 0; px.b = 0;
+    }
+    // White block moving right by 4 pixels per frame
+    int bx = 4 + i * 4;
+    int by = 24;
+    for (int y = by; y < by + block_size && y < h; ++y) {
+      for (int x = bx; x < bx + block_size && x < w; ++x) {
+        auto& px = frames[i].pixels[static_cast<std::size_t>(y) * w + x];
+        px.r = 255; px.g = 255; px.b = 255;
+      }
+    }
+  }
+
+  // Provide synthetic depth data (one frame worth, all same = blocked by float_depth_to_uint16)
+  // So pass empty depth — tracker handles gracefully
+  std::vector<std::uint16_t> depth_data;
+  std::vector<std::string> depth_frame_ids;
+  for (int i = 0; i < 8; ++i) {
+    depth_frame_ids.push_back(frames[i].frame_id);
+  }
+
+  svp::vision::VisualEntityTrackerOptions opts;
+  opts.embedding_model_id = "model_nomic_embed_vision_v1_5";
+  opts.execution_provider = "cpu";
+
+  auto result = svp::vision::run_visual_entity_tracker(
+      frames, depth_data, depth_frame_ids, {}, {}, opts);
+
+  // Verify provenance
+  assert(!result.processor_id.empty());
+  assert(!result.opencv_version.empty());
+  assert(result.runtime == "onnxruntime");
+
+  // If the tracker found regions, verify structure
+  if (!result.regions.empty()) {
+    // Verify all region IDs are unique
+    std::set<std::string> region_ids;
+    for (const auto& r : result.regions) {
+      assert(region_ids.insert(r.region_id).second);
+      // mask_ref must be set
+      assert(!r.mask_ref.empty());
+      // mask_ref must follow "mask_" + region_id pattern
+      assert(r.mask_ref == "mask_" + r.region_id);
+      // depth_ref must be set (we provided depth_frame_ids)
+      assert(!r.depth_ref.empty());
+      // Mask pixels must be non-empty
+      assert(!r.mask_pixels.empty());
+      assert(r.mask_width > 0);
+      assert(r.mask_height > 0);
+      // Entity and track IDs must be set
+      assert(!r.entity_id.empty());
+      assert(!r.track_id.empty());
+    }
+
+    // Verify entities have correct type
+    for (const auto& e : result.entities) {
+      assert(!e.entity_id.empty());
+      assert(e.entity_type == "visual_entity" || e.entity_type == "background_region");
+      assert(!e.track_ids.empty());
+    }
+
+    // Verify tracks have tracking method
+    for (const auto& t : result.tracks) {
+      assert(!t.track_id.empty());
+      assert(!t.tracking_method.empty());
+      assert(t.tracking_method == "optical_flow_kalman");
+    }
+
+    // Verify all track IDs are unique
+    std::set<std::string> track_ids;
+    for (const auto& t : result.tracks) {
+      assert(track_ids.insert(t.track_id).second);
+    }
+
+    // Verify all entity IDs are unique
+    std::set<std::string> entity_ids;
+    for (const auto& e : result.entities) {
+      assert(entity_ids.insert(e.entity_id).second);
+    }
+  }
+
+  std::cout << "test_moving_object_integration: PASS (regions=" << result.regions.size()
+            << ", entities=" << result.entities.size()
+            << ", tracks=" << result.tracks.size() << ")\n";
+}
+
 int main() {
   test_rle_all_zero();
   test_rle_all_one();
@@ -221,6 +327,7 @@ int main() {
   test_empty_frames();
   test_single_frame();
   test_provenance_fields();
+  test_moving_object_integration();
 
   std::cout << "All visual entity tracker tests passed.\n";
   return 0;

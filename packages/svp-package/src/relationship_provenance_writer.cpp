@@ -214,12 +214,12 @@ KnownIds collect_known_ids(const std::filesystem::path& staging_dir) {
   }
 
   for (const auto& rec : read_jsonl(staging_dir / "spatial" / "regions.jsonl")) {
-    const std::string id = string_value(rec, "region_id");
+    const std::string id = string_value(rec, "id");
     if (!id.empty()) ids.spatial_region_ids.insert(id);
   }
 
   for (const auto& rec : read_jsonl(staging_dir / "spatial" / "masks.index.jsonl")) {
-    const std::string id = string_value(rec, "mask_id");
+    const std::string id = string_value(rec, "id");
     if (!id.empty()) ids.spatial_mask_ids.insert(id);
   }
 
@@ -513,11 +513,11 @@ void build_spatial_region_relationships(
 
   // Build entity -> region relationships (appears_in_frame)
   for (const auto& region : regions) {
-    const std::string region_id = string_value(region, "region_id");
+    const std::string region_id = string_value(region, "id");
     const std::string entity_id = string_value(region, "entity_id");
     const std::string frame_id = string_value(region, "frame_id");
     const std::string track_id = string_value(region, "track_id");
-    const std::int64_t ts = int_value_or_zero(region, "timestamp_us");
+    const std::int64_t ts = int_value_or_zero(region, "pts_us");
 
     if (region_id.empty()) continue;
 
@@ -545,9 +545,9 @@ void build_spatial_region_relationships(
 
   // Build region -> mask relationships (has_mask)
   for (const auto& mask : masks) {
-    const std::string mask_id = string_value(mask, "mask_id");
+    const std::string mask_id = string_value(mask, "id");
     const std::string region_id = string_value(mask, "region_id");
-    const std::int64_t ts = int_value_or_zero(mask, "timestamp_us");
+    const std::int64_t ts = 0;
 
     if (mask_id.empty() || region_id.empty()) continue;
 
@@ -562,7 +562,7 @@ void build_spatial_region_relationships(
   // per §20.8
   for (std::size_t i = 0; i < regions.size(); ++i) {
     const auto& r1 = regions[i];
-    const std::string r1_id = string_value(r1, "region_id");
+    const std::string r1_id = string_value(r1, "id");
     if (r1_id.empty()) continue;
 
     const auto& r1_box = r1.value("box_norm", nlohmann::json::array());
@@ -577,7 +577,7 @@ void build_spatial_region_relationships(
 
     for (std::size_t j = i + 1; j < regions.size(); ++j) {
       const auto& r2 = regions[j];
-      const std::string r2_id = string_value(r2, "region_id");
+      const std::string r2_id = string_value(r2, "id");
       if (r2_id.empty()) continue;
 
       // Only compare regions from the same frame
