@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <dlfcn.h>
 #include <fstream>
@@ -830,9 +829,10 @@ std::vector<std::string> refine_word_speakers_by_embedding(
 
   if (sub_segs.empty()) return assignments;
 
-  // Agglomerative clustering with k=2 (force exactly 2 speakers).
-  // Start with each sub-segment as its own cluster, then iteratively
-  // merge the two most similar clusters until only 2 remain.
+  // Agglomerative clustering with largest-gap separation.
+  // Merge clusters bottom-up, tracking the similarity at each merge.
+  // Stop when we find the largest gap in merge similarities — this is
+  // the natural point where two distinct speakers separate.
   std::size_t n = sub_segs.size();
   std::vector<int32_t> cluster_id(n);
   std::iota(cluster_id.begin(), cluster_id.end(), 0);
@@ -848,16 +848,6 @@ std::vector<std::string> refine_word_speakers_by_embedding(
     }
   }
 
-  // Debug: log pairwise similarities
-  std::fprintf(stderr, "  [refine_word_speakers] %zu segments, pairwise similarities:\n", n);
-  for (std::size_t i = 0; i < n; ++i) {
-    std::fprintf(stderr, "    seg %zu [%.2f-%.2fs]:", i, sub_segs[i].start_sec, sub_segs[i].end_sec);
-    for (std::size_t j = 0; j < n; ++j) {
-      std::fprintf(stderr, " %.4f", sim[i][j]);
-    }
-    std::fprintf(stderr, "\n");
-  }
-
   // Cluster centroids for agglomerative merging
   std::map<int32_t, std::vector<std::size_t>> cluster_members;
   std::map<int32_t, std::vector<float>> cluster_centroids;
@@ -867,7 +857,6 @@ std::vector<std::string> refine_word_speakers_by_embedding(
   }
 
   auto cluster_similarity = [&](int32_t c1, int32_t c2) -> float {
-    // Average linkage: mean similarity between all pairs
     float total = 0.0f;
     std::size_t count = 0;
     for (std::size_t m1 : cluster_members[c1]) {
@@ -879,8 +868,10 @@ std::vector<std::string> refine_word_speakers_by_embedding(
     return count > 0 ? total / count : -2.0f;
   };
 
-  // Merge until only 2 clusters remain
-  while (cluster_members.size() > 2) {
+  // Track merge similarities to find the largest gap
+  std::vector<float> merge_sims;
+
+  while (cluster_members.size() > 1) {
     float best_sim = -2.0f;
     int32_t best_c1 = -1, best_c2 = -1;
     for (auto it1 = cluster_members.begin(); it1 != cluster_members.end(); ++it1) {
@@ -897,12 +888,13 @@ std::vector<std::string> refine_word_speakers_by_embedding(
     }
     if (best_c1 < 0) break;
 
+    merge_sims.push_back(best_sim);
+
     // Merge c2 into c1
     for (std::size_t m : cluster_members[best_c2]) {
       cluster_id[m] = best_c1;
       cluster_members[best_c1].push_back(m);
     }
-    // Update centroid (average of member embeddings)
     auto& centroid = cluster_centroids[best_c1];
     std::fill(centroid.begin(), centroid.end(), 0.0f);
     for (std::size_t m : cluster_members[best_c1]) {
@@ -917,44 +909,60 @@ std::vector<std::string> refine_word_speakers_by_embedding(
     cluster_centroids.erase(best_c2);
   }
 
-  // If we ended up with only 1 cluster, split it by finding the least
-  // similar pair and using them as seeds.
-  if (cluster_members.size() == 1) {
-    auto& members = cluster_members.begin()->second;
-    float min_sim = 2.0f;
-    std::size_t seed1 = 0, seed2 = 0;
-    for (std::size_t i = 0; i < members.size(); ++i) {
-      for (std::size_t j = i + 1; j < members.size(); ++j) {
-        if (sim[members[i]][members[j]] < min_sim) {
-          min_sim = sim[members[i]][members[j]];
-          seed1 = members[i];
-          seed2 = members[j];
+  // Find the largest gap in merge similarities to determine the cut point.
+  // merge_sims is in order of merging (descending since we always merge
+  // the most similar pair first). The largest gap indicates where
+  // intra-speaker merges end and inter-speaker merges begin.
+  // merge_sims[0..cut_idx] are intra-speaker merges (keep merged),
+  // merge_sims[cut_idx+1..] are inter-speaker merges (don't merge).
+  std::size_t cut_idx = 0;  // default: don't merge anything (all separate)
+  if (merge_sims.size() > 1) {
+    float largest_gap = 0.0f;
+    for (std::size_t i = 0; i + 1 < merge_sims.size(); ++i) {
+      float gap = merge_sims[i] - merge_sims[i + 1];
+      if (gap > largest_gap) {
+        largest_gap = gap;
+        cut_idx = i;
+      }
+    }
+    // If the largest gap is too small, treat all as one speaker
+    if (largest_gap < 0.15f) {
+      cut_idx = merge_sims.size() - 1;  // merge everything
+    }
+  }
+
+  // Re-run clustering but only merge up to cut_idx
+  std::iota(cluster_id.begin(), cluster_id.end(), 0);
+  cluster_members.clear();
+  cluster_centroids.clear();
+  for (std::size_t i = 0; i < n; ++i) {
+    cluster_members[cluster_id[i]] = {i};
+    cluster_centroids[cluster_id[i]] = sub_segs[i].embedding;
+  }
+
+  for (std::size_t step = 0; step < cut_idx && cluster_members.size() > 1; ++step) {
+    float best_sim = -2.0f;
+    int32_t best_c1 = -1, best_c2 = -1;
+    for (auto it1 = cluster_members.begin(); it1 != cluster_members.end(); ++it1) {
+      auto it2 = it1;
+      ++it2;
+      for (; it2 != cluster_members.end(); ++it2) {
+        float s = cluster_similarity(it1->first, it2->first);
+        if (s > best_sim) {
+          best_sim = s;
+          best_c1 = it1->first;
+          best_c2 = it2->first;
         }
       }
     }
-    // Assign each member to the closer seed
-    int32_t old_cluster = cluster_members.begin()->first;
-    int32_t new_cluster = *std::max_element(cluster_id.begin(), cluster_id.end()) + 1;
-    cluster_members.clear();
-    cluster_centroids.clear();
-    for (std::size_t m : members) {
-      float s1 = cosine_similarity(sub_segs[m].embedding, sub_segs[seed1].embedding);
-      float s2 = cosine_similarity(sub_segs[m].embedding, sub_segs[seed2].embedding);
-      int32_t c = (s1 >= s2) ? static_cast<int32_t>(seed1) : new_cluster;
-      cluster_id[m] = c;
-      cluster_members[c].push_back(m);
+    if (best_c1 < 0) break;
+
+    for (std::size_t m : cluster_members[best_c2]) {
+      cluster_id[m] = best_c1;
+      cluster_members[best_c1].push_back(m);
     }
-    for (auto& [cid, mems] : cluster_members) {
-      cluster_centroids[cid].assign(embedding_dim, 0.0f);
-      for (std::size_t m : mems) {
-        for (int d = 0; d < embedding_dim; ++d) {
-          cluster_centroids[cid][d] += sub_segs[m].embedding[d];
-        }
-      }
-      for (int d = 0; d < embedding_dim; ++d) {
-        cluster_centroids[cid][d] /= static_cast<float>(mems.size());
-      }
-    }
+    cluster_members.erase(best_c2);
+    cluster_centroids.erase(best_c2);
   }
 
   // Map cluster IDs to sequential speaker IDs (0, 1)
