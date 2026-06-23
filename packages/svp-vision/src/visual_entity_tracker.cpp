@@ -690,6 +690,21 @@ double compute_iou(const cv::Rect& a, const cv::Rect& b) {
   return union_area > 0 ? intersection / union_area : 0;
 }
 
+// Intersection-over-minimum-area: useful when one bbox is much smaller
+// than the other (e.g., motion cluster vs depth contour).  Returns the
+// fraction of the smaller bbox that is covered by the intersection.
+double compute_iom(const cv::Rect& a, const cv::Rect& b) {
+  int x1 = std::max(a.x, b.x);
+  int y1 = std::max(a.y, b.y);
+  int x2 = std::min(a.x + a.width, b.x + b.width);
+  int y2 = std::min(a.y + a.height, b.y + b.height);
+  int w = std::max(0, x2 - x1);
+  int h = std::max(0, y2 - y1);
+  double intersection = w * h;
+  double min_area = std::min(a.area(), b.area());
+  return min_area > 0 ? intersection / min_area : 0;
+}
+
 // ---------------------------------------------------------------------------
 // Degenerate source detection (§13.4)
 // ---------------------------------------------------------------------------
@@ -1011,54 +1026,10 @@ EntityTrackResult run_visual_entity_tracker(
     cv::cvtColor(mat_prev, gray_prev, cv::COLOR_BGR2GRAY);
     cv::cvtColor(mat_next, gray_next, cv::COLOR_BGR2GRAY);
 
-    // Step 3: Shi-Tomasi corner detection (§20.6 step 3)
-    auto corners = detect_corners(gray_prev, options.max_corners,
-                                  options.corner_quality_level,
-                                  options.corner_min_distance);
-
-    if (corners.empty()) continue;
-
-    // Step 4: Lucas-Kanade sparse optical flow (§20.6 step 4)
-    auto lk_result = track_lk(gray_prev, gray_next, corners,
-                              options.lk_window_width, options.lk_window_height,
-                              options.lk_max_level, options.lk_max_count,
-                              options.lk_epsilon);
-
-    // Step 5: Farneback dense optical flow (§20.6 step 5)
-    cv::Mat dense_flow = compute_farneback_flow(
-        gray_prev, gray_next,
-        options.farneback_window_size, options.farneback_poly_n,
-        options.farneback_poly_sigma, options.farneback_iterations,
-        options.farneback_pyr_scale);
-
-    // Step 6: RANSAC homography estimation (§20.6 step 6)
-    auto homography_result = estimate_homography(
-        lk_result.prev_points, lk_result.next_points,
-        lk_result.status, options.ransac_threshold);
-
-    cv::Mat compensated_flow;
-    cv::Mat residual;
-
-    if (homography_result.valid) {
-      // Step 7: Camera motion compensation (§20.6 step 7)
-      residual = compute_residual_motion(
-          dense_flow, homography_result.homography,
-          frame_width, frame_height);
-    } else {
-      // No homography: use raw dense flow as residual
-      residual = dense_flow;
-    }
-
-    // Step 8: Residual motion clustering (§20.6 step 8)
-    auto clusters = cluster_residual_motion(
-        residual, options.min_motion_magnitude,
-        options.min_region_area_ratio,
-        frame_width, frame_height);
-
     // Step 8b: Depth-based candidate detection (§20.6 step 8b)
-    // Detect coherent static regions from depth discontinuities when motion
-    // is absent or insufficient.  This allows discovery of static but visually
-    // separable entities without requiring motion.
+    // Detect coherent static regions from depth discontinuities.
+    // This runs BEFORE motion detection so that depth-derived entities
+    // are discovered even when RGB has no texture for corner detection.
     std::vector<DepthCandidate> depth_candidates;
     const std::uint16_t* frame_depth_ptr = nullptr;
     if (!depth_data.empty()) {
@@ -1081,6 +1052,66 @@ EntityTrackResult run_visual_entity_tracker(
               options.min_region_area_ratio);
         }
       }
+    }
+
+    // Step 3-8: Motion detection pipeline (§20.6 steps 3-8)
+    // These steps require RGB texture.  If corners are not found (e.g.
+    // uniform RGB frames), motion candidates will be empty but depth
+    // candidates above are still processed.
+    std::vector<MotionCluster> clusters;
+
+    // Step 3: Shi-Tomasi corner detection (§20.6 step 3)
+    auto corners = detect_corners(gray_prev, options.max_corners,
+                                  options.corner_quality_level,
+                                  options.corner_min_distance);
+
+    if (!corners.empty()) {
+      // Step 4: Lucas-Kanade sparse optical flow (§20.6 step 4)
+      auto lk_result = track_lk(gray_prev, gray_next, corners,
+                                options.lk_window_width, options.lk_window_height,
+                                options.lk_max_level, options.lk_max_count,
+                                options.lk_epsilon);
+
+      // Step 5: Farneback dense optical flow (§20.6 step 5)
+      cv::Mat dense_flow = compute_farneback_flow(
+          gray_prev, gray_next,
+          options.farneback_window_size, options.farneback_poly_n,
+          options.farneback_poly_sigma, options.farneback_iterations,
+          options.farneback_pyr_scale);
+
+      // Step 6: RANSAC homography estimation (§20.6 step 6)
+      auto homography_result = estimate_homography(
+          lk_result.prev_points, lk_result.next_points,
+          lk_result.status, options.ransac_threshold);
+
+      cv::Mat residual;
+
+      if (homography_result.valid) {
+        // Step 7: Camera motion compensation (§20.6 step 7)
+        residual = compute_residual_motion(
+            dense_flow, homography_result.homography,
+            frame_width, frame_height);
+      } else {
+        // No homography: use raw dense flow as residual
+        residual = dense_flow;
+      }
+
+      // Step 8: Residual motion clustering (§20.6 step 8)
+      clusters = cluster_residual_motion(
+          residual, options.min_motion_magnitude,
+          options.min_region_area_ratio,
+          frame_width, frame_height);
+    }
+
+    // Skip frame if no candidates from either source
+    if (clusters.empty() && depth_candidates.empty()) {
+      // Mark tracks as lost
+      for (auto& track : active_tracks) {
+        if (track.last_frame_idx < idx_next) {
+          track.kalman.mark_lost();
+        }
+      }
+      continue;
     }
 
     // Build unified candidate list: merge motion and depth candidates
@@ -1119,11 +1150,12 @@ EntityTrackResult run_visual_entity_tracker(
       for (auto& uc : unified_candidates) {
         if (uc.source == "motion" || uc.source == "fused_motion_depth") {
           double iou = compute_iou(uc.bbox, dc.bbox);
-          if (iou > options.candidate_merge_iou_threshold) {
-            // Merge: mark as fused and prefer the larger bbox
+          double iom = compute_iom(uc.bbox, dc.bbox);
+          // Merge if either IoU or IoM exceeds threshold
+          if (iou > options.candidate_merge_iou_threshold ||
+              iom > options.candidate_merge_iou_threshold) {
             uc.source = "fused_motion_depth";
             fused = true;
-            // Keep the motion candidate's bbox (already has GrabCut mask)
             break;
           }
         }
