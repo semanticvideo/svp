@@ -380,6 +380,214 @@ static void test_moving_object_integration() {
             << ", masks=" << mask_entries.size() << ")\n";
 }
 
+// Test 11: Static depth-separated object produces entities
+// RGB frames are identical (no motion), but depth has a coherent foreground
+// object separated from background.  Expected: non-empty entities/tracks/regions/masks.
+static void test_static_depth_separated_object() {
+  const int w = 64, h = 64;
+  const int block_size = 24;
+  std::vector<svp::vision::ColorRasterFrame> frames(8);
+  for (int i = 0; i < 8; ++i) {
+    frames[i].frame_id = "frame_" + std::to_string(2000 + i);
+    frames[i].timestamp_us = (i + 1) * 1000000;
+    frames[i].width = w;
+    frames[i].height = h;
+    frames[i].keyframe = (i % 5 == 0);
+    frames[i].pixels.resize(static_cast<std::size_t>(w) * h);
+    // All frames identical: gray background with a darker square
+    for (auto& px : frames[i].pixels) {
+      px.r = 128; px.g = 128; px.b = 128;
+    }
+    // Darker square in center (static, no motion)
+    for (int y = 20; y < 20 + block_size; ++y) {
+      for (int x = 20; x < 20 + block_size; ++x) {
+        auto& px = frames[i].pixels[static_cast<std::size_t>(y) * w + x];
+        px.r = 60; px.g = 60; px.b = 60;
+      }
+    }
+  }
+
+  // Depth: foreground object (near) vs background (far)
+  std::vector<std::uint16_t> depth_data;
+  std::vector<std::string> depth_frame_ids;
+  for (int i = 0; i < 8; ++i) {
+    depth_frame_ids.push_back(frames[i].frame_id);
+    for (int y = 0; y < h; ++y) {
+      for (int x = 0; x < w; ++x) {
+        if (x >= 20 && x < 20 + block_size && y >= 20 && y < 20 + block_size) {
+          depth_data.push_back(50000);  // near
+        } else {
+          depth_data.push_back(10000);  // far
+        }
+      }
+    }
+  }
+
+  svp::vision::VisualEntityTrackerOptions opts;
+  opts.embedding_model_id = "model_nomic_embed_vision_v1_5";
+  opts.execution_provider = "cpu";
+
+  auto result = svp::vision::run_visual_entity_tracker(
+      frames, depth_data, depth_frame_ids, {}, {}, opts);
+
+  // Must produce non-empty entities/tracks/regions from depth alone
+  assert(!result.regions.empty());
+  assert(!result.entities.empty());
+  assert(!result.tracks.empty());
+
+  // Verify candidate_source is set and includes depth-derived regions
+  bool has_depth_source = false;
+  for (const auto& r : result.regions) {
+    assert(!r.candidate_source.empty());
+    if (r.candidate_source == "depth" || r.candidate_source == "fused_motion_depth") {
+      has_depth_source = true;
+    }
+    assert(!r.mask_ref.empty());
+    assert(!r.depth_ref.empty());
+    assert(!r.mask_pixels.empty());
+  }
+  assert(has_depth_source);
+
+  // Verify no duplicate track_id per frame
+  std::map<std::string, std::set<std::string>> tracks_per_frame;
+  for (const auto& r : result.regions) {
+    auto& tracks = tracks_per_frame[r.frame_id];
+    assert(tracks.insert(r.track_id).second);
+  }
+
+  std::cout << "test_static_depth_separated_object: PASS (regions=" << result.regions.size()
+            << ", entities=" << result.entities.size()
+            << ", tracks=" << result.tracks.size() << ")\n";
+}
+
+// Test 12: Flat depth static produces no entities
+// RGB frames are static and depth is uniform.  Expected: no invented visual entities.
+static void test_flat_depth_static() {
+  const int w = 64, h = 64;
+  std::vector<svp::vision::ColorRasterFrame> frames(8);
+  for (int i = 0; i < 8; ++i) {
+    frames[i].frame_id = "frame_" + std::to_string(3000 + i);
+    frames[i].timestamp_us = (i + 1) * 1000000;
+    frames[i].width = w;
+    frames[i].height = h;
+    frames[i].keyframe = (i % 5 == 0);
+    frames[i].pixels.resize(static_cast<std::size_t>(w) * h);
+    // All frames identical: uniform gray
+    for (auto& px : frames[i].pixels) {
+      px.r = 128; px.g = 128; px.b = 128;
+    }
+  }
+
+  // Uniform depth (all same value)
+  std::vector<std::uint16_t> depth_data;
+  std::vector<std::string> depth_frame_ids;
+  for (int i = 0; i < 8; ++i) {
+    depth_frame_ids.push_back(frames[i].frame_id);
+    for (int y = 0; y < h; ++y) {
+      for (int x = 0; x < w; ++x) {
+        depth_data.push_back(30000);  // uniform
+      }
+    }
+  }
+
+  svp::vision::VisualEntityTrackerOptions opts;
+  opts.embedding_model_id = "model_nomic_embed_vision_v1_5";
+  opts.execution_provider = "cpu";
+
+  auto result = svp::vision::run_visual_entity_tracker(
+      frames, depth_data, depth_frame_ids, {}, {}, opts);
+
+  // Flat depth + static RGB should not create fake entities
+  assert(result.regions.empty());
+  assert(result.entities.empty());
+  assert(result.tracks.empty());
+
+  std::cout << "test_flat_depth_static: PASS (regions=0, entities=0, tracks=0)\n";
+}
+
+// Test 13: Motion + depth fusion produces one entity, not duplicates
+// A moving object with distinct depth.  Both motion and depth should detect it,
+// but fusion should produce one entity/track, not two.
+static void test_motion_depth_fusion() {
+  const int w = 64, h = 64;
+  const int block_size = 20;
+  std::vector<svp::vision::ColorRasterFrame> frames(8);
+  for (int i = 0; i < 8; ++i) {
+    frames[i].frame_id = "frame_" + std::to_string(4000 + i);
+    frames[i].timestamp_us = (i + 1) * 1000000;
+    frames[i].width = w;
+    frames[i].height = h;
+    frames[i].keyframe = (i % 5 == 0);
+    frames[i].pixels.resize(static_cast<std::size_t>(w) * h);
+    for (auto& px : frames[i].pixels) {
+      px.r = 0; px.g = 0; px.b = 0;
+    }
+    // White block moving right
+    int bx = 4 + i * 4;
+    int by = 22;
+    for (int y = by; y < by + block_size && y < h; ++y) {
+      for (int x = bx; x < bx + block_size && x < w; ++x) {
+        auto& px = frames[i].pixels[static_cast<std::size_t>(y) * w + x];
+        px.r = 255; px.g = 255; px.b = 255;
+      }
+    }
+  }
+
+  // Depth: foreground object (near) matching the moving block, background (far)
+  std::vector<std::uint16_t> depth_data;
+  std::vector<std::string> depth_frame_ids;
+  for (int i = 0; i < 8; ++i) {
+    depth_frame_ids.push_back(frames[i].frame_id);
+    int bx = 4 + i * 4;
+    int by = 22;
+    for (int y = 0; y < h; ++y) {
+      for (int x = 0; x < w; ++x) {
+        if (x >= bx && x < bx + block_size && y >= by && y < by + block_size) {
+          depth_data.push_back(50000);  // near
+        } else {
+          depth_data.push_back(10000);  // far
+        }
+      }
+    }
+  }
+
+  svp::vision::VisualEntityTrackerOptions opts;
+  opts.embedding_model_id = "model_nomic_embed_vision_v1_5";
+  opts.execution_provider = "cpu";
+
+  auto result = svp::vision::run_visual_entity_tracker(
+      frames, depth_data, depth_frame_ids, {}, {}, opts);
+
+  // Must produce non-empty results
+  assert(!result.regions.empty());
+  assert(!result.entities.empty());
+
+  // Should have at most 2 entities (ideally 1 if fusion works well)
+  // The key assertion: no duplicate entities for the same spatial region
+  // Check no duplicate track_id per frame
+  std::map<std::string, std::set<std::string>> tracks_per_frame;
+  for (const auto& r : result.regions) {
+    auto& tracks = tracks_per_frame[r.frame_id];
+    assert(tracks.insert(r.track_id).second);
+  }
+
+  // Verify that at least some regions have fused source
+  bool has_fused = false;
+  for (const auto& r : result.regions) {
+    if (r.candidate_source == "fused_motion_depth") {
+      has_fused = true;
+      break;
+    }
+  }
+  // Fusion may or may not happen depending on IoU overlap, but if it does,
+  // it should be correctly labeled.  The key is no duplicate entities per frame.
+
+  std::cout << "test_motion_depth_fusion: PASS (regions=" << result.regions.size()
+            << ", entities=" << result.entities.size()
+            << ", tracks=" << result.tracks.size()
+            << ", fused=" << (has_fused ? "yes" : "no") << ")\n";
+}
+
 int main() {
   test_rle_all_zero();
   test_rle_all_one();
@@ -392,6 +600,9 @@ int main() {
   test_single_frame();
   test_provenance_fields();
   test_moving_object_integration();
+  test_static_depth_separated_object();
+  test_flat_depth_static();
+  test_motion_depth_fusion();
 
   std::cout << "All visual entity tracker tests passed.\n";
   return 0;

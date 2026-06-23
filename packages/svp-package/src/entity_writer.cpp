@@ -528,6 +528,7 @@ EntityWriteSummary write_visual_entity_artifacts(
     track_record["reacquired"] = track.reacquired;
     track_record["confidence"] = track.confidence;
     track_record["tracking_method"] = track.tracking_method;
+    track_record["candidate_source"] = track.candidate_source;
     all_tracks.push_back(track_record);
   }
 
@@ -563,6 +564,7 @@ EntityWriteSummary write_visual_entity_artifacts(
       {"far_percentile_90", region.far_percentile_90}
     };
     record["confidence"] = region.confidence;
+    record["candidate_source"] = region.candidate_source;
     region_records.push_back(record);
   }
 

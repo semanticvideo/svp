@@ -329,8 +329,145 @@ std::vector<MotionCluster> cluster_residual_motion(
 }
 
 // ---------------------------------------------------------------------------
-// GrabCut mask refinement (§20.6 step 10, §5.9)
+// Depth-based candidate detection (§20.6 step 8b: depth-derived candidates)
 // ---------------------------------------------------------------------------
+
+// Check if depth data is too flat to produce meaningful candidates.
+// Returns true if the depth variance (as fraction of mean) is below threshold.
+bool is_depth_flat(
+    const std::uint16_t* depth_data,
+    int width, int height,
+    double variance_threshold) {
+  if (width <= 0 || height <= 0 || depth_data == nullptr) return true;
+  const std::size_t total = static_cast<std::size_t>(width) * height;
+  if (total == 0) return true;
+
+  // Sample pixels for efficiency (every 4th pixel in each dimension)
+  std::vector<std::uint16_t> samples;
+  for (int y = 0; y < height; y += 4) {
+    for (int x = 0; x < width; x += 4) {
+      samples.push_back(depth_data[static_cast<std::size_t>(y) * width + x]);
+    }
+  }
+  if (samples.empty()) return true;
+
+  double sum = 0;
+  for (auto v : samples) sum += v;
+  double mean = sum / samples.size();
+  if (mean < 1.0) return true;  // All-zero or near-zero depth
+
+  double sq_sum = 0;
+  for (auto v : samples) sq_sum += (v - mean) * (v - mean);
+  double variance = sq_sum / samples.size();
+  double normalized_var = variance / (mean * mean);
+
+  return normalized_var < variance_threshold;
+}
+
+// Detect coherent depth regions from depth discontinuities.
+// Uses Canny edge detection on depth, then finds contours and bounding boxes.
+// Returns depth-derived candidate regions.
+struct DepthCandidate {
+  cv::Rect bbox;
+  cv::Mat mask;
+  double mean_depth;
+};
+
+std::vector<DepthCandidate> detect_depth_candidates(
+    const std::uint16_t* depth_data,
+    int depth_width, int depth_height,
+    int frame_width, int frame_height,
+    int edge_threshold,
+    double min_area_ratio) {
+  std::vector<DepthCandidate> candidates;
+
+  if (depth_data == nullptr || depth_width <= 0 || depth_height <= 0) {
+    return candidates;
+  }
+
+  // Convert depth to CV_16U
+  cv::Mat depth_mat = uint16_depth_to_cv_mat(depth_data, depth_width, depth_height);
+
+  // Convert to 8-bit for edge detection (scale to 0-255)
+  cv::Mat depth_8u;
+  double min_val, max_val;
+  cv::minMaxLoc(depth_mat, &min_val, &max_val);
+  if (max_val < 1.0) return candidates;
+
+  double scale = 255.0 / max_val;
+  depth_mat.convertTo(depth_8u, CV_8UC1, scale);
+
+  // Blur to reduce noise before edge detection
+  cv::Mat blurred;
+  cv::GaussianBlur(depth_8u, blurred, cv::Size(5, 5), 0);
+
+  // Canny edge detection on depth
+  cv::Mat edges;
+  cv::Canny(blurred, edges, edge_threshold * scale, edge_threshold * scale * 2);
+
+  // Dilate edges to connect nearby boundaries
+  cv::Mat dilated;
+  cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+  cv::dilate(edges, dilated, kernel);
+
+  // Find contours from depth edges
+  std::vector<std::vector<cv::Point>> contours;
+  cv::findContours(dilated, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+  double min_area = min_area_ratio * frame_width * frame_height;
+
+  // Scale factor from depth resolution to frame resolution
+  double sx = static_cast<double>(frame_width) / depth_width;
+  double sy = static_cast<double>(frame_height) / depth_height;
+
+  for (const auto& contour : contours) {
+    double area = cv::contourArea(contour);
+    if (area < min_area / (sx * sy)) continue;  // Check area in frame coords
+
+    cv::Rect bbox = cv::boundingRect(contour);
+
+    // Scale bbox to frame resolution
+    cv::Rect frame_bbox(
+      static_cast<int>(bbox.x * sx),
+      static_cast<int>(bbox.y * sy),
+      static_cast<int>(bbox.width * sx),
+      static_cast<int>(bbox.height * sy));
+    frame_bbox &= cv::Rect(0, 0, frame_width, frame_height);
+
+    if (frame_bbox.width <= 0 || frame_bbox.height <= 0) continue;
+
+    // Create mask from contour (in frame resolution)
+    cv::Mat mask = cv::Mat::zeros(frame_height, frame_width, CV_8UC1);
+    // Scale contour points to frame resolution
+    std::vector<cv::Point> scaled_contour;
+    for (const auto& pt : contour) {
+      scaled_contour.emplace_back(
+        static_cast<int>(pt.x * sx),
+        static_cast<int>(pt.y * sy));
+    }
+    cv::fillConvexPoly(mask, scaled_contour, 1);
+
+    // Compute mean depth within the contour region
+    double depth_sum = 0;
+    int depth_count = 0;
+    for (int y = bbox.y; y < bbox.y + bbox.height && y < depth_height; ++y) {
+      for (int x = bbox.x; x < bbox.x + bbox.width && x < depth_width; ++x) {
+        if (y >= 0 && x >= 0) {
+          depth_sum += depth_data[static_cast<std::size_t>(y) * depth_width + x];
+          ++depth_count;
+        }
+      }
+    }
+
+    DepthCandidate dc;
+    dc.bbox = frame_bbox;
+    dc.mask = mask;
+    dc.mean_depth = depth_count > 0 ? depth_sum / depth_count : 0;
+    candidates.push_back(dc);
+  }
+
+  return candidates;
+}
 
 cv::Mat refine_mask_grabcut(
     const cv::Mat& color_frame,
@@ -760,7 +897,21 @@ EntityTrackResult run_visual_entity_tracker(
   };
 
   // Step 1: Degenerate source check (§13.4)
-  if (is_degenerate_source(decoded_frames)) {
+  // Static frames are degenerate for motion-based tracking, but if depth data
+  // has meaningful variance, depth-derived candidates can still discover
+  // static entities.  Only skip if both frames AND depth are degenerate.
+  bool frames_degenerate = is_degenerate_source(decoded_frames);
+  bool depth_has_variance = false;
+  if (frames_degenerate && !depth_data.empty() && !depth_frame_ids.empty()) {
+    // Check if the first frame's depth has meaningful variance
+    const std::uint16_t* depth_ptr = depth_data.data();
+    int d_w = decoded_frames[0].width;
+    int d_h = decoded_frames[0].height;
+    depth_has_variance = !is_depth_flat(depth_ptr, d_w, d_h,
+                                         options.depth_variance_threshold);
+  }
+
+  if (frames_degenerate && !depth_has_variance) {
     result.limitations_note += " Degenerate source detected: no persistent "
         "visual entities. Empty entity, track, and region files produced.";
     return result;
@@ -837,6 +988,7 @@ EntityTrackResult run_visual_entity_tracker(
     bool reacquired = false;
     std::int64_t start_us = 0;
     std::int64_t end_us = 0;
+    std::string candidate_source;  // "motion", "depth", or "fused_motion_depth"
   };
 
   std::vector<ActiveTrack> active_tracks;
@@ -903,27 +1055,114 @@ EntityTrackResult run_visual_entity_tracker(
         options.min_region_area_ratio,
         frame_width, frame_height);
 
+    // Step 8b: Depth-based candidate detection (§20.6 step 8b)
+    // Detect coherent static regions from depth discontinuities when motion
+    // is absent or insufficient.  This allows discovery of static but visually
+    // separable entities without requiring motion.
+    std::vector<DepthCandidate> depth_candidates;
+    const std::uint16_t* frame_depth_ptr = nullptr;
+    if (!depth_data.empty()) {
+      int d_idx = -1;
+      for (std::size_t d = 0; d < depth_frame_ids.size(); ++d) {
+        if (depth_frame_ids[d] == frame_next.frame_id) {
+          d_idx = static_cast<int>(d);
+          break;
+        }
+      }
+      if (d_idx >= 0) {
+        frame_depth_ptr = &depth_data[static_cast<std::size_t>(d_idx) * depth_width * depth_height];
+        // Only detect depth candidates if depth is not flat
+        if (!is_depth_flat(frame_depth_ptr, depth_width, depth_height,
+                           options.depth_variance_threshold)) {
+          depth_candidates = detect_depth_candidates(
+              frame_depth_ptr, depth_width, depth_height,
+              frame_width, frame_height,
+              options.depth_edge_threshold,
+              options.min_region_area_ratio);
+        }
+      }
+    }
+
+    // Build unified candidate list: merge motion and depth candidates
+    struct UnifiedCandidate {
+      cv::Rect bbox;
+      cv::Mat mask;       // Pre-computed mask (for depth candidates)
+      bool has_mask;      // Whether a pre-computed mask is available
+      std::string source; // "motion", "depth", or "fused_motion_depth"
+    };
+
+    std::vector<UnifiedCandidate> unified_candidates;
+
+    // Add motion candidates
+    for (std::size_t c = 0; c < clusters.size(); ++c) {
+      auto& cluster = clusters[c];
+      if (cluster.bbox.width <= 0 || cluster.bbox.height <= 0) continue;
+      if (cluster.bbox.area() < options.min_region_area_ratio * frame_width * frame_height) {
+        continue;
+      }
+      UnifiedCandidate uc;
+      uc.bbox = cluster.bbox;
+      uc.has_mask = false;
+      uc.source = "motion";
+      unified_candidates.push_back(std::move(uc));
+    }
+
+    // Add depth candidates, merging with motion candidates if they overlap
+    for (auto& dc : depth_candidates) {
+      if (dc.bbox.width <= 0 || dc.bbox.height <= 0) continue;
+      if (dc.bbox.area() < options.min_region_area_ratio * frame_width * frame_height) {
+        continue;
+      }
+
+      // Check if this depth candidate overlaps with any existing motion candidate
+      bool fused = false;
+      for (auto& uc : unified_candidates) {
+        if (uc.source == "motion" || uc.source == "fused_motion_depth") {
+          double iou = compute_iou(uc.bbox, dc.bbox);
+          if (iou > options.candidate_merge_iou_threshold) {
+            // Merge: mark as fused and prefer the larger bbox
+            uc.source = "fused_motion_depth";
+            fused = true;
+            // Keep the motion candidate's bbox (already has GrabCut mask)
+            break;
+          }
+        }
+      }
+
+      if (!fused) {
+        // Add as a depth-only candidate
+        UnifiedCandidate uc;
+        uc.bbox = dc.bbox;
+        uc.mask = dc.mask.clone();
+        uc.has_mask = true;
+        uc.source = "depth";
+        unified_candidates.push_back(std::move(uc));
+      }
+    }
+
     // Track which tracks have been assigned a region this frame
     // to enforce one-region-per-track-per-frame assignment
     std::set<int> assigned_this_frame;
 
-    // Step 9: Region proposal from clusters (§20.6 step 9)
-    // Each cluster becomes a region proposal
-    for (std::size_t c = 0; c < clusters.size(); ++c) {
-      auto& cluster = clusters[c];
-      cv::Rect bbox = cluster.bbox;
+    // Step 9: Process unified candidates (§20.6 step 9)
+    for (auto& uc : unified_candidates) {
+      cv::Rect bbox = uc.bbox;
 
       if (bbox.width <= 0 || bbox.height <= 0) continue;
       if (bbox.area() < options.min_region_area_ratio * frame_width * frame_height) {
         continue;
       }
 
-      // Step 10: GrabCut mask refinement (§20.6 step 10, §5.9)
-      cv::Mat mask = refine_mask_grabcut(mat_next, bbox, options.grabcut_iterations);
-
-      // Convert mask to binary 0/1
+      // Step 10: Mask refinement (§20.6 step 10, §5.9)
+      // For depth-only candidates, use the pre-computed depth mask.
+      // For motion and fused candidates, use GrabCut on the color frame.
       cv::Mat binary_mask;
-      cv::threshold(mask, binary_mask, 0.5, 1, cv::THRESH_BINARY);
+      if (uc.has_mask && uc.source == "depth") {
+        binary_mask = uc.mask.clone();
+      } else {
+        cv::Mat mask = refine_mask_grabcut(mat_next, bbox, options.grabcut_iterations);
+        cv::threshold(mask, binary_mask, 0.5, 1, cv::THRESH_BINARY);
+      }
 
       // Step 11: Depth summary (§20.6 step 11)
       DepthSummary depth_summary{0, 0, 0};
@@ -1025,6 +1264,14 @@ EntityTrackResult run_visual_entity_tracker(
         if (!region_embedding.empty()) {
           track.last_embedding = region_embedding;
         }
+        // Upgrade candidate source if this track now has evidence from both sources
+        if (uc.source == "depth" && track.candidate_source == "motion") {
+          track.candidate_source = "fused_motion_depth";
+        } else if (uc.source == "motion" && track.candidate_source == "depth") {
+          track.candidate_source = "fused_motion_depth";
+        } else if (track.candidate_source.empty()) {
+          track.candidate_source = uc.source;
+        }
         entity_id = track.entity_id;
         track_id = track.track_id;
         assigned_this_frame.insert(best_track_idx);
@@ -1041,6 +1288,7 @@ EntityTrackResult run_visual_entity_tracker(
         new_track.end_us = frame_next.timestamp_us;
         new_track.region_count = 1;
         new_track.lost_count = 0;
+        new_track.candidate_source = uc.source;
         if (!region_embedding.empty()) {
           new_track.last_embedding = region_embedding;
         }
@@ -1098,6 +1346,7 @@ EntityTrackResult run_visual_entity_tracker(
       region.embedding_model_id = options.embedding_model_id;
       region.confidence = std::min(1.0, best_iou > 0 ? best_iou : 0.5);
       region.mask_ref = "mask_" + region.region_id;
+      region.candidate_source = uc.source;
       // depth_ref: find the depth entry for this frame
       for (std::size_t di = 0; di < depth_frame_ids.size(); ++di) {
         if (depth_frame_ids[di] == frame_next.frame_id) {
@@ -1206,6 +1455,7 @@ EntityTrackResult run_visual_entity_tracker(
     tr.processor_id = result.processor_id;
     tr.tracking_method = track.reacquired ?
       "optical_flow_kalman_embedding_reacquisition" : "optical_flow_kalman";
+    tr.candidate_source = track.candidate_source;
     result.tracks.push_back(std::move(tr));
   }
 

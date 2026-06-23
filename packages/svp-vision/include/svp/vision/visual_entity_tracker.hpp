@@ -111,6 +111,14 @@ struct VisualEntityTrackerOptions {
   double overlap_iou_threshold = 0.3;
   double near_centroid_threshold = 0.15;
   double contains_ratio_threshold = 0.7;
+
+  // --- Depth-based candidate detection ---
+  // Minimum depth variance (as fraction of mean depth) to consider depth non-flat
+  double depth_variance_threshold = 0.05;
+  // Minimum depth discontinuity (in uint16 units) to detect a boundary
+  int depth_edge_threshold = 2000;
+  // IoU threshold for merging depth and motion candidates
+  double candidate_merge_iou_threshold = 0.3;
 };
 
 struct TrackedRegion {
@@ -143,6 +151,8 @@ struct TrackedRegion {
   std::string mask_ref;
   // Depth reference (id of the depth entry in spatial/depth.index.jsonl)
   std::string depth_ref;
+  // Candidate source: "motion", "depth", or "fused_motion_depth"
+  std::string candidate_source;
 };
 
 struct EntityRecord {
@@ -170,6 +180,8 @@ struct TrackRecord {
   double confidence = 0;
   std::string processor_id;
   std::string tracking_method;
+  // Candidate source: "motion", "depth", or "fused_motion_depth"
+  std::string candidate_source;
 };
 
 struct EntityTrackResult {
