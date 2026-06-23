@@ -275,15 +275,14 @@ TranscriptWriteResult write_transcript_artifacts(const AsrExecutionBoundary& bou
         if (best_seg) {
           word_speaker_id = best_seg->speaker_id;
         } else {
-          const std::int64_t word_mid = (w.start_us + w.end_us) / 2;
           const SpeakerSegment* nearest_seg = nullptr;
           std::int64_t nearest_dist = std::numeric_limits<std::int64_t>::max();
           for (const SpeakerSegment& seg : boundary.speaker_segments) {
             std::int64_t dist;
-            if (word_mid < seg.timing.start_us) {
-              dist = seg.timing.start_us - word_mid;
-            } else if (word_mid >= seg.timing.end_us) {
-              dist = word_mid - seg.timing.end_us;
+            if (w.end_us <= seg.timing.start_us) {
+              dist = seg.timing.start_us - w.end_us;
+            } else if (w.start_us >= seg.timing.end_us) {
+              dist = w.start_us - seg.timing.end_us;
             } else {
               dist = 0;
             }

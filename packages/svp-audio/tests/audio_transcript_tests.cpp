@@ -1727,7 +1727,7 @@ void test_word_assignment_gap_nearest_within_tolerance() {
   boundary.speaker_count = 1;
 
   // Word [3.2s, 3.5s) has no overlap with seg [0, 3s).
-  // Midpoint = 3.35s, distance to seg end = 350000 us (within 500000 tolerance).
+  // Word start to seg end = 200000 us (within 500000 tolerance).
   boundary.reconciled_words.push_back({"word_gap", 3200000, 3500000, 0.9, 0});
   boundary.reconciled_word_count = 1;
 
@@ -1765,7 +1765,7 @@ void test_word_assignment_gap_beyond_tolerance_gets_unknown() {
   boundary.speaker_count = 1;
 
   // Word [4s, 4.3s) has no overlap with seg [0, 3s).
-  // Midpoint = 4.15s, distance to seg end = 1150000 us (beyond 500000 tolerance).
+  // Word start to seg end = 1000000 us (beyond 500000 tolerance).
   boundary.reconciled_words.push_back({"word_far", 4000000, 4300000, 0.9, 0});
   boundary.reconciled_word_count = 1;
 
