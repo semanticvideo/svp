@@ -146,6 +146,21 @@ const std::vector<std::string> kIndexTables = {
     "  color_observation_id TEXT NOT NULL,"
     "  target_type TEXT NOT NULL,"
     "  target_id TEXT NOT NULL"
+    ")",
+
+    "CREATE TABLE entities ("
+    "  entity_id TEXT PRIMARY KEY,"
+    "  entity_type TEXT NOT NULL,"
+    "  first_seen_us INTEGER,"
+    "  last_seen_us INTEGER"
+    ")",
+
+    "CREATE TABLE entity_tracks ("
+    "  track_id TEXT PRIMARY KEY,"
+    "  entity_id TEXT NOT NULL,"
+    "  start_us INTEGER,"
+    "  end_us INTEGER,"
+    "  confidence REAL"
     ")"
 };
 
@@ -485,6 +500,60 @@ bool write_index_foundation(
       }
     }
 
+    // Load and insert entity records
+    const auto entity_records = read_jsonl(staging_dir / "entities" / "entities.jsonl");
+    if (!entity_records.empty()) {
+      const std::string insert_entity_sql =
+          "INSERT INTO entities (entity_id, entity_type, first_seen_us, last_seen_us) "
+          "VALUES (?, ?, ?, ?)";
+      sqlite3_stmt* stmt_entity = nullptr;
+      if (sqlite3_prepare_v2(db.get(), insert_entity_sql.c_str(), -1, &stmt_entity, nullptr) == SQLITE_OK) {
+        std::unique_ptr<sqlite3_stmt, StatementDeleter> stmt_entity_guard{stmt_entity};
+        for (const auto& entity : entity_records) {
+          const auto entity_id = entity.value("id", "");
+          if (entity_id.empty()) continue;
+          sqlite3_bind_text(stmt_entity, 1, entity_id.c_str(), -1, SQLITE_TRANSIENT);
+          bind_json_string(stmt_entity, 2, entity, "entity_type");
+          bind_json_int(stmt_entity, 3, entity, "first_seen_us");
+          bind_json_int(stmt_entity, 4, entity, "last_seen_us");
+          sqlite3_step(stmt_entity);
+          sqlite3_reset(stmt_entity);
+        }
+      } else {
+        if (stmt_entity) sqlite3_finalize(stmt_entity);
+      }
+    }
+
+    // Load and insert entity track records
+    const auto track_records = read_jsonl(staging_dir / "entities" / "entity_tracks.jsonl");
+    if (!track_records.empty()) {
+      const std::string insert_track_sql =
+          "INSERT INTO entity_tracks (track_id, entity_id, start_us, end_us, confidence) "
+          "VALUES (?, ?, ?, ?, ?)";
+      sqlite3_stmt* stmt_track = nullptr;
+      if (sqlite3_prepare_v2(db.get(), insert_track_sql.c_str(), -1, &stmt_track, nullptr) == SQLITE_OK) {
+        std::unique_ptr<sqlite3_stmt, StatementDeleter> stmt_track_guard{stmt_track};
+        for (const auto& track : track_records) {
+          const auto track_id = track.value("id", "");
+          if (track_id.empty()) continue;
+          sqlite3_bind_text(stmt_track, 1, track_id.c_str(), -1, SQLITE_TRANSIENT);
+          bind_json_string(stmt_track, 2, track, "entity_id");
+          bind_json_int(stmt_track, 3, track, "start_us");
+          bind_json_int(stmt_track, 4, track, "end_us");
+          const auto conf_it = track.find("confidence");
+          if (conf_it != track.end() && conf_it->is_number()) {
+            sqlite3_bind_double(stmt_track, 5, conf_it->get<double>());
+          } else {
+            sqlite3_bind_null(stmt_track, 5);
+          }
+          sqlite3_step(stmt_track);
+          sqlite3_reset(stmt_track);
+        }
+      } else {
+        if (stmt_track) sqlite3_finalize(stmt_track);
+      }
+    }
+
     const auto relationships = read_jsonl(staging_dir / "relationships" / "relationships.jsonl");
     if (!relationships.empty()) {
       const std::string insert_sql =
@@ -557,6 +626,8 @@ bool write_index_foundation(
         "color_bucket_coverage",
         "color_observations",
         "color_targets",
+        "entities",
+        "entity_tracks",
         "numeric_values",
         "objects",
         "relationships",

@@ -1,6 +1,7 @@
 #include "svp/package/package_writer.hpp"
 #include "svp/package/package_layout.hpp"
 #include "svp/package/package_probe.hpp"
+#include "svp/package/entity_writer.hpp"
 #include "svp/package/index_writer.hpp"
 #include "svp/package/relationship_provenance_writer.hpp"
 #include "svp/package/spatial_embedding_placeholders.hpp"
@@ -983,7 +984,7 @@ void test_write_index_foundation() {
   nlohmann::json index_manifest;
   manifest_in >> index_manifest;
   assert(index_manifest["schema_version"] == "svp-index-manifest-v1");
-  assert(index_manifest["table_count"] == 13);
+  assert(index_manifest["table_count"] == 15);
   assert(index_manifest["row_count"] > 0);
   assert(index_manifest["created_from"]["manifest_blake3"].get<std::string>().find("blake3:") == 0);
 
@@ -1282,6 +1283,699 @@ void test_timeline_writer() {
   std::filesystem::remove_all(root);
 }
 
+void test_entity_writer_basic() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-entity-writer-basic-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "text");
+  std::filesystem::create_directories(staging_dir / "timeline");
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  // Write text regions
+  {
+    std::ofstream out(staging_dir / "text" / "text_regions.jsonl");
+    out << nlohmann::json({
+        {"text_region_id", "tr_000001"},
+        {"start_us", 1000000},
+        {"end_us", 2000000},
+        {"confidence", 0.95},
+        {"shot_id", "shot_000001"},
+        {"scene_id", "scene_000001"},
+        {"bbox_norm", {0.1, 0.2, 0.3, 0.4}}
+    }).dump() << "\n";
+    out << nlohmann::json({
+        {"text_region_id", "tr_000002"},
+        {"start_us", 3000000},
+        {"end_us", 4000000},
+        {"confidence", 0.88},
+        {"shot_id", "shot_000002"},
+        {"scene_id", "scene_000001"},
+        {"bbox_norm", {0.1, 0.2, 0.3, 0.4}}
+    }).dump() << "\n";
+  }
+
+  // Write text observations linking regions to normalized text
+  {
+    std::ofstream out(staging_dir / "text" / "text_observations.jsonl");
+    out << nlohmann::json({
+        {"text_observation_id", "tobs_000001"},
+        {"text_region_id", "tr_000001"},
+        {"normalized_text", "HELLO"}
+    }).dump() << "\n";
+    out << nlohmann::json({
+        {"text_observation_id", "tobs_000002"},
+        {"text_region_id", "tr_000002"},
+        {"normalized_text", "HELLO"}
+    }).dump() << "\n";
+  }
+
+  // Write timeline shots for media duration
+  {
+    std::ofstream out(staging_dir / "timeline" / "shots.jsonl");
+    out << nlohmann::json({
+        {"id", "shot_000001"},
+        {"start_us", 0},
+        {"end_us", 5000000}
+    }).dump() << "\n";
+  }
+
+  const svp::package::EntityWriteSummary summary =
+      svp::package::write_entity_artifacts(staging_dir);
+
+  assert(summary.entities_written);
+  assert(summary.tracks_written);
+  assert(summary.entity_count == 1);
+  assert(summary.track_count == 1);
+
+  // Read entities
+  auto entities = read_jsonl_records(staging_dir / "entities" / "entities.jsonl");
+  assert(entities.size() == 1);
+  assert(entities[0].value("id", "") == "entity_000001");
+  assert(entities[0].value("entity_type", "") == "unknown_region");
+  assert(entities[0].value("first_seen_us", -1) == 1000000);
+  assert(entities[0].value("last_seen_us", -1) == 4000000);
+  assert(entities[0]["track_ids"].size() == 1);
+  assert(entities[0]["track_ids"][0] == "track_000001_a");
+  assert(entities[0].contains("evidence"));
+  assert(entities[0]["evidence"].value("evidence_type", "") == "ocr_text_region");
+  assert(entities[0]["evidence"].value("normalized_text", "") == "HELLO");
+  assert(entities[0]["evidence"]["region_ids"].size() == 2);
+
+  // Read tracks
+  auto tracks = read_jsonl_records(staging_dir / "entities" / "entity_tracks.jsonl");
+  assert(tracks.size() == 1);
+  assert(tracks[0].value("id", "") == "track_000001_a");
+  assert(tracks[0].value("entity_id", "") == "entity_000001");
+  assert(tracks[0].value("start_us", -1) == 1000000);
+  assert(tracks[0].value("end_us", -1) == 4000000);
+  assert(tracks[0].value("region_count", -1) == 2);
+  assert(tracks[0].contains("evidence"));
+  assert(tracks[0]["evidence"].value("tracking_method", "") == "text_content_match");
+
+  // Check processor provenance
+  auto processors = read_jsonl_records(staging_dir / "provenance" / "processors.jsonl");
+  bool found_entity_proc = false;
+  for (const auto& proc : processors) {
+    if (proc.value("id", "") == "processor_entity_writer_0001") {
+      found_entity_proc = true;
+      assert(proc.contains("provenance_note"));
+    }
+  }
+  assert(found_entity_proc);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_entity_writer_empty_input() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-entity-writer-empty-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  const svp::package::EntityWriteSummary summary =
+      svp::package::write_entity_artifacts(staging_dir);
+
+  assert(summary.entities_written);
+  assert(summary.tracks_written);
+  assert(summary.entity_count == 0);
+  assert(summary.track_count == 0);
+
+  // Files should exist but be empty
+  assert(std::filesystem::exists(staging_dir / "entities" / "entities.jsonl"));
+  assert(std::filesystem::exists(staging_dir / "entities" / "entity_tracks.jsonl"));
+  assert(std::filesystem::file_size(staging_dir / "entities" / "entities.jsonl") == 0);
+  assert(std::filesystem::file_size(staging_dir / "entities" / "entity_tracks.jsonl") == 0);
+
+  // Processor should still be written
+  auto processors = read_jsonl_records(staging_dir / "provenance" / "processors.jsonl");
+  bool found_entity_proc = false;
+  for (const auto& proc : processors) {
+    if (proc.value("id", "") == "processor_entity_writer_0001") {
+      found_entity_proc = true;
+    }
+  }
+  assert(found_entity_proc);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_entity_writer_deterministic_ids() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-entity-writer-determinism-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir_1 = root / "staging1";
+  const std::filesystem::path staging_dir_2 = root / "staging2";
+
+  for (const auto& sd : {staging_dir_1, staging_dir_2}) {
+    std::filesystem::create_directories(sd / "text");
+    std::filesystem::create_directories(sd / "timeline");
+    std::filesystem::create_directories(sd / "provenance");
+
+    {
+      std::ofstream out(sd / "text" / "text_regions.jsonl");
+      out << nlohmann::json({
+          {"text_region_id", "tr_000001"},
+          {"start_us", 1000000},
+          {"end_us", 2000000},
+          {"confidence", 0.9}
+      }).dump() << "\n";
+      out << nlohmann::json({
+          {"text_region_id", "tr_000002"},
+          {"start_us", 3000000},
+          {"end_us", 4000000},
+          {"confidence", 0.8}
+      }).dump() << "\n";
+    }
+    {
+      std::ofstream out(sd / "text" / "text_observations.jsonl");
+      out << nlohmann::json({
+          {"text_observation_id", "tobs_000001"},
+          {"text_region_id", "tr_000001"},
+          {"normalized_text", "WORLD"}
+      }).dump() << "\n";
+      out << nlohmann::json({
+          {"text_observation_id", "tobs_000002"},
+          {"text_region_id", "tr_000002"},
+          {"normalized_text", "WORLD"}
+      }).dump() << "\n";
+    }
+    {
+      std::ofstream out(sd / "timeline" / "shots.jsonl");
+      out << nlohmann::json({
+          {"id", "shot_000001"},
+          {"start_us", 0},
+          {"end_us", 5000000}
+      }).dump() << "\n";
+    }
+  }
+
+  const auto summary1 = svp::package::write_entity_artifacts(staging_dir_1);
+  const auto summary2 = svp::package::write_entity_artifacts(staging_dir_2);
+
+  assert(summary1.entity_count == summary2.entity_count);
+  assert(summary1.track_count == summary2.track_count);
+
+  auto entities1 = read_jsonl_records(staging_dir_1 / "entities" / "entities.jsonl");
+  auto entities2 = read_jsonl_records(staging_dir_2 / "entities" / "entities.jsonl");
+  assert(entities1.size() == entities2.size());
+  for (std::size_t i = 0; i < entities1.size(); ++i) {
+    assert(entities1[i].value("id", "") == entities2[i].value("id", ""));
+    assert(entities1[i].value("first_seen_us", -1) == entities2[i].value("first_seen_us", -1));
+    assert(entities1[i].value("last_seen_us", -1) == entities2[i].value("last_seen_us", -1));
+  }
+
+  auto tracks1 = read_jsonl_records(staging_dir_1 / "entities" / "entity_tracks.jsonl");
+  auto tracks2 = read_jsonl_records(staging_dir_2 / "entities" / "entity_tracks.jsonl");
+  assert(tracks1.size() == tracks2.size());
+  for (std::size_t i = 0; i < tracks1.size(); ++i) {
+    assert(tracks1[i].value("id", "") == tracks2[i].value("id", ""));
+    assert(tracks1[i].value("entity_id", "") == tracks2[i].value("entity_id", ""));
+  }
+
+  std::filesystem::remove_all(root);
+}
+
+void test_entity_writer_no_dangling_refs() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-entity-writer-dangling-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "text");
+  std::filesystem::create_directories(staging_dir / "timeline");
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  // Write text regions with frame references
+  {
+    std::ofstream out(staging_dir / "text" / "text_regions.jsonl");
+    out << nlohmann::json({
+        {"text_region_id", "tr_000001"},
+        {"start_us", 1000000},
+        {"end_us", 2000000},
+        {"confidence", 0.9},
+        {"frame_start", "frame_000001"},
+        {"frame_end", "frame_000002"}
+    }).dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "text" / "text_observations.jsonl");
+    out << nlohmann::json({
+        {"text_observation_id", "tobs_000001"},
+        {"text_region_id", "tr_000001"},
+        {"normalized_text", "TEST"}
+    }).dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "timeline" / "shots.jsonl");
+    out << nlohmann::json({
+        {"id", "shot_000001"},
+        {"start_us", 0},
+        {"end_us", 5000000}
+    }).dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "timeline" / "frames.jsonl");
+    out << nlohmann::json({
+        {"id", "frame_000001"},
+        {"frame_index", 0},
+        {"pts_us", 1000000}
+    }).dump() << "\n";
+    out << nlohmann::json({
+        {"id", "frame_000002"},
+        {"frame_index", 1},
+        {"pts_us", 2000000}
+    }).dump() << "\n";
+  }
+
+  const svp::package::EntityWriteSummary summary =
+      svp::package::write_entity_artifacts(staging_dir);
+
+  assert(summary.entity_count == 1);
+  assert(summary.track_count == 1);
+
+  auto tracks = read_jsonl_records(staging_dir / "entities" / "entity_tracks.jsonl");
+  assert(tracks.size() == 1);
+  // Track should have frame references from the text region
+  assert(tracks[0].value("start_frame_id", "") == "frame_000001");
+  assert(tracks[0].value("end_frame_id", "") == "frame_000002");
+
+  // Verify entity track references resolve: track.entity_id must match entity.id
+  auto entities = read_jsonl_records(staging_dir / "entities" / "entities.jsonl");
+  assert(entities.size() == 1);
+  assert(tracks[0].value("entity_id", "") == entities[0].value("id", ""));
+
+  // Verify entity.track_ids must contain the track id
+  bool track_found = false;
+  for (const auto& tid : entities[0]["track_ids"]) {
+    if (tid == tracks[0].value("id", "")) {
+      track_found = true;
+    }
+  }
+  assert(track_found);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_entity_writer_multiple_groups() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-entity-writer-multi-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "text");
+  std::filesystem::create_directories(staging_dir / "timeline");
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  {
+    std::ofstream out(staging_dir / "text" / "text_regions.jsonl");
+    out << nlohmann::json({
+        {"text_region_id", "tr_000001"},
+        {"start_us", 1000000},
+        {"end_us", 2000000},
+        {"confidence", 0.9}
+    }).dump() << "\n";
+    out << nlohmann::json({
+        {"text_region_id", "tr_000002"},
+        {"start_us", 3000000},
+        {"end_us", 4000000},
+        {"confidence", 0.8}
+    }).dump() << "\n";
+    out << nlohmann::json({
+        {"text_region_id", "tr_000003"},
+        {"start_us", 5000000},
+        {"end_us", 6000000},
+        {"confidence", 0.7}
+    }).dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "text" / "text_observations.jsonl");
+    out << nlohmann::json({
+        {"text_observation_id", "tobs_000001"},
+        {"text_region_id", "tr_000001"},
+        {"normalized_text", "AAA"}
+    }).dump() << "\n";
+    out << nlohmann::json({
+        {"text_observation_id", "tobs_000002"},
+        {"text_region_id", "tr_000002"},
+        {"normalized_text", "BBB"}
+    }).dump() << "\n";
+    out << nlohmann::json({
+        {"text_observation_id", "tobs_000003"},
+        {"text_region_id", "tr_000003"},
+        {"normalized_text", "AAA"}
+    }).dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "timeline" / "shots.jsonl");
+    out << nlohmann::json({
+        {"id", "shot_000001"},
+        {"start_us", 0},
+        {"end_us", 10000000}
+    }).dump() << "\n";
+  }
+
+  const svp::package::EntityWriteSummary summary =
+      svp::package::write_entity_artifacts(staging_dir);
+
+  // Two groups: "AAA" (tr_000001 + tr_000003) and "BBB" (tr_000002)
+  assert(summary.entity_count == 2);
+  assert(summary.track_count == 2);
+
+  auto entities = read_jsonl_records(staging_dir / "entities" / "entities.jsonl");
+  assert(entities.size() == 2);
+
+  // First entity should be the one with earliest start_us
+  assert(entities[0].value("id", "") == "entity_000001");
+  assert(entities[0]["evidence"].value("normalized_text", "") == "AAA");
+  assert(entities[0]["evidence"]["region_ids"].size() == 2);
+
+  assert(entities[1].value("id", "") == "entity_000002");
+  assert(entities[1]["evidence"].value("normalized_text", "") == "BBB");
+  assert(entities[1]["evidence"]["region_ids"].size() == 1);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_entity_writer_missing_observations() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-entity-writer-missing-obs-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "text");
+  std::filesystem::create_directories(staging_dir / "timeline");
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  // Write text regions but NO text observations
+  {
+    std::ofstream out(staging_dir / "text" / "text_regions.jsonl");
+    out << nlohmann::json({
+        {"text_region_id", "tr_000001"},
+        {"start_us", 1000000},
+        {"end_us", 2000000},
+        {"confidence", 0.9}
+    }).dump() << "\n";
+  }
+
+  const svp::package::EntityWriteSummary summary =
+      svp::package::write_entity_artifacts(staging_dir);
+
+  // No observations means no evidence to group by — should produce empty entities
+  assert(summary.entity_count == 0);
+  assert(summary.track_count == 0);
+  assert(summary.skipped_missing_evidence > 0);
+
+  // Files should still exist
+  assert(std::filesystem::exists(staging_dir / "entities" / "entities.jsonl"));
+  assert(std::filesystem::exists(staging_dir / "entities" / "entity_tracks.jsonl"));
+
+  std::filesystem::remove_all(root);
+}
+
+void test_entity_writer_provenance_honest() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-entity-writer-provenance-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "text");
+  std::filesystem::create_directories(staging_dir / "timeline");
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  {
+    std::ofstream out(staging_dir / "text" / "text_regions.jsonl");
+    out << nlohmann::json({
+        {"text_region_id", "tr_000001"},
+        {"start_us", 1000000},
+        {"end_us", 2000000},
+        {"confidence", 0.9}
+    }).dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "text" / "text_observations.jsonl");
+    out << nlohmann::json({
+        {"text_observation_id", "tobs_000001"},
+        {"text_region_id", "tr_000001"},
+        {"normalized_text", "X"}
+    }).dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "timeline" / "shots.jsonl");
+    out << nlohmann::json({
+        {"id", "shot_000001"},
+        {"start_us", 0},
+        {"end_us", 5000000}
+    }).dump() << "\n";
+  }
+
+  (void)svp::package::write_entity_artifacts(staging_dir);
+
+  auto processors = read_jsonl_records(staging_dir / "provenance" / "processors.jsonl");
+  bool found_entity_proc = false;
+  for (const auto& proc : processors) {
+    if (proc.value("id", "") == "processor_entity_writer_0001") {
+      found_entity_proc = true;
+      assert(proc.contains("provenance_note"));
+      const std::string note = proc.value("provenance_note", "");
+      // Provenance must honestly state that no object recognition is used
+      assert(note.find("no object recognition") != std::string::npos ||
+             note.find("not") != std::string::npos);
+      assert(proc.contains("input_refs"));
+      assert(proc.contains("output_refs"));
+    }
+  }
+  assert(found_entity_proc);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_entity_writer_string_frame_id_validated() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-entity-writer-str-frame-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "text");
+  std::filesystem::create_directories(staging_dir / "timeline");
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  // Write timeline frames with known IDs
+  {
+    std::ofstream out(staging_dir / "timeline" / "frames.jsonl");
+    out << nlohmann::json({
+        {"id", "frame_000001"},
+        {"frame_index", 0},
+        {"pts_us", 1000000}
+    }).dump() << "\n";
+    out << nlohmann::json({
+        {"id", "frame_000002"},
+        {"frame_index", 1},
+        {"pts_us", 2000000}
+    }).dump() << "\n";
+  }
+
+  // Write text regions: one with a valid string frame ID, one with a fabricated one
+  {
+    std::ofstream out(staging_dir / "text" / "text_regions.jsonl");
+    out << nlohmann::json({
+        {"text_region_id", "tr_000001"},
+        {"start_us", 1000000},
+        {"end_us", 2000000},
+        {"confidence", 0.9},
+        {"frame_start", "frame_000001"},
+        {"frame_end", "frame_000002"}
+    }).dump() << "\n";
+    out << nlohmann::json({
+        {"text_region_id", "tr_000002"},
+        {"start_us", 3000000},
+        {"end_us", 4000000},
+        {"confidence", 0.8},
+        {"frame_start", "frame_FAKE_NOT_IN_TIMELINE"},
+        {"frame_end", "frame_ALSO_FAKE"}
+    }).dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "text" / "text_observations.jsonl");
+    out << nlohmann::json({
+        {"text_observation_id", "tobs_000001"},
+        {"text_region_id", "tr_000001"},
+        {"normalized_text", "VALID"}
+    }).dump() << "\n";
+    out << nlohmann::json({
+        {"text_observation_id", "tobs_000002"},
+        {"text_region_id", "tr_000002"},
+        {"normalized_text", "FAKE_FRAME"}
+    }).dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "timeline" / "shots.jsonl");
+    out << nlohmann::json({
+        {"id", "shot_000001"},
+        {"start_us", 0},
+        {"end_us", 5000000}
+    }).dump() << "\n";
+  }
+
+  const svp::package::EntityWriteSummary summary =
+      svp::package::write_entity_artifacts(staging_dir);
+
+  assert(summary.entity_count == 2);
+  assert(summary.track_count == 2);
+
+  auto tracks = read_jsonl_records(staging_dir / "entities" / "entity_tracks.jsonl");
+  assert(tracks.size() == 2);
+
+  // First track (VALID) should have frame IDs
+  assert(tracks[0].value("start_frame_id", "") == "frame_000001");
+  assert(tracks[0].value("end_frame_id", "") == "frame_000002");
+
+  // Second track (FAKE_FRAME) should NOT have frame IDs — they were unresolved
+  assert(!tracks[1].contains("start_frame_id"));
+  assert(!tracks[1].contains("end_frame_id"));
+
+  std::filesystem::remove_all(root);
+}
+
+void test_entity_writer_deterministic_tiebreakers() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-entity-writer-tiebreaker-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "text");
+  std::filesystem::create_directories(staging_dir / "timeline");
+  std::filesystem::create_directories(staging_dir / "provenance");
+
+  // Write timeline frames
+  {
+    std::ofstream out(staging_dir / "timeline" / "frames.jsonl");
+    out << nlohmann::json({
+        {"id", "frame_000001"},
+        {"frame_index", 0},
+        {"pts_us", 1000000}
+    }).dump() << "\n";
+  }
+
+  // Three text regions all with the SAME start_us but different text/IDs
+  {
+    std::ofstream out(staging_dir / "text" / "text_regions.jsonl");
+    out << nlohmann::json({
+        {"text_region_id", "tr_000003"},
+        {"start_us", 1000000},
+        {"end_us", 2000000},
+        {"confidence", 0.7}
+    }).dump() << "\n";
+    out << nlohmann::json({
+        {"text_region_id", "tr_000001"},
+        {"start_us", 1000000},
+        {"end_us", 2000000},
+        {"confidence", 0.9}
+    }).dump() << "\n";
+    out << nlohmann::json({
+        {"text_region_id", "tr_000002"},
+        {"start_us", 1000000},
+        {"end_us", 2000000},
+        {"confidence", 0.8}
+    }).dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "text" / "text_observations.jsonl");
+    out << nlohmann::json({
+        {"text_observation_id", "tobs_000001"},
+        {"text_region_id", "tr_000001"},
+        {"normalized_text", "CCC"}
+    }).dump() << "\n";
+    out << nlohmann::json({
+        {"text_observation_id", "tobs_000002"},
+        {"text_region_id", "tr_000002"},
+        {"normalized_text", "AAA"}
+    }).dump() << "\n";
+    out << nlohmann::json({
+        {"text_observation_id", "tobs_000003"},
+        {"text_region_id", "tr_000003"},
+        {"normalized_text", "BBB"}
+    }).dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "timeline" / "shots.jsonl");
+    out << nlohmann::json({
+        {"id", "shot_000001"},
+        {"start_us", 0},
+        {"end_us", 5000000}
+    }).dump() << "\n";
+  }
+
+  // Build twice to verify determinism
+  const std::filesystem::path staging_dir_2 = root / "staging2";
+  std::filesystem::create_directories(staging_dir_2 / "text");
+  std::filesystem::create_directories(staging_dir_2 / "timeline");
+  std::filesystem::create_directories(staging_dir_2 / "provenance");
+  std::filesystem::copy(
+      staging_dir / "text" / "text_regions.jsonl",
+      staging_dir_2 / "text" / "text_regions.jsonl",
+      std::filesystem::copy_options::overwrite_existing);
+  std::filesystem::copy(
+      staging_dir / "text" / "text_observations.jsonl",
+      staging_dir_2 / "text" / "text_observations.jsonl",
+      std::filesystem::copy_options::overwrite_existing);
+  std::filesystem::copy(
+      staging_dir / "timeline" / "frames.jsonl",
+      staging_dir_2 / "timeline" / "frames.jsonl",
+      std::filesystem::copy_options::overwrite_existing);
+  std::filesystem::copy(
+      staging_dir / "timeline" / "shots.jsonl",
+      staging_dir_2 / "timeline" / "shots.jsonl",
+      std::filesystem::copy_options::overwrite_existing);
+
+  const auto summary1 = svp::package::write_entity_artifacts(staging_dir);
+  const auto summary2 = svp::package::write_entity_artifacts(staging_dir_2);
+
+  assert(summary1.entity_count == 3);
+  assert(summary2.entity_count == 3);
+
+  auto entities1 = read_jsonl_records(staging_dir / "entities" / "entities.jsonl");
+  auto entities2 = read_jsonl_records(staging_dir_2 / "entities" / "entities.jsonl");
+  assert(entities1.size() == 3);
+  assert(entities2.size() == 3);
+
+  // All three groups have the same start_us (1000000).
+  // Tie-breaker is normalized_text, so order should be AAA, BBB, CCC.
+  assert(entities1[0].value("id", "") == "entity_000001");
+  assert(entities1[0]["evidence"].value("normalized_text", "") == "AAA");
+  assert(entities1[1].value("id", "") == "entity_000002");
+  assert(entities1[1]["evidence"].value("normalized_text", "") == "BBB");
+  assert(entities1[2].value("id", "") == "entity_000003");
+  assert(entities1[2]["evidence"].value("normalized_text", "") == "CCC");
+
+  // Verify both builds produce identical IDs
+  for (std::size_t i = 0; i < entities1.size(); ++i) {
+    assert(entities1[i].value("id", "") == entities2[i].value("id", ""));
+  }
+
+  auto tracks1 = read_jsonl_records(staging_dir / "entities" / "entity_tracks.jsonl");
+  auto tracks2 = read_jsonl_records(staging_dir_2 / "entities" / "entity_tracks.jsonl");
+  for (std::size_t i = 0; i < tracks1.size(); ++i) {
+    assert(tracks1[i].value("id", "") == tracks2[i].value("id", ""));
+    assert(tracks1[i].value("entity_id", "") == tracks2[i].value("entity_id", ""));
+  }
+
+  std::filesystem::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
@@ -1302,6 +1996,15 @@ int main() {
   test_timeline_writer();
   test_validation_report_storage();
   test_package_skeleton_includes_placeholders_and_validation_report();
+  test_entity_writer_basic();
+  test_entity_writer_empty_input();
+  test_entity_writer_deterministic_ids();
+  test_entity_writer_no_dangling_refs();
+  test_entity_writer_multiple_groups();
+  test_entity_writer_missing_observations();
+  test_entity_writer_provenance_honest();
+  test_entity_writer_string_frame_id_validated();
+  test_entity_writer_deterministic_tiebreakers();
   std::cout << "All svp-package-tests passed!\n";
   return 0;
 }

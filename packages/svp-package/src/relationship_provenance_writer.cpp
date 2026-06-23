@@ -120,6 +120,8 @@ struct KnownIds {
   std::set<std::string> frame_ids;
   std::set<std::string> shot_ids;
   std::set<std::string> scene_ids;
+  std::set<std::string> entity_ids;
+  std::set<std::string> track_ids;
   std::set<std::string> processor_ids;
 };
 
@@ -196,6 +198,16 @@ KnownIds collect_known_ids(const std::filesystem::path& staging_dir) {
   for (const auto& rec : read_jsonl(staging_dir / "timeline" / "scenes.jsonl")) {
     const std::string id = string_value(rec, "id");
     if (!id.empty()) ids.scene_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "entities" / "entities.jsonl")) {
+    const std::string id = string_value(rec, "id");
+    if (!id.empty()) ids.entity_ids.insert(id);
+  }
+
+  for (const auto& rec : read_jsonl(staging_dir / "entities" / "entity_tracks.jsonl")) {
+    const std::string id = string_value(rec, "id");
+    if (!id.empty()) ids.track_ids.insert(id);
   }
 
   for (const auto& rec : read_jsonl(staging_dir / "provenance" / "processors.jsonl")) {
