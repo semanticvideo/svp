@@ -259,7 +259,10 @@ TranscriptWriteResult write_transcript_artifacts(const AsrExecutionBoundary& bou
     for (std::size_t i = 0; i < boundary.reconciled_words.size(); ++i) {
       const AsrWord& w = boundary.reconciled_words[i];
       std::string word_speaker_id = "speaker_unknown";
-      if (boundary.one_speaker_mode) {
+      if (i < boundary.word_speaker_assignments.size() &&
+          !boundary.word_speaker_assignments[i].empty()) {
+        word_speaker_id = boundary.word_speaker_assignments[i];
+      } else if (boundary.one_speaker_mode) {
         word_speaker_id = "speaker_0001";
       } else if (!boundary.speaker_segments.empty()) {
         const SpeakerSegment* best_seg = nullptr;

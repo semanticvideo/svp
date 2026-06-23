@@ -1,5 +1,6 @@
 #pragma once
 
+#include "svp/audio/asr_chunk_planner.hpp"
 #include "svp/audio/transcript_records.hpp"
 
 #include <filesystem>
@@ -31,6 +32,9 @@ struct SherpaDiarizationResult {
   std::vector<ClusterMergeDecision> merge_decisions;
   std::string reconciliation_method;
   std::vector<std::string> blockers;
+  std::vector<std::vector<float>> cluster_centroids;
+  std::vector<int32_t> cluster_ids_for_centroids;
+  std::map<int32_t, int32_t> cluster_to_final;
 };
 
 struct ReconciliationResult {
@@ -47,6 +51,12 @@ struct ReconciliationResult {
 [[nodiscard]] SherpaDiarizationResult run_sherpa_diarization(
     const std::filesystem::path& wav_path,
     const std::filesystem::path& model_dir);
+
+[[nodiscard]] std::vector<std::string> refine_word_speakers_by_embedding(
+    const std::filesystem::path& wav_path,
+    const std::filesystem::path& model_dir,
+    const std::vector<AsrWord>& words,
+    const SherpaDiarizationResult& diar_result);
 
 [[nodiscard]] bool is_sherpa_diarization_available();
 

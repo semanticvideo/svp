@@ -483,6 +483,19 @@ int main(int argc, char** argv) {
         }
         asr_with_diar.speaker_segments = std::move(diar_boundary.speaker_segments);
 
+        if (diar_boundary.diarization_status == svp::audio::DiarizationStatus::ran &&
+            !asr_with_diar.reconciled_words.empty()) {
+          const std::filesystem::path wav_path =
+              staging_dir / "media/audio/analysis_mono_16k.wav";
+          const std::filesystem::path diar_model_dir =
+              model_cache_root / diar_boundary.model_id;
+          asr_with_diar.word_speaker_assignments =
+              svp::audio::refine_word_speakers_by_embedding(
+                  wav_path, diar_model_dir,
+                  asr_with_diar.reconciled_words,
+                  diar_boundary.raw_diar_result);
+        }
+
         const svp::audio::TranscriptWriteResult transcript_result =
             svp::audio::write_transcript_artifacts(asr_with_diar, staging_dir);
 

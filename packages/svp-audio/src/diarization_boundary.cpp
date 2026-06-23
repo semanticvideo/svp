@@ -259,6 +259,8 @@ DiarizationExecutionBoundary execute_diarization_boundary(
   }
   boundary.merge_decisions_json = merge_decisions_json;
 
+  boundary.raw_diar_result = std::move(diar_result);
+
   return boundary;
 }
 
