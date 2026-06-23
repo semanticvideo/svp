@@ -84,15 +84,22 @@ struct EntityGroup {
   std::vector<TextRegionInfo> regions;
 };
 
-std::map<std::int64_t, std::string> build_frame_index_to_id_map(
-    const std::filesystem::path& staging_dir) {
-  std::map<std::int64_t, std::string> result;
+struct FrameIdLookup {
+  std::map<std::int64_t, std::string> index_to_id;
+  std::set<std::string> known_ids;
+};
+
+FrameIdLookup build_frame_id_lookup(const std::filesystem::path& staging_dir) {
+  FrameIdLookup result;
   const auto frames = read_jsonl(staging_dir / "timeline" / "frames.jsonl");
   for (const auto& frame : frames) {
     const std::string id = string_value(frame, "id");
+    if (!id.empty()) {
+      result.known_ids.insert(id);
+    }
     const auto idx_it = frame.find("frame_index");
     if (!id.empty() && idx_it != frame.end() && idx_it->is_number_integer()) {
-      result[idx_it->get<std::int64_t>()] = id;
+      result.index_to_id[idx_it->get<std::int64_t>()] = id;
     }
   }
   return result;
@@ -100,17 +107,21 @@ std::map<std::int64_t, std::string> build_frame_index_to_id_map(
 
 std::string resolve_frame_ref(const nlohmann::json& record,
                               const char* key,
-                              const std::map<std::int64_t, std::string>& frame_index_to_id) {
+                              const FrameIdLookup& frame_lookup) {
   const auto it = record.find(key);
   if (it == record.end() || it->is_null()) {
     return {};
   }
   if (it->is_string()) {
-    return it->get<std::string>();
+    const std::string id = it->get<std::string>();
+    if (frame_lookup.known_ids.count(id) > 0) {
+      return id;
+    }
+    return {};
   }
   if (it->is_number_integer()) {
-    const auto map_it = frame_index_to_id.find(it->get<std::int64_t>());
-    if (map_it != frame_index_to_id.end()) {
+    const auto map_it = frame_lookup.index_to_id.find(it->get<std::int64_t>());
+    if (map_it != frame_lookup.index_to_id.end()) {
       return map_it->second;
     }
   }
@@ -136,7 +147,7 @@ std::vector<EntityGroup> group_text_regions(
     std::size_t& skipped_missing_evidence) {
   const auto text_regions = read_jsonl(staging_dir / "text" / "text_regions.jsonl");
   const auto region_to_text = build_region_to_text_map(staging_dir);
-  const auto frame_index_to_id = build_frame_index_to_id_map(staging_dir);
+  const auto frame_lookup = build_frame_id_lookup(staging_dir);
 
   std::map<std::string, EntityGroup> groups_by_text;
 
@@ -160,8 +171,8 @@ std::vector<EntityGroup> group_text_regions(
     info.confidence = confidence_value_or_one(region);
     info.shot_id = string_value(region, "shot_id");
     info.scene_id = string_value(region, "scene_id");
-    info.frame_start = resolve_frame_ref(region, "frame_start", frame_index_to_id);
-    info.frame_end = resolve_frame_ref(region, "frame_end", frame_index_to_id);
+    info.frame_start = resolve_frame_ref(region, "frame_start", frame_lookup);
+    info.frame_end = resolve_frame_ref(region, "frame_end", frame_lookup);
 
     if (region.contains("bbox_norm") && region["bbox_norm"].is_array()) {
       for (const auto& val : region["bbox_norm"]) {
@@ -180,17 +191,24 @@ std::vector<EntityGroup> group_text_regions(
     group.normalized_text = text;
     std::sort(group.regions.begin(), group.regions.end(),
               [](const TextRegionInfo& a, const TextRegionInfo& b) {
-                return a.start_us < b.start_us;
+                if (a.start_us != b.start_us) {
+                  return a.start_us < b.start_us;
+                }
+                return a.text_region_id < b.text_region_id;
               });
     groups.push_back(std::move(group));
   }
 
   std::sort(groups.begin(), groups.end(),
             [](const EntityGroup& a, const EntityGroup& b) {
-              if (a.regions.empty() || b.regions.empty()) {
-                return a.normalized_text < b.normalized_text;
+              const std::int64_t a_start =
+                  a.regions.empty() ? 0 : a.regions[0].start_us;
+              const std::int64_t b_start =
+                  b.regions.empty() ? 0 : b.regions[0].start_us;
+              if (a_start != b_start) {
+                return a_start < b_start;
               }
-              return a.regions[0].start_us < b.regions[0].start_us;
+              return a.normalized_text < b.normalized_text;
             });
 
   return groups;
