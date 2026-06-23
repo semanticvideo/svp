@@ -11,6 +11,7 @@
 #include "svp/vision/foundation_color_staging.hpp"
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
+#include <zip.h>
 
 #include <cassert>
 #include <filesystem>
@@ -1976,6 +1977,70 @@ void test_entity_writer_deterministic_tiebreakers() {
   std::filesystem::remove_all(root);
 }
 
+void test_media_original_entries_use_zip_cm_store() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-package-media-store-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path package_path = root / "output.svp";
+  const std::filesystem::path staging_dir = root / "staging";
+  const std::filesystem::path source_path = root / "input.mov";
+
+  std::filesystem::create_directories(staging_dir);
+
+  // Create mock source media file
+  {
+    std::ofstream out(source_path);
+    out << "mock media content for store test\n";
+  }
+
+  nlohmann::json manifest = {
+    {"svp_version", "1.0-rc.2"},
+    {"package_id", "svp_test_store_pkg"},
+    {"created_utc", "2026-06-20T00:00:00Z"},
+    {"primary_media_id", "media_000001"},
+    {"timebase", {
+      {"unit", "microseconds"},
+      {"origin", "primary_presentation_start"},
+      {"source_timebase_mode", "exact_rational"},
+      {"rounding", "round_half_to_even"}
+    }}
+  };
+
+  bool success = svp::package::write_package_skeleton(
+      package_path, staging_dir, source_path, manifest);
+  assert(success);
+
+  // Open the ZIP and verify media/original entry uses STORE
+  int error_code = ZIP_ER_OK;
+  zip_t* archive = zip_open(package_path.string().c_str(), ZIP_RDONLY, &error_code);
+  assert(archive != nullptr);
+
+  const auto num_entries = zip_get_num_entries(archive, 0);
+  bool found_media_original = false;
+  for (zip_int64_t i = 0; i < num_entries; ++i) {
+    zip_stat_t stat;
+    zip_stat_init(&stat);
+    if (zip_stat_index(archive, static_cast<zip_uint64_t>(i), 0, &stat) != 0) {
+      continue;
+    }
+    if (stat.name == nullptr) {
+      continue;
+    }
+    std::string name(stat.name);
+    if (name.rfind("media/original/", 0) == 0) {
+      found_media_original = true;
+      assert((stat.valid & ZIP_STAT_COMP_METHOD) != 0);
+      assert(stat.comp_method == ZIP_CM_STORE);
+    }
+  }
+  assert(found_media_original);
+
+  zip_close(archive);
+  std::filesystem::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
@@ -2005,6 +2070,7 @@ int main() {
   test_entity_writer_provenance_honest();
   test_entity_writer_string_frame_id_validated();
   test_entity_writer_deterministic_tiebreakers();
+  test_media_original_entries_use_zip_cm_store();
   std::cout << "All svp-package-tests passed!\n";
   return 0;
 }

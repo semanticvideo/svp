@@ -612,7 +612,8 @@ Required package compression rules:
 3. The SVP binary block payload inside those files MUST use the compression declared in the SVP block header. RC1 defines Zstandard as compression code `0x01`.
 4. JSON, JSONL, and manifest entries MAY use ordinary ZIP compression.
 5. `index/index.sqlite` SHOULD use ZIP method `STORE` so readers can extract or memory-map it without redundant decompression.
-6. A file whose bytes begin with the SVP binary block magic `SVPB` MUST NOT use a `.zst` extension.
+6. `media/original/*` SHOULD use ZIP method `STORE`. Already-compressed media formats (MP4, MOV, FLAC, etc.) gain negligible size from Deflate, and STORED entries enable `zip_fseek` random access for streaming readers that read media directly from the ZIP without extracting to disk.
+7. A file whose bytes begin with the SVP binary block magic `SVPB` MUST NOT use a `.zst` extension.
 
 Large depth, mask, and embedding payloads are therefore not plain Zstandard files. They are SVP block streams whose payload sections are Zstandard-compressed.
 
