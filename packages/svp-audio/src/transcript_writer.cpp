@@ -17,6 +17,8 @@
 namespace svp::audio {
 namespace {
 
+constexpr std::int64_t speaker_assignment_tolerance_us = 500000;
+
 void write_json_file(const std::filesystem::path& path, const nlohmann::json& value) {
   std::filesystem::create_directories(path.parent_path());
   std::ofstream output(path);
@@ -130,7 +132,7 @@ nlohmann::json ran_transcript_json(const AsrExecutionBoundary& boundary,
            : "diarization_assigned"},
       {"speaker_note", boundary.diarization_status == "fallback_one_speaker"
            ? "Single speaker assigned without diarization. All words have speaker_id speaker_0001. This is fallback behavior, not speaker recognition."
-           : "Speaker IDs assigned by diarization processor."},
+           : "Speaker IDs assigned by max interval overlap with nearest-segment fallback (500ms tolerance). Words outside all segments and tolerance are marked speaker_unknown."},
   };
 
   return {
@@ -256,22 +258,43 @@ TranscriptWriteResult write_transcript_artifacts(const AsrExecutionBoundary& bou
     std::map<std::string, std::vector<TimeSpan>> speaker_intervals;
     for (std::size_t i = 0; i < boundary.reconciled_words.size(); ++i) {
       const AsrWord& w = boundary.reconciled_words[i];
-      std::string word_speaker_id = "speaker_0001";
-      if (!boundary.one_speaker_mode && !boundary.speaker_segments.empty()) {
-        const std::int64_t word_mid = (w.start_us + w.end_us) / 2;
+      std::string word_speaker_id = "speaker_unknown";
+      if (boundary.one_speaker_mode) {
+        word_speaker_id = "speaker_0001";
+      } else if (!boundary.speaker_segments.empty()) {
         const SpeakerSegment* best_seg = nullptr;
-        std::int64_t best_duration = std::numeric_limits<std::int64_t>::max();
+        std::int64_t best_overlap = 0;
         for (const SpeakerSegment& seg : boundary.speaker_segments) {
-          if (word_mid >= seg.timing.start_us && word_mid < seg.timing.end_us) {
-            std::int64_t dur = seg.timing.end_us - seg.timing.start_us;
-            if (dur < best_duration) {
-              best_duration = dur;
-              best_seg = &seg;
-            }
+          std::int64_t overlap = std::min(w.end_us, seg.timing.end_us) -
+                                 std::max(w.start_us, seg.timing.start_us);
+          if (overlap > best_overlap) {
+            best_overlap = overlap;
+            best_seg = &seg;
           }
         }
         if (best_seg) {
           word_speaker_id = best_seg->speaker_id;
+        } else {
+          const std::int64_t word_mid = (w.start_us + w.end_us) / 2;
+          const SpeakerSegment* nearest_seg = nullptr;
+          std::int64_t nearest_dist = std::numeric_limits<std::int64_t>::max();
+          for (const SpeakerSegment& seg : boundary.speaker_segments) {
+            std::int64_t dist;
+            if (word_mid < seg.timing.start_us) {
+              dist = seg.timing.start_us - word_mid;
+            } else if (word_mid >= seg.timing.end_us) {
+              dist = word_mid - seg.timing.end_us;
+            } else {
+              dist = 0;
+            }
+            if (dist < nearest_dist) {
+              nearest_dist = dist;
+              nearest_seg = &seg;
+            }
+          }
+          if (nearest_seg && nearest_dist <= speaker_assignment_tolerance_us) {
+            word_speaker_id = nearest_seg->speaker_id;
+          }
         }
       }
       speaker_intervals[word_speaker_id].push_back({w.start_us, w.end_us});
@@ -304,6 +327,9 @@ TranscriptWriteResult write_transcript_artifacts(const AsrExecutionBoundary& bou
       std::set<std::string> unique_speaker_ids;
       for (const SpeakerSegment& seg : boundary.speaker_segments) {
         unique_speaker_ids.insert(seg.speaker_id);
+      }
+      for (const auto& [sid, intervals] : speaker_intervals) {
+        unique_speaker_ids.insert(sid);
       }
       std::vector<nlohmann::json> speaker_records;
       int speaker_number = 1;
