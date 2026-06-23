@@ -740,30 +740,30 @@ std::vector<std::string> refine_word_speakers_by_embedding(
     const std::vector<AsrWord>& words,
     const SherpaDiarizationResult& diar_result) {
 
-  std::vector<std::string> assignments(words.size(), "speaker_unknown");
-
+  // Return empty on failure paths so the caller falls back to
+  // segment-overlap assignment instead of overriding with speaker_unknown.
   if (words.empty() || diar_result.cluster_centroids.empty()) {
-    return assignments;
+    return {};
   }
 
   const SherpaDiarizationApi& api = get_api();
   if (!api.lib_handle || !api.emb_create) {
-    return assignments;
+    return {};
   }
 
   const std::filesystem::path embedding_model =
       model_dir / "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx";
   if (!std::filesystem::exists(embedding_model)) {
-    return assignments;
+    return {};
   }
 
   std::vector<float> samples;
   try {
     samples = read_pcm_s16le_mono_wav_samples(wav_path);
   } catch (...) {
-    return assignments;
+    return {};
   }
-  if (samples.empty()) return assignments;
+  if (samples.empty()) return {};
 
   const std::string emb_path = embedding_model.string();
   SherpaOnnxSpeakerEmbeddingExtractorConfig emb_config;
@@ -774,13 +774,13 @@ std::vector<std::string> refine_word_speakers_by_embedding(
   emb_config.provider = "cpu";
 
   const void* extractor = api.emb_create(&emb_config);
-  if (!extractor) return assignments;
+  if (!extractor) return {};
 
   const int32_t embedding_dim = api.emb_dim(extractor);
 
   if (diar_result.cluster_centroids.empty()) {
     api.emb_destroy(extractor);
-    return assignments;
+    return {};
   }
 
   // Compute embeddings for each diarization segment (full segment, no splitting).
@@ -827,7 +827,7 @@ std::vector<std::string> refine_word_speakers_by_embedding(
 
   api.emb_destroy(extractor);
 
-  if (sub_segs.empty()) return assignments;
+  if (sub_segs.empty()) return {};
 
   // Agglomerative clustering with largest-gap separation.
   // Merge clusters bottom-up, tracking the similarity at each merge.
@@ -910,28 +910,38 @@ std::vector<std::string> refine_word_speakers_by_embedding(
   }
 
   // Find the largest gap in merge similarities to determine the cut point.
-  // merge_sims is in order of merging (descending since we always merge
-  // the most similar pair first). The largest gap indicates where
-  // intra-speaker merges end and inter-speaker merges begin.
-  // merge_sims[0..cut_idx] are intra-speaker merges (keep merged),
-  // merge_sims[cut_idx+1..] are inter-speaker merges (don't merge).
-  std::size_t cut_idx = 0;  // default: don't merge anything (all separate)
+  // merge_sims is in descending order (most similar merge first). The largest
+  // gap between consecutive merge sims indicates where intra-speaker merges
+  // end and inter-speaker merges begin.
+  // num_merges = how many of the top merges to replay (intra-speaker only).
+  // We exclude the very last gap (after the second-to-last merge) because the
+  // final merge always has an artificially large gap — it merges the last
+  // two remaining clusters, which are naturally the most dissimilar.
+  std::size_t num_merges = 0;  // default: don't merge anything (all separate)
   if (merge_sims.size() > 1) {
     float largest_gap = 0.0f;
-    for (std::size_t i = 0; i + 1 < merge_sims.size(); ++i) {
+    std::size_t gap_idx = 0;
+    // Consider gaps 0..(merge_sims.size()-2), skipping only the last gap
+    std::size_t num_gaps = merge_sims.size() - 1;
+    // When there are 3+ merges, skip the last gap (it's artificial).
+    // With 2 merges (1 gap), still consider it.
+    std::size_t gaps_to_check = (num_gaps > 1) ? num_gaps - 1 : num_gaps;
+    for (std::size_t i = 0; i < gaps_to_check; ++i) {
       float gap = merge_sims[i] - merge_sims[i + 1];
       if (gap > largest_gap) {
         largest_gap = gap;
-        cut_idx = i;
+        gap_idx = i;
       }
     }
+    // Merges 0..gap_idx (inclusive) are intra-speaker
+    num_merges = gap_idx + 1;
     // If the largest gap is too small, treat all as one speaker
-    if (largest_gap < 0.15f) {
-      cut_idx = merge_sims.size() - 1;  // merge everything
+    if (largest_gap < 0.10f) {
+      num_merges = merge_sims.size();  // merge everything
     }
   }
 
-  // Re-run clustering but only merge up to cut_idx
+  // Re-run clustering but only perform num_merges intra-speaker merges
   std::iota(cluster_id.begin(), cluster_id.end(), 0);
   cluster_members.clear();
   cluster_centroids.clear();
@@ -940,7 +950,7 @@ std::vector<std::string> refine_word_speakers_by_embedding(
     cluster_centroids[cluster_id[i]] = sub_segs[i].embedding;
   }
 
-  for (std::size_t step = 0; step < cut_idx && cluster_members.size() > 1; ++step) {
+  for (std::size_t step = 0; step < num_merges && cluster_members.size() > 1; ++step) {
     float best_sim = -2.0f;
     int32_t best_c1 = -1, best_c2 = -1;
     for (auto it1 = cluster_members.begin(); it1 != cluster_members.end(); ++it1) {
@@ -976,6 +986,7 @@ std::vector<std::string> refine_word_speakers_by_embedding(
   }
 
   // Assign words to speakers based on sub-segments using max overlap
+  std::vector<std::string> assignments(words.size(), "speaker_unknown");
   for (std::size_t i = 0; i < words.size(); ++i) {
     std::int64_t w_start = words[i].start_us;
     std::int64_t w_end = words[i].end_us;
