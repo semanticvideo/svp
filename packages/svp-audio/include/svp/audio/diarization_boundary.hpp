@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/audio/asr_chunk_planner.hpp"
+#include "svp/audio/sherpa_diarization.hpp"
 #include "svp/audio/transcript_records.hpp"
 
 #include <cstddef>
@@ -37,6 +38,7 @@ struct DiarizationExecutionBoundary {
   int32_t preliminary_cluster_count = 0;
   nlohmann::json pairwise_similarity_matrix_json = nullptr;
   nlohmann::json merge_decisions_json = nullptr;
+  SherpaDiarizationResult raw_diar_result;
 };
 
 [[nodiscard]] bool check_diarization_model_in_cache(

@@ -49,6 +49,7 @@ struct AsrExecutionBoundary {
   std::vector<std::string> diarization_blockers;
   std::vector<SpeakerSegment> speaker_segments;
   std::vector<AsrWord> reconciled_words;
+  std::vector<std::string> word_speaker_assignments;
 };
 
 [[nodiscard]] bool check_asr_model_in_cache(
