@@ -45,15 +45,15 @@ Visible text and measured color distribution are observations, not labels. Examp
 
 ## What happens next
 
-The original phase plan got the project to a real 30-second video processing trial with valid `/text/` and `/colors/` Core sections. That milestone has now been reached in the implementation: real video packages can be validator-clean with OCR text, numeric values, color observations, depth, OCR evidence crops, OCR-derived embeddings, ONNX Whisper ASR transcript words, diarization, timeline artifacts, relationship records, SQLite index output, and stored validation reports when the local model cache and native tools are available.
+The original phase plan got the project to a real 30-second video processing trial with valid `/text/` and `/colors/` Core sections. That milestone has now been reached in the implementation: real video packages can be validator-clean with OCR text, numeric values, color observations, depth, OCR evidence crops, OCR-derived embeddings, ONNX Whisper ASR transcript words, diarization, timeline artifacts, visual entity tracks, spatial regions, mask block streams, relationship records, SQLite index output, and stored validation reports when the local model cache and native tools are available.
 
-Recent hardening has also fixed ASR full-chunk coverage, decoder-derived word confidence, speaker `total_speech_us`, ONNX Runtime/CoreML include portability, sherpa-onnx library discovery, and validator-visible diarization fallback behavior. `speakers.MOV` is again the 2-speaker diarization proof path when sherpa-onnx and the diarization model bundle are available.
+Recent hardening has also fixed ASR full-chunk coverage, decoder-derived word confidence, speaker `total_speech_us`, ONNX Runtime/CoreML include portability, sherpa-onnx library discovery, validator-visible diarization fallback behavior, and first-class unlabeled entity discovery from motion/depth evidence. `speakers.MOV` is again the 2-speaker diarization proof path when sherpa-onnx and the diarization model bundle are available.
 
 The next work is completion and hardening. It is still organized through the same phases, but the active backlog is now stackable lanes:
 
-1. Entity and entity-track artifacts.
+1. Deterministic visual-entity tracking fixtures for identity stability, crossing paths, occlusion, stop/resume behavior, and depth-only separation.
 2. Relationship traversal queries over timeline-backed graph output.
-3. Spatial regions and mask blocks.
+3. Mask-based spatial relationships such as overlaps, contains, and occludes.
 4. Timeline/scene quality hardening beyond sampled-frame interval evidence.
 5. Transcript chunk embeddings and vision embeddings.
 6. Strict validator/spec enforcement, including relationship, diarization, entity, and model-bundle checks.

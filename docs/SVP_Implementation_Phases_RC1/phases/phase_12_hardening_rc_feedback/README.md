@@ -2,7 +2,7 @@
 
 ## Phase purpose
 
-Use implementation results to identify true spec bugs, validator gaps, builder issues, and remaining reference-implementation gaps. This phase now starts after the repository has produced validator-clean real-video packages with OCR, color, depth, embeddings, evidence crops, and ONNX Whisper ASR. Phase 12 decides what must be completed for full RC2/reference conformance versus what belongs in post-RC2 quality hardening.
+Use implementation results to identify true spec bugs, validator gaps, builder issues, and remaining reference-implementation gaps. This phase now starts after the repository has produced validator-clean real-video packages with OCR, color, depth, embeddings, evidence crops, visual entity tracks, spatial regions, mask block streams, and ONNX Whisper ASR. Phase 12 decides what must be completed for full RC2/reference conformance versus what belongs in post-RC2 quality hardening.
 
 ## Prerequisites
 
@@ -16,7 +16,7 @@ implementation gap list
 validator gap list
 fixture gap list
 RC2 spec issue list
-post-PR51 completion backlog
+post-PR64 completion backlog
 parallelization plan
 v1.0 final or post-RC2 clarification recommendation
 ```
@@ -25,11 +25,12 @@ v1.0 final or post-RC2 clarification recommendation
 
 1. Review validator results, package contents, and human-baseline findings from the real video trials.
 2. Separate milestone-valid package behavior from full RC2/reference-builder conformance.
-3. Maintain the post-PR51 backlog in stackable lanes:
+3. Maintain the post-PR64 backlog in stackable lanes:
    - Query and inspection usability.
    - Speaker diarization and speaker embeddings.
-   - Visual tracks, spatial regions, and mask blocks.
-   - Relationship graph completion.
+   - Deterministic visual entity identity fixtures.
+   - Mask/depth-backed spatial relationships.
+   - Relationship graph traversal.
    - Transcript chunk embeddings and vision embeddings.
    - Strict validator/spec enforcement.
    - Canonical model-bundle BLAKE3 verification.

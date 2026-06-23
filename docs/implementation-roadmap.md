@@ -96,8 +96,9 @@ Builder responsibilities:
 - create transcript and word timestamps
 - detect speakers
 - detect shots/scenes
-- create tracks/spatial regions
+- create visual entity tracks/spatial regions from motion and depth evidence
 - create depth/mask/embedding blocks
+- preserve entity identity through deterministic tracker fixtures
 - create SQLite index
 - create index manifest
 - write package

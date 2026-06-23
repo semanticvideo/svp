@@ -56,6 +56,10 @@ cmake --build build
 - Entity track and region files exist.
 - Degenerate/static video produces valid empty tracks and near-uniform depth/mask behavior where appropriate.
 
+## Current landed status
+
+This phase now has first-class unlabeled visual entity tracking in the reference builder path. The tracker can derive entities from motion, discover static entities from depth discontinuities, avoid fake entities for flat depth/static sources, fuse motion and depth evidence into one entity/track, write spatial regions and mask block streams, and record candidate-source provenance. The next quality bar is deterministic identity fixtures for crossing paths, stop/resume, occlusion, same-RGB different-depth objects, shape changes, and mask/depth-backed spatial relationships.
+
 ## RC2 OCR and color delta
 
 Phase 09 now includes independent OCR and structured color builder stages:

@@ -66,7 +66,8 @@ That milestone is now met in principle by the actual pipeline: real sample video
 
 The current milestone is completion and hardening:
 
-- Fill missing entity/entity-track and mask/spatial-region layers.
+- Harden visual entity identity with deterministic fixtures for crossing paths, occlusion, stop/resume behavior, and depth-only separation.
 - Add relationship traversal queries.
-- Tighten validator coverage for diarization fallback, relationships, model identity, and package hygiene.
+- Add mask-based spatial relationships such as overlaps, contains, and occludes.
+- Tighten validator coverage for diarization fallback, relationships, model identity, visual entity artifacts, and package hygiene.
 - Improve OCR spacing/evidence verification, ASR confidence/alignment, scene/timeline quality, and model-bundle conformance.
