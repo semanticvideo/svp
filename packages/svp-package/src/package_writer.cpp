@@ -43,6 +43,9 @@ bool should_store_uncompressed(std::string_view name) {
   if (starts_with(name, "embeddings/") && ends_with(name, ".svpez")) {
     return true;
   }
+  if (starts_with(name, "media/original/")) {
+    return true;
+  }
   return false;
 }
 
