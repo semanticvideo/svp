@@ -18,8 +18,13 @@ namespace svp::models {
 
 #if defined(SVP_ONNX_RUNTIME_AVAILABLE)
 
+Ort::Env& shared_onnx_env() {
+  static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "svp-models");
+  return env;
+}
+
 struct OnnxSession::Impl {
-  Ort::Env env;
+  Ort::Env* env = &shared_onnx_env();
   Ort::Session session{nullptr};
   std::string model_id_value;
   std::string execution_provider_value;
@@ -27,8 +32,6 @@ struct OnnxSession::Impl {
   std::vector<std::string> output_names;
   std::vector<std::int64_t> input_shape;
   std::vector<std::int64_t> output_shape;
-
-  Impl() : env(ORT_LOGGING_LEVEL_WARNING, "svp-models") {}
 };
 
 OnnxSession::OnnxSession() : impl_(std::make_unique<Impl>()) {}
@@ -96,7 +99,7 @@ OnnxSession OnnxSession::load(const ModelBundleManifest& manifest,
   }
 #endif
 
-  result.impl_->session = Ort::Session(result.impl_->env,
+  result.impl_->session = Ort::Session(*result.impl_->env,
                                        model_file_path.string().c_str(),
                                        session_options);
 

@@ -9,6 +9,26 @@ find_library(BLAKE3_LIBRARY NAMES blake3 REQUIRED)
 find_package(onnxruntime CONFIG QUIET)
 if(onnxruntime_FOUND)
   set(SVP_MODEL_ONNX_RUNTIME_AVAILABLE TRUE)
+  # The Debug ONNX static archive trips its schema-registry assertion when
+  # loaded through ONNX Runtime; keep Debug app builds on the Release archives.
+  foreach(SVP_ONNX_TARGET
+      onnxruntime::onnxruntime_flatbuffers
+      onnxruntime::onnxruntime_common
+      onnxruntime::onnxruntime_mlas
+      onnxruntime::onnxruntime_graph
+      onnxruntime::onnxruntime_lora
+      onnxruntime::onnxruntime_framework
+      onnxruntime::onnxruntime_util
+      onnxruntime::onnxruntime_providers
+      onnxruntime::onnxruntime_optimizer
+      onnxruntime::onnxruntime_session
+      ONNX::onnx
+      ONNX::onnx_proto)
+    if(TARGET ${SVP_ONNX_TARGET})
+      set_property(TARGET ${SVP_ONNX_TARGET}
+                   PROPERTY MAP_IMPORTED_CONFIG_DEBUG Release)
+    endif()
+  endforeach()
 else()
   set(SVP_MODEL_ONNX_RUNTIME_AVAILABLE FALSE)
 endif()
