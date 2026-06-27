@@ -26,7 +26,7 @@ void write_foundation_color_staging_files(
 namespace svp::builder {
 
 void run_foundation_color_stage(BuildPipelineContext& context) {
-  const svp::vision::FoundationColorStagingArtifact color_artifact =
+  svp::vision::FoundationColorStagingArtifact color_artifact =
       svp::vision::build_real_frame_color_staging_artifact(
           context.plan, context.options.ffmpeg_path);
   write_foundation_color_staging_files(context.staging_dir, color_artifact);
@@ -36,6 +36,12 @@ void run_foundation_color_stage(BuildPipelineContext& context) {
 
   nlohmann::json color_json =
       svp::vision::foundation_color_staging_artifact_to_json(color_artifact);
+
+  for (auto& frame : color_artifact.sampling_input.frames) {
+    frame.pixels.clear();
+    frame.pixels.shrink_to_fit();
+  }
+
   color_json["staging_paths"] = {
       {"color_observations_jsonl",
        (context.staging_dir / "colors" / "color_observations.jsonl").string()},

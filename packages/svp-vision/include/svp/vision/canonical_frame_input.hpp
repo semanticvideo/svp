@@ -4,6 +4,7 @@
 #include "svp/vision/color_frame_sampling.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -78,5 +79,16 @@ struct DecodedCanonicalFrames {
     int target_width,
     int target_height,
     const std::vector<std::int64_t>& timestamps_us);
+
+// Decode frames at explicit timestamps and invoke on_frame for each decoded
+// frame without retaining decoded pixel buffers after the callback returns.
+// Metadata counters match decode_frames_at_timestamps.
+[[nodiscard]] DecodedCanonicalFrames decode_frames_at_timestamps_streaming(
+    const media::MediaIngestPlan& plan,
+    const std::filesystem::path& ffmpeg_path,
+    int target_width,
+    int target_height,
+    const std::vector<std::int64_t>& timestamps_us,
+    const std::function<void(const ColorRasterFrame&, std::size_t)>& on_frame);
 
 }  // namespace svp::vision

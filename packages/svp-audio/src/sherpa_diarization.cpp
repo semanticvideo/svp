@@ -17,6 +17,9 @@
 namespace svp::audio {
 namespace {
 
+constexpr int32_t kDiarizationSampleRate = 16000;
+constexpr int32_t kMaxDiarizationChunkSamples = kDiarizationSampleRate * 5;
+
 struct SherpaOnnxOfflineSpeakerDiarizationSegment {
   float start;
   float end;
@@ -613,33 +616,52 @@ SherpaDiarizationResult run_sherpa_diarization(
     return result;
   }
 
-  const void* diar_result = api.process(sd, samples.data(), static_cast<int32_t>(samples.size()));
-  if (!diar_result) {
-    result.blockers.push_back("sherpa-onnx diarization process returned null");
-    api.destroy(sd);
-    return result;
-  }
-
-  int32_t preliminary_speakers = api.get_num_speakers(diar_result);
-  const int32_t num_segments = api.get_num_segments(diar_result);
-
-  const SherpaOnnxOfflineSpeakerDiarizationSegment* seg_array =
-      reinterpret_cast<const SherpaOnnxOfflineSpeakerDiarizationSegment*>(
-          api.sort_by_start_time(diar_result));
-
   std::vector<SherpaDiarizationSegment> preliminary_segments;
-  for (int32_t i = 0; i < num_segments; ++i) {
-    SherpaDiarizationSegment seg;
-    seg.start_sec = seg_array[i].start;
-    seg.end_sec = seg_array[i].end;
-    seg.speaker_id = seg_array[i].speaker;
-    preliminary_segments.push_back(seg);
+  int32_t preliminary_speakers = 0;
+  int32_t speaker_id_base = 0;
+
+  for (std::size_t sample_offset = 0; sample_offset < samples.size();
+       sample_offset += static_cast<std::size_t>(kMaxDiarizationChunkSamples)) {
+    const std::size_t remaining = samples.size() - sample_offset;
+    const int32_t chunk_samples = static_cast<int32_t>(
+        std::min<std::size_t>(remaining, kMaxDiarizationChunkSamples));
+
+    const void* diar_result =
+        api.process(sd, samples.data() + sample_offset, chunk_samples);
+    if (!diar_result) {
+      result.blockers.push_back("sherpa-onnx diarization process returned null");
+      api.destroy(sd);
+      return result;
+    }
+
+    const int32_t chunk_speakers = api.get_num_speakers(diar_result);
+    const int32_t num_segments = api.get_num_segments(diar_result);
+    const float chunk_start_sec =
+        static_cast<float>(sample_offset) / static_cast<float>(kDiarizationSampleRate);
+
+    const SherpaOnnxOfflineSpeakerDiarizationSegment* seg_array =
+        reinterpret_cast<const SherpaOnnxOfflineSpeakerDiarizationSegment*>(
+            api.sort_by_start_time(diar_result));
+
+    int32_t max_chunk_speaker = -1;
+    for (int32_t i = 0; i < num_segments; ++i) {
+      SherpaDiarizationSegment seg;
+      seg.start_sec = chunk_start_sec + seg_array[i].start;
+      seg.end_sec = chunk_start_sec + seg_array[i].end;
+      seg.speaker_id = speaker_id_base + seg_array[i].speaker;
+      max_chunk_speaker = std::max(max_chunk_speaker, seg_array[i].speaker);
+      preliminary_segments.push_back(seg);
+    }
+
+    api.destroy_segment(seg_array);
+    api.destroy_result(diar_result);
+
+    speaker_id_base += std::max(chunk_speakers, max_chunk_speaker + 1);
   }
 
-  api.destroy_segment(seg_array);
-  api.destroy_result(diar_result);
   api.destroy(sd);
 
+  preliminary_speakers = speaker_id_base;
   result.preliminary_cluster_count = preliminary_speakers;
 
   if (preliminary_segments.empty()) {

@@ -394,21 +394,6 @@ OcrGenerationResult generate_ocr_observations(
   result.ocr_frame_input_available =
       frame_input.decoding_succeeded && !frame_input.frames.empty();
 
-  // Decode higher-resolution frames for OCR using temporal sampling
-  DecodedCanonicalFrames ocr_frames;
-  bool using_high_res_frames = false;
-  if (options.media_plan != nullptr &&
-      options.ocr_frame_width > 0 && options.ocr_frame_height > 0) {
-    ocr_frames = decode_ocr_frames_temporal(options, result.temporal_sampling);
-    if (ocr_frames.decoding_succeeded && !ocr_frames.frames.empty()) {
-      using_high_res_frames = true;
-      result.ocr_frame_input_available = true;
-    }
-  }
-
-  const DecodedCanonicalFrames& effective_frames =
-      using_high_res_frames ? ocr_frames : frame_input;
-
   // If PP-OCR is not available, report honest blocker
   if (!result.ocr_available) {
     result.blocker = pp_ocr_session.blocker;
@@ -444,14 +429,30 @@ OcrGenerationResult generate_ocr_observations(
     return result;
   }
 
+  bool use_streamed_high_res_frames = false;
+  DecodedCanonicalFrames streamed_frame_status;
+  if (options.media_plan != nullptr &&
+      options.ocr_frame_width > 0 && options.ocr_frame_height > 0) {
+    const std::int64_t duration_us =
+        compute_media_duration_us(*options.media_plan);
+    result.temporal_sampling =
+        compute_ocr_temporal_timestamps(duration_us, options.sampling_config);
+    if (!result.temporal_sampling.timestamps_us.empty()) {
+      use_streamed_high_res_frames = true;
+    } else {
+      streamed_frame_status.decoding_attempted = false;
+      streamed_frame_status.skipped_reason =
+          "no OCR temporal timestamps computed (duration unknown?)";
+    }
+  }
   // If frames are not available, report blocker
-  if (!result.ocr_frame_input_available) {
-    if (!effective_frames.decoding_attempted) {
+  if (!use_streamed_high_res_frames && !result.ocr_frame_input_available) {
+    if (!frame_input.decoding_attempted) {
       result.blocker = "Frame decoding was not attempted; OCR is blocked: " +
-          effective_frames.skipped_reason;
-    } else if (!effective_frames.decoding_succeeded) {
+          frame_input.skipped_reason;
+    } else if (!frame_input.decoding_succeeded) {
       result.blocker = "Frame decoding failed; OCR is blocked: " +
-          effective_frames.skipped_reason;
+          frame_input.skipped_reason;
     } else {
       result.blocker = "No decoded frames available for OCR";
     }
@@ -494,10 +495,17 @@ OcrGenerationResult generate_ocr_observations(
   std::vector<nlohmann::json> frame_diagnostics;
   bool any_frame_failed = false;
   std::string failure_reason_details;
+  int processed_frame_count = 0;
+  int processed_frame_width = 0;
+  int processed_frame_height = 0;
 
-  for (std::size_t frame_idx = 0; frame_idx < effective_frames.frames.size(); ++frame_idx) {
-    const ColorRasterFrame& frame = effective_frames.frames[frame_idx];
-
+  auto process_ocr_frame = [&](const ColorRasterFrame& frame,
+                               std::size_t frame_idx) {
+    ++processed_frame_count;
+    if (processed_frame_width == 0 && processed_frame_height == 0) {
+      processed_frame_width = frame.width;
+      processed_frame_height = frame.height;
+    }
     if (frame.width <= 0 || frame.height <= 0 || frame.pixels.empty()) {
       nlohmann::json diag = {
           {"frame_id", sanitize_utf8(frame.frame_id)},
@@ -511,7 +519,7 @@ OcrGenerationResult generate_ocr_observations(
       if (failure_reason_details.empty()) {
         failure_reason_details = sanitize_utf8("Invalid frame data for " + frame.frame_id);
       }
-      continue;
+      return;
     }
 
     PpOcrFrameResult ocr_result;
@@ -531,7 +539,7 @@ OcrGenerationResult generate_ocr_observations(
       if (failure_reason_details.empty()) {
         failure_reason_details = sanitize_utf8("PP-OCR failed on frame " + frame.frame_id + ": " + e.what());
       }
-      continue;
+      return;
     }
 
     nlohmann::json diag = {
@@ -544,7 +552,7 @@ OcrGenerationResult generate_ocr_observations(
     };
     frame_diagnostics.push_back(diag);
 
-    if (ocr_result.detections.empty()) continue;
+    if (ocr_result.detections.empty()) return;
 
     for (const auto& det : ocr_result.detections) {
       if (det.bbox_right <= det.bbox_left || det.bbox_bottom <= det.bbox_top) continue;
@@ -563,6 +571,74 @@ OcrGenerationResult generate_ocr_observations(
       fdet.bbox_bottom = det.bbox_bottom;
       all_detections.push_back(std::move(fdet));
     }
+  };
+
+  if (use_streamed_high_res_frames) {
+    streamed_frame_status = decode_frames_at_timestamps_streaming(
+        *options.media_plan,
+        options.ffmpeg_path,
+        options.ocr_frame_width,
+        options.ocr_frame_height,
+        result.temporal_sampling.timestamps_us,
+        process_ocr_frame);
+    result.ocr_frame_input_available =
+        streamed_frame_status.decoding_succeeded &&
+        streamed_frame_status.frames_decoded > 0;
+  } else {
+    for (std::size_t frame_idx = 0; frame_idx < frame_input.frames.size(); ++frame_idx) {
+      process_ocr_frame(frame_input.frames[frame_idx], frame_idx);
+    }
+    result.ocr_frame_input_available =
+        frame_input.decoding_succeeded && !frame_input.frames.empty();
+    processed_frame_count = static_cast<int>(frame_input.frames.size());
+    if (!frame_input.frames.empty()) {
+      processed_frame_width = frame_input.frames[0].width;
+      processed_frame_height = frame_input.frames[0].height;
+    }
+  }
+
+  if (!result.ocr_frame_input_available) {
+    const DecodedCanonicalFrames& failed_frames =
+        use_streamed_high_res_frames ? streamed_frame_status : frame_input;
+    if (!failed_frames.decoding_attempted) {
+      result.blocker = "Frame decoding was not attempted; OCR is blocked: " +
+          failed_frames.skipped_reason;
+    } else if (!failed_frames.decoding_succeeded) {
+      result.blocker = "Frame decoding failed; OCR is blocked: " +
+          failed_frames.skipped_reason;
+    } else {
+      result.blocker = "No decoded frames available for OCR";
+    }
+    result.text_absence.schema_version = "svp-text-absence-v1";
+    result.text_absence.ocr_required = true;
+    result.text_absence.ocr_completed = false;
+    result.text_absence.reason = "processor_failed";
+    result.text_absence.provenance_id = "processor_ocr_detector_0001";
+    result.processors.push_back(make_ocr_processor_provenance(
+        "processor_ocr_detector_0001", "ocr_detector",
+        "svp-vision-pp-ocr-v1", "onnxruntime",
+        "not_executed", result.blocker));
+    result.processors.push_back(make_ocr_processor_provenance(
+        "processor_ocr_recognizer_0001", "ocr_recognizer",
+        "svp-vision-pp-ocr-v1", "onnxruntime",
+        "not_executed", result.blocker));
+    result.processors.push_back(make_ocr_processor_provenance(
+        "processor_numeric_parser_0001", "numeric_parser",
+        "svp-vision-ocr-generation-v1", "deterministic_cpp",
+        "not_run", "No OCR text to parse"));
+
+    if (!result.processors.empty()) {
+      result.processors[0]["temporal_sampling"] =
+          ocr_temporal_sampling_result_to_json(result.temporal_sampling);
+    }
+
+    write_failure_stage_files(staging_dir, result.text_absence);
+    result.text_regions_written = true;
+    result.text_observations_written = true;
+    result.numeric_values_written = true;
+    result.text_absence_written = true;
+
+    return result;
   }
 
   // Surface any failure as a blocker
@@ -633,8 +709,7 @@ OcrGenerationResult generate_ocr_observations(
   }
 
   // Phase 2: Reconcile detections across frames
-  const int total_frames = static_cast<int>(effective_frames.frames.size());
-  auto reconciled = reconcile_detections(all_detections, total_frames);
+  auto reconciled = reconcile_detections(all_detections, processed_frame_count);
 
   // Phase 3: Emit reconciled observations as records
   int region_counter = 0;
@@ -816,11 +891,11 @@ OcrGenerationResult generate_ocr_observations(
       "svp-vision-pp-ocr-v1", "onnxruntime",
       "completed",
       "Text detection via PP-OCR ONNX (DB post-processing) on " +
-          std::to_string(effective_frames.frames.size()) +
+          std::to_string(processed_frame_count) +
           " decoded frame(s) at " +
-          std::to_string(effective_frames.frames.empty() ? 0 : effective_frames.frames[0].width) +
+          std::to_string(processed_frame_width) +
           "x" +
-          std::to_string(effective_frames.frames.empty() ? 0 : effective_frames.frames[0].height) +
+          std::to_string(processed_frame_height) +
           " resolution; collected " +
           std::to_string(all_detections.size()) + " per-frame detection(s)");
   detector_proc["model_refs"] = detector_model_refs;
