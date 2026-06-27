@@ -29,10 +29,13 @@ struct AsrChunkPlanResult {
   std::vector<std::string> blockers;
 };
 
+inline constexpr std::int64_t kDefaultAsrChunkDurationUs = 15000000;
+inline constexpr std::int64_t kDefaultAsrChunkOverlapUs = 2000000;
+
 [[nodiscard]] AsrChunkPlanResult build_asr_chunk_plan(
     std::int64_t total_duration_us,
-    std::int64_t chunk_duration_us = 30000000,
-    std::int64_t overlap_us = 2000000,
+    std::int64_t chunk_duration_us = kDefaultAsrChunkDurationUs,
+    std::int64_t overlap_us = kDefaultAsrChunkOverlapUs,
     const std::string& input_ref = "media/audio/analysis_mono_16k.wav",
     const std::string& model_id = "model_whisper_small_en",
     const std::string& runtime = "onnxruntime");
