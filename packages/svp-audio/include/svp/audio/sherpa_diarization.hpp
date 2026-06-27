@@ -28,6 +28,7 @@ struct SherpaDiarizationResult {
   int32_t preliminary_cluster_count = 0;
   int32_t final_speaker_count = 0;
   std::vector<SherpaDiarizationSegment> segments;
+  std::vector<SherpaDiarizationSegment> preliminary_segments;
   std::vector<std::vector<float>> pairwise_similarity_matrix;
   std::vector<ClusterMergeDecision> merge_decisions;
   std::string reconciliation_method;
