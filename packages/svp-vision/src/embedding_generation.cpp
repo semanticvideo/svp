@@ -292,10 +292,27 @@ EmbeddingGenerationResult generate_embedding_blocks(
 
   std::string model_blake3 = manifest.bundle_blake3.hex_value();
 
-  std::vector<std::vector<float>> all_embeddings;
-  std::vector<std::string> processed_ids;
-  std::vector<std::string> processed_input_refs;
-  std::vector<std::string> processed_input_kinds;
+  const std::filesystem::path emb_blocks_path =
+      staging_dir / "embeddings" / "embeddings.blocks.svpez";
+  const std::filesystem::path emb_blocks_tmp_path =
+      staging_dir / "embeddings" / "embeddings.blocks.svpez.tmp";
+  const std::filesystem::path emb_index_path =
+      staging_dir / "embeddings" / "embeddings.index.jsonl";
+  const std::filesystem::path emb_sets_path =
+      staging_dir / "embeddings" / "embedding_sets.json";
+  std::filesystem::create_directories(emb_blocks_path.parent_path());
+
+  std::ofstream block_out(emb_blocks_tmp_path, std::ios::binary);
+  if (!block_out) {
+    result.blocker = "Failed to open embedding blocks temp file: " +
+        emb_blocks_tmp_path.string();
+    result.processor_provenance = make_embedding_processor_provenance(
+        manifest.model_id, manifest.model_bundle_id,
+        options.execution_provider, "error", result.blocker);
+    return result;
+  }
+
+  std::vector<nlohmann::json> index_entries;
 
   for (const auto& text_input : text_inputs) {
     TokenizedText tokenized = tokenizer.tokenize(text_input.text, 512);
@@ -404,34 +421,6 @@ EmbeddingGenerationResult generate_embedding_blocks(
       return result;
     }
 
-    all_embeddings.push_back(std::move(embedding));
-    processed_ids.push_back(text_input.id);
-    processed_input_refs.push_back(text_input.input_ref);
-    processed_input_kinds.push_back(text_input.input_kind);
-  }
-
-  if (all_embeddings.empty()) {
-    result.blocker = "No valid embeddings were generated from text observations";
-    result.processor_provenance = make_embedding_processor_provenance(
-        manifest.model_id, manifest.model_bundle_id,
-        options.execution_provider, "not_run", result.blocker);
-    return result;
-  }
-
-  const std::filesystem::path emb_blocks_path =
-      staging_dir / "embeddings" / "embeddings.blocks.svpez";
-  const std::filesystem::path emb_index_path =
-      staging_dir / "embeddings" / "embeddings.index.jsonl";
-  const std::filesystem::path emb_sets_path =
-      staging_dir / "embeddings" / "embedding_sets.json";
-  std::filesystem::create_directories(emb_blocks_path.parent_path());
-
-  std::vector<std::byte> block_stream;
-  std::vector<nlohmann::json> index_entries;
-
-  for (std::size_t i = 0; i < all_embeddings.size(); ++i) {
-    const auto& embedding = all_embeddings[i];
-
     svp::blocks::BlockWriteSpec spec;
     spec.block_type = svp::blocks::BlockType::embedding;
     spec.extent_0 = 1;
@@ -445,13 +434,13 @@ EmbeddingGenerationResult generate_embedding_blocks(
 
     svp::blocks::WrittenBlockInfo block_info;
     try {
-      block_info = svp::blocks::write_block(
-          block_stream, spec,
+      block_info = svp::blocks::write_block_to_stream(
+          block_out, spec,
           reinterpret_cast<const std::byte*>(embedding.data()),
           embedding.size() * sizeof(float));
     } catch (const std::exception& e) {
       result.blocker = std::string("Failed to write embedding block for ") +
-          processed_ids[i] + ": " + e.what();
+          text_input.id + ": " + e.what();
       result.processor_provenance = make_embedding_processor_provenance(
           manifest.model_id, manifest.model_bundle_id,
           options.execution_provider, "error", result.blocker);
@@ -462,14 +451,14 @@ EmbeddingGenerationResult generate_embedding_blocks(
     const std::string block_hex = hash_to_hex(block_info.header_blake3);
 
     EmbeddingEntry entry;
-    entry.id = "embed_" + processed_ids[i];
+    entry.id = "embed_" + text_input.id;
     entry.set_id = "embedset_text_nomic_v15";
     entry.model_id = manifest.model_id;
     entry.model_bundle_id = manifest.model_bundle_id;
     entry.model_blake3 = model_blake3;
     entry.dim = options.embedding_dim;
     entry.normalization = "l2";
-    entry.input_ref = processed_input_refs[i];
+    entry.input_ref = text_input.input_ref;
     entry.block_file = "embeddings/embeddings.blocks.svpez";
     entry.block_offset = block_info.block_offset;
     entry.block_length = block_info.block_length;
@@ -478,20 +467,21 @@ EmbeddingGenerationResult generate_embedding_blocks(
     entry.compressed_size = block_info.compressed_size;
     entry.payload_blake3 = payload_hex;
     entry.block_blake3 = block_hex;
+    const std::size_t vector_index = result.entries.size();
     result.entries.push_back(entry);
 
     index_entries.push_back({
         {"id", entry.id},
         {"embedding_set_id", entry.set_id},
         {"input_ref", entry.input_ref},
-        {"input_kind", processed_input_kinds[i]},
+        {"input_kind", text_input.input_kind},
         {"block_file", entry.block_file},
         {"block_offset", entry.block_offset},
         {"block_length", entry.block_length},
         {"payload_offset", entry.payload_offset},
         {"uncompressed_size", entry.uncompressed_size},
         {"compressed_size", entry.compressed_size},
-        {"vector_index", i},
+        {"vector_index", vector_index},
         {"dimension", entry.dim},
         {"dtype", "float32"},
         {"payload_blake3", entry.payload_blake3},
@@ -499,25 +489,25 @@ EmbeddingGenerationResult generate_embedding_blocks(
     });
   }
 
-  {
-    std::ofstream out(emb_blocks_path, std::ios::binary);
-    if (!out) {
-      result.blocker = "Failed to open embedding blocks file: " + emb_blocks_path.string();
-      result.processor_provenance = make_embedding_processor_provenance(
-          manifest.model_id, manifest.model_bundle_id,
-          options.execution_provider, "error", result.blocker);
-      return result;
-    }
-    out.write(reinterpret_cast<const char*>(block_stream.data()),
-              static_cast<std::streamsize>(block_stream.size()));
-    if (!out) {
-      result.blocker = "Failed to write embedding blocks file: " + emb_blocks_path.string();
-      result.processor_provenance = make_embedding_processor_provenance(
-          manifest.model_id, manifest.model_bundle_id,
-          options.execution_provider, "error", result.blocker);
-      return result;
-    }
+  if (result.entries.empty()) {
+    result.blocker = "No valid embeddings were generated from text observations";
+    result.processor_provenance = make_embedding_processor_provenance(
+        manifest.model_id, manifest.model_bundle_id,
+        options.execution_provider, "not_run", result.blocker);
+    return result;
   }
+
+  block_out.close();
+  if (!block_out) {
+    result.blocker = "Failed to finalize embedding blocks file: " +
+        emb_blocks_tmp_path.string();
+    result.processor_provenance = make_embedding_processor_provenance(
+        manifest.model_id, manifest.model_bundle_id,
+        options.execution_provider, "error", result.blocker);
+    return result;
+  }
+  std::filesystem::remove(emb_blocks_path);
+  std::filesystem::rename(emb_blocks_tmp_path, emb_blocks_path);
   result.embeddings_blocks_written = true;
 
   {

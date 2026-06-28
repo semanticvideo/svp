@@ -31,13 +31,19 @@ MaskWriteSummary write_masks(
 
   const std::filesystem::path index_path = spatial_dir / "masks.index.jsonl";
   const std::filesystem::path block_path = spatial_dir / "masks.blocks.svpmz";
+  const std::filesystem::path block_tmp_path = spatial_dir / "masks.blocks.svpmz.tmp";
 
   summary.masks_index_path = index_path.string();
   summary.masks_block_path = block_path.string();
   summary.mask_count = static_cast<int>(masks.size());
 
-  // Write all mask blocks to the block stream file
-  std::vector<std::byte> block_stream;
+  std::ofstream block_file;
+  if (!masks.empty()) {
+    block_file.open(block_tmp_path, std::ios::binary);
+    if (!block_file) {
+      return summary;
+    }
+  }
 
   for (const auto& mask : masks) {
     svp::blocks::BlockWriteSpec spec;
@@ -51,8 +57,8 @@ MaskWriteSummary write_masks(
     spec.start_us = mask.timestamp_us;
     spec.end_us = mask.timestamp_us;
 
-    auto block_info = svp::blocks::write_block(
-        block_stream, spec,
+    auto block_info = svp::blocks::write_block_to_stream(
+        block_file, spec,
         reinterpret_cast<const std::byte*>(mask.rle_data.data()),
         mask.rle_data.size());
 
@@ -99,11 +105,12 @@ MaskWriteSummary write_masks(
     summary.block_manifest_entries.push_back(block_entry);
   }
 
-  // Write block stream to file
-  if (!block_stream.empty()) {
-    std::ofstream block_file(block_path, std::ios::binary);
-    block_file.write(reinterpret_cast<const char*>(block_stream.data()),
-                     static_cast<std::streamsize>(block_stream.size()));
+  if (block_file.is_open()) {
+    block_file.close();
+  }
+  if (!masks.empty() && block_file) {
+    std::filesystem::remove(block_path);
+    std::filesystem::rename(block_tmp_path, block_path);
   }
 
   // Write index JSONL

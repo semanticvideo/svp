@@ -17,6 +17,12 @@
 namespace svp::audio {
 namespace {
 
+constexpr int32_t kDiarizationSampleRate = 16000;
+constexpr int32_t kMaxDiarizationChunkSamples = kDiarizationSampleRate * 5;
+constexpr std::int64_t kUtteranceGapThresholdUs = 750000;
+constexpr std::int64_t kUtterancePaddingUs = 150000;
+constexpr float kSameSpeakerSimilarityThreshold = 0.5f;
+
 struct SherpaOnnxOfflineSpeakerDiarizationSegment {
   float start;
   float end;
@@ -340,6 +346,12 @@ void normalize_embedding(std::vector<float>& v) {
   }
 }
 
+bool ends_utterance(const std::string& text) {
+  if (text.empty()) return false;
+  const char last = text.back();
+  return last == '.' || last == '?' || last == '!';
+}
+
 std::vector<float> compute_cluster_embedding(
     const SherpaDiarizationApi& api,
     const void* extractor,
@@ -448,8 +460,6 @@ ReconciliationResult reconcile_clusters(
   // Fixed similarity threshold for the single-pair case.
   // Below this, two clusters are clearly different speakers.
   // Above this, they are likely the same speaker and should merge.
-  const float kSinglePairThreshold = 0.5f;
-
   float merge_threshold = 0.0f;
   float largest_gap = 0.0f;
   int32_t gap_index = -1;
@@ -458,7 +468,7 @@ ReconciliationResult reconcile_clusters(
     // Single pair: use a fixed similarity threshold to decide merge vs split.
     // If similarity >= 0.5, merge (same speaker).
     // If similarity < 0.5, keep separate (different speakers).
-    if (pairs[0].sim >= kSinglePairThreshold) {
+    if (pairs[0].sim >= kSameSpeakerSimilarityThreshold) {
       merge_threshold = pairs[0].sim;  // will merge
       gap_index = 0;
     } else {
@@ -613,34 +623,54 @@ SherpaDiarizationResult run_sherpa_diarization(
     return result;
   }
 
-  const void* diar_result = api.process(sd, samples.data(), static_cast<int32_t>(samples.size()));
-  if (!diar_result) {
-    result.blockers.push_back("sherpa-onnx diarization process returned null");
-    api.destroy(sd);
-    return result;
-  }
-
-  int32_t preliminary_speakers = api.get_num_speakers(diar_result);
-  const int32_t num_segments = api.get_num_segments(diar_result);
-
-  const SherpaOnnxOfflineSpeakerDiarizationSegment* seg_array =
-      reinterpret_cast<const SherpaOnnxOfflineSpeakerDiarizationSegment*>(
-          api.sort_by_start_time(diar_result));
-
   std::vector<SherpaDiarizationSegment> preliminary_segments;
-  for (int32_t i = 0; i < num_segments; ++i) {
-    SherpaDiarizationSegment seg;
-    seg.start_sec = seg_array[i].start;
-    seg.end_sec = seg_array[i].end;
-    seg.speaker_id = seg_array[i].speaker;
-    preliminary_segments.push_back(seg);
+  int32_t preliminary_speakers = 0;
+  int32_t speaker_id_base = 0;
+
+  for (std::size_t sample_offset = 0; sample_offset < samples.size();
+       sample_offset += static_cast<std::size_t>(kMaxDiarizationChunkSamples)) {
+    const std::size_t remaining = samples.size() - sample_offset;
+    const int32_t chunk_samples = static_cast<int32_t>(
+        std::min<std::size_t>(remaining, kMaxDiarizationChunkSamples));
+
+    const void* diar_result =
+        api.process(sd, samples.data() + sample_offset, chunk_samples);
+    if (!diar_result) {
+      result.blockers.push_back("sherpa-onnx diarization process returned null");
+      api.destroy(sd);
+      return result;
+    }
+
+    const int32_t chunk_speakers = api.get_num_speakers(diar_result);
+    const int32_t num_segments = api.get_num_segments(diar_result);
+    const float chunk_start_sec =
+        static_cast<float>(sample_offset) / static_cast<float>(kDiarizationSampleRate);
+
+    const SherpaOnnxOfflineSpeakerDiarizationSegment* seg_array =
+        reinterpret_cast<const SherpaOnnxOfflineSpeakerDiarizationSegment*>(
+            api.sort_by_start_time(diar_result));
+
+    int32_t max_chunk_speaker = -1;
+    for (int32_t i = 0; i < num_segments; ++i) {
+      SherpaDiarizationSegment seg;
+      seg.start_sec = chunk_start_sec + seg_array[i].start;
+      seg.end_sec = chunk_start_sec + seg_array[i].end;
+      seg.speaker_id = speaker_id_base + seg_array[i].speaker;
+      max_chunk_speaker = std::max(max_chunk_speaker, seg_array[i].speaker);
+      preliminary_segments.push_back(seg);
+    }
+
+    api.destroy_segment(seg_array);
+    api.destroy_result(diar_result);
+
+    speaker_id_base += std::max(chunk_speakers, max_chunk_speaker + 1);
   }
 
-  api.destroy_segment(seg_array);
-  api.destroy_result(diar_result);
   api.destroy(sd);
 
+  preliminary_speakers = speaker_id_base;
   result.preliminary_cluster_count = preliminary_speakers;
+  result.preliminary_segments = preliminary_segments;
 
   if (preliminary_segments.empty()) {
     result.blockers.push_back("diarization produced no segments");
@@ -811,7 +841,12 @@ std::vector<std::string> refine_word_speakers_by_embedding(
     return emb;
   };
 
-  for (const auto& seg : diar_result.segments) {
+  const std::vector<SherpaDiarizationSegment>& diar_segments =
+      !diar_result.preliminary_segments.empty()
+          ? diar_result.preliminary_segments
+          : diar_result.segments;
+
+  for (const auto& seg : diar_segments) {
     int32_t start_sample = static_cast<int32_t>(seg.start_sec * 16000.0f);
     int32_t end_sample = static_cast<int32_t>(seg.end_sec * 16000.0f);
     if (start_sample < 0) start_sample = 0;
@@ -1021,6 +1056,114 @@ std::vector<std::string> refine_word_speakers_by_embedding(
       std::ostringstream sid;
       sid << "speaker_" << std::setw(4) << std::setfill('0') << (best_speaker + 1);
       assignments[i] = sid.str();
+    }
+  }
+
+  const bool has_unknown_assignment =
+      std::find(assignments.begin(), assignments.end(), "speaker_unknown") !=
+      assignments.end();
+
+  float max_pairwise_similarity = -2.0f;
+  for (std::size_t i = 0; i < diar_result.pairwise_similarity_matrix.size(); ++i) {
+    for (std::size_t j = i + 1; j < diar_result.pairwise_similarity_matrix[i].size(); ++j) {
+      max_pairwise_similarity =
+          std::max(max_pairwise_similarity, diar_result.pairwise_similarity_matrix[i][j]);
+    }
+  }
+  const bool likely_overmerged_single_speaker =
+      diar_result.final_speaker_count == 1 &&
+      max_pairwise_similarity > -2.0f &&
+      max_pairwise_similarity < kSameSpeakerSimilarityThreshold;
+
+  if (has_unknown_assignment &&
+      (diar_result.final_speaker_count > 1 || likely_overmerged_single_speaker)) {
+    struct UtteranceGroup {
+      std::size_t first_word = 0;
+      std::size_t last_word = 0;
+    };
+
+    std::vector<UtteranceGroup> groups;
+    std::size_t group_start = 0;
+    for (std::size_t i = 0; i < words.size(); ++i) {
+      const bool last_word = i + 1 == words.size();
+      const bool gap_after =
+          !last_word &&
+          words[i + 1].start_us - words[i].end_us > kUtteranceGapThresholdUs;
+      if (last_word || gap_after || ends_utterance(words[i].text)) {
+        groups.push_back({group_start, i});
+        group_start = i + 1;
+      }
+    }
+
+    if (groups.size() >= 2) {
+      std::vector<std::string> group_assignments(words.size(), "");
+      for (std::size_t group_index = 0; group_index < groups.size(); ++group_index) {
+        std::ostringstream sid;
+        sid << "speaker_" << std::setw(4) << std::setfill('0')
+            << (group_index + 1);
+        for (std::size_t word_index = groups[group_index].first_word;
+             word_index <= groups[group_index].last_word &&
+             word_index < group_assignments.size();
+             ++word_index) {
+          group_assignments[word_index] = sid.str();
+        }
+      }
+
+      const bool group_has_unknown =
+          std::any_of(group_assignments.begin(), group_assignments.end(),
+                      [](const std::string& sid) { return sid.empty(); });
+      if (!group_has_unknown) {
+        return group_assignments;
+      }
+    }
+
+    auto nearest_known_assignment = [&](std::size_t word_index,
+                                        std::size_t first_word,
+                                        std::size_t last_word) -> std::string {
+      std::string best;
+      std::size_t best_distance = std::numeric_limits<std::size_t>::max();
+      for (std::size_t i = first_word; i <= last_word && i < assignments.size(); ++i) {
+        if (assignments[i] == "speaker_unknown") continue;
+        const std::size_t distance =
+            (i > word_index) ? (i - word_index) : (word_index - i);
+        if (distance < best_distance) {
+          best_distance = distance;
+          best = assignments[i];
+        }
+      }
+      return best;
+    };
+
+    for (const UtteranceGroup& group : groups) {
+      for (std::size_t i = group.first_word;
+           i <= group.last_word && i < assignments.size();
+           ++i) {
+        if (assignments[i] != "speaker_unknown") continue;
+        const std::string speaker =
+            nearest_known_assignment(i, group.first_word, group.last_word);
+        if (!speaker.empty()) {
+          assignments[i] = speaker;
+        }
+      }
+    }
+
+    for (std::size_t i = 0; i < assignments.size(); ++i) {
+      if (assignments[i] != "speaker_unknown") continue;
+      const std::string speaker =
+          nearest_known_assignment(i, 0, assignments.empty() ? 0 : assignments.size() - 1);
+      if (!speaker.empty()) {
+        assignments[i] = speaker;
+      }
+    }
+  }
+
+  if (has_unknown_assignment &&
+      diar_result.final_speaker_count == 1 &&
+      !likely_overmerged_single_speaker) {
+    for (std::string& assignment : assignments) {
+      if (assignment == "speaker_unknown") {
+        assignment = "speaker_0001";
+      }
     }
   }
 

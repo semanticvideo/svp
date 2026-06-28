@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstring>
 #include <iostream>
+#include <sstream>
 #include <vector>
 
 namespace {
@@ -191,6 +192,49 @@ void test_multiple_blocks_in_stream() {
   std::cout << "test_multiple_blocks_in_stream: PASS\n";
 }
 
+void test_stream_writer_matches_vector_writer() {
+  const std::uint32_t width = 3;
+  const std::uint32_t height = 3;
+  const std::uint64_t payload_size = width * height * 2;
+
+  std::vector<std::byte> payload(payload_size);
+  for (std::size_t i = 0; i < payload.size(); ++i) {
+    payload[i] = std::byte{static_cast<std::uint8_t>((i * 7) % 251)};
+  }
+
+  BlockWriteSpec spec;
+  spec.block_type = BlockType::depth;
+  spec.extent_0 = width;
+  spec.extent_1 = height;
+  spec.extent_2 = 1;
+  spec.dtype = DType::uint16;
+  spec.start_frame = 2;
+  spec.frame_count = 1;
+  spec.start_us = 2000;
+  spec.end_us = 3000;
+
+  std::vector<std::byte> vector_stream;
+  const auto vector_info =
+      write_block(vector_stream, spec, payload.data(), payload.size());
+
+  std::stringstream stream;
+  const auto stream_info =
+      write_block_to_stream(stream, spec, payload.data(), payload.size());
+  const std::string stream_bytes = stream.str();
+
+  assert(stream_info.block_offset == vector_info.block_offset);
+  assert(stream_info.block_length == vector_info.block_length);
+  assert(stream_info.payload_offset == vector_info.payload_offset);
+  assert(stream_info.uncompressed_size == vector_info.uncompressed_size);
+  assert(stream_info.compressed_size == vector_info.compressed_size);
+  assert(stream_info.payload_blake3 == vector_info.payload_blake3);
+  assert(stream_info.header_blake3 == vector_info.header_blake3);
+  assert(stream_bytes.size() == vector_stream.size());
+  assert(std::memcmp(stream_bytes.data(), vector_stream.data(), vector_stream.size()) == 0);
+
+  std::cout << "test_stream_writer_matches_vector_writer: PASS\n";
+}
+
 void test_write_block_to_file() {
   const std::filesystem::path file_path =
       std::filesystem::temp_directory_path() / "svp-block-writer-test.svpdz";
@@ -230,6 +274,7 @@ int main() {
   test_round_trip_depth_block();
   test_round_trip_embedding_block();
   test_multiple_blocks_in_stream();
+  test_stream_writer_matches_vector_writer();
   test_write_block_to_file();
   std::cout << "All svp-blocks writer tests passed.\n";
   return 0;

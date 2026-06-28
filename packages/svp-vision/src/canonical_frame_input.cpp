@@ -287,4 +287,66 @@ DecodedCanonicalFrames decode_frames_at_timestamps(
   return result;
 }
 
+DecodedCanonicalFrames decode_frames_at_timestamps_streaming(
+    const media::MediaIngestPlan& plan,
+    const std::filesystem::path& ffmpeg_path,
+    int target_width,
+    int target_height,
+    const std::vector<std::int64_t>& timestamps_us,
+    const std::function<void(const ColorRasterFrame&, std::size_t)>& on_frame) {
+  DecodedCanonicalFrames result;
+
+  if (!ffmpeg_is_available(ffmpeg_path)) {
+    result.decoding_attempted = false;
+    result.skipped_reason = "ffmpeg not found at: " + ffmpeg_path.string();
+    return result;
+  }
+
+  const int width = target_width;
+  const int height = target_height;
+  if (width <= 0 || height <= 0) {
+    result.decoding_attempted = false;
+    result.skipped_reason = "target frame dimensions are not positive";
+    return result;
+  }
+
+  result.decoding_attempted = true;
+  result.frames_attempted = static_cast<int>(timestamps_us.size());
+
+  for (int i = 0; i < static_cast<int>(timestamps_us.size()); ++i) {
+    std::string decode_error;
+    std::vector<Srgb8Pixel> pixels = decode_frame_at(
+        ffmpeg_path,
+        plan.source_path,
+        timestamps_us[static_cast<std::size_t>(i)],
+        width,
+        height,
+        decode_error);
+    if (pixels.empty()) {
+      ++result.frames_missed;
+      if (result.skipped_reason.empty()) {
+        result.skipped_reason =
+            "frame miss at " +
+            std::to_string(timestamps_us[static_cast<std::size_t>(i)]) +
+            "us: " + decode_error;
+      }
+      continue;
+    }
+
+    ColorRasterFrame frame{
+        frame_id(result.frames_decoded),
+        timestamps_us[static_cast<std::size_t>(i)],
+        width,
+        height,
+        result.frames_decoded == 0,
+        std::move(pixels),
+    };
+    on_frame(frame, static_cast<std::size_t>(result.frames_decoded));
+    ++result.frames_decoded;
+  }
+
+  result.decoding_succeeded = result.frames_decoded > 0;
+  return result;
+}
+
 }  // namespace svp::vision

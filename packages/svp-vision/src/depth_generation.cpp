@@ -298,12 +298,23 @@ DepthGenerationResult generate_depth_blocks(
   // Write depth blocks to SVPB stream
   const std::filesystem::path depth_blocks_path =
       staging_dir / "spatial" / "depth.blocks.svpdz";
+  const std::filesystem::path depth_blocks_tmp_path =
+      staging_dir / "spatial" / "depth.blocks.svpdz.tmp";
   const std::filesystem::path depth_index_path =
       staging_dir / "spatial" / "depth.index.jsonl";
   std::filesystem::create_directories(depth_blocks_path.parent_path());
 
-  std::vector<std::byte> block_stream;
   std::vector<nlohmann::json> index_entries;
+
+  std::ofstream block_out(depth_blocks_tmp_path, std::ios::binary);
+  if (!block_out) {
+    result.blocker = "Failed to open depth blocks temp file: " +
+        depth_blocks_tmp_path.string();
+    result.processor_provenance = make_depth_processor_provenance(
+        manifest.model_id, manifest.model_bundle_id,
+        options.execution_provider, "error", result.blocker);
+    return result;
+  }
 
   for (std::size_t frame_idx = 0; frame_idx < options.frame_input.frames.size(); ++frame_idx) {
     const ColorRasterFrame& frame = options.frame_input.frames[frame_idx];
@@ -391,8 +402,8 @@ DepthGenerationResult generate_depth_blocks(
 
     svp::blocks::WrittenBlockInfo block_info;
     try {
-      block_info = svp::blocks::write_block(
-          block_stream, spec,
+      block_info = svp::blocks::write_block_to_stream(
+          block_out, spec,
           reinterpret_cast<const std::byte*>(depth_uint16.data()),
           depth_uint16.size() * sizeof(std::uint16_t));
     } catch (const std::exception& e) {
@@ -448,26 +459,17 @@ DepthGenerationResult generate_depth_blocks(
     });
   }
 
-  // Write block stream to file
-  {
-    std::ofstream out(depth_blocks_path, std::ios::binary);
-    if (!out) {
-      result.blocker = "Failed to open depth blocks file: " + depth_blocks_path.string();
-      result.processor_provenance = make_depth_processor_provenance(
-          manifest.model_id, manifest.model_bundle_id,
-          options.execution_provider, "error", result.blocker);
-      return result;
-    }
-    out.write(reinterpret_cast<const char*>(block_stream.data()),
-              static_cast<std::streamsize>(block_stream.size()));
-    if (!out) {
-      result.blocker = "Failed to write depth blocks file: " + depth_blocks_path.string();
-      result.processor_provenance = make_depth_processor_provenance(
-          manifest.model_id, manifest.model_bundle_id,
-          options.execution_provider, "error", result.blocker);
-      return result;
-    }
+  block_out.close();
+  if (!block_out) {
+    result.blocker = "Failed to finalize depth blocks file: " +
+        depth_blocks_tmp_path.string();
+    result.processor_provenance = make_depth_processor_provenance(
+        manifest.model_id, manifest.model_bundle_id,
+        options.execution_provider, "error", result.blocker);
+    return result;
   }
+  std::filesystem::remove(depth_blocks_path);
+  std::filesystem::rename(depth_blocks_tmp_path, depth_blocks_path);
   result.depth_blocks_written = true;
 
   // Write index JSONL

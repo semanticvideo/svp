@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <iosfwd>
 #include <vector>
 
 namespace svp::blocks {
@@ -38,6 +39,12 @@ struct WrittenBlockInfo {
 
 [[nodiscard]] WrittenBlockInfo write_block_to_file(
     const std::filesystem::path& file_path,
+    const BlockWriteSpec& spec,
+    const std::byte* uncompressed_payload,
+    std::uint64_t uncompressed_size);
+
+[[nodiscard]] WrittenBlockInfo write_block_to_stream(
+    std::ostream& output_stream,
     const BlockWriteSpec& spec,
     const std::byte* uncompressed_payload,
     std::uint64_t uncompressed_size);

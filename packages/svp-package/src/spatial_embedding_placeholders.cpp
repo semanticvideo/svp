@@ -336,12 +336,9 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
         }
       }
 
-      // Extract depth data from depth result if available
-      std::vector<std::uint16_t> depth_data = depth_result.raw_depth_data;
-
       auto tracker_result = svp::vision::run_visual_entity_tracker(
           decoded_frames.frames,
-          depth_data,
+          depth_result.raw_depth_data,
           depth_frame_ids,
           shot_boundaries,
           model_cache_root,
@@ -352,6 +349,11 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
           staging_dir, tracker_result);
       summary.masks_index_written = visual_entity_summary.masks_written;
       summary.masks_blocks_written = visual_entity_summary.masks_written;
+
+      depth_result.raw_depth_data.clear();
+      depth_result.raw_depth_data.shrink_to_fit();
+      decoded_frames.frames.clear();
+      decoded_frames.frames.shrink_to_fit();
     }
 
     if (!summary.masks_index_written) {
