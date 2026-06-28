@@ -673,7 +673,10 @@ SherpaDiarizationResult run_sherpa_diarization(
   result.preliminary_segments = preliminary_segments;
 
   if (preliminary_segments.empty()) {
-    result.blockers.push_back("diarization produced no segments");
+    result.ran = true;
+    result.segments.clear();
+    result.final_speaker_count = 0;
+    result.reconciliation_method = "no_speech_detected";
     return result;
   }
 

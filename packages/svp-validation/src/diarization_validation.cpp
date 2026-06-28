@@ -63,7 +63,8 @@ void add_diarization_findings_impl(ValidationReport& report,
                                      "Speaker diarization did not run. Speaker count is "
                                      "unverified fallback, not real diarization. Install "
                                      "sherpa-onnx and rebuild."));
-  } else if (diarization_status == "unavailable" || speaker_count == 0) {
+  } else if (diarization_status == "unavailable" ||
+             (speaker_count == 0 && diarization_status != "ran")) {
     add_finding(report, make_finding(registry, kCodeDiarizationUnavailable,
                                      "/transcript/transcript.json",
                                      "Speaker diarization is unavailable. Package does not "

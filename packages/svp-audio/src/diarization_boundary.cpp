@@ -202,7 +202,7 @@ DiarizationExecutionBoundary execute_diarization_boundary(
   SherpaDiarizationResult diar_result =
       run_sherpa_diarization(wav_path, model_dir);
 
-  if (!diar_result.ran || diar_result.segments.empty()) {
+  if (!diar_result.ran) {
     for (const auto& blocker : diar_result.blockers) {
       boundary.blockers.push_back(blocker);
     }
