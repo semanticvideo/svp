@@ -1179,6 +1179,63 @@ void test_blocked_asr_with_fallback_segments_does_not_create_dangling_speaker_se
   std::filesystem::remove_all(root);
 }
 
+void test_transcript_writer_ran_with_zero_speakers_and_zero_words() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-diar-ran-zero-speakers-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  svp::audio::AsrExecutionBoundary boundary =
+      svp::audio::build_asr_execution_boundary(plan, true, true, true, true);
+  boundary.asr_status = svp::audio::AsrStatus::ran;
+  boundary.reconciled_word_count = 0;
+  boundary.speaker_count = 0;
+  boundary.one_speaker_mode = false;
+  boundary.diarization_status = "ran";
+
+  const svp::audio::TranscriptWriteResult result =
+      svp::audio::write_transcript_artifacts(boundary, root);
+
+  assert(result.transcript_written);
+  assert(result.transcript_status == "ran");
+  assert(result.word_count == 0);
+  assert(result.speaker_count == 0);
+
+  {
+    std::ifstream input(root / "transcript/transcript.json");
+    const nlohmann::json transcript = nlohmann::json::parse(input);
+    assert(transcript["diarization"]["status"] == "ran");
+    assert(transcript["speaker_count"] == 0);
+    assert(transcript["word_count"] == 0);
+  }
+
+  {
+    std::ifstream input(root / "transcript/words.jsonl");
+    std::string content((std::istreambuf_iterator<char>(input)),
+                         std::istreambuf_iterator<char>());
+    assert(content.empty());
+  }
+
+  {
+    std::ifstream input(root / "transcript/speakers.jsonl");
+    std::string content((std::istreambuf_iterator<char>(input)),
+                         std::istreambuf_iterator<char>());
+    assert(content.empty());
+  }
+
+  {
+    std::ifstream input(root / "transcript/speaker_segments.jsonl");
+    std::string content((std::istreambuf_iterator<char>(input)),
+                         std::istreambuf_iterator<char>());
+    assert(content.empty());
+  }
+
+  std::filesystem::remove_all(root);
+}
+
 void test_fallback_provenance_distinguishes_model_missing_from_inference_not_wired() {
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "svp-diar-provenance-wording-test";
@@ -1934,6 +1991,7 @@ int main() {
   test_transcript_writer_blocked_includes_diarization_provenance();
   test_blocked_asr_with_fallback_segments_does_not_create_dangling_speaker_segments();
   test_fallback_provenance_distinguishes_model_missing_from_inference_not_wired();
+  test_transcript_writer_ran_with_zero_speakers_and_zero_words();
 
   // Reconciliation tests
   test_reconcile_single_pair_low_similarity_keeps_two_speakers();

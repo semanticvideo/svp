@@ -66,7 +66,11 @@ std::string word_id_for_ordinal(std::size_t ordinal) {
 nlohmann::json diarization_provenance_json(const AsrExecutionBoundary& boundary) {
   std::string note;
   if (boundary.diarization_status == "ran") {
-    note = "Diarization model ran and produced speaker segments.";
+    if (boundary.speaker_count == 0 || boundary.speaker_segments.empty()) {
+      note = "Diarization model ran and detected no speech or speaker segments.";
+    } else {
+      note = "Diarization model ran and produced speaker segments.";
+    }
   } else if (boundary.diarization_status == "fallback_one_speaker") {
     note = boundary.diarization_note.empty()
          ? "One-speaker fallback used. This is not speaker recognition."
