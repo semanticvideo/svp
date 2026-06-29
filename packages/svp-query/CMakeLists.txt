@@ -3,6 +3,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 add_library(svp-query
   src/query_reader.cpp
   src/query_ops.cpp
+  src/traversal.cpp
 )
 
 add_library(svp::query ALIAS svp-query)
