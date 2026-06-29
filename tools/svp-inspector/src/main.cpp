@@ -899,17 +899,7 @@ void print_path(const std::filesystem::path& package_path,
   }
 }
 
-void print_context(const std::filesystem::path& package_path,
-                   const std::string& object_id,
-                   std::size_t limit,
-                   bool json_output) {
-  auto result = svp::query::build_context(package_path, object_id, limit);
-
-  if (json_output) {
-    std::cout << svp::query::context_result_to_json(result).dump(2) << "\n";
-    return;
-  }
-
+void print_context_result(const svp::query::ContextResult& result) {
   if (!result.error_message.empty()) {
     std::cout << "Context error: " << result.error_message << "\n";
     return;
@@ -928,7 +918,7 @@ void print_context(const std::filesystem::path& package_path,
 
   std::cout << "Context nodes:\n";
   for (const auto& node : result.context_nodes) {
-    std::cout << "  " << node.object_id;
+    std::cout << "  [d" << node.depth << "] " << node.object_id;
     if (node.resolved) {
       const auto d = compact_node_summary(node.summary);
       if (!d.empty()) {
@@ -942,7 +932,7 @@ void print_context(const std::filesystem::path& package_path,
 
   std::cout << "\nContext edges:\n";
   for (const auto& edge : result.context_edges) {
-    std::cout << "  " << edge.direction << " "
+    std::cout << "  [d" << edge.depth << "] " << edge.direction << " "
               << edge.source_id << " -> " << edge.target_id
               << "  [" << edge.relationship_class << "] "
               << edge.relationship_type;
@@ -951,6 +941,20 @@ void print_context(const std::filesystem::path& package_path,
     }
     std::cout << "\n";
   }
+}
+
+void print_context(const std::filesystem::path& package_path,
+                   const std::string& object_id,
+                   std::size_t limit,
+                   bool json_output) {
+  auto result = svp::query::build_context(package_path, object_id, limit);
+
+  if (json_output) {
+    std::cout << svp::query::context_result_to_json(result).dump(2) << "\n";
+    return;
+  }
+
+  print_context_result(result);
 }
 
 }  // namespace query_cmd
@@ -1124,7 +1128,7 @@ int main(int argc, char** argv) {
       if (query_json) {
         std::cout << svp::query::context_result_to_json(ctx_result).dump(2) << "\n";
       } else {
-        query_cmd::print_context(query_package_path, query_from, query_limit, query_json);
+        query_cmd::print_context_result(ctx_result);
       }
     } else if (query_mode == "health") {
       auto health = svp::query::compute_graph_health(query_package_path);
