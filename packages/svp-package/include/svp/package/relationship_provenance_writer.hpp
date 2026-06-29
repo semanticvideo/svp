@@ -20,6 +20,11 @@ struct RelationshipTypeCounts {
   std::size_t embedding_source = 0;
   std::size_t text_region_overlaps_entity = 0;
   std::size_t skipped_dangling = 0;
+  std::size_t semantic_visible_during_speech = 0;
+  std::size_t semantic_visible_during_word_range = 0;
+  std::size_t semantic_speaker_active_during_entity_visible = 0;
+  std::size_t semantic_entity_appears_in_shot = 0;
+  std::size_t semantic_entity_appears_in_scene = 0;
 };
 
 struct RelationshipProvenanceWriteSummary {

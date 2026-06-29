@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <climits>
 #include <queue>
 #include <string>
 #include <string_view>
@@ -259,7 +260,41 @@ bool class_matches(const std::string& edge_class,
   return edge_class == class_filter;
 }
 
+std::int64_t json_int_val(const nlohmann::json& j, std::string_view key) {
+  const auto it = j.find(key);
+  if (it == j.end() || !it->is_number_integer()) return 0;
+  return it->get<std::int64_t>();
+}
+
 }  // namespace
+
+bool TimeWindow::matches(std::int64_t rel_start, std::int64_t rel_end) const {
+  if (!active()) return true;
+
+  if (at_us.has_value()) {
+    const auto t = *at_us;
+    if (rel_start == rel_end) {
+      return rel_start == t;
+    }
+    return t >= rel_start && t < rel_end;
+  }
+
+  const auto win_start = start_us.value_or(0);
+  const auto win_end = end_us.value_or(INT64_MAX);
+
+  if (rel_start == rel_end) {
+    return rel_start >= win_start && rel_start < win_end;
+  }
+  return rel_start < win_end && win_start < rel_end;
+}
+
+nlohmann::json time_window_to_json(const TimeWindow& tw) {
+  nlohmann::json j;
+  if (tw.at_us.has_value()) j["at_us"] = *tw.at_us;
+  if (tw.start_us.has_value()) j["start_us"] = *tw.start_us;
+  if (tw.end_us.has_value()) j["end_us"] = *tw.end_us;
+  return j;
+}
 
 const CatalogEntry* ObjectCatalog::find(const std::string& object_id) const {
   const auto it = entries.find(object_id);
@@ -301,9 +336,17 @@ TraversalResult traverse_relationships(
   TraversalResult result;
   result.start_id = options.start_id;
   result.requested_depth = options.max_depth;
+  result.time_window_json = time_window_to_json(options.time_window);
 
   if (options.start_id.empty()) {
     result.error_message = "start_id is required for traversal";
+    return result;
+  }
+
+  if (options.time_window.at_us.has_value() &&
+      (options.time_window.start_us.has_value() ||
+       options.time_window.end_us.has_value())) {
+    result.error_message = "cannot specify both --at-us and --start-us/--end-us";
     return result;
   }
 
@@ -335,6 +378,12 @@ TraversalResult traverse_relationships(
 
     if (options.type_filter.has_value() && type != *options.type_filter) continue;
 
+    const auto rel_start = json_int_val(record, "start_us");
+    const auto rel_end = json_int_val(record, "end_us");
+    if (options.time_window.active() && !options.time_window.matches(rel_start, rel_end)) {
+      continue;
+    }
+
     const auto edge_idx = edges.size();
     GraphEdge edge;
     edge.relationship_id = rel_id;
@@ -349,14 +398,10 @@ TraversalResult traverse_relationships(
     nodes[target_id].incoming.push_back(edge_idx);
   }
 
-  if (nodes.find(options.start_id) == nodes.end() &&
-      options.start_id != result.start_id) {
-    // start_id not in graph — still try, it may have no edges
-  }
-
   ObjectCatalog catalog = build_object_catalog(package_path);
 
   std::unordered_set<std::string> visited;
+  std::unordered_set<std::string> emitted_edge_ids;
   std::queue<std::pair<std::string, int>> frontier;
   frontier.push({options.start_id, 0});
   visited.insert(options.start_id);
@@ -391,6 +436,12 @@ TraversalResult traverse_relationships(
         }
 
         const auto& edge = edges[idx];
+
+        if (!edge.relationship_id.empty()) {
+          if (emitted_edge_ids.count(edge.relationship_id) > 0) continue;
+          emitted_edge_ids.insert(edge.relationship_id);
+        }
+
         const auto neighbor_id = (direction == "outgoing")
             ? edge.target_id : edge.source_id;
 
@@ -442,6 +493,25 @@ TraversalResult traverse_relationships(
   result.edge_count = result.edges.size();
   result.limit_applied = limit_hit;
 
+  auto& health = result.graph_health;
+  health.total_edges = edges.size();
+  health.total_nodes = nodes.size();
+  for (const auto& edge : edges) {
+    health.class_counts[edge.relationship_class]++;
+    health.type_counts[edge.relationship_type]++;
+    if (edge.relationship_class == "unknown") {
+      health.unknown_types.push_back(edge.relationship_type);
+    }
+    if (catalog.find(edge.source_id) == nullptr) {
+      health.unresolved_ids.push_back(edge.source_id);
+    }
+    if (catalog.find(edge.target_id) == nullptr) {
+      health.unresolved_ids.push_back(edge.target_id);
+    }
+  }
+  health.unresolved_endpoints = health.unresolved_ids.size();
+  health.unknown_relationship_types = health.unknown_types.size();
+
   return result;
 }
 
@@ -476,6 +546,31 @@ nlohmann::json traversal_result_to_json(const TraversalResult& result) {
     edges_arr.push_back(std::move(e));
   }
 
+  nlohmann::json health_json = {
+      {"total_edges", result.graph_health.total_edges},
+      {"total_nodes", result.graph_health.total_nodes},
+      {"unresolved_endpoints", result.graph_health.unresolved_endpoints},
+      {"unknown_relationship_types", result.graph_health.unknown_relationship_types},
+  };
+  nlohmann::json class_counts_json = nlohmann::json::object();
+  for (const auto& [cls, cnt] : result.graph_health.class_counts) {
+    class_counts_json[cls] = cnt;
+  }
+  health_json["class_counts"] = class_counts_json;
+
+  nlohmann::json type_counts_json = nlohmann::json::object();
+  for (const auto& [type, cnt] : result.graph_health.type_counts) {
+    type_counts_json[type] = cnt;
+  }
+  health_json["type_counts"] = type_counts_json;
+
+  if (!result.graph_health.unresolved_ids.empty()) {
+    health_json["unresolved_ids"] = result.graph_health.unresolved_ids;
+  }
+  if (!result.graph_health.unknown_types.empty()) {
+    health_json["unknown_types"] = result.graph_health.unknown_types;
+  }
+
   nlohmann::json out = {
       {"start_id", result.start_id},
       {"requested_depth", result.requested_depth},
@@ -484,8 +579,12 @@ nlohmann::json traversal_result_to_json(const TraversalResult& result) {
       {"limit_applied", result.limit_applied},
       {"nodes", std::move(nodes_arr)},
       {"edges", std::move(edges_arr)},
+      {"graph_health", std::move(health_json)},
   };
 
+  if (!result.time_window_json.is_null()) {
+    out["time_window"] = result.time_window_json;
+  }
   if (!result.missing_object_ids.empty()) {
     out["missing_object_ids"] = result.missing_object_ids;
   }
@@ -494,6 +593,345 @@ nlohmann::json traversal_result_to_json(const TraversalResult& result) {
   }
 
   return out;
+}
+
+PathResult find_shortest_path(
+    const std::filesystem::path& package_path,
+    const TraversalOptions& options) {
+  PathResult result;
+  result.start_id = options.start_id;
+  result.target_id = options.target_id;
+
+  if (options.start_id.empty() || options.target_id.empty()) {
+    result.error_message = "both --from and --to are required for path finding";
+    return result;
+  }
+
+  if (options.start_id == options.target_id) {
+    result.path_found = true;
+    ObjectCatalog catalog = build_object_catalog(package_path);
+    TraversalNode node;
+    node.object_id = options.start_id;
+    node.depth = 0;
+    node.resolved = catalog.find(options.start_id) != nullptr;
+    const auto* entry = catalog.find(options.start_id);
+    if (entry) node.source_layer = entry->source_layer;
+    node.summary = catalog.node_summary(options.start_id);
+    result.path_nodes.push_back(std::move(node));
+    return result;
+  }
+
+  const auto jsonl = read_jsonl_entry(package_path, "relationships/relationships.jsonl");
+  if (!jsonl.present) {
+    result.error_message = "relationships file not present";
+    return result;
+  }
+  if (!jsonl.readable) {
+    result.error_message = jsonl.error_message;
+    return result;
+  }
+
+  std::vector<GraphEdge> edges;
+  std::unordered_map<std::string, GraphNode> nodes;
+
+  for (const auto& record : jsonl.records) {
+    const auto type = json_string_val(record, "type");
+    const auto source_id = json_string_val(record, "source_id");
+    const auto target_id = json_string_val(record, "target_id");
+    const auto rel_id = json_string_val(record, "id");
+
+    if (source_id.empty() || target_id.empty()) continue;
+
+    const auto cls = svp::package::classify_relationship_type(type);
+    const auto class_str = std::string{svp::package::relationship_class_to_string(cls)};
+
+    if (!class_matches(class_str, options.class_filter)) continue;
+    if (options.type_filter.has_value() && type != *options.type_filter) continue;
+
+    const auto rel_start = json_int_val(record, "start_us");
+    const auto rel_end = json_int_val(record, "end_us");
+    if (options.time_window.active() && !options.time_window.matches(rel_start, rel_end)) {
+      continue;
+    }
+
+    const auto edge_idx = edges.size();
+    GraphEdge edge;
+    edge.relationship_id = rel_id;
+    edge.relationship_type = type;
+    edge.relationship_class = class_str;
+    edge.source_id = source_id;
+    edge.target_id = target_id;
+    edge.record = record;
+    edges.push_back(std::move(edge));
+
+    nodes[source_id].outgoing.push_back(edge_idx);
+    nodes[target_id].incoming.push_back(edge_idx);
+  }
+
+  ObjectCatalog catalog = build_object_catalog(package_path);
+
+  std::unordered_map<std::string, int> depth_map;
+  std::unordered_map<std::string, std::string> parent_map;
+  std::unordered_map<std::string, std::size_t> parent_edge_idx;
+  std::queue<std::string> frontier;
+
+  frontier.push(options.start_id);
+  depth_map[options.start_id] = 0;
+
+  bool found = false;
+
+  while (!frontier.empty() && !found) {
+    const auto current_id = frontier.front();
+    frontier.pop();
+
+    const auto current_depth = depth_map[current_id];
+    if (current_depth >= options.max_depth) continue;
+
+    const auto node_it = nodes.find(current_id);
+    if (node_it == nodes.end()) continue;
+
+    const auto process_neighbors = [&](const std::vector<std::size_t>& edge_indices,
+                                        const std::string& direction) {
+      for (const auto idx : edge_indices) {
+        if (found) break;
+        const auto& edge = edges[idx];
+        const auto neighbor_id = (direction == "outgoing")
+            ? edge.target_id : edge.source_id;
+
+        if (depth_map.count(neighbor_id) > 0) continue;
+
+        depth_map[neighbor_id] = current_depth + 1;
+        parent_map[neighbor_id] = current_id;
+        parent_edge_idx[neighbor_id] = idx;
+
+        if (neighbor_id == options.target_id) {
+          found = true;
+          break;
+        }
+
+        frontier.push(neighbor_id);
+      }
+    };
+
+    if (options.direction == TraversalDirection::Outgoing ||
+        options.direction == TraversalDirection::Both) {
+      process_neighbors(node_it->second.outgoing, "outgoing");
+    }
+    if (options.direction == TraversalDirection::Incoming ||
+        options.direction == TraversalDirection::Both) {
+      process_neighbors(node_it->second.incoming, "incoming");
+    }
+  }
+
+  if (!found) {
+    result.error_message = "no path found from " + options.start_id +
+                           " to " + options.target_id +
+                           " within depth " + std::to_string(options.max_depth);
+    return result;
+  }
+
+  result.path_found = true;
+
+  std::vector<std::string> path_ids;
+  std::vector<std::size_t> path_edge_indices;
+  std::string current = options.target_id;
+  while (current != options.start_id) {
+    path_ids.push_back(current);
+    path_edge_indices.push_back(parent_edge_idx[current]);
+    current = parent_map[current];
+  }
+  path_ids.push_back(options.start_id);
+  std::reverse(path_ids.begin(), path_ids.end());
+  std::reverse(path_edge_indices.begin(), path_edge_indices.end());
+
+  for (std::size_t i = 0; i < path_ids.size(); ++i) {
+    TraversalNode node;
+    node.object_id = path_ids[i];
+    node.depth = static_cast<int>(i);
+    node.resolved = catalog.find(path_ids[i]) != nullptr;
+    const auto* entry = catalog.find(path_ids[i]);
+    if (entry) node.source_layer = entry->source_layer;
+    node.summary = catalog.node_summary(path_ids[i]);
+    result.path_nodes.push_back(std::move(node));
+  }
+
+  for (std::size_t i = 0; i < path_edge_indices.size(); ++i) {
+    const auto& edge = edges[path_edge_indices[i]];
+    TraversalEdge tedge;
+    tedge.relationship_id = edge.relationship_id;
+    tedge.relationship_type = edge.relationship_type;
+    tedge.relationship_class = edge.relationship_class;
+    tedge.source_id = edge.source_id;
+    tedge.target_id = edge.target_id;
+    tedge.direction = (edge.source_id == path_ids[i]) ? "outgoing" : "incoming";
+    tedge.depth = static_cast<int>(i + 1);
+    tedge.record = edge.record;
+    result.path_edges.push_back(std::move(tedge));
+  }
+
+  return result;
+}
+
+nlohmann::json path_result_to_json(const PathResult& result) {
+  nlohmann::json nodes_arr = nlohmann::json::array();
+  for (const auto& node : result.path_nodes) {
+    nlohmann::json n = {
+        {"object_id", node.object_id},
+        {"depth", node.depth},
+        {"resolved", node.resolved},
+    };
+    if (!node.source_layer.empty()) n["source_layer"] = node.source_layer;
+    if (!node.summary.is_null()) n["summary"] = node.summary;
+    nodes_arr.push_back(std::move(n));
+  }
+
+  nlohmann::json edges_arr = nlohmann::json::array();
+  for (const auto& edge : result.path_edges) {
+    edges_arr.push_back({
+        {"relationship_id", edge.relationship_id},
+        {"relationship_type", edge.relationship_type},
+        {"relationship_class", edge.relationship_class},
+        {"source_id", edge.source_id},
+        {"target_id", edge.target_id},
+        {"direction", edge.direction},
+        {"depth", edge.depth},
+    });
+  }
+
+  nlohmann::json j = {
+      {"start_id", result.start_id},
+      {"target_id", result.target_id},
+      {"path_found", result.path_found},
+      {"path_length", result.path_edges.size()},
+      {"nodes", std::move(nodes_arr)},
+      {"edges", std::move(edges_arr)},
+  };
+
+  if (!result.error_message.empty()) {
+    j["error"] = result.error_message;
+  }
+
+  return j;
+}
+
+ContextResult build_context(
+    const std::filesystem::path& package_path,
+    const std::string& object_id,
+    std::size_t limit) {
+  ContextResult result;
+  result.object_id = object_id;
+
+  if (object_id.empty()) {
+    result.error_message = "object_id is required for context";
+    return result;
+  }
+
+  ObjectCatalog catalog = build_object_catalog(package_path);
+
+  const auto* entry = catalog.find(object_id);
+  if (entry) {
+    result.resolved = true;
+    result.source_layer = entry->source_layer;
+    result.summary = catalog.node_summary(object_id);
+  }
+
+  const auto jsonl = read_jsonl_entry(package_path, "relationships/relationships.jsonl");
+  if (!jsonl.present || !jsonl.readable) {
+    if (!result.resolved) {
+      result.error_message = "object not found in catalog and relationships not readable";
+    }
+    return result;
+  }
+
+  std::unordered_set<std::string> emitted_edge_ids;
+  std::size_t edge_count = 0;
+
+  for (const auto& record : jsonl.records) {
+    if (edge_count >= limit) break;
+
+    const auto source_id = json_string_val(record, "source_id");
+    const auto target_id = json_string_val(record, "target_id");
+    const auto rel_id = json_string_val(record, "id");
+    const auto type = json_string_val(record, "type");
+
+    if (source_id != object_id && target_id != object_id) continue;
+
+    if (!rel_id.empty()) {
+      if (emitted_edge_ids.count(rel_id) > 0) continue;
+      emitted_edge_ids.insert(rel_id);
+    }
+
+    const auto cls = svp::package::classify_relationship_type(type);
+    const auto class_str = std::string{svp::package::relationship_class_to_string(cls)};
+
+    const auto neighbor_id = (source_id == object_id) ? target_id : source_id;
+    const auto direction = (source_id == object_id) ? "outgoing" : "incoming";
+
+    TraversalEdge tedge;
+    tedge.relationship_id = rel_id;
+    tedge.relationship_type = type;
+    tedge.relationship_class = class_str;
+    tedge.source_id = source_id;
+    tedge.target_id = target_id;
+    tedge.direction = direction;
+    tedge.depth = 1;
+    tedge.record = record;
+    result.context_edges.push_back(std::move(tedge));
+
+    TraversalNode tnode;
+    tnode.object_id = neighbor_id;
+    tnode.depth = 1;
+    tnode.resolved = catalog.find(neighbor_id) != nullptr;
+    const auto* neighbor_entry = catalog.find(neighbor_id);
+    if (neighbor_entry) tnode.source_layer = neighbor_entry->source_layer;
+    tnode.summary = catalog.node_summary(neighbor_id);
+    result.context_nodes.push_back(std::move(tnode));
+
+    ++edge_count;
+  }
+
+  return result;
+}
+
+nlohmann::json context_result_to_json(const ContextResult& result) {
+  nlohmann::json j = {
+      {"object_id", result.object_id},
+      {"resolved", result.resolved},
+  };
+
+  if (!result.source_layer.empty()) j["source_layer"] = result.source_layer;
+  if (!result.summary.is_null()) j["summary"] = result.summary;
+
+  nlohmann::json nodes_arr = nlohmann::json::array();
+  for (const auto& node : result.context_nodes) {
+    nlohmann::json n = {
+        {"object_id", node.object_id},
+        {"resolved", node.resolved},
+    };
+    if (!node.source_layer.empty()) n["source_layer"] = node.source_layer;
+    if (!node.summary.is_null()) n["summary"] = node.summary;
+    nodes_arr.push_back(std::move(n));
+  }
+  j["context_nodes"] = std::move(nodes_arr);
+
+  nlohmann::json edges_arr = nlohmann::json::array();
+  for (const auto& edge : result.context_edges) {
+    edges_arr.push_back({
+        {"relationship_id", edge.relationship_id},
+        {"relationship_type", edge.relationship_type},
+        {"relationship_class", edge.relationship_class},
+        {"source_id", edge.source_id},
+        {"target_id", edge.target_id},
+        {"direction", edge.direction},
+    });
+  }
+  j["context_edges"] = std::move(edges_arr);
+
+  if (!result.error_message.empty()) {
+    j["error"] = result.error_message;
+  }
+
+  return j;
 }
 
 }  // namespace svp::query

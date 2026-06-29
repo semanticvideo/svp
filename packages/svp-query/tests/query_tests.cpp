@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <string>
 #include <unordered_set>
 
@@ -1357,6 +1358,717 @@ void test_traversal_empty_relationships() {
   std::cout << "test_traversal_empty_relationships: passed\n";
 }
 
+std::filesystem::path create_semantic_test_package() {
+  const auto root = std::filesystem::temp_directory_path() / "svp-query-semantic-tests";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto staging = root / "staging";
+  const auto package_path = root / "test_semantic.svp";
+  const auto source_path = root / "source.mp4";
+
+  write_file(source_path, "mock media\n");
+
+  nlohmann::json manifest = {
+      {"svp_version", "1.0-rc.2"},
+      {"package_id", "svp_semantic_test_pkg"},
+      {"created_utc", "2026-06-20T00:00:00Z"},
+      {"primary_media_id", "media_000001"},
+      {"timebase", {{"unit", "microseconds"}, {"origin", "primary_presentation_start"}}},
+      {"canonical_analysis_raster", {{"width", 640}, {"height", 360}}}
+  };
+
+  nlohmann::json transcript_json = {
+      {"language", {{"primary", "en"}, {"detected", {"en"}}, {"mode", "single"}, {"confidence", 0.94}}},
+      {"duration_us", 30000000},
+      {"word_count", 3},
+      {"speaker_count", 1},
+      {"source_audio_id", "astream_analysis_0001"},
+      {"processor_id", "proc_whispercpp_0001"}
+  };
+  write_json(staging / "transcript" / "transcript.json", transcript_json);
+
+  std::vector<nlohmann::json> words = {
+      {{"id", "word_000001"}, {"text", "hello"}, {"normalized_text", "hello"},
+       {"start_us", 0}, {"end_us", 500000}, {"speaker_id", "speaker_0001"}},
+      {{"id", "word_000002"}, {"text", "world"}, {"normalized_text", "world"},
+       {"start_us", 500000}, {"end_us", 1000000}, {"speaker_id", "speaker_0001"}},
+      {{"id", "word_000003"}, {"text", "camera"}, {"normalized_text", "camera"},
+       {"start_us", 1000000}, {"end_us", 1500000}, {"speaker_id", "speaker_0001"}},
+  };
+  write_jsonl(staging / "transcript" / "words.jsonl", words);
+
+  std::vector<nlohmann::json> speakers = {
+      {{"id", "speaker_0001"}, {"display_name", "Speaker 1"},
+       {"total_speech_us", 2500000}, {"confidence", 0.91},
+       {"processor_id", "proc_whispercpp_0001"}}
+  };
+  write_jsonl(staging / "transcript" / "speakers.jsonl", speakers);
+
+  std::vector<nlohmann::json> speaker_segments = {
+      {{"segment_id", "seg_001"}, {"speaker_id", "speaker_0001"},
+       {"start_us", 0}, {"end_us", 1500000}}
+  };
+  write_jsonl(staging / "transcript" / "speaker_segments.jsonl", speaker_segments);
+  write_jsonl(staging / "transcript" / "speech_regions.jsonl", {});
+
+  write_jsonl(staging / "timeline" / "frames.jsonl", {
+      {{"id", "frame_000001"}, {"pts_us", 0}, {"shot_id", "shot_000001"}},
+      {{"id", "frame_000002"}, {"pts_us", 500000}, {"shot_id", "shot_000001"}}
+  });
+  write_jsonl(staging / "timeline" / "shots.jsonl", {
+      {{"id", "shot_000001"}, {"start_us", 0}, {"end_us", 15000000}}
+  });
+  write_jsonl(staging / "timeline" / "scenes.jsonl", {
+      {{"id", "scene_000001"}, {"start_us", 0}, {"end_us", 30000000},
+       {"shot_ids", {"shot_000001"}}}
+  });
+
+  write_jsonl(staging / "entities" / "entities.jsonl", {
+      {{"id", "entity_001"}, {"entity_type", "person"}, {"label", "Person 1"}}
+  });
+  write_jsonl(staging / "entities" / "entity_tracks.jsonl", {});
+
+  std::filesystem::create_directories(staging / "spatial");
+  write_jsonl(staging / "spatial" / "regions.jsonl", {
+      {{"id", "region_000001"}, {"entity_id", "entity_001"},
+       {"frame_id", "frame_000001"}, {"pts_us", 500000}}
+  });
+  write_file(staging / "spatial" / "masks.index.jsonl", "");
+  write_file(staging / "spatial" / "depth.index.jsonl", "");
+
+  write_jsonl(staging / "text" / "text_regions.jsonl", {
+      {{"text_region_id", "text_region_000001"},
+       {"observation_type", "text_detection"},
+       {"start_us", 1000000}, {"end_us", 2000000},
+       {"shot_id", "shot_000001"}, {"scene_id", "scene_000001"}}
+  });
+  write_jsonl(staging / "text" / "text_observations.jsonl", {});
+  write_jsonl(staging / "text" / "numeric_values.jsonl", {});
+  write_json(staging / "text" / "text_absence.json", {
+      {"schema_version", "svp-text-absence-v1"},
+      {"ocr_required", true}, {"ocr_completed", true},
+      {"text_region_count", 1}, {"text_observation_count", 0},
+      {"numeric_value_count", 0}, {"reason", "text_detected"}
+  });
+  write_jsonl(staging / "text" / "evidence_crops.jsonl", {});
+
+  write_jsonl(staging / "colors" / "color_observations.jsonl", {});
+  write_json(staging / "colors" / "color_summary.json", {
+      {"schema_version", "svp-color-summary-v1"},
+      {"color_observation_count", 0},
+      {"color_space", "svp_oklch_v1"},
+      {"color_bucket_registry_version", "svp-color-buckets-v1"}
+  });
+  write_json(staging / "colors" / "color_absence.json", {
+      {"schema_version", "svp-color-absence-v1"},
+      {"color_required", true}, {"color_completed", true}
+  });
+
+  std::filesystem::create_directories(staging / "embeddings");
+  write_json(staging / "embeddings" / "embedding_sets.json", {{"schema_version", "svp-embedding-sets-v1"}});
+  write_file(staging / "embeddings" / "embeddings.index.jsonl", "");
+
+  std::filesystem::create_directories(staging / "index");
+  write_json(staging / "index" / "index_manifest.json", {
+      {"index_schema_version", "svp-index-v1"},
+      {"sqlite_file", "index.sqlite"},
+      {"logical_row_stream_version", "1"},
+      {"table_count", 6}, {"row_count", 10}
+  });
+
+  std::filesystem::create_directories(staging / "provenance");
+  write_json(staging / "provenance" / "build.json", {{"build_id", "test_build"}});
+  write_jsonl(staging / "provenance" / "processors.jsonl", {});
+  write_jsonl(staging / "provenance" / "input_hashes.jsonl", {});
+  write_jsonl(staging / "provenance" / "model_hashes.jsonl", {});
+  write_json(staging / "provenance" / "validation.json", {
+      {"status", "valid"},
+      {"core_status", "valid"},
+      {"authenticity_status", "valid"}
+  });
+
+  std::filesystem::create_directories(staging / "media" / "original");
+  std::filesystem::create_directories(staging / "media" / "audio");
+
+  bool ok = svp::package::write_package_skeleton(package_path, staging, source_path, manifest);
+  assert(ok);
+  assert(std::filesystem::exists(package_path));
+
+  return package_path;
+}
+
+void test_time_window_at_us() {
+  const auto pkg = create_traversal_test_package();
+  svp::query::TraversalOptions opts;
+  opts.start_id = "word_000001";
+  opts.max_depth = 2;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.class_filter = "all";
+  opts.limit = 100;
+  opts.time_window.at_us = 0;
+
+  auto result = svp::query::traverse_relationships(pkg, opts);
+
+  assert(result.error_message.empty());
+  assert(!result.edges.empty());
+
+  for (const auto& edge : result.edges) {
+    const auto start = edge.record.value("start_us", 0);
+    const auto end = edge.record.value("end_us", 0);
+    assert(start <= 0 && 0 < end);
+  }
+
+  std::cout << "test_time_window_at_us: passed\n";
+}
+
+void test_time_window_start_end() {
+  const auto pkg = create_traversal_test_package();
+  svp::query::TraversalOptions opts;
+  opts.start_id = "word_000001";
+  opts.max_depth = 2;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.class_filter = "all";
+  opts.limit = 100;
+  opts.time_window.start_us = 0;
+  opts.time_window.end_us = 500000;
+
+  auto result = svp::query::traverse_relationships(pkg, opts);
+
+  assert(result.error_message.empty());
+  for (const auto& edge : result.edges) {
+    const auto start = edge.record.value("start_us", 0);
+    const auto end = edge.record.value("end_us", 0);
+    assert(start < 500000 && 0 < end);
+  }
+
+  std::cout << "test_time_window_start_end: passed\n";
+}
+
+void test_time_window_at_us_excludes_non_overlapping() {
+  const auto pkg = create_traversal_test_package();
+  svp::query::TraversalOptions opts;
+  opts.start_id = "word_000001";
+  opts.max_depth = 2;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.class_filter = "all";
+  opts.limit = 100;
+  opts.time_window.at_us = 1200000;
+
+  auto result = svp::query::traverse_relationships(pkg, opts);
+
+  assert(result.error_message.empty());
+  for (const auto& edge : result.edges) {
+    const auto start = edge.record.value("start_us", 0);
+    const auto end = edge.record.value("end_us", 0);
+    assert(start <= 1200000 && 1200000 < end);
+  }
+
+  std::cout << "test_time_window_at_us_excludes_non_overlapping: passed\n";
+}
+
+void test_time_window_at_and_start_mutually_exclusive() {
+  const auto pkg = create_traversal_test_package();
+  svp::query::TraversalOptions opts;
+  opts.start_id = "word_000001";
+  opts.max_depth = 2;
+  opts.limit = 100;
+  opts.time_window.at_us = 100;
+  opts.time_window.start_us = 0;
+
+  auto result = svp::query::traverse_relationships(pkg, opts);
+
+  assert(!result.error_message.empty());
+  assert(result.error_message.find("cannot specify both") != std::string::npos);
+
+  std::cout << "test_time_window_at_and_start_mutually_exclusive: passed\n";
+}
+
+void test_shortest_path_found() {
+  const auto pkg = create_traversal_test_package();
+  svp::query::TraversalOptions opts;
+  opts.start_id = "word_000001";
+  opts.target_id = "speaker_0001";
+  opts.max_depth = 3;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.class_filter = "all";
+  opts.limit = 100;
+
+  auto result = svp::query::find_shortest_path(pkg, opts);
+
+  assert(result.path_found);
+  assert(!result.path_nodes.empty());
+  assert(result.path_nodes.front().object_id == "word_000001");
+  assert(result.path_nodes.back().object_id == "speaker_0001");
+  assert(result.path_edges.size() == result.path_nodes.size() - 1);
+
+  std::cout << "test_shortest_path_found: passed\n";
+}
+
+void test_shortest_path_not_found() {
+  const auto pkg = create_traversal_test_package();
+  svp::query::TraversalOptions opts;
+  opts.start_id = "word_000001";
+  opts.target_id = "nonexistent_id";
+  opts.max_depth = 2;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.class_filter = "all";
+  opts.limit = 100;
+
+  auto result = svp::query::find_shortest_path(pkg, opts);
+
+  assert(!result.path_found);
+  assert(!result.error_message.empty());
+
+  std::cout << "test_shortest_path_not_found: passed\n";
+}
+
+void test_shortest_path_same_node() {
+  const auto pkg = create_traversal_test_package();
+  svp::query::TraversalOptions opts;
+  opts.start_id = "word_000001";
+  opts.target_id = "word_000001";
+  opts.max_depth = 3;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.limit = 100;
+
+  auto result = svp::query::find_shortest_path(pkg, opts);
+
+  assert(result.path_found);
+  assert(result.path_nodes.size() == 1);
+  assert(result.path_edges.empty());
+  assert(result.path_nodes[0].object_id == "word_000001");
+
+  std::cout << "test_shortest_path_same_node: passed\n";
+}
+
+void test_shortest_path_json_output() {
+  const auto pkg = create_traversal_test_package();
+  svp::query::TraversalOptions opts;
+  opts.start_id = "word_000001";
+  opts.target_id = "speaker_0001";
+  opts.max_depth = 3;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.limit = 100;
+
+  auto result = svp::query::find_shortest_path(pkg, opts);
+  auto json = svp::query::path_result_to_json(result);
+
+  assert(json.contains("start_id"));
+  assert(json.contains("target_id"));
+  assert(json.contains("path_found"));
+  assert(json.value("path_found", false) == true);
+  assert(json.contains("path_length"));
+  assert(json.contains("nodes"));
+  assert(json.contains("edges"));
+  assert(json["nodes"].is_array());
+  assert(json["edges"].is_array());
+
+  std::cout << "test_shortest_path_json_output: passed\n";
+}
+
+void test_context_mode() {
+  const auto pkg = create_traversal_test_package();
+  auto result = svp::query::build_context(pkg, "word_000001", 100);
+
+  assert(result.object_id == "word_000001");
+  assert(result.resolved);
+  assert(!result.context_edges.empty());
+
+  bool found_speaker = false;
+  for (const auto& node : result.context_nodes) {
+    if (node.object_id == "speaker_0001") found_speaker = true;
+  }
+  assert(found_speaker);
+
+  std::cout << "test_context_mode: passed\n";
+}
+
+void test_context_json_output() {
+  const auto pkg = create_traversal_test_package();
+  auto result = svp::query::build_context(pkg, "word_000001", 100);
+  auto json = svp::query::context_result_to_json(result);
+
+  assert(json.contains("object_id"));
+  assert(json.contains("resolved"));
+  assert(json.value("resolved", false) == true);
+  assert(json.contains("context_nodes"));
+  assert(json.contains("context_edges"));
+  assert(json["context_nodes"].is_array());
+  assert(json["context_edges"].is_array());
+
+  std::cout << "test_context_json_output: passed\n";
+}
+
+void test_context_unresolved_object() {
+  const auto pkg = create_traversal_test_package();
+  auto result = svp::query::build_context(pkg, "nonexistent_id", 100);
+
+  assert(result.object_id == "nonexistent_id");
+  assert(!result.resolved);
+
+  std::cout << "test_context_unresolved_object: passed\n";
+}
+
+void test_edge_deduplication() {
+  const auto pkg = create_traversal_test_package();
+  svp::query::TraversalOptions opts;
+  opts.start_id = "entity_001";
+  opts.max_depth = 2;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.class_filter = "all";
+  opts.limit = 100;
+
+  auto result = svp::query::traverse_relationships(pkg, opts);
+
+  assert(result.error_message.empty());
+
+  std::set<std::string> seen_edge_ids;
+  for (const auto& edge : result.edges) {
+    if (!edge.relationship_id.empty()) {
+      assert(seen_edge_ids.find(edge.relationship_id) == seen_edge_ids.end());
+      seen_edge_ids.insert(edge.relationship_id);
+    }
+  }
+
+  std::cout << "test_edge_deduplication: passed\n";
+}
+
+void test_graph_health_report() {
+  const auto pkg = create_traversal_test_package();
+  svp::query::TraversalOptions opts;
+  opts.start_id = "word_000001";
+  opts.max_depth = 1;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.class_filter = "all";
+  opts.limit = 100;
+
+  auto result = svp::query::traverse_relationships(pkg, opts);
+
+  assert(result.graph_health.total_edges > 0);
+  assert(result.graph_health.total_nodes > 0);
+  assert(result.graph_health.class_counts.find("support") != result.graph_health.class_counts.end() ||
+         result.graph_health.class_counts.find("semantic") != result.graph_health.class_counts.end());
+
+  auto json = svp::query::traversal_result_to_json(result);
+  assert(json.contains("graph_health"));
+  assert(json["graph_health"].contains("total_edges"));
+  assert(json["graph_health"].contains("total_nodes"));
+  assert(json["graph_health"].contains("class_counts"));
+
+  std::cout << "test_graph_health_report: passed\n";
+}
+
+void test_time_window_in_json_output() {
+  const auto pkg = create_traversal_test_package();
+  svp::query::TraversalOptions opts;
+  opts.start_id = "word_000001";
+  opts.max_depth = 1;
+  opts.limit = 100;
+  opts.time_window.at_us = 500000;
+
+  auto result = svp::query::traverse_relationships(pkg, opts);
+  auto json = svp::query::traversal_result_to_json(result);
+
+  assert(json.contains("time_window"));
+  assert(json["time_window"].contains("at_us"));
+  assert(json["time_window"].value("at_us", 0) == 500000);
+
+  std::cout << "test_time_window_in_json_output: passed\n";
+}
+
+void test_deterministic_json_output() {
+  const auto pkg = create_traversal_test_package();
+  svp::query::TraversalOptions opts;
+  opts.start_id = "word_000001";
+  opts.max_depth = 2;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.class_filter = "all";
+  opts.limit = 100;
+
+  auto result1 = svp::query::traverse_relationships(pkg, opts);
+  auto result2 = svp::query::traverse_relationships(pkg, opts);
+
+  auto json1 = svp::query::traversal_result_to_json(result1);
+  auto json2 = svp::query::traversal_result_to_json(result2);
+
+  assert(json1.dump() == json2.dump());
+
+  std::cout << "test_deterministic_json_output: passed\n";
+}
+
+void test_semantic_relationships_generated() {
+  const auto pkg = create_semantic_test_package();
+
+  svp::query::TraversalOptions opts;
+  opts.start_id = "entity_001";
+  opts.max_depth = 2;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.class_filter = "semantic";
+  opts.limit = 100;
+
+  auto result = svp::query::traverse_relationships(pkg, opts);
+
+  assert(result.error_message.empty());
+  assert(!result.edges.empty());
+
+  bool found_appears_in_shot = false;
+  bool found_appears_in_scene = false;
+  for (const auto& edge : result.edges) {
+    if (edge.relationship_type == "appears_in_shot") found_appears_in_shot = true;
+    if (edge.relationship_type == "appears_in_scene") found_appears_in_scene = true;
+  }
+  assert(found_appears_in_shot);
+  assert(found_appears_in_scene);
+
+  std::cout << "test_semantic_relationships_generated: passed\n";
+}
+
+void test_semantic_visible_during_speech() {
+  const auto pkg = create_semantic_test_package();
+
+  svp::query::TraversalOptions opts;
+  opts.start_id = "text_region_000001";
+  opts.max_depth = 2;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.class_filter = "semantic";
+  opts.limit = 100;
+
+  auto result = svp::query::traverse_relationships(pkg, opts);
+
+  assert(result.error_message.empty());
+
+  bool found_visible_during_speech = false;
+  bool found_visible_during_word_range = false;
+  for (const auto& edge : result.edges) {
+    if (edge.relationship_type == "visible_during_speech") found_visible_during_speech = true;
+    if (edge.relationship_type == "visible_during_word_range") found_visible_during_word_range = true;
+  }
+  assert(found_visible_during_speech);
+  assert(found_visible_during_word_range);
+
+  std::cout << "test_semantic_visible_during_speech: passed\n";
+}
+
+void test_semantic_speaker_active_during_entity_visible() {
+  const auto pkg = create_semantic_test_package();
+
+  svp::query::TraversalOptions opts;
+  opts.start_id = "seg_001";
+  opts.max_depth = 2;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.class_filter = "semantic";
+  opts.limit = 100;
+
+  auto result = svp::query::traverse_relationships(pkg, opts);
+
+  assert(result.error_message.empty());
+
+  bool found_speaker_active = false;
+  for (const auto& edge : result.edges) {
+    if (edge.relationship_type == "speaker_active_during_entity_visible") {
+      found_speaker_active = true;
+    }
+  }
+  assert(found_speaker_active);
+
+  std::cout << "test_semantic_speaker_active_during_entity_visible: passed\n";
+}
+
+void test_unresolved_ids_in_graph_health() {
+  const auto pkg = create_traversal_test_package();
+  svp::query::TraversalOptions opts;
+  opts.start_id = "word_000001";
+  opts.max_depth = 3;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.class_filter = "all";
+  opts.limit = 100;
+
+  auto result = svp::query::traverse_relationships(pkg, opts);
+
+  bool has_unresolved = false;
+  for (const auto& node : result.nodes) {
+    if (!node.resolved) {
+      has_unresolved = true;
+      break;
+    }
+  }
+
+  if (has_unresolved) {
+    assert(!result.missing_object_ids.empty());
+  }
+
+  auto json = svp::query::traversal_result_to_json(result);
+  if (json.contains("missing_object_ids")) {
+    assert(json["missing_object_ids"].is_array());
+  }
+
+  std::cout << "test_unresolved_ids_in_graph_health: passed\n";
+}
+
+std::filesystem::path create_zero_pts_test_package() {
+  const auto root = std::filesystem::temp_directory_path() / "svp-query-zero-pts-tests";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto staging = root / "staging";
+  const auto package_path = root / "test_zero_pts.svp";
+  const auto source_path = root / "source.mp4";
+
+  write_file(source_path, "mock media\n");
+
+  nlohmann::json manifest = {
+      {"svp_version", "1.0-rc.2"},
+      {"package_id", "svp_zero_pts_test_pkg"},
+      {"created_utc", "2026-06-20T00:00:00Z"},
+      {"primary_media_id", "media_000001"},
+      {"timebase", {{"unit", "microseconds"}, {"origin", "primary_presentation_start"}}},
+      {"canonical_analysis_raster", {{"width", 640}, {"height", 360}}}
+  };
+
+  nlohmann::json transcript_json = {
+      {"language", {{"primary", "en"}, {"detected", {"en"}}, {"mode", "single"}, {"confidence", 0.94}}},
+      {"duration_us", 30000000},
+      {"word_count", 1},
+      {"speaker_count", 1},
+      {"source_audio_id", "astream_analysis_0001"},
+      {"processor_id", "proc_whispercpp_0001"}
+  };
+  write_json(staging / "transcript" / "transcript.json", transcript_json);
+
+  std::vector<nlohmann::json> words = {
+      {{"id", "word_000001"}, {"text", "hello"}, {"normalized_text", "hello"},
+       {"start_us", 0}, {"end_us", 500000}, {"speaker_id", "speaker_0001"}},
+  };
+  write_jsonl(staging / "transcript" / "words.jsonl", words);
+
+  std::vector<nlohmann::json> speakers = {
+      {{"id", "speaker_0001"}, {"display_name", "Speaker 1"},
+       {"total_speech_us", 500000}, {"confidence", 0.91},
+       {"processor_id", "proc_whispercpp_0001"}}
+  };
+  write_jsonl(staging / "transcript" / "speakers.jsonl", speakers);
+
+  std::vector<nlohmann::json> speaker_segments = {
+      {{"segment_id", "seg_001"}, {"speaker_id", "speaker_0001"},
+       {"start_us", 0}, {"end_us", 500000}}
+  };
+  write_jsonl(staging / "transcript" / "speaker_segments.jsonl", speaker_segments);
+  write_jsonl(staging / "transcript" / "speech_regions.jsonl", {});
+
+  write_jsonl(staging / "timeline" / "frames.jsonl", {
+      {{"id", "frame_000001"}, {"pts_us", 0}, {"shot_id", "shot_000001"}}
+  });
+  write_jsonl(staging / "timeline" / "shots.jsonl", {
+      {{"id", "shot_000001"}, {"start_us", 0}, {"end_us", 15000000}}
+  });
+  write_jsonl(staging / "timeline" / "scenes.jsonl", {
+      {{"id", "scene_000001"}, {"start_us", 0}, {"end_us", 30000000},
+       {"shot_ids", {"shot_000001"}}}
+  });
+
+  write_jsonl(staging / "entities" / "entities.jsonl", {
+      {{"id", "entity_001"}, {"entity_type", "person"}, {"label", "Person 1"}}
+  });
+  write_jsonl(staging / "entities" / "entity_tracks.jsonl", {});
+
+  std::filesystem::create_directories(staging / "spatial");
+  write_jsonl(staging / "spatial" / "regions.jsonl", {
+      {{"id", "region_000001"}, {"entity_id", "entity_001"},
+       {"frame_id", "frame_000001"}, {"pts_us", 0}}
+  });
+  write_file(staging / "spatial" / "masks.index.jsonl", "");
+  write_file(staging / "spatial" / "depth.index.jsonl", "");
+
+  write_jsonl(staging / "text" / "text_regions.jsonl", {});
+  write_jsonl(staging / "text" / "text_observations.jsonl", {});
+  write_jsonl(staging / "text" / "numeric_values.jsonl", {});
+  write_json(staging / "text" / "text_absence.json", {
+      {"schema_version", "svp-text-absence-v1"},
+      {"ocr_required", true}, {"ocr_completed", true},
+      {"text_region_count", 0}, {"text_observation_count", 0},
+      {"numeric_value_count", 0}, {"reason", "no_text_detected"}
+  });
+  write_jsonl(staging / "text" / "evidence_crops.jsonl", {});
+
+  write_jsonl(staging / "colors" / "color_observations.jsonl", {});
+  write_json(staging / "colors" / "color_summary.json", {
+      {"schema_version", "svp-color-summary-v1"},
+      {"color_observation_count", 0},
+      {"color_space", "svp_oklch_v1"},
+      {"color_bucket_registry_version", "svp-color-buckets-v1"}
+  });
+  write_json(staging / "colors" / "color_absence.json", {
+      {"schema_version", "svp-color-absence-v1"},
+      {"color_required", true}, {"color_completed", true}
+  });
+
+  std::filesystem::create_directories(staging / "embeddings");
+  write_json(staging / "embeddings" / "embedding_sets.json", {{"schema_version", "svp-embedding-sets-v1"}});
+  write_file(staging / "embeddings" / "embeddings.index.jsonl", "");
+
+  std::filesystem::create_directories(staging / "index");
+  write_json(staging / "index" / "index_manifest.json", {
+      {"index_schema_version", "svp-index-v1"},
+      {"sqlite_file", "index.sqlite"},
+      {"logical_row_stream_version", "1"},
+      {"table_count", 6}, {"row_count", 10}
+  });
+
+  std::filesystem::create_directories(staging / "provenance");
+  write_json(staging / "provenance" / "build.json", {{"build_id", "test_build"}});
+  write_jsonl(staging / "provenance" / "processors.jsonl", {});
+  write_jsonl(staging / "provenance" / "input_hashes.jsonl", {});
+  write_jsonl(staging / "provenance" / "model_hashes.jsonl", {});
+  write_json(staging / "provenance" / "validation.json", {
+      {"status", "valid"},
+      {"core_status", "valid"},
+      {"authenticity_status", "valid"}
+  });
+
+  std::filesystem::create_directories(staging / "media" / "original");
+  std::filesystem::create_directories(staging / "media" / "audio");
+
+  bool ok = svp::package::write_package_skeleton(package_path, staging, source_path, manifest);
+  assert(ok);
+  assert(std::filesystem::exists(package_path));
+
+  return package_path;
+}
+
+void test_zero_pts_semantic_relationships() {
+  const auto pkg = create_zero_pts_test_package();
+
+  svp::query::TraversalOptions opts;
+  opts.start_id = "entity_001";
+  opts.max_depth = 2;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.class_filter = "semantic";
+  opts.limit = 100;
+
+  auto result = svp::query::traverse_relationships(pkg, opts);
+
+  assert(result.error_message.empty());
+  assert(!result.edges.empty());
+
+  bool found_appears_in_shot = false;
+  bool found_appears_in_scene = false;
+  bool found_visible_during_speech = false;
+  bool found_speaker_active = false;
+  for (const auto& edge : result.edges) {
+    if (edge.relationship_type == "appears_in_shot") found_appears_in_shot = true;
+    if (edge.relationship_type == "appears_in_scene") found_appears_in_scene = true;
+    if (edge.relationship_type == "visible_during_speech") found_visible_during_speech = true;
+    if (edge.relationship_type == "speaker_active_during_entity_visible") found_speaker_active = true;
+  }
+  assert(found_appears_in_shot);
+  assert(found_appears_in_scene);
+  assert(found_visible_during_speech);
+  assert(found_speaker_active);
+
+  std::cout << "test_zero_pts_semantic_relationships: passed\n";
+}
+
 }  // namespace
 
 int main() {
@@ -1392,6 +2104,26 @@ int main() {
   test_object_catalog_annotations();
   test_traversal_json_output();
   test_traversal_empty_relationships();
+  test_time_window_at_us();
+  test_time_window_start_end();
+  test_time_window_at_us_excludes_non_overlapping();
+  test_time_window_at_and_start_mutually_exclusive();
+  test_shortest_path_found();
+  test_shortest_path_not_found();
+  test_shortest_path_same_node();
+  test_shortest_path_json_output();
+  test_context_mode();
+  test_context_json_output();
+  test_context_unresolved_object();
+  test_edge_deduplication();
+  test_graph_health_report();
+  test_time_window_in_json_output();
+  test_deterministic_json_output();
+  test_semantic_relationships_generated();
+  test_semantic_visible_during_speech();
+  test_semantic_speaker_active_during_entity_visible();
+  test_unresolved_ids_in_graph_health();
+  test_zero_pts_semantic_relationships();
 
   std::cout << "All svp-query tests passed.\n";
   return 0;
