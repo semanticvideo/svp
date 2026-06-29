@@ -40,6 +40,7 @@ void test_semantic_edge_types_classified_as_semantic() {
   assert(classify_relationship_type("exits_frame") == RelationshipClass::Semantic);
   assert(classify_relationship_type("occludes") == RelationshipClass::Semantic);
   assert(classify_relationship_type("occluded_by") == RelationshipClass::Semantic);
+  assert(classify_relationship_type("mask_overlaps") == RelationshipClass::Semantic);
   assert(classify_relationship_type("moves_with") == RelationshipClass::Semantic);
   assert(classify_relationship_type("stationary_relative_to_camera") == RelationshipClass::Semantic);
   assert(classify_relationship_type("foreground_relative_to") == RelationshipClass::Semantic);

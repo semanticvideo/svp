@@ -38,6 +38,7 @@
         "exits_frame",
         "occludes",
         "occluded_by",
+        "mask_overlaps",
         "moves_with",
         "stationary_relative_to_camera",
         "foreground_relative_to",

@@ -3206,6 +3206,66 @@ void test_traversal_jsonl_sqlite_parity() {
   // Both health reports should have the same total_edges.
   assert(health_sqlite.total_edges == health_jsonl.total_edges);
 
+  // --- Path parity ---
+  // Find a path from word_000001 to speaker_0001 (direct edge via word_spoken_by).
+  svp::query::TraversalOptions path_opts;
+  path_opts.start_id = "word_000001";
+  path_opts.target_id = "speaker_0001";
+  path_opts.max_depth = 3;
+  path_opts.direction = svp::query::TraversalDirection::Both;
+  path_opts.limit = 100;
+
+  auto path_sqlite = svp::query::find_shortest_path(pkg_with_sqlite, path_opts);
+  auto path_jsonl = svp::query::find_shortest_path(pkg_jsonl_only, path_opts);
+
+  assert(path_sqlite.error_message.empty());
+  assert(path_jsonl.error_message.empty());
+  assert(path_sqlite.path_found == path_jsonl.path_found);
+  assert(path_sqlite.path_found);  // word_000001 -> speaker_0001 exists
+  assert(path_sqlite.path_edges.size() == path_jsonl.path_edges.size());
+  assert(path_sqlite.path_nodes.size() == path_jsonl.path_nodes.size());
+
+  // Compare path edges
+  for (std::size_t i = 0; i < path_sqlite.path_edges.size(); ++i) {
+    assert(path_sqlite.path_edges[i].relationship_id ==
+           path_jsonl.path_edges[i].relationship_id);
+    assert(path_sqlite.path_edges[i].source_id ==
+           path_jsonl.path_edges[i].source_id);
+    assert(path_sqlite.path_edges[i].target_id ==
+           path_jsonl.path_edges[i].target_id);
+  }
+
+  // --- Context parity ---
+  // Build context for word_000001.
+  auto ctx_sqlite = svp::query::build_context(pkg_with_sqlite, "word_000001", 100);
+  auto ctx_jsonl = svp::query::build_context(pkg_jsonl_only, "word_000001", 100);
+
+  assert(ctx_sqlite.error_message.empty());
+  assert(ctx_jsonl.error_message.empty());
+  assert(ctx_sqlite.resolved == ctx_jsonl.resolved);
+  assert(ctx_sqlite.resolved);  // word_000001 exists in both packages
+  assert(ctx_sqlite.context_edges.size() == ctx_jsonl.context_edges.size());
+  assert(ctx_sqlite.context_nodes.size() == ctx_jsonl.context_nodes.size());
+
+  // Compare context edges (sorted by relationship ID for determinism)
+  auto sort_ctx_edges = [](svp::query::ContextResult& r) {
+    std::sort(r.context_edges.begin(), r.context_edges.end(),
+              [](const svp::query::TraversalEdge& a, const svp::query::TraversalEdge& b) {
+                return a.relationship_id < b.relationship_id;
+              });
+  };
+  sort_ctx_edges(ctx_sqlite);
+  sort_ctx_edges(ctx_jsonl);
+
+  for (std::size_t i = 0; i < ctx_sqlite.context_edges.size(); ++i) {
+    assert(ctx_sqlite.context_edges[i].relationship_id ==
+           ctx_jsonl.context_edges[i].relationship_id);
+    assert(ctx_sqlite.context_edges[i].source_id ==
+           ctx_jsonl.context_edges[i].source_id);
+    assert(ctx_sqlite.context_edges[i].target_id ==
+           ctx_jsonl.context_edges[i].target_id);
+  }
+
   std::cout << "test_traversal_jsonl_sqlite_parity: passed\n";
 }
 
