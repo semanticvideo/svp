@@ -768,21 +768,21 @@ std::optional<std::filesystem::path> find_model_bundle_dir(
 
 std::string make_region_id(int entity_idx, int region_seq, int frame_idx) {
   std::ostringstream oss;
-  oss << "region_" << std::setfill('0') << std::setw(4) << entity_idx
-      << "_" << std::setw(6) << region_seq
-      << "_" << std::setw(6) << frame_idx;
+  oss << "region_" << std::setfill('0') << std::setw(6) << (entity_idx + 1)
+      << "_" << std::setw(6) << (region_seq + 1)
+      << "_" << std::setw(6) << (frame_idx + 1);
   return oss.str();
 }
 
 std::string make_entity_id(int idx) {
   std::ostringstream oss;
-  oss << "entity_" << std::setfill('0') << std::setw(4) << idx;
+  oss << "entity_" << std::setfill('0') << std::setw(6) << (idx + 1);
   return oss.str();
 }
 
 std::string make_track_id(int idx) {
   std::ostringstream oss;
-  oss << "track_" << std::setfill('0') << std::setw(4) << idx;
+  oss << "track_" << std::setfill('0') << std::setw(6) << (idx + 1);
   return oss.str();
 }
 
@@ -994,6 +994,7 @@ EntityTrackResult run_visual_entity_tracker(
     KalmanTracker kalman;
     std::string entity_id;
     std::string track_id;
+    int entity_idx = 0;
     std::vector<float> last_embedding;
     cv::Rect last_bbox;
     int first_frame_idx = 0;
@@ -1311,6 +1312,7 @@ EntityTrackResult run_visual_entity_tracker(
         // Create new track
         ActiveTrack new_track;
         new_track.kalman.init(bbox);
+        new_track.entity_idx = next_entity_idx;
         new_track.entity_id = make_entity_id(next_entity_idx++);
         new_track.track_id = make_track_id(next_track_idx++);
         new_track.last_bbox = bbox;
@@ -1347,7 +1349,10 @@ EntityTrackResult run_visual_entity_tracker(
 
       // Build TrackedRegion
       TrackedRegion region;
-      region.region_id = make_region_id(next_entity_idx, total_region_count, idx_next);
+      const int region_entity_idx = (best_track_idx >= 0)
+          ? active_tracks[best_track_idx].entity_idx
+          : static_cast<int>(active_tracks.size() - 1);
+      region.region_id = make_region_id(region_entity_idx, total_region_count, idx_next);
       region.entity_id = entity_id;
       region.track_id = track_id;
       region.frame_id = frame_next.frame_id;

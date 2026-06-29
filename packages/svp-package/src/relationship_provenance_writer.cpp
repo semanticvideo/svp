@@ -909,6 +909,37 @@ void build_speaker_active_during_entity_visible_relationships(
   }
 }
 
+void build_frame_timeline_relationships(
+    RelationshipBuilder& builder, const std::filesystem::path& staging_dir) {
+  const auto frames = read_jsonl(staging_dir / "timeline" / "frames.jsonl");
+  for (const auto& frame : frames) {
+    const std::string frame_id = string_value(frame, "id");
+    if (frame_id.empty()) continue;
+    if (builder.ids.frame_ids.count(frame_id) == 0) continue;
+
+    const std::int64_t pts_us = int_value_or_zero(frame, "pts_us");
+    const double confidence = confidence_value_or_one(frame);
+
+    const std::string shot_id = string_value(frame, "shot_id");
+    if (!shot_id.empty() && builder.ids.shot_ids.count(shot_id)) {
+      builder.add("rel_frame_shot_", "frame_in_shot",
+                  frame_id, shot_id,
+                  pts_us, pts_us, confidence,
+                  "timeline/frames.jsonl");
+      ++builder.counts.frame_in_shot;
+    }
+
+    const std::string scene_id = string_value(frame, "scene_id");
+    if (!scene_id.empty() && builder.ids.scene_ids.count(scene_id)) {
+      builder.add("rel_frame_scene_", "frame_in_scene",
+                  frame_id, scene_id,
+                  pts_us, pts_us, confidence,
+                  "timeline/frames.jsonl");
+      ++builder.counts.frame_in_scene;
+    }
+  }
+}
+
 std::vector<nlohmann::json> build_relationships(const std::filesystem::path& staging_dir,
                                                  RelationshipTypeCounts& counts) {
   const KnownIds ids = collect_known_ids(staging_dir);
@@ -923,6 +954,7 @@ std::vector<nlohmann::json> build_relationships(const std::filesystem::path& sta
   build_embedding_source_relationships(builder, staging_dir);
   build_spatial_region_relationships(builder, staging_dir);
   build_text_region_entity_overlap_relationships(builder, staging_dir);
+  build_frame_timeline_relationships(builder, staging_dir);
   build_entity_shot_scene_relationships(builder, staging_dir);
   build_visible_during_speech_relationships(builder, staging_dir);
   build_visible_during_word_range_relationships(builder, staging_dir);
@@ -941,7 +973,7 @@ nlohmann::json make_relationship_processor_record(const RelationshipTypeCounts& 
   return {
       {"id", kRelationshipProcessorId},
       {"name", "svp package relationship writer"},
-      {"version", "svp-package-relationship-writer-v4"},
+      {"version", "svp-package-relationship-writer-v5"},
       {"input_refs", {
           "text/text_regions.jsonl",
           "text/text_observations.jsonl",
@@ -979,7 +1011,9 @@ nlohmann::json make_relationship_processor_record(const RelationshipTypeCounts& 
           {"semantic_visible_during_word_range", counts.semantic_visible_during_word_range},
           {"semantic_speaker_active_during_entity_visible", counts.semantic_speaker_active_during_entity_visible},
           {"semantic_entity_appears_in_shot", counts.semantic_entity_appears_in_shot},
-          {"semantic_entity_appears_in_scene", counts.semantic_entity_appears_in_scene}
+          {"semantic_entity_appears_in_scene", counts.semantic_entity_appears_in_scene},
+          {"frame_in_shot", counts.frame_in_shot},
+          {"frame_in_scene", counts.frame_in_scene}
       }},
   };
 }
@@ -1073,6 +1107,8 @@ nlohmann::json relationship_provenance_write_summary_to_json(
           {"semantic_speaker_active_during_entity_visible", summary.type_counts.semantic_speaker_active_during_entity_visible},
           {"semantic_entity_appears_in_shot", summary.type_counts.semantic_entity_appears_in_shot},
           {"semantic_entity_appears_in_scene", summary.type_counts.semantic_entity_appears_in_scene},
+          {"frame_in_shot", summary.type_counts.frame_in_shot},
+          {"frame_in_scene", summary.type_counts.frame_in_scene},
       }},
   };
 }

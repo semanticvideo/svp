@@ -22,6 +22,8 @@ void test_support_edge_types_classified_as_support() {
   assert(classify_relationship_type("track_observation") == RelationshipClass::Support);
   assert(classify_relationship_type("has_evidence_crop") == RelationshipClass::Support);
   assert(classify_relationship_type("text_region_overlaps_entity") == RelationshipClass::Support);
+  assert(classify_relationship_type("frame_in_shot") == RelationshipClass::Support);
+  assert(classify_relationship_type("frame_in_scene") == RelationshipClass::Support);
 }
 
 void test_semantic_edge_types_classified_as_semantic() {
@@ -72,6 +74,7 @@ void test_json_type_field_is_canonical_not_renamed() {
     "numeric_value_from_observation", "appears_in_frame", "region_in_frame",
     "has_mask", "track_observation", "has_evidence_crop",
     "text_region_overlaps_entity",
+    "frame_in_shot", "frame_in_scene",
     "appears_in_shot", "appears_in_scene",
   };
   for (const auto t : emitted_types) {

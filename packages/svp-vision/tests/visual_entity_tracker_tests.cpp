@@ -699,6 +699,102 @@ static void test_motion_depth_fusion() {
             << ", fused=" << (has_fused ? "yes" : "no") << ")\n";
 }
 
+// Test 14: Verify canonical one-based 6-digit entity/track ID format
+// and that entity_id, track_id, and region_id are mutually consistent.
+static void test_canonical_id_format() {
+  const int w = 64, h = 64;
+  const int block_size = 16;
+  std::vector<svp::vision::ColorRasterFrame> frames(8);
+  for (int i = 0; i < 8; ++i) {
+    frames[i].frame_id = "frame_" + std::to_string(6000 + i);
+    frames[i].timestamp_us = (i + 1) * 1000000;
+    frames[i].width = w;
+    frames[i].height = h;
+    frames[i].keyframe = (i % 5 == 0);
+    frames[i].pixels.resize(static_cast<std::size_t>(w) * h);
+    for (auto& px : frames[i].pixels) { px.r = 0; px.g = 0; px.b = 0; }
+    int bx = 4 + i * 4;
+    int by = 24;
+    for (int y = by; y < by + block_size && y < h; ++y) {
+      for (int x = bx; x < bx + block_size && x < w; ++x) {
+        auto& px = frames[i].pixels[static_cast<std::size_t>(y) * w + x];
+        px.r = 255; px.g = 255; px.b = 255;
+      }
+    }
+  }
+
+  std::vector<std::uint16_t> depth_data;
+  std::vector<std::string> depth_frame_ids;
+  for (int i = 0; i < 8; ++i) {
+    depth_frame_ids.push_back(frames[i].frame_id);
+    int bx = 4 + i * 4;
+    int by = 24;
+    for (int y = 0; y < h; ++y) {
+      for (int x = 0; x < w; ++x) {
+        if (x >= bx && x < bx + block_size && y >= by && y < by + block_size) {
+          depth_data.push_back(50000);
+        } else {
+          depth_data.push_back(10000);
+        }
+      }
+    }
+  }
+
+  svp::vision::VisualEntityTrackerOptions opts;
+  opts.embedding_model_id = "model_nomic_embed_vision_v1_5";
+  opts.execution_provider = "cpu";
+
+  auto result = svp::vision::run_visual_entity_tracker(
+      frames, depth_data, depth_frame_ids, {}, {}, opts);
+
+  assert(!result.entities.empty());
+  assert(!result.tracks.empty());
+  assert(!result.regions.empty());
+
+  // Verify entity IDs match canonical format: entity_000001, entity_000002, etc.
+  for (std::size_t i = 0; i < result.entities.size(); ++i) {
+    const auto& eid = result.entities[i].entity_id;
+    assert(eid.rfind("entity_", 0) == 0);
+    const std::string num_part = eid.substr(7);
+    assert(num_part.length() == 6);
+    // Must be all digits
+    for (char c : num_part) assert(c >= '0' && c <= '9');
+    // Must not start with zero if more than one digit (i.e., must be zero-padded)
+    // First entity should be entity_000001
+    if (i == 0) {
+      assert(eid == "entity_000001");
+    }
+  }
+
+  // Verify track IDs match canonical format: track_000001, track_000002, etc.
+  for (std::size_t i = 0; i < result.tracks.size(); ++i) {
+    const auto& tid = result.tracks[i].track_id;
+    assert(tid.rfind("track_", 0) == 0);
+    const std::string num_part = tid.substr(6);
+    assert(num_part.length() == 6);
+    for (char c : num_part) assert(c >= '0' && c <= '9');
+    if (i == 0) {
+      assert(tid == "track_000001");
+    }
+  }
+
+  // Verify all region entity_ids and track_ids exist in entities/tracks
+  std::set<std::string> entity_id_set, track_id_set;
+  for (const auto& e : result.entities) entity_id_set.insert(e.entity_id);
+  for (const auto& t : result.tracks) track_id_set.insert(t.track_id);
+
+  for (const auto& r : result.regions) {
+    assert(entity_id_set.count(r.entity_id) > 0);
+    assert(track_id_set.count(r.track_id) > 0);
+    // mask_ref must be "mask_" + region_id
+    assert(r.mask_ref == "mask_" + r.region_id);
+  }
+
+  std::cout << "test_canonical_id_format: PASS (entities=" << result.entities.size()
+            << ", tracks=" << result.tracks.size()
+            << ", regions=" << result.regions.size() << ")\n";
+}
+
 int main() {
   test_rle_all_zero();
   test_rle_all_one();
@@ -715,6 +811,7 @@ int main() {
   test_flat_depth_static();
   test_uniform_rgb_depth_separated();
   test_motion_depth_fusion();
+  test_canonical_id_format();
 
   std::cout << "All visual entity tracker tests passed.\n";
   return 0;
