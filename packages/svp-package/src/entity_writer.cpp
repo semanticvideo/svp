@@ -361,8 +361,9 @@ nlohmann::json make_track_record(std::size_t entity_index,
   return record;
 }
 
-nlohmann::json make_entity_processor_record(const EntityWriteSummary& summary) {
-  return {
+nlohmann::json make_entity_processor_record(const EntityWriteSummary& summary,
+                                           bool fallback_used) {
+  nlohmann::json record = {
       {"id", kEntityProcessorId},
       {"name", "svp package entity writer"},
       {"version", "svp-package-entity-writer-v1"},
@@ -382,12 +383,28 @@ nlohmann::json make_entity_processor_record(const EntityWriteSummary& summary) {
       {"entity_count", summary.entity_count},
       {"track_count", summary.track_count},
       {"skipped_missing_evidence", summary.skipped_missing_evidence},
-      {"provenance_note", "Entities are derived from OCR text region evidence. "
-                          "Entity type is 'unknown_region' because no object "
-                          "recognition model is used. Labels are not assigned. "
-                          "Tracks represent text-content-matched observations, "
-                          "not robust visual tracking."},
   };
+
+  if (fallback_used) {
+    record["provenance_note"] =
+        "Fallback: no visual entity tracker output was found, so entities "
+        "are derived from OCR text region evidence as a last resort. "
+        "Entity type is 'unknown_region' because no object recognition "
+        "model is used. Labels are not assigned. Tracks represent "
+        "text-content-matched observations, not robust visual tracking. "
+        "When visual entity tracking is available, persistent entity "
+        "identity is owned by the visual entity tracker, not by OCR text.";
+    record["status"] = "fallback";
+  } else {
+    record["provenance_note"] =
+        "No text-derived entities were created because visual entity "
+        "tracker output is present. Persistent entity identity is owned "
+        "by the visual entity tracker. OCR text regions remain as text "
+        "observations and evidence, not as duplicate persistent entities.";
+    record["status"] = "skipped_visual_entities_present";
+  }
+
+  return record;
 }
 
 void append_processor_record(
@@ -435,6 +452,40 @@ EntityWriteSummary write_entity_artifacts(
     const std::filesystem::path& staging_dir) {
   EntityWriteSummary summary;
 
+  const std::filesystem::path entities_path = staging_dir / "entities" / "entities.jsonl";
+  const std::filesystem::path tracks_path = staging_dir / "entities" / "entity_tracks.jsonl";
+
+  // Read existing entities/tracks (may have been written by visual entity tracker)
+  auto existing_entities = read_jsonl(entities_path);
+  auto existing_tracks = read_jsonl(tracks_path);
+
+  // Check if visual entity tracker has already produced entities.
+  // Visual entities own persistent entity identity. If they exist, do not
+  // create duplicate text-derived persistent entities.
+  const bool has_visual_entities = !existing_entities.empty();
+
+  if (has_visual_entities) {
+    // Visual entities are present — keep them as the sole persistent entities.
+    // Text regions remain as text observations/evidence, not as entities.
+    // Write the existing visual entities back unchanged.
+    write_jsonl(entities_path, existing_entities);
+    write_jsonl(tracks_path, existing_tracks);
+
+    summary.entities_written = true;
+    summary.tracks_written = true;
+    summary.entity_count = existing_entities.size();
+    summary.track_count = existing_tracks.size();
+
+    append_processor_record(
+        staging_dir / "provenance" / "processors.jsonl",
+        make_entity_processor_record(summary, /*fallback_used=*/false),
+        summary);
+
+    return summary;
+  }
+
+  // Fallback: no visual entities exist. Create text-derived entities as a
+  // last resort with honest provenance.
   std::size_t skipped_missing_evidence = 0;
   const std::vector<EntityGroup> groups =
       group_text_regions(staging_dir, skipped_missing_evidence);
@@ -453,32 +504,17 @@ EntityWriteSummary write_entity_artifacts(
     tracks.push_back(make_track_record(i, groups[i]));
   }
 
-  const std::filesystem::path entities_path = staging_dir / "entities" / "entities.jsonl";
-  const std::filesystem::path tracks_path = staging_dir / "entities" / "entity_tracks.jsonl";
-
-  // Read existing entities/tracks (may have been written by visual entity tracker)
-  auto existing_entities = read_jsonl(entities_path);
-  auto existing_tracks = read_jsonl(tracks_path);
-
-  // Merge: append text-based entities to existing visual entities
-  for (auto& e : entities) {
-    existing_entities.push_back(std::move(e));
-  }
-  for (auto& t : tracks) {
-    existing_tracks.push_back(std::move(t));
-  }
-
-  write_jsonl(entities_path, existing_entities);
-  write_jsonl(tracks_path, existing_tracks);
+  write_jsonl(entities_path, entities);
+  write_jsonl(tracks_path, tracks);
 
   summary.entities_written = true;
   summary.tracks_written = true;
-  summary.entity_count = existing_entities.size();
-  summary.track_count = existing_tracks.size();
+  summary.entity_count = entities.size();
+  summary.track_count = tracks.size();
 
   append_processor_record(
       staging_dir / "provenance" / "processors.jsonl",
-      make_entity_processor_record(summary),
+      make_entity_processor_record(summary, /*fallback_used=*/true),
       summary);
 
   return summary;
@@ -494,13 +530,11 @@ EntityWriteSummary write_visual_entity_artifacts(
   std::filesystem::create_directories(entities_dir);
   std::filesystem::create_directories(spatial_dir);
 
-  // Read existing entities and tracks (from text-based entity writer)
-  auto existing_entities = read_jsonl(entities_dir / "entities.jsonl");
-  auto existing_tracks = read_jsonl(entities_dir / "entity_tracks.jsonl");
-
-  // Append visual entities
-  std::vector<nlohmann::json> all_entities = existing_entities;
-  std::vector<nlohmann::json> all_tracks = existing_tracks;
+  // Visual entity tracker owns persistent entity identity.
+  // Overwrite entities/tracks with visual-owned output rather than
+  // appending to any text-derived entities that may have been written.
+  std::vector<nlohmann::json> all_entities;
+  std::vector<nlohmann::json> all_tracks;
 
   for (const auto& entity : tracker_result.entities) {
     nlohmann::json entity_record;

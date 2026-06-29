@@ -579,6 +579,89 @@ void build_spatial_region_relationships(
   // is available in the relationship builder.
 }
 
+// Compute IoU (intersection-over-union) of two normalized bounding boxes.
+// Each bbox is [x0, y0, x1, y1] in [0, 1].
+double bbox_iou(const std::vector<double>& a, const std::vector<double>& b) {
+  if (a.size() < 4 || b.size() < 4) return 0.0;
+  const double ix0 = std::max(a[0], b[0]);
+  const double iy0 = std::max(a[1], b[1]);
+  const double ix1 = std::min(a[2], b[2]);
+  const double iy1 = std::min(a[3], b[3]);
+  if (ix1 <= ix0 || iy1 <= iy0) return 0.0;
+  const double intersection = (ix1 - ix0) * (iy1 - iy0);
+  const double area_a = (a[2] - a[0]) * (a[3] - a[1]);
+  const double area_b = (b[2] - b[0]) * (b[3] - b[1]);
+  const double union_area = area_a + area_b - intersection;
+  if (union_area <= 0.0) return 0.0;
+  return intersection / union_area;
+}
+
+void build_text_region_entity_overlap_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto text_regions = read_jsonl(staging_dir / "text" / "text_regions.jsonl");
+  const auto spatial_regions = read_jsonl(staging_dir / "spatial" / "regions.jsonl");
+
+  if (text_regions.empty() || spatial_regions.empty()) return;
+
+  // Only emit overlap relationships when visual entities exist.
+  // If entities are text-derived (fallback), there are no visual spatial
+  // regions to overlap with, so this function is a no-op.
+  if (builder.ids.entity_ids.empty()) return;
+
+  for (const auto& tr : text_regions) {
+    const std::string tr_id = string_value(tr, "text_region_id");
+    if (tr_id.empty()) continue;
+    if (builder.ids.text_region_ids.count(tr_id) == 0) continue;
+
+    const std::int64_t tr_start = int_value_or_zero(tr, "start_us");
+    const std::int64_t tr_end = int_value_or_zero(tr, "end_us");
+
+    std::vector<double> tr_bbox;
+    if (tr.contains("bbox_norm") && tr["bbox_norm"].is_array()) {
+      for (const auto& val : tr["bbox_norm"]) {
+        if (val.is_number()) {
+          tr_bbox.push_back(val.get<double>());
+        }
+      }
+    }
+    if (tr_bbox.size() < 4) continue;
+
+    for (const auto& sr : spatial_regions) {
+      const std::string sr_entity_id = string_value(sr, "entity_id");
+      if (sr_entity_id.empty()) continue;
+      if (builder.ids.entity_ids.count(sr_entity_id) == 0) continue;
+
+      const std::int64_t sr_ts = int_value_or_zero(sr, "pts_us");
+      // Spatial regions are instantaneous (single frame), so treat them
+      // as a point in time. Check if the text region's time span contains
+      // the spatial region's timestamp.
+      if (sr_ts < tr_start || sr_ts >= tr_end) continue;
+
+      std::vector<double> sr_bbox;
+      if (sr.contains("box_norm") && sr["box_norm"].is_array()) {
+        for (const auto& val : sr["box_norm"]) {
+          if (val.is_number()) {
+            sr_bbox.push_back(val.get<double>());
+          }
+        }
+      }
+      if (sr_bbox.size() < 4) continue;
+
+      // Only emit when there is actual spatial overlap (IoU > 0).
+      const double iou = bbox_iou(tr_bbox, sr_bbox);
+      if (iou <= 0.0) continue;
+
+      builder.add("rel_tr_entity_", "text_region_overlaps_entity",
+                  tr_id, sr_entity_id,
+                  tr_start, tr_end,
+                  confidence_value_or_one(tr),
+                  "text/text_regions.jsonl+spatial/regions.jsonl");
+      ++builder.counts.text_region_overlaps_entity;
+    }
+  }
+}
+
 std::vector<nlohmann::json> build_relationships(const std::filesystem::path& staging_dir,
                                                  RelationshipTypeCounts& counts) {
   const KnownIds ids = collect_known_ids(staging_dir);
@@ -592,6 +675,7 @@ std::vector<nlohmann::json> build_relationships(const std::filesystem::path& sta
   build_depth_frame_relationships(builder, staging_dir);
   build_embedding_source_relationships(builder, staging_dir);
   build_spatial_region_relationships(builder, staging_dir);
+  build_text_region_entity_overlap_relationships(builder, staging_dir);
 
   counts = builder.counts;
 
@@ -638,6 +722,7 @@ nlohmann::json make_relationship_processor_record(const RelationshipTypeCounts& 
           {"color_observation_target", counts.color_observation_target},
           {"depth_frame", counts.depth_frame},
           {"embedding_source", counts.embedding_source},
+          {"text_region_overlaps_entity", counts.text_region_overlaps_entity},
           {"skipped_dangling", counts.skipped_dangling}
       }},
   };
@@ -725,6 +810,7 @@ nlohmann::json relationship_provenance_write_summary_to_json(
           {"color_observation_target", summary.type_counts.color_observation_target},
           {"depth_frame", summary.type_counts.depth_frame},
           {"embedding_source", summary.type_counts.embedding_source},
+          {"text_region_overlaps_entity", summary.type_counts.text_region_overlaps_entity},
           {"skipped_dangling", summary.type_counts.skipped_dangling},
       }},
   };

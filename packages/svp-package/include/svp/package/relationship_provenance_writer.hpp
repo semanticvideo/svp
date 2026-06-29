@@ -18,6 +18,7 @@ struct RelationshipTypeCounts {
   std::size_t color_observation_target = 0;
   std::size_t depth_frame = 0;
   std::size_t embedding_source = 0;
+  std::size_t text_region_overlaps_entity = 0;
   std::size_t skipped_dangling = 0;
 };
 
