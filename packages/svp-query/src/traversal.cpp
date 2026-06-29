@@ -35,7 +35,7 @@ constexpr std::array<CatalogLayerDef, 17> kCatalogLayers{{
     {"spatial/regions.jsonl",               {"region_id", "id", ""}},
     {"spatial/masks.index.jsonl",           {"mask_id", "block_id", "id"}},
     {"spatial/depth.index.jsonl",           {"depth_frame_id", "block_id", "id"}},
-    {"embeddings/embeddings.index.jsonl",   {"embedding_id", "embedding_set_id", "id"}},
+    {"embeddings/embeddings.index.jsonl",   {"id", "embedding_id", "embedding_set_id"}},
 }};
 
 std::string extract_id(const nlohmann::json& record,

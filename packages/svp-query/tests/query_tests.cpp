@@ -922,13 +922,17 @@ std::filesystem::path create_traversal_test_package() {
       {{"id", "rel_013"}, {"type", "word_spoken_by"}, {"source_id", "word_000003"},
        {"target_id", "nonexistent_speaker"}, {"start_us", 1000000}, {"end_us", 1500000},
        {"confidence", 0.95}, {"processor_id", "proc_test"}},
+      {{"id", "rel_014"}, {"type", "embedding_source_is"}, {"source_id", "embed_text_obs_000001"},
+       {"target_id", "text_obs_000001"}, {"start_us", 1000000}, {"end_us", 2000000},
+       {"confidence", 1.0}, {"processor_id", "proc_test"}},
   };
   write_jsonl(staging / "relationships" / "relationships.jsonl", relationships);
 
   std::filesystem::create_directories(staging / "embeddings");
   write_json(staging / "embeddings" / "embedding_sets.json", {{"schema_version", "svp-embedding-sets-v1"}});
   write_jsonl(staging / "embeddings" / "embeddings.index.jsonl", {
-      {{"embedding_id", "embed_000001"}, {"embedding_set_id", "embed_set_001"},
+      {{"id", "embed_text_obs_000001"}, {"embedding_id", "embed_000001"},
+       {"embedding_set_id", "embed_set_001"},
        {"source_type", "text_observation"}, {"source_id", "text_obs_000001"},
        {"block_path", "embeddings/embed_000001.bin"},
        {"block_size_bytes", 512}}
@@ -1205,6 +1209,40 @@ void test_traversal_missing_ids_reported() {
   std::cout << "test_traversal_missing_ids_reported: passed\n";
 }
 
+void test_traversal_embedding_id_resolves() {
+  const auto pkg = create_traversal_test_package();
+  svp::query::TraversalOptions opts;
+  opts.start_id = "text_obs_000001";
+  opts.max_depth = 2;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.class_filter = "all";
+  opts.limit = 100;
+
+  auto result = svp::query::traverse_relationships(pkg, opts);
+
+  assert(result.error_message.empty());
+
+  bool found_embed = false;
+  bool embed_resolved = false;
+  for (const auto& node : result.nodes) {
+    if (node.object_id == "embed_text_obs_000001") {
+      found_embed = true;
+      embed_resolved = node.resolved;
+      assert(node.source_layer == "embeddings/embeddings.index.jsonl");
+    }
+  }
+  assert(found_embed);
+  assert(embed_resolved);
+
+  bool embed_in_missing = false;
+  for (const auto& id : result.missing_object_ids) {
+    if (id == "embed_text_obs_000001") embed_in_missing = true;
+  }
+  assert(!embed_in_missing);
+
+  std::cout << "test_traversal_embedding_id_resolves: passed\n";
+}
+
 void test_object_catalog_annotations() {
   const auto pkg = create_traversal_test_package();
   auto catalog = svp::query::build_object_catalog(pkg);
@@ -1212,7 +1250,7 @@ void test_object_catalog_annotations() {
   const char* required_ids[] = {
       "word_000001", "text_obs_000001", "text_region_000001",
       "frame_000001", "entity_001", "crop_000001",
-      "mask_000001", "depth_frame_000001", "embed_000001"
+      "mask_000001", "depth_frame_000001", "embed_text_obs_000001"
   };
   for (const auto* id : required_ids) {
     const auto* entry = catalog.find(id);
@@ -1251,7 +1289,7 @@ void test_object_catalog_annotations() {
   assert(depth_summary.value("kind", "") == "depth");
   assert(depth_summary.value("block_path", "") == "spatial/depth/depth_000001.bin");
 
-  const auto embed_summary = catalog.node_summary("embed_000001");
+  const auto embed_summary = catalog.node_summary("embed_text_obs_000001");
   assert(embed_summary.value("kind", "") == "embedding");
   assert(embed_summary.value("source_type", "") == "text_observation");
   assert(embed_summary.value("source_id", "") == "text_obs_000001");
@@ -1350,6 +1388,7 @@ int main() {
   test_traversal_type_filter();
   test_traversal_unknown_type_traversable();
   test_traversal_missing_ids_reported();
+  test_traversal_embedding_id_resolves();
   test_object_catalog_annotations();
   test_traversal_json_output();
   test_traversal_empty_relationships();
