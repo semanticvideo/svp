@@ -95,6 +95,7 @@ PackageSkeletonStageResult run_package_skeleton_stage(
     // is present in the timeline.
     const std::size_t total_frames =
         svp::package::rewrite_frames_jsonl(context.staging_dir,
+                                           context.plan,
                                            context.frame_catalog);
     context.output["frame_catalog_total_frames"] = total_frames;
 

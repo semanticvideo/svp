@@ -278,10 +278,10 @@ DecodedCanonicalFrames decode_frames_at_timestamps(
     std::size_t fidx = result.frames.size();
     if (frame_catalog) {
       fid = frame_catalog->register_frame(
-          timestamps_us[static_cast<std::size_t>(i)], width, height,
+          timestamps_us[static_cast<std::size_t>(i)],
           purpose, is_keyframe);
       const auto idx = frame_catalog->get_frame_index(
-          timestamps_us[static_cast<std::size_t>(i)], width, height);
+          timestamps_us[static_cast<std::size_t>(i)]);
       if (idx.has_value())
         fidx = *idx;
     } else {
@@ -362,10 +362,10 @@ DecodedCanonicalFrames decode_frames_at_timestamps_streaming(
     std::size_t fidx = static_cast<std::size_t>(result.frames_decoded);
     if (frame_catalog) {
       fid = frame_catalog->register_frame(
-          timestamps_us[static_cast<std::size_t>(i)], width, height,
+          timestamps_us[static_cast<std::size_t>(i)],
           purpose, result.frames_decoded == 0);
       const auto idx = frame_catalog->get_frame_index(
-          timestamps_us[static_cast<std::size_t>(i)], width, height);
+          timestamps_us[static_cast<std::size_t>(i)]);
       if (idx.has_value())
         fidx = *idx;
     } else {

@@ -12,13 +12,10 @@ std::string FrameCatalog::make_frame_id(std::size_t index) {
 }
 
 std::string FrameCatalog::register_frame(std::int64_t timestamp_us,
-                                         int width,
-                                         int height,
                                          const std::string& purpose,
                                          bool keyframe) {
-  const FrameKey key{timestamp_us, width, height};
-  const auto it = key_to_index_.find(key);
-  if (it != key_to_index_.end()) {
+  const auto it = timestamp_to_index_.find(timestamp_us);
+  if (it != timestamp_to_index_.end()) {
     auto& entry = entries_[it->second];
     entry.purposes.insert(purpose);
     if (keyframe)
@@ -31,11 +28,9 @@ std::string FrameCatalog::register_frame(std::int64_t timestamp_us,
   entry.frame_id = make_frame_id(index);
   entry.frame_index = index;
   entry.timestamp_us = timestamp_us;
-  entry.width = width;
-  entry.height = height;
   entry.keyframe = keyframe;
   entry.purposes.insert(purpose);
-  key_to_index_[key] = index;
+  timestamp_to_index_[timestamp_us] = index;
   entries_.push_back(std::move(entry));
   return entries_.back().frame_id;
 }
@@ -50,10 +45,9 @@ std::optional<std::size_t> FrameCatalog::get_frame_index(
 }
 
 std::optional<std::size_t> FrameCatalog::get_frame_index(
-    std::int64_t timestamp_us, int width, int height) const {
-  const FrameKey key{timestamp_us, width, height};
-  const auto it = key_to_index_.find(key);
-  if (it == key_to_index_.end())
+    std::int64_t timestamp_us) const {
+  const auto it = timestamp_to_index_.find(timestamp_us);
+  if (it == timestamp_to_index_.end())
     return std::nullopt;
   return entries_[it->second].frame_index;
 }

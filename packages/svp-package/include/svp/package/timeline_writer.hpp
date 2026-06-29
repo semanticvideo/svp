@@ -46,6 +46,7 @@ struct TimelineWriteSummary {
  */
 [[nodiscard]] std::size_t rewrite_frames_jsonl(
     const std::filesystem::path& staging_dir,
+    const svp::media::MediaIngestPlan& plan,
     const svp::vision::FrameCatalog& frame_catalog);
 
 } // namespace svp::package

@@ -352,6 +352,7 @@ TimelineWriteSummary write_timeline_artifacts(
 
 std::size_t rewrite_frames_jsonl(
     const std::filesystem::path& staging_dir,
+    const svp::media::MediaIngestPlan& plan,
     const svp::vision::FrameCatalog& frame_catalog) {
   const std::filesystem::path frames_path =
       staging_dir / "timeline" / "frames.jsonl";
@@ -366,6 +367,27 @@ std::size_t rewrite_frames_jsonl(
     }
   }
 
+  const std::string stream_id =
+      plan.primary_video_stream.id.empty() ? "vstream_0001" : plan.primary_video_stream.id;
+
+  const bool has_real_video = plan.primary_video_stream.width > 0;
+  const std::int32_t src_w = has_real_video ? plan.primary_video_stream.width : 640;
+  const std::int32_t src_h = has_real_video ? plan.primary_video_stream.height : 360;
+  const std::int32_t rot = has_real_video ? plan.primary_video_stream.rotation_degrees : 0;
+  const std::int32_t analysis_w = has_real_video ? plan.canonical_raster.width : 640;
+  const std::int32_t analysis_h = has_real_video ? plan.canonical_raster.height : 360;
+
+  std::int32_t display_w = src_w;
+  std::int32_t display_h = src_h;
+  std::string par = "1:1";
+
+  if (has_real_video) {
+    display_w = plan.canonical_raster.display.oriented_width;
+    display_h = plan.canonical_raster.display.oriented_height;
+    par = std::to_string(plan.primary_video_stream.pixel_aspect_ratio.numerator) + ":" +
+          std::to_string(plan.primary_video_stream.pixel_aspect_ratio.denominator);
+  }
+
   std::vector<nlohmann::json> new_records;
   for (const auto& entry : frame_catalog.entries()) {
     auto it = existing_by_id.find(entry.frame_id);
@@ -374,25 +396,24 @@ std::size_t rewrite_frames_jsonl(
       rec["frame_index"] = entry.frame_index;
       new_records.push_back(std::move(rec));
     } else {
+      std::ostringstream pts_sec_oss;
+      pts_sec_oss << std::fixed << std::setprecision(6)
+                  << (static_cast<double>(entry.timestamp_us) / 1000000.0);
+
       nlohmann::json rec = {
           {"id", entry.frame_id},
           {"frame_index", entry.frame_index},
-          {"source_stream_id", "stream_000001"},
+          {"source_stream_id", stream_id},
           {"pts_us", entry.timestamp_us},
-          {"pts_sec", [&entry] {
-            std::ostringstream oss;
-            oss << std::fixed << std::setprecision(6)
-                << (static_cast<double>(entry.timestamp_us) / 1000000.0);
-            return oss.str();
-          }()},
-          {"source_width", entry.width},
-          {"source_height", entry.height},
-          {"display_width", entry.width},
-          {"display_height", entry.height},
-          {"pixel_aspect_ratio", "1:1"},
-          {"rotation_degrees_applied", 0},
-          {"analysis_width", entry.width},
-          {"analysis_height", entry.height},
+          {"pts_sec", pts_sec_oss.str()},
+          {"source_width", src_w},
+          {"source_height", src_h},
+          {"display_width", display_w},
+          {"display_height", display_h},
+          {"pixel_aspect_ratio", par},
+          {"rotation_degrees_applied", rot},
+          {"analysis_width", analysis_w},
+          {"analysis_height", analysis_h},
       };
       new_records.push_back(std::move(rec));
     }
