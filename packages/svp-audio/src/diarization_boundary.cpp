@@ -77,6 +77,7 @@ std::string diarization_status_to_string(DiarizationStatus status) {
     case DiarizationStatus::unavailable: return "unavailable";
     case DiarizationStatus::ran: return "ran";
     case DiarizationStatus::fallback_one_speaker: return "fallback_one_speaker";
+    case DiarizationStatus::user_declared_single_speaker: return "user_declared_single_speaker";
   }
   return "unknown";
 }
@@ -124,7 +125,22 @@ DiarizationExecutionBoundary execute_diarization_boundary(
     DiarizationExecutionBoundary boundary,
     const std::filesystem::path& staging_root,
     const std::filesystem::path& model_cache_root,
-    bool allow_fallback) {
+    bool allow_fallback,
+    bool force_single_speaker) {
+  if (force_single_speaker) {
+    SpeakerSegment single_segment;
+    single_segment.id = segment_id_for_ordinal(0);
+    single_segment.speaker_id = "speaker_0001";
+    single_segment.timing = {0, boundary.total_duration_us};
+    single_segment.confidence = 0.0;
+    single_segment.overlap = false;
+    boundary.speaker_segments.push_back(std::move(single_segment));
+    boundary.speaker_count = 1;
+    boundary.diarization_status = DiarizationStatus::user_declared_single_speaker;
+    boundary.blockers.clear();
+    return boundary;
+  }
+
   if (boundary.diarization_status == DiarizationStatus::unavailable) {
     if (allow_fallback && boundary.total_duration_us > 0 && boundary.analysis_audio_available) {
       SpeakerSegment fallback_segment;

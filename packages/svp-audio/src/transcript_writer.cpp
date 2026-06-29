@@ -71,6 +71,10 @@ nlohmann::json diarization_provenance_json(const AsrExecutionBoundary& boundary)
     } else {
       note = "Diarization model ran and produced speaker segments.";
     }
+  } else if (boundary.diarization_status == "user_declared_single_speaker") {
+    note = boundary.diarization_note.empty()
+         ? "User requested single-speaker mode; diarization was intentionally skipped."
+         : boundary.diarization_note;
   } else if (boundary.diarization_status == "fallback_one_speaker") {
     note = boundary.diarization_note.empty()
          ? "One-speaker fallback used. This is not speaker recognition."
@@ -85,6 +89,7 @@ nlohmann::json diarization_provenance_json(const AsrExecutionBoundary& boundary)
       {"status", boundary.diarization_status},
       {"processor_id", boundary.diarization_processor_id},
       {"one_speaker_fallback", boundary.diarization_status == "fallback_one_speaker"},
+      {"user_declared_single_speaker", boundary.diarization_status == "user_declared_single_speaker"},
       {"note", note},
   };
   if (!boundary.diarization_blockers.empty()) {
@@ -133,10 +138,14 @@ nlohmann::json ran_transcript_json(const AsrExecutionBoundary& boundary,
       {"confidence_note", "Per-word confidence is the mean of selected-token decoder softmax probabilities for the word's constituent tokens. This is uncalibrated model confidence, not a calibrated probability."},
       {"speaker_mode", boundary.diarization_status == "fallback_one_speaker"
            ? "one_speaker_fallback"
-           : "diarization_assigned"},
+           : (boundary.diarization_status == "user_declared_single_speaker"
+                ? "user_declared_single_speaker"
+                : "diarization_assigned")},
       {"speaker_note", boundary.diarization_status == "fallback_one_speaker"
            ? "Single speaker assigned without diarization. All words have speaker_id speaker_0001. This is fallback behavior, not speaker recognition."
-           : "Speaker IDs assigned by max interval overlap with nearest-segment fallback (500ms tolerance). Words outside all segments and tolerance are marked speaker_unknown."},
+           : (boundary.diarization_status == "user_declared_single_speaker"
+                ? "User requested single-speaker mode. All words have speaker_id speaker_0001. Diarization was intentionally skipped."
+                : "Speaker IDs assigned by max interval overlap with nearest-segment fallback (500ms tolerance). Words outside all segments and tolerance are marked speaker_unknown.")},
   };
 
   return {

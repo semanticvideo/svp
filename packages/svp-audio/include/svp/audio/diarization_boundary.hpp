@@ -17,6 +17,7 @@ enum class DiarizationStatus {
   unavailable,
   ran,
   fallback_one_speaker,
+  user_declared_single_speaker,
 };
 
 struct DiarizationExecutionBoundary {
@@ -60,7 +61,8 @@ struct DiarizationExecutionBoundary {
     DiarizationExecutionBoundary boundary,
     const std::filesystem::path& staging_root,
     const std::filesystem::path& model_cache_root,
-    bool allow_fallback = false);
+    bool allow_fallback = false,
+    bool force_single_speaker = false);
 
 [[nodiscard]] std::string diarization_status_to_string(DiarizationStatus status);
 

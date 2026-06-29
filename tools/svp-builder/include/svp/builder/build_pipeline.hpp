@@ -41,6 +41,7 @@ struct BuildPipelineOptions {
   BuildStage stop_after = BuildStage::media_ingest;
   std::string sherpa_lib_path;
   bool allow_fallback_diarization = false;
+  bool force_single_speaker = false;
 };
 
 struct BuildPipelineResult {

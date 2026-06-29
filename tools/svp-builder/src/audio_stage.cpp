@@ -108,13 +108,16 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
 
   // Diarization boundary: check for diarization model in cache.
   // If unavailable, honest fallback one-speaker segment is produced.
+  // When force_single_speaker is set, skip all Sherpa checks and execution.
   const bool diar_model_available =
+      context.options.force_single_speaker ||
       svp::audio::check_diarization_model_in_cache(
           "model_sherpa_onnx_diarization", model_cache_root);
   const bool diar_model_verified =
-      diar_model_available &&
-      svp::audio::verify_diarization_model_files(
-          "model_sherpa_onnx_diarization", model_cache_root);
+      context.options.force_single_speaker ||
+      (diar_model_available &&
+       svp::audio::verify_diarization_model_files(
+           "model_sherpa_onnx_diarization", model_cache_root));
 
   svp::audio::DiarizationExecutionBoundary diar_boundary =
       svp::audio::build_diarization_boundary(
@@ -126,7 +129,9 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
   // Check sherpa-onnx availability AFTER ASR has loaded its models.
   // Loading sherpa's dylib (which bundles its own onnxruntime) before
   // ASR model loading corrupts the ONNX schema registry.
-  if (!svp::audio::is_sherpa_diarization_available() &&
+  // Skip Sherpa availability check entirely when force_single_speaker is set.
+  if (!context.options.force_single_speaker &&
+      !svp::audio::is_sherpa_diarization_available() &&
       !context.options.allow_fallback_diarization) {
     std::cerr << "\n  ERROR: sherpa-onnx C API library not found.\n"
               << "  Diarization cannot run. Speaker detection will NOT be performed.\n\n"
@@ -135,10 +140,14 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
               << "  Or set SHERPA_ONNX_LIB_PATH to the library path.\n"
               << "  Or use --sherpa-lib <path> to specify it explicitly.\n\n"
               << "  To proceed WITHOUT diarization (NOT RECOMMENDED):\n"
-              << "    --allow-fallback-diarization\n\n";
+              << "    --allow-fallback-diarization\n\n"
+              << "  Or to skip diarization intentionally:\n"
+              << "    --force-single-speaker\n\n";
     return 1;
   }
-  if (context.options.allow_fallback_diarization && !svp::audio::is_sherpa_diarization_available()) {
+  if (!context.options.force_single_speaker &&
+      context.options.allow_fallback_diarization &&
+      !svp::audio::is_sherpa_diarization_available()) {
     std::cerr << "  WARNING: --allow-fallback-diarization is active. "
               << "sherpa-onnx is not available. "
               << "Speaker data will be FABRICATED FALLBACK, not real.\n";
@@ -146,11 +155,13 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
 
   diar_boundary = svp::audio::execute_diarization_boundary(
       std::move(diar_boundary), context.staging_dir, model_cache_root,
-      context.options.allow_fallback_diarization);
+      context.options.allow_fallback_diarization,
+      context.options.force_single_speaker);
 
   if (context.stage_plan.run_audio &&
       diar_boundary.diarization_status == svp::audio::DiarizationStatus::unavailable &&
-      !context.options.allow_fallback_diarization) {
+      !context.options.allow_fallback_diarization &&
+      !context.options.force_single_speaker) {
     std::cerr << "\n  ERROR: Diarization is unavailable. Speaker detection will NOT be performed.\n"
               << "  Cause:";
     for (const auto& blocker : diar_boundary.blockers) {
@@ -175,7 +186,12 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
   asr_with_diar.diarization_status =
       svp::audio::diarization_status_to_string(diar_boundary.diarization_status);
   asr_with_diar.diarization_blockers = diar_boundary.blockers;
-  if (diar_boundary.diarization_status == svp::audio::DiarizationStatus::fallback_one_speaker) {
+  if (diar_boundary.diarization_status == svp::audio::DiarizationStatus::user_declared_single_speaker) {
+    asr_with_diar.one_speaker_mode = true;
+    asr_with_diar.speaker_count = 1;
+    asr_with_diar.diarization_note =
+        "User requested single-speaker mode; diarization was intentionally skipped.";
+  } else if (diar_boundary.diarization_status == svp::audio::DiarizationStatus::fallback_one_speaker) {
     asr_with_diar.one_speaker_mode = true;
     asr_with_diar.speaker_count = 1;
     if (!diar_boundary.blockers.empty()) {
