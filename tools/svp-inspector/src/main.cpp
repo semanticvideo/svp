@@ -983,11 +983,11 @@ int main(int argc, char** argv) {
   auto* query = app.add_subcommand("query", "Query SVP package semantic layers");
   query->add_option("package", query_package_path, "Path to a .svp package")->required();
   query->add_option("--mode", query_mode,
-                    "Query mode: layers, transcript, words, speakers, ocr, colors, validation, relationships, traverse, path, context")
+                    "Query mode: layers, transcript, words, speakers, ocr, colors, validation, relationships, traverse, path, context, health")
       ->check(CLI::IsMember({"layers", "transcript", "words", "speakers",
                               "ocr", "colors", "validation",
                               "relationships", "traverse",
-                              "path", "context"}));
+                              "path", "context", "health"}));
   query->add_option("--text", query_text, "Search text for words or OCR mode");
   query->add_option("--bucket", query_color_bucket, "Filter color observations by dominant bucket");
   query->add_option("--min-coverage", query_min_coverage,
@@ -1112,11 +1112,59 @@ int main(int argc, char** argv) {
         query_cmd::print_path(query_package_path, opts, query_json);
       }
     } else if (query_mode == "context") {
-      auto ctx_result = svp::query::build_context(query_package_path, query_from, query_limit);
+      svp::query::ContextOptions ctx_opts;
+      ctx_opts.object_id = query_from;
+      ctx_opts.max_depth = query_depth;
+      ctx_opts.limit = query_limit;
+      ctx_opts.class_filter = query_class;
+      if (query_at_us >= 0) ctx_opts.at_us = query_at_us;
+      if (query_start_us >= 0) ctx_opts.start_us = query_start_us;
+      if (query_end_us >= 0) ctx_opts.end_us = query_end_us;
+      auto ctx_result = svp::query::build_context(query_package_path, ctx_opts);
       if (query_json) {
         std::cout << svp::query::context_result_to_json(ctx_result).dump(2) << "\n";
       } else {
         query_cmd::print_context(query_package_path, query_from, query_limit, query_json);
+      }
+    } else if (query_mode == "health") {
+      auto health = svp::query::compute_graph_health(query_package_path);
+      if (query_json) {
+        std::cout << svp::query::graph_health_to_json(health).dump(2) << "\n";
+      } else {
+        std::cout << "Graph health diagnostics\n";
+        std::cout << "  total edges: " << health.total_edges << "\n";
+        std::cout << "  total nodes: " << health.total_nodes << "\n";
+        std::cout << "  resolved nodes: " << health.resolved_nodes << "\n";
+        std::cout << "  unresolved nodes: " << health.unresolved_nodes << "\n";
+        std::cout << "  orphan nodes: " << health.orphan_nodes << "\n";
+        std::cout << "  unknown relationship types: " << health.unknown_relationship_types << "\n";
+        if (!health.class_counts.empty()) {
+          std::cout << "  class counts:\n";
+          for (const auto& [cls, cnt] : health.class_counts) {
+            std::cout << "    " << cls << ": " << cnt << "\n";
+          }
+        }
+        if (!health.type_counts.empty()) {
+          std::cout << "  type counts:\n";
+          for (const auto& [type, cnt] : health.type_counts) {
+            std::cout << "    " << type << ": " << cnt << "\n";
+          }
+        }
+        if (!health.unresolved_ids.empty()) {
+          std::cout << "  unresolved ids: " << health.unresolved_ids.size() << "\n";
+          for (const auto& id : health.unresolved_ids) {
+            std::cout << "    - " << id << "\n";
+          }
+        }
+        if (!health.orphan_ids.empty()) {
+          std::cout << "  orphan ids: " << health.orphan_ids.size() << "\n";
+          for (const auto& id : health.orphan_ids) {
+            std::cout << "    - " << id << "\n";
+          }
+        }
+        if (!health.error_message.empty()) {
+          std::cout << "  error: " << health.error_message << "\n";
+        }
       }
     }
     return 0;

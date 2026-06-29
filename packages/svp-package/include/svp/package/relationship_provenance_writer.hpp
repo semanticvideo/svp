@@ -27,6 +27,12 @@ struct RelationshipTypeCounts {
   std::size_t semantic_entity_appears_in_scene = 0;
   std::size_t frame_in_shot = 0;
   std::size_t frame_in_scene = 0;
+  std::size_t spatial_overlaps = 0;
+  std::size_t spatial_contains = 0;
+  std::size_t spatial_contained_by = 0;
+  std::size_t spatial_near = 0;
+  std::size_t entity_enters_frame = 0;
+  std::size_t entity_exits_frame = 0;
 };
 
 struct RelationshipProvenanceWriteSummary {
