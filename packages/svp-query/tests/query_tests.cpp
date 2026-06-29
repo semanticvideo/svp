@@ -1457,7 +1457,7 @@ void test_traversal_missing_relationships() {
   // Verify the package does not contain relationships.jsonl.
   const auto layout = svp::package::read_package_layout(package_path);
   assert(layout.has_value());
-  assert(!layout->value().has_entry("relationships/relationships.jsonl"));
+  assert(!layout.value().has_entry("relationships/relationships.jsonl"));
 
   svp::query::TraversalOptions opts;
   opts.start_id = "word_000001";
