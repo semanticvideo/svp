@@ -695,10 +695,11 @@ void build_spatial_region_pair_relationships(
         const double iou = bbox_iou(a.bbox, b.bbox);
         const std::int64_t ts = a.pts_us;
 
-        // Do NOT emit 'overlaps' from bbox IoU — spec §15 requires
-        // "overlaps: mask IoU exceeds threshold". Mask-based overlaps
-        // are emitted by build_mask_occlusion_relationships using real
-        // decoded RLE pixel evidence. Only emit 'near' from bbox here.
+        // Do NOT emit 'overlaps' or 'contains'/'contained_by' from bbox —
+        // spec §15 requires mask IoU for overlaps and mask containment for
+        // contains/contained_by. These are emitted by
+        // build_mask_occlusion_relationships using real decoded RLE pixel
+        // evidence. Only emit 'near' from bbox centroid distance here.
         if (iou <= 0.0) {
           const double dist = bbox_center_distance(a.bbox, b.bbox);
           if (dist <= kNearThreshold) {
@@ -707,18 +708,6 @@ void build_spatial_region_pair_relationships(
                         "spatial/regions.jsonl");
             ++builder.counts.spatial_near;
           }
-        }
-
-        if (bbox_contains(a.bbox, b.bbox)) {
-          builder.add("rel_spatial_contains_", "contains",
-                      a.id, b.id, ts, ts, 1.0,
-                      "spatial/regions.jsonl");
-          ++builder.counts.spatial_contains;
-        } else if (bbox_contains(b.bbox, a.bbox)) {
-          builder.add("rel_spatial_contained_by_", "contained_by",
-                      a.id, b.id, ts, ts, 1.0,
-                      "spatial/regions.jsonl");
-          ++builder.counts.spatial_contained_by;
         }
       }
     }
@@ -1447,6 +1436,36 @@ void build_mask_occlusion_relationships(
                       pts_us, pts_us, mask_iou,
                       "spatial/masks.blocks.svpmz");
           ++builder.counts.spatial_overlaps;
+        }
+
+        // Spec §15: "contains: one mask mostly contains another"
+        // Compute containment ratio: what fraction of B's pixels are
+        // inside A? If most of B is inside A, then A contains B.
+        constexpr double kMaskContainmentThreshold = 0.8;
+        const std::size_t b_total = overlap_pixels + b_only_pixels;
+        const std::size_t a_total = overlap_pixels + a_only_pixels;
+
+        if (b_total > 0) {
+          const double containment_b_in_a =
+              static_cast<double>(overlap_pixels) / static_cast<double>(b_total);
+          if (containment_b_in_a >= kMaskContainmentThreshold) {
+            builder.add("rel_mask_contains_", "contains",
+                        info_a.region_id, info_b.region_id,
+                        pts_us, pts_us, containment_b_in_a,
+                        "spatial/masks.blocks.svpmz");
+            ++builder.counts.spatial_contains;
+          }
+        }
+        if (a_total > 0) {
+          const double containment_a_in_b =
+              static_cast<double>(overlap_pixels) / static_cast<double>(a_total);
+          if (containment_a_in_b >= kMaskContainmentThreshold) {
+            builder.add("rel_mask_contained_by_", "contained_by",
+                        info_a.region_id, info_b.region_id,
+                        pts_us, pts_us, containment_a_in_b,
+                        "spatial/masks.blocks.svpmz");
+            ++builder.counts.spatial_contained_by;
+          }
         }
       }
     }
