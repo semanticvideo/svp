@@ -586,6 +586,151 @@ void test_malformed_layers() {
   std::cout << "test_malformed_layers: passed\n";
 }
 
+std::filesystem::path create_test_package_with_relationships() {
+  const auto root = std::filesystem::temp_directory_path() / "svp-query-rel-tests";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto staging = root / "staging";
+  const auto package_path = root / "test_rel.svp";
+  const auto source_path = root / "source.mp4";
+
+  write_file(source_path, "mock media\n");
+
+  nlohmann::json manifest = {
+      {"svp_version", "1.0-rc.2"},
+      {"package_id", "svp_query_rel_test_pkg"},
+      {"created_utc", "2026-06-20T00:00:00Z"},
+      {"primary_media_id", "media_000001"},
+      {"timebase", {{"unit", "microseconds"}, {"origin", "primary_presentation_start"}}},
+      {"canonical_analysis_raster", {{"width", 640}, {"height", 360}}}
+  };
+
+  write_json(staging / "text" / "text_absence.json", {{"reason", "test"}});
+  write_json(staging / "colors" / "color_summary.json", {{"schema_version", "svp-color-summary-v1"}});
+  write_json(staging / "colors" / "color_absence.json", {{"reason", "test"}});
+  write_json(staging / "embeddings" / "embedding_sets.json", {{"schema_version", "svp-embedding-sets-v1"}});
+  write_file(staging / "embeddings" / "embeddings.index.jsonl", "");
+  write_json(staging / "index" / "index_manifest.json", {
+      {"index_schema_version", "svp-index-v1"},
+      {"sqlite_file", "index.sqlite"},
+      {"logical_row_stream_version", "1"},
+      {"table_count", 6}, {"row_count", 10}
+  });
+  write_json(staging / "provenance" / "build.json", {{"build_id", "test_build"}});
+  write_jsonl(staging / "provenance" / "processors.jsonl", {});
+  write_jsonl(staging / "provenance" / "input_hashes.jsonl", {});
+  write_jsonl(staging / "provenance" / "model_hashes.jsonl", {});
+  write_json(staging / "provenance" / "validation.json", {
+      {"status", "valid"},
+      {"core_status", "valid"},
+      {"authenticity_status", "valid"}
+  });
+  std::filesystem::create_directories(staging / "media" / "original");
+  std::filesystem::create_directories(staging / "media" / "audio");
+
+  // Write relationships with mixed support, semantic, and unknown types
+  std::vector<nlohmann::json> relationships = {
+      {{"id", "rel_001"}, {"type", "word_spoken_by"}, {"source_id", "word_001"},
+       {"target_id", "speaker_001"}, {"start_us", 0}, {"end_us", 1000000},
+       {"evidence", {{"source_path", "transcript/words.jsonl"}}},
+       {"confidence", 0.95}, {"processor_id", "proc_test"}},
+      {{"id", "rel_002"}, {"type", "appears_in_shot"}, {"source_id", "entity_001"},
+       {"target_id", "shot_001"}, {"start_us", 0}, {"end_us", 5000000},
+       {"evidence", {{"source_path", "entities/entities.jsonl"}}},
+       {"confidence", 0.88}, {"processor_id", "proc_test"}},
+      {{"id", "rel_003"}, {"type", "depth_for_frame"}, {"source_id", "depth_001"},
+       {"target_id", "frame_001"}, {"start_us", 0}, {"end_us", 0},
+       {"evidence", {{"source_path", "spatial/depth.index.jsonl"}}},
+       {"confidence", 1.0}, {"processor_id", "proc_test"}},
+      {{"id", "rel_004"}, {"type", "overlaps"}, {"source_id", "entity_001"},
+       {"target_id", "entity_002"}, {"start_us", 1000000}, {"end_us", 2000000},
+       {"evidence", {{"region_ids", {"region_001", "region_002"}}, {"iou", 0.17}}},
+       {"confidence", 0.79}, {"processor_id", "proc_test"}},
+      {{"id", "rel_005"}, {"type", "totally_unknown_type"}, {"source_id", "entity_001"},
+       {"target_id", "entity_002"}, {"start_us", 0}, {"end_us", 1000000},
+       {"evidence", {{"source_path", "test"}}},
+       {"confidence", 0.5}, {"processor_id", "proc_test"}},
+  };
+  write_jsonl(staging / "relationships" / "relationships.jsonl", relationships);
+
+  bool ok = svp::package::write_package_skeleton(package_path, staging, source_path, manifest);
+  assert(ok);
+  assert(std::filesystem::exists(package_path));
+
+  return package_path;
+}
+
+void test_relationship_summary() {
+  const auto pkg = create_test_package_with_relationships();
+  auto summary = svp::query::relationship_summary(pkg);
+
+  assert(summary.present);
+  assert(summary.readable);
+  assert(summary.total_count == 5);
+  assert(summary.support_count == 2);
+  assert(summary.semantic_count == 2);
+  assert(summary.unknown_count == 1);
+
+  std::cout << "test_relationship_summary: passed\n";
+}
+
+void test_list_relationships_all() {
+  const auto pkg = create_test_package_with_relationships();
+  auto all = svp::query::list_relationships(pkg, std::nullopt, 100);
+
+  assert(all.size() == 5);
+
+  std::cout << "test_list_relationships_all: passed\n";
+}
+
+void test_list_relationships_filtered_by_support() {
+  const auto pkg = create_test_package_with_relationships();
+  auto support_only = svp::query::list_relationships(pkg, std::string{"support"}, 100);
+
+  assert(support_only.size() == 2);
+  for (const auto& rel : support_only) {
+    assert(rel.relationship_class == "support");
+  }
+
+  std::cout << "test_list_relationships_filtered_by_support: passed\n";
+}
+
+void test_list_relationships_filtered_by_semantic() {
+  const auto pkg = create_test_package_with_relationships();
+  auto semantic_only = svp::query::list_relationships(pkg, std::string{"semantic"}, 100);
+
+  assert(semantic_only.size() == 2);
+  for (const auto& rel : semantic_only) {
+    assert(rel.relationship_class == "semantic");
+  }
+
+  std::cout << "test_list_relationships_filtered_by_semantic: passed\n";
+}
+
+void test_list_relationships_filtered_by_unknown() {
+  const auto pkg = create_test_package_with_relationships();
+  auto unknown_only = svp::query::list_relationships(pkg, std::string{"unknown"}, 100);
+
+  assert(unknown_only.size() == 1);
+  assert(unknown_only[0].relationship_class == "unknown");
+  assert(unknown_only[0].record.value("type", "") == "totally_unknown_type");
+
+  std::cout << "test_list_relationships_filtered_by_unknown: passed\n";
+}
+
+void test_json_type_field_canonical_in_query() {
+  const auto pkg = create_test_package_with_relationships();
+  auto all = svp::query::list_relationships(pkg, std::nullopt, 100);
+
+  for (const auto& rel : all) {
+    assert(rel.record.contains("type"));
+    assert(!rel.record.contains("relationship_type"));
+  }
+
+  std::cout << "test_json_type_field_canonical_in_query: passed\n";
+}
+
 }  // namespace
 
 int main() {
@@ -602,6 +747,12 @@ int main() {
   test_malformed_transcript_json();
   test_malformed_validation_json();
   test_malformed_layers();
+  test_relationship_summary();
+  test_list_relationships_all();
+  test_list_relationships_filtered_by_support();
+  test_list_relationships_filtered_by_semantic();
+  test_list_relationships_filtered_by_unknown();
+  test_json_type_field_canonical_in_query();
 
   std::cout << "All svp-query tests passed.\n";
   return 0;

@@ -1,5 +1,6 @@
 #include "svp/package/index_writer.hpp"
 #include "svp/package/index_logical_rows.hpp"
+#include "svp/package/relationship_type_policy.hpp"
 
 #include <blake3.h>
 #include <sqlite3.h>
@@ -58,6 +59,7 @@ const std::vector<std::string> kIndexTables = {
     "CREATE TABLE relationships ("
     "  relationship_id TEXT PRIMARY KEY,"
     "  relationship_type TEXT NOT NULL,"
+    "  relationship_class TEXT NOT NULL,"
     "  source_id TEXT NOT NULL,"
     "  target_id TEXT NOT NULL,"
     "  start_us INTEGER NOT NULL,"
@@ -643,8 +645,9 @@ bool write_index_foundation(
     const auto relationships = read_jsonl(staging_dir / "relationships" / "relationships.jsonl");
     if (!relationships.empty()) {
       const std::string insert_sql =
-          "INSERT INTO relationships (relationship_id, relationship_type, source_id, "
-          "target_id, start_us, end_us, confidence) VALUES (?, ?, ?, ?, ?, ?, ?)";
+          "INSERT INTO relationships (relationship_id, relationship_type, "
+          "relationship_class, source_id, target_id, start_us, end_us, "
+          "confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
       sqlite3_stmt* stmt = nullptr;
       if (sqlite3_prepare_v2(db.get(), insert_sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
         std::unique_ptr<sqlite3_stmt, StatementDeleter> stmt_guard{stmt};
@@ -661,13 +664,17 @@ bool write_index_foundation(
             continue;
           }
 
+          const auto rel_class = classify_relationship_type(relationship_type);
+          const auto class_str = relationship_class_to_string(rel_class);
+
           sqlite3_bind_text(stmt, 1, relationship_id.c_str(), -1, SQLITE_TRANSIENT);
           sqlite3_bind_text(stmt, 2, relationship_type.c_str(), -1, SQLITE_TRANSIENT);
-          sqlite3_bind_text(stmt, 3, source_id.c_str(), -1, SQLITE_TRANSIENT);
-          sqlite3_bind_text(stmt, 4, target_id.c_str(), -1, SQLITE_TRANSIENT);
-          sqlite3_bind_int64(stmt, 5, relationship["start_us"].get<std::int64_t>());
-          sqlite3_bind_int64(stmt, 6, relationship["end_us"].get<std::int64_t>());
-          sqlite3_bind_double(stmt, 7, relationship["confidence"].get<double>());
+          sqlite3_bind_text(stmt, 3, class_str.data(), static_cast<int>(class_str.size()), SQLITE_TRANSIENT);
+          sqlite3_bind_text(stmt, 4, source_id.c_str(), -1, SQLITE_TRANSIENT);
+          sqlite3_bind_text(stmt, 5, target_id.c_str(), -1, SQLITE_TRANSIENT);
+          sqlite3_bind_int64(stmt, 6, relationship["start_us"].get<std::int64_t>());
+          sqlite3_bind_int64(stmt, 7, relationship["end_us"].get<std::int64_t>());
+          sqlite3_bind_double(stmt, 8, relationship["confidence"].get<double>());
 
           sqlite3_step(stmt);
           sqlite3_reset(stmt);

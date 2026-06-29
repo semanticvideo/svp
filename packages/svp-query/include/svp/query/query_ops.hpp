@@ -61,6 +61,21 @@ struct PackageLayerSummary {
   std::string error_message;
 };
 
+struct RelationshipInfo {
+  nlohmann::json record;
+  std::string relationship_class;
+};
+
+struct RelationshipSummary {
+  bool present = false;
+  bool readable = false;
+  std::uint64_t total_count = 0;
+  std::uint64_t support_count = 0;
+  std::uint64_t semantic_count = 0;
+  std::uint64_t unknown_count = 0;
+  std::string error_message;
+};
+
 [[nodiscard]] PackageLayerSummary list_layers(const std::filesystem::path& package_path);
 
 [[nodiscard]] TranscriptSummaryResult transcript_summary(
@@ -85,5 +100,13 @@ struct PackageLayerSummary {
     std::size_t max_results);
 
 [[nodiscard]] ValidationInfo show_validation(const std::filesystem::path& package_path);
+
+[[nodiscard]] std::vector<RelationshipInfo> list_relationships(
+    const std::filesystem::path& package_path,
+    const std::optional<std::string>& class_filter,
+    std::size_t max_results);
+
+[[nodiscard]] RelationshipSummary relationship_summary(
+    const std::filesystem::path& package_path);
 
 }  // namespace svp::query

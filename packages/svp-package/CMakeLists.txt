@@ -14,6 +14,7 @@ add_library(svp-package
   src/index_writer.cpp
   src/entity_writer.cpp
   src/relationship_provenance_writer.cpp
+  src/relationship_type_policy.cpp
   src/spatial_embedding_placeholders.cpp
   src/timeline_writer.cpp
   src/validation_report_storage.cpp
@@ -47,7 +48,12 @@ if(BUILD_TESTING)
     tests/package_writer_tests.cpp
   )
 
+  add_executable(svp-relationship-type-policy-tests
+    tests/relationship_type_policy_tests.cpp
+  )
+
   target_compile_features(svp-package-tests PRIVATE cxx_std_20)
+  target_compile_features(svp-relationship-type-policy-tests PRIVATE cxx_std_20)
 
   target_link_libraries(svp-package-tests
     PRIVATE
@@ -56,5 +62,11 @@ if(BUILD_TESTING)
       svp::vision
   )
 
+  target_link_libraries(svp-relationship-type-policy-tests
+    PRIVATE
+      svp::package
+  )
+
   add_test(NAME svp-package-tests COMMAND svp-package-tests)
+  add_test(NAME svp-relationship-type-policy-tests COMMAND svp-relationship-type-policy-tests)
 endif()

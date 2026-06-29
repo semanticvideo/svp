@@ -2,6 +2,7 @@
 
 #include "svp/query/query_reader.hpp"
 #include "svp/package/package_layout.hpp"
+#include "svp/package/relationship_type_policy.hpp"
 
 #include <algorithm>
 #include <array>
@@ -302,6 +303,71 @@ ValidationInfo show_validation(const std::filesystem::path& package_path) {
   info.parsed = true;
   info.record = validation.value;
   return info;
+}
+
+std::vector<RelationshipInfo> list_relationships(
+    const std::filesystem::path& package_path,
+    const std::optional<std::string>& class_filter,
+    std::size_t max_results) {
+  std::vector<RelationshipInfo> results;
+
+  const auto jsonl = read_jsonl_entry(package_path, "relationships/relationships.jsonl");
+  if (!jsonl.readable) {
+    return results;
+  }
+
+  for (const auto& record : jsonl.records) {
+    const auto type = json_string(record, "type");
+    const auto cls = svp::package::classify_relationship_type(type);
+    const auto class_str = std::string{svp::package::relationship_class_to_string(cls)};
+
+    if (class_filter.has_value() && *class_filter != class_str) {
+      continue;
+    }
+
+    RelationshipInfo info;
+    info.record = record;
+    info.relationship_class = class_str;
+    results.push_back(std::move(info));
+    if (results.size() >= max_results) {
+      break;
+    }
+  }
+
+  return results;
+}
+
+RelationshipSummary relationship_summary(const std::filesystem::path& package_path) {
+  RelationshipSummary summary;
+
+  const auto jsonl = read_jsonl_entry(package_path, "relationships/relationships.jsonl");
+  summary.present = jsonl.present;
+  if (!jsonl.readable) {
+    summary.error_message = jsonl.error_message;
+    return summary;
+  }
+
+  summary.readable = true;
+
+  for (const auto& record : jsonl.records) {
+    const auto type = json_string(record, "type");
+    const auto cls = svp::package::classify_relationship_type(type);
+
+    ++summary.total_count;
+    switch (cls) {
+      case svp::package::RelationshipClass::Support:
+        ++summary.support_count;
+        break;
+      case svp::package::RelationshipClass::Semantic:
+        ++summary.semantic_count;
+        break;
+      case svp::package::RelationshipClass::Unknown:
+        ++summary.unknown_count;
+        break;
+    }
+  }
+
+  return summary;
 }
 
 }  // namespace svp::query
