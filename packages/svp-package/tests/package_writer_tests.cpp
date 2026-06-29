@@ -1667,6 +1667,104 @@ void test_entity_writer_multiple_groups() {
   std::filesystem::remove_all(root);
 }
 
+void test_entity_writer_skipped_when_visual_entities_exist() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-entity-writer-visual-skip-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const std::filesystem::path staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir / "text");
+  std::filesystem::create_directories(staging_dir / "timeline");
+  std::filesystem::create_directories(staging_dir / "provenance");
+  std::filesystem::create_directories(staging_dir / "entities");
+
+  // Pre-populate entities/entities.jsonl with visual entities (simulating
+  // output from write_visual_entity_artifacts)
+  {
+    std::ofstream out(staging_dir / "entities" / "entities.jsonl");
+    out << nlohmann::json({
+        {"id", "entity_0000"},
+        {"entity_type", "visual_entity"},
+        {"first_seen_us", 0},
+        {"last_seen_us", 5000000},
+        {"track_ids", nlohmann::json::array({"track_0001"})},
+        {"average_visibility", 0.8},
+        {"average_screen_area", 0.15}
+    }).dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "entities" / "entity_tracks.jsonl");
+    out << nlohmann::json({
+        {"id", "track_0001"},
+        {"entity_id", "entity_0000"},
+        {"start_us", 0},
+        {"end_us", 5000000},
+        {"confidence", 0.9}
+    }).dump() << "\n";
+  }
+
+  // Write text regions and observations that WOULD produce text-derived
+  // entities in fallback mode
+  {
+    std::ofstream out(staging_dir / "text" / "text_regions.jsonl");
+    out << nlohmann::json({
+        {"text_region_id", "tr_000001"},
+        {"start_us", 1000000},
+        {"end_us", 2000000},
+        {"confidence", 0.95},
+        {"bbox_norm", {0.1, 0.2, 0.3, 0.4}}
+    }).dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "text" / "text_observations.jsonl");
+    out << nlohmann::json({
+        {"text_observation_id", "tobs_000001"},
+        {"text_region_id", "tr_000001"},
+        {"normalized_text", "HELLO"}
+    }).dump() << "\n";
+  }
+  {
+    std::ofstream out(staging_dir / "timeline" / "shots.jsonl");
+    out << nlohmann::json({
+        {"id", "shot_000001"},
+        {"start_us", 0},
+        {"end_us", 5000000}
+    }).dump() << "\n";
+  }
+
+  const svp::package::EntityWriteSummary summary =
+      svp::package::write_entity_artifacts(staging_dir);
+
+  // Should preserve only the visual entity, NOT create text-derived entities
+  assert(summary.entities_written);
+  assert(summary.tracks_written);
+  assert(summary.entity_count == 1);
+  assert(summary.track_count == 1);
+
+  auto entities = read_jsonl_records(staging_dir / "entities" / "entities.jsonl");
+  assert(entities.size() == 1);
+  assert(entities[0].value("id", "") == "entity_0000");
+  assert(entities[0].value("entity_type", "") == "visual_entity");
+
+  auto tracks = read_jsonl_records(staging_dir / "entities" / "entity_tracks.jsonl");
+  assert(tracks.size() == 1);
+  assert(tracks[0].value("id", "") == "track_0001");
+
+  // Processor should note that text-derived entities were skipped
+  auto processors = read_jsonl_records(staging_dir / "provenance" / "processors.jsonl");
+  bool found_entity_proc = false;
+  for (const auto& proc : processors) {
+    if (proc.value("id", "") == "processor_entity_writer_0001") {
+      found_entity_proc = true;
+      assert(proc.value("status", "") == "skipped_visual_entities_present");
+    }
+  }
+  assert(found_entity_proc);
+
+  std::filesystem::remove_all(root);
+}
+
 void test_entity_writer_missing_observations() {
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "svp-entity-writer-missing-obs-test";
@@ -2066,6 +2164,7 @@ int main() {
   test_entity_writer_deterministic_ids();
   test_entity_writer_no_dangling_refs();
   test_entity_writer_multiple_groups();
+  test_entity_writer_skipped_when_visual_entities_exist();
   test_entity_writer_missing_observations();
   test_entity_writer_provenance_honest();
   test_entity_writer_string_frame_id_validated();

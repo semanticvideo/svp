@@ -23,18 +23,19 @@ struct EntityWriteSummary {
 };
 
 /**
- * Writes honest, source-derived entity and entity-track artifacts to staging:
+ * Writes entity and entity-track artifacts to staging:
  * - entities/entities.jsonl
  * - entities/entity_tracks.jsonl
  *
- * Evidence source: OCR text regions from text/text_regions.jsonl, linked to
- * text observations from text/text_observations.jsonl. Text regions that share
- * the same normalized text content are grouped into a single entity with a
- * single track spanning all observations. This is conservative: we do not
- * claim robust cross-frame tracking. Each track represents observations of the
- * same visible text element across time.
+ * When visual entity tracker output is already present in entities/entities.jsonl,
+ * this function preserves those visual-owned entities and does NOT create
+ * duplicate text-derived persistent entities. OCR text regions remain as text
+ * observations and evidence, not as duplicate persistent entities.
  *
- * When text regions or observations are absent, valid empty files are written.
+ * When no visual entities exist (fallback mode), entities are derived from
+ * OCR text region evidence with honest provenance noting the fallback status.
+ * Text regions that share the same normalized text content are grouped into
+ * a single entity with a single track spanning all observations.
  *
  * Also appends a processor record for the entity generator to
  * provenance/processors.jsonl.
@@ -44,8 +45,8 @@ struct EntityWriteSummary {
 
 /**
  * Writes visual entity, track, region, and mask artifacts to staging:
- * - entities/entities.jsonl (merged with any existing text-based entities)
- * - entities/entity_tracks.jsonl (merged with any existing text-based tracks)
+ * - entities/entities.jsonl (overwritten with visual-owned entities)
+ * - entities/entity_tracks.jsonl (overwritten with visual-owned tracks)
  * - spatial/regions.jsonl
  * - spatial/masks.index.jsonl + spatial/masks.blocks.svpmz
  *
