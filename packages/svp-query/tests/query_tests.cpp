@@ -4,6 +4,8 @@
 #include "svp/package/package_writer.hpp"
 #include "svp/package/package_layout.hpp"
 
+#include <sqlite3.h>
+
 #include <nlohmann/json.hpp>
 
 #include <cassert>
@@ -1351,11 +1353,234 @@ void test_traversal_empty_relationships() {
 
   auto result = svp::query::traverse_relationships(pkg, opts);
 
-  assert(!result.error_message.empty());
+  // Contract: empty relationships file = valid empty graph.
+  // No error, no edges, start node is still visited and resolved.
+  assert(result.error_message.empty());
   assert(result.edges.empty());
-  assert(result.visited_node_count == 0 || result.visited_node_count == 1);
+  assert(result.visited_node_count == 1);
+  assert(result.nodes.size() == 1);
+  assert(result.nodes[0].object_id == "word_000001");
+  assert(result.nodes[0].resolved);
 
   std::cout << "test_traversal_empty_relationships: passed\n";
+}
+
+void test_traversal_missing_relationships() {
+  // Create a valid package without relationships.jsonl in the ZIP.
+  // We build the staging dir without creating the relationships file,
+  // so write_package_skeleton will not include it in the archive.
+  const auto root = std::filesystem::temp_directory_path() / "svp-query-missing-rel-tests";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto staging = root / "staging";
+  const auto package_path = root / "test_missing_rel.svp";
+  const auto source_path = root / "source.mp4";
+
+  write_file(source_path, "mock media\n");
+
+  nlohmann::json manifest = {
+      {"svp_version", "1.0-rc.2"},
+      {"package_id", "svp_query_missing_rel_pkg"},
+      {"created_utc", "2026-06-20T00:00:00Z"},
+      {"primary_media_id", "media_000001"},
+      {"timebase", {{"unit", "microseconds"}, {"origin", "primary_presentation_start"}}},
+      {"canonical_analysis_raster", {{"width", 640}, {"height", 360}}}
+  };
+
+  // Minimal staging — same as create_test_package but WITHOUT relationships.jsonl.
+  write_jsonl(staging / "transcript" / "words.jsonl", {
+      {{"id", "word_000001"}, {"text", "hello"}, {"normalized_text", "hello"},
+       {"start_us", 0}, {"end_us", 500000}, {"speaker_id", "speaker_0001"}}
+  });
+  write_jsonl(staging / "transcript" / "speakers.jsonl", {});
+  write_jsonl(staging / "transcript" / "speaker_segments.jsonl", {});
+  write_jsonl(staging / "transcript" / "speech_regions.jsonl", {});
+  write_jsonl(staging / "timeline" / "frames.jsonl", {});
+  write_jsonl(staging / "timeline" / "shots.jsonl", {});
+  write_jsonl(staging / "timeline" / "scenes.jsonl", {});
+  write_jsonl(staging / "entities" / "entities.jsonl", {});
+  write_jsonl(staging / "entities" / "entity_tracks.jsonl", {});
+  std::filesystem::create_directories(staging / "spatial");
+  write_file(staging / "spatial" / "regions.jsonl", "");
+  write_file(staging / "spatial" / "masks.index.jsonl", "");
+  write_file(staging / "spatial" / "depth.index.jsonl", "");
+  write_jsonl(staging / "text" / "text_regions.jsonl", {});
+  write_jsonl(staging / "text" / "text_observations.jsonl", {});
+  write_jsonl(staging / "text" / "numeric_values.jsonl", {});
+  write_jsonl(staging / "text" / "evidence_crops.jsonl", {});
+  write_json(staging / "text" / "text_absence.json", {
+      {"schema_version", "svp-text-absence-v1"},
+      {"ocr_required", true}, {"ocr_completed", true},
+      {"text_region_count", 0}, {"text_observation_count", 0},
+      {"reason", "no_text_detected"}
+  });
+  write_jsonl(staging / "colors" / "color_observations.jsonl", {});
+  write_json(staging / "colors" / "color_summary.json", {
+      {"schema_version", "svp-color-summary-v1"},
+      {"color_observation_count", 0},
+      {"color_space", "svp_oklch_v1"},
+      {"color_bucket_registry_version", "svp-color-buckets-v1"}
+  });
+  write_json(staging / "colors" / "color_absence.json", {
+      {"schema_version", "svp-color-absence-v1"},
+      {"color_required", true}, {"color_completed", true}
+  });
+
+  // Deliberately do NOT create relationships/relationships.jsonl.
+
+  write_json(staging / "embeddings" / "embedding_sets.json", {{"schema_version", "svp-embedding-sets-v1"}});
+  write_file(staging / "embeddings" / "embeddings.index.jsonl", "");
+  std::filesystem::create_directories(staging / "index");
+  write_json(staging / "index" / "index_manifest.json", {
+      {"index_schema_version", "svp-index-v1"},
+      {"sqlite_file", "index.sqlite"},
+      {"logical_row_stream_version", "1"},
+      {"table_count", 6}, {"row_count", 10}
+  });
+  std::filesystem::create_directories(staging / "provenance");
+  write_json(staging / "provenance" / "build.json", {{"build_id", "test_build"}});
+  write_jsonl(staging / "provenance" / "processors.jsonl", {});
+  write_jsonl(staging / "provenance" / "input_hashes.jsonl", {});
+  write_jsonl(staging / "provenance" / "model_hashes.jsonl", {});
+  write_json(staging / "provenance" / "validation.json", {
+      {"status", "valid"},
+      {"core_status", "valid"},
+      {"authenticity_status", "valid"}
+  });
+  std::filesystem::create_directories(staging / "media" / "original");
+  std::filesystem::create_directories(staging / "media" / "audio");
+
+  bool ok = svp::package::write_package_skeleton(package_path, staging, source_path, manifest);
+  assert(ok);
+
+  // Verify the package does not contain relationships.jsonl.
+  const auto layout = svp::package::read_package_layout(package_path);
+  assert(layout.has_value());
+  assert(!layout->value().has_entry("relationships/relationships.jsonl"));
+
+  svp::query::TraversalOptions opts;
+  opts.start_id = "word_000001";
+  opts.max_depth = 2;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.limit = 100;
+
+  auto result = svp::query::traverse_relationships(package_path, opts);
+
+  // Contract: missing relationships file = error.
+  assert(!result.error_message.empty());
+  assert(result.edges.empty());
+
+  std::cout << "test_traversal_missing_relationships: passed\n";
+}
+
+void test_traversal_malformed_relationships() {
+  // Create a package with malformed relationships.jsonl content.
+  const auto root = std::filesystem::temp_directory_path() / "svp-query-malformed-tests";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto staging = root / "staging";
+  const auto package_path = root / "test_malformed.svp";
+  const auto source_path = root / "source.mp4";
+
+  write_file(source_path, "mock media\n");
+
+  nlohmann::json manifest = {
+      {"svp_version", "1.0-rc.2"},
+      {"package_id", "svp_query_malformed_pkg"},
+      {"created_utc", "2026-06-20T00:00:00Z"},
+      {"primary_media_id", "media_000001"},
+      {"timebase", {{"unit", "microseconds"}, {"origin", "primary_presentation_start"}}},
+      {"canonical_analysis_raster", {{"width", 640}, {"height", 360}}}
+  };
+
+  // Minimal staging with malformed relationships
+  write_jsonl(staging / "transcript" / "words.jsonl", {
+      {{"id", "word_000001"}, {"text", "hello"}, {"normalized_text", "hello"},
+       {"start_us", 0}, {"end_us", 500000}, {"speaker_id", "speaker_0001"}}
+  });
+  write_jsonl(staging / "transcript" / "speakers.jsonl", {});
+  write_jsonl(staging / "transcript" / "speaker_segments.jsonl", {});
+  write_jsonl(staging / "transcript" / "speech_regions.jsonl", {});
+  write_jsonl(staging / "timeline" / "frames.jsonl", {});
+  write_jsonl(staging / "timeline" / "shots.jsonl", {});
+  write_jsonl(staging / "timeline" / "scenes.jsonl", {});
+  write_jsonl(staging / "entities" / "entities.jsonl", {});
+  write_jsonl(staging / "entities" / "entity_tracks.jsonl", {});
+  std::filesystem::create_directories(staging / "spatial");
+  write_file(staging / "spatial" / "regions.jsonl", "");
+  write_file(staging / "spatial" / "masks.index.jsonl", "");
+  write_file(staging / "spatial" / "depth.index.jsonl", "");
+  write_jsonl(staging / "text" / "text_regions.jsonl", {});
+  write_jsonl(staging / "text" / "text_observations.jsonl", {});
+  write_jsonl(staging / "text" / "numeric_values.jsonl", {});
+  write_jsonl(staging / "text" / "evidence_crops.jsonl", {});
+  write_json(staging / "text" / "text_absence.json", {
+      {"schema_version", "svp-text-absence-v1"},
+      {"ocr_required", true}, {"ocr_completed", true},
+      {"text_region_count", 0}, {"text_observation_count", 0},
+      {"reason", "no_text_detected"}
+  });
+  write_jsonl(staging / "colors" / "color_observations.jsonl", {});
+  write_json(staging / "colors" / "color_summary.json", {
+      {"schema_version", "svp-color-summary-v1"},
+      {"color_observation_count", 0},
+      {"color_space", "svp_oklch_v1"},
+      {"color_bucket_registry_version", "svp-color-buckets-v1"}
+  });
+  write_json(staging / "colors" / "color_absence.json", {
+      {"schema_version", "svp-color-absence-v1"},
+      {"color_required", true}, {"color_completed", true}
+  });
+
+  // Write malformed relationships JSONL
+  std::filesystem::create_directories(staging / "relationships");
+  {
+    std::ofstream rel_file(staging / "relationships" / "relationships.jsonl");
+    rel_file << "this is not valid json\n";
+    rel_file << "{\"type\":\"word_spoken_by\",\"source_id\":\"word_000001\",\"target_id\":\"speaker_0001\",\"id\":\"rel_001\"}\n";
+    rel_file << "{broken json line\n";
+  }
+
+  write_json(staging / "embeddings" / "embedding_sets.json", {{"schema_version", "svp-embedding-sets-v1"}});
+  write_file(staging / "embeddings" / "embeddings.index.jsonl", "");
+  std::filesystem::create_directories(staging / "index");
+  write_json(staging / "index" / "index_manifest.json", {
+      {"index_schema_version", "svp-index-v1"},
+      {"sqlite_file", "index.sqlite"},
+      {"logical_row_stream_version", "1"},
+      {"table_count", 6}, {"row_count", 10}
+  });
+  std::filesystem::create_directories(staging / "provenance");
+  write_json(staging / "provenance" / "build.json", {{"build_id", "test_build"}});
+  write_jsonl(staging / "provenance" / "processors.jsonl", {});
+  write_jsonl(staging / "provenance" / "input_hashes.jsonl", {});
+  write_jsonl(staging / "provenance" / "model_hashes.jsonl", {});
+  write_json(staging / "provenance" / "validation.json", {
+      {"status", "valid"},
+      {"core_status", "valid"},
+      {"authenticity_status", "valid"}
+  });
+  std::filesystem::create_directories(staging / "media" / "original");
+  std::filesystem::create_directories(staging / "media" / "audio");
+
+  bool ok = svp::package::write_package_skeleton(package_path, staging, source_path, manifest);
+  assert(ok);
+
+  svp::query::TraversalOptions opts;
+  opts.start_id = "word_000001";
+  opts.max_depth = 2;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.limit = 100;
+
+  auto result = svp::query::traverse_relationships(package_path, opts);
+
+  // Contract: malformed JSONL produces an error message.
+  assert(!result.error_message.empty());
+  assert(result.edges.empty());
+
+  std::cout << "test_traversal_malformed_relationships: passed\n";
 }
 
 std::filesystem::path create_semantic_test_package() {
@@ -2693,6 +2918,357 @@ void test_graph_health_diagnostics_json_deterministic() {
   std::cout << "test_graph_health_diagnostics_json_deterministic: passed\n";
 }
 
+void test_graph_health_enhanced_diagnostics() {
+  const auto pkg = create_test_package();
+
+  auto health = svp::query::compute_graph_health(pkg);
+  auto j = svp::query::graph_health_to_json(health);
+
+  // Verify new fields are present in JSON output.
+  assert(j.contains("backend_used"));
+  assert(j.contains("index_available"));
+  assert(j.contains("mask_data_available"));
+  assert(j.contains("depth_data_available"));
+
+  // The test package has no mask or depth data, so skipped categories should
+  // report them honestly.
+  assert(j.contains("skipped_categories"));
+  const auto& skipped = j["skipped_categories"];
+  assert(skipped.is_array());
+  assert(skipped.size() >= 2);
+
+  bool found_mask_skip = false;
+  bool found_depth_skip = false;
+  bool found_motion_skip = false;
+  for (const auto& cat : skipped) {
+    const std::string category = cat["category"];
+    const std::string reason = cat["reason"];
+    if (category.find("occludes") != std::string::npos) found_mask_skip = true;
+    if (category.find("foreground") != std::string::npos) found_depth_skip = true;
+    if (category.find("moves_with") != std::string::npos) found_motion_skip = true;
+    assert(!reason.empty());
+  }
+  assert(found_mask_skip);
+  assert(found_depth_skip);
+  assert(found_motion_skip);
+
+  // Backend should be jsonl (no index.sqlite in test package).
+  assert(j["backend_used"] == "jsonl");
+  assert(j["index_available"] == false);
+
+  std::cout << "test_graph_health_enhanced_diagnostics: passed\n";
+}
+
+void test_traversal_jsonl_sqlite_parity() {
+  // Create a package with BOTH index.sqlite (containing a relationships table)
+  // and relationships.jsonl with the same data. Then verify:
+  // 1. SQLite-backed traversal produces the same edges/nodes as JSONL.
+  // 2. Graph health reports the correct backend.
+  //
+  // Since load_relationship_edges tries SQLite first and falls back to JSONL,
+  // we create two packages: one with both (uses SQLite) and one with only
+  // JSONL (uses JSONL), then compare results.
+
+  const auto root = std::filesystem::temp_directory_path() / "svp-query-parity-tests";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto staging = root / "staging";
+  const auto pkg_with_sqlite = root / "test_parity_sqlite.svp";
+  const auto pkg_jsonl_only = root / "test_parity_jsonl.svp";
+  const auto source_path = root / "source.mp4";
+
+  write_file(source_path, "mock media\n");
+
+  nlohmann::json manifest = {
+      {"svp_version", "1.0-rc.2"},
+      {"package_id", "svp_query_parity_pkg"},
+      {"created_utc", "2026-06-20T00:00:00Z"},
+      {"primary_media_id", "media_000001"},
+      {"timebase", {{"unit", "microseconds"}, {"origin", "primary_presentation_start"}}},
+      {"canonical_analysis_raster", {{"width", 640}, {"height", 360}}}
+  };
+
+  // Define the same relationships for both backends.
+  std::vector<nlohmann::json> relationships = {
+      {{"id", "rel_001"}, {"type", "word_spoken_by"}, {"source_id", "word_000001"},
+       {"target_id", "speaker_0001"}, {"start_us", 0}, {"end_us", 500000},
+       {"confidence", 0.95}, {"processor_id", "proc_test"}},
+      {{"id", "rel_002"}, {"type", "word_spoken_by"}, {"source_id", "word_000002"},
+       {"target_id", "speaker_0001"}, {"start_us", 500000}, {"end_us", 1000000},
+       {"confidence", 0.95}, {"processor_id", "proc_test"}},
+      {{"id", "rel_003"}, {"type", "observation_in_region"},
+       {"source_id", "text_obs_000001"}, {"target_id", "text_region_000001"},
+       {"start_us", 1000000}, {"end_us", 2000000},
+       {"confidence", 0.9}, {"processor_id", "proc_test"}},
+  };
+
+  // Helper to write minimal staging files.
+  auto write_minimal_staging = [&](const std::filesystem::path& stg) {
+    write_jsonl(stg / "transcript" / "words.jsonl", {
+        {{"id", "word_000001"}, {"text", "hello"}, {"normalized_text", "hello"},
+         {"start_us", 0}, {"end_us", 500000}, {"speaker_id", "speaker_0001"}},
+        {{"id", "word_000002"}, {"text", "world"}, {"normalized_text", "world"},
+         {"start_us", 500000}, {"end_us", 1000000}, {"speaker_id", "speaker_0001"}}
+    });
+    write_jsonl(stg / "transcript" / "speakers.jsonl", {
+        {{"id", "speaker_0001"}, {"display_name", "Speaker 1"},
+         {"total_speech_us", 1000000}, {"confidence", 0.91}}
+    });
+    write_jsonl(stg / "transcript" / "speaker_segments.jsonl", {});
+    write_jsonl(stg / "transcript" / "speech_regions.jsonl", {});
+    write_jsonl(stg / "timeline" / "frames.jsonl", {});
+    write_jsonl(stg / "timeline" / "shots.jsonl", {
+        {{"id", "shot_000001"}, {"start_us", 0}, {"end_us", 15000000}}
+    });
+    write_jsonl(stg / "timeline" / "scenes.jsonl", {
+        {{"id", "scene_000001"}, {"start_us", 0}, {"end_us", 30000000},
+         {"shot_ids", {"shot_000001"}}}
+    });
+    write_jsonl(stg / "entities" / "entities.jsonl", {});
+    write_jsonl(stg / "entities" / "entity_tracks.jsonl", {});
+    std::filesystem::create_directories(stg / "spatial");
+    write_file(stg / "spatial" / "regions.jsonl", "");
+    write_file(stg / "spatial" / "masks.index.jsonl", "");
+    write_file(stg / "spatial" / "depth.index.jsonl", "");
+    write_jsonl(stg / "text" / "text_regions.jsonl", {
+        {{"text_region_id", "text_region_000001"},
+         {"observation_type", "text_detection"},
+         {"start_us", 1000000}, {"end_us", 2000000},
+         {"shot_id", "shot_000001"}, {"scene_id", "scene_000001"}}
+    });
+    write_jsonl(stg / "text" / "text_observations.jsonl", {
+        {{"text_observation_id", "text_obs_000001"},
+         {"text_region_id", "text_region_000001"},
+         {"observation_type", "text_recognition"},
+         {"raw_text", "SALE"}, {"normalized_text", "sale"},
+         {"confidence", 0.902}}
+    });
+    write_jsonl(stg / "text" / "numeric_values.jsonl", {});
+    write_jsonl(stg / "text" / "evidence_crops.jsonl", {});
+    write_json(stg / "text" / "text_absence.json", {
+        {"schema_version", "svp-text-absence-v1"},
+        {"ocr_required", true}, {"ocr_completed", true},
+        {"text_region_count", 1}, {"text_observation_count", 1},
+        {"reason", "text_detected"}
+    });
+    write_jsonl(stg / "colors" / "color_observations.jsonl", {});
+    write_json(stg / "colors" / "color_summary.json", {
+        {"schema_version", "svp-color-summary-v1"},
+        {"color_observation_count", 0},
+        {"color_space", "svp_oklch_v1"},
+        {"color_bucket_registry_version", "svp-color-buckets-v1"}
+    });
+    write_json(stg / "colors" / "color_absence.json", {
+        {"schema_version", "svp-color-absence-v1"},
+        {"color_required", true}, {"color_completed", true}
+    });
+    write_json(stg / "embeddings" / "embedding_sets.json", {{"schema_version", "svp-embedding-sets-v1"}});
+    write_file(stg / "embeddings" / "embeddings.index.jsonl", "");
+    std::filesystem::create_directories(stg / "provenance");
+    write_json(stg / "provenance" / "build.json", {{"build_id", "test_build"}});
+    write_jsonl(stg / "provenance" / "processors.jsonl", {});
+    write_jsonl(stg / "provenance" / "input_hashes.jsonl", {});
+    write_jsonl(stg / "provenance" / "model_hashes.jsonl", {});
+    write_json(stg / "provenance" / "validation.json", {
+        {"status", "valid"}, {"core_status", "valid"}, {"authenticity_status", "valid"}
+    });
+    std::filesystem::create_directories(stg / "media" / "original");
+    std::filesystem::create_directories(stg / "media" / "audio");
+  };
+
+  // --- Package 1: JSONL only (no index.sqlite) ---
+  {
+    const auto stg = staging / "jsonl_only";
+    write_minimal_staging(stg);
+    write_jsonl(stg / "relationships" / "relationships.jsonl", relationships);
+    std::filesystem::create_directories(stg / "index");
+    write_json(stg / "index" / "index_manifest.json", {
+        {"index_schema_version", "svp-index-v1"},
+        {"sqlite_file", "index.sqlite"},
+        {"logical_row_stream_version", "1"},
+        {"table_count", 6}, {"row_count", 10}
+    });
+    bool ok = svp::package::write_package_skeleton(pkg_jsonl_only, stg, source_path, manifest);
+    assert(ok);
+  }
+
+  // --- Package 2: Both JSONL and index.sqlite ---
+  {
+    const auto stg = staging / "with_sqlite";
+    write_minimal_staging(stg);
+    write_jsonl(stg / "relationships" / "relationships.jsonl", relationships);
+
+    // Create a real SQLite database with a relationships table.
+    const auto sqlite_path = stg / "index" / "index.sqlite";
+    std::filesystem::create_directories(stg / "index");
+
+    sqlite3* db = nullptr;
+    assert(sqlite3_open(sqlite_path.string().c_str(), &db) == SQLITE_OK);
+
+    const char* create_sql =
+        "CREATE TABLE relationships ("
+        "  relationship_id TEXT,"
+        "  relationship_type TEXT,"
+        "  relationship_class TEXT,"
+        "  source_id TEXT,"
+        "  target_id TEXT,"
+        "  start_us INTEGER,"
+        "  end_us INTEGER,"
+        "  confidence REAL)";
+    assert(sqlite3_exec(db, create_sql, nullptr, nullptr, nullptr) == SQLITE_OK);
+
+    for (const auto& rel : relationships) {
+      const std::string sql =
+          std::string("INSERT INTO relationships VALUES (") +
+          "'" + rel["id"].get<std::string>() + "', " +
+          "'" + rel["type"].get<std::string>() + "', " +
+          "'support', " +
+          "'" + rel["source_id"].get<std::string>() + "', " +
+          "'" + rel["target_id"].get<std::string>() + "', " +
+          std::to_string(rel["start_us"].get<std::int64_t>()) + ", " +
+          std::to_string(rel["end_us"].get<std::int64_t>()) + ", " +
+          std::to_string(rel["confidence"].get<double>()) + ")";
+      assert(sqlite3_exec(db, sql.c_str(), nullptr, nullptr, nullptr) == SQLITE_OK);
+    }
+    sqlite3_close(db);
+
+    write_json(stg / "index" / "index_manifest.json", {
+        {"index_schema_version", "svp-index-v1"},
+        {"sqlite_file", "index.sqlite"},
+        {"logical_row_stream_version", "1"},
+        {"table_count", 6}, {"row_count", 10}
+    });
+    bool ok = svp::package::write_package_skeleton(pkg_with_sqlite, stg, source_path, manifest);
+    assert(ok);
+  }
+
+  // Verify both packages have the expected entries.
+  const auto layout_sqlite = svp::package::read_package_layout(pkg_with_sqlite);
+  assert(layout_sqlite.has_value());
+  assert(layout_sqlite->value().has_entry("index/index.sqlite"));
+  assert(layout_sqlite->value().has_entry("relationships/relationships.jsonl"));
+
+  const auto layout_jsonl = svp::package::read_package_layout(pkg_jsonl_only);
+  assert(layout_jsonl.has_value());
+  assert(!layout_jsonl->value().has_entry("index/index.sqlite"));
+  assert(layout_jsonl->value().has_entry("relationships/relationships.jsonl"));
+
+  // Traverse both packages with the same options.
+  svp::query::TraversalOptions opts;
+  opts.start_id = "word_000001";
+  opts.max_depth = 3;
+  opts.direction = svp::query::TraversalDirection::Both;
+  opts.limit = 100;
+
+  auto result_sqlite = svp::query::traverse_relationships(pkg_with_sqlite, opts);
+  auto result_jsonl = svp::query::traverse_relationships(pkg_jsonl_only, opts);
+
+  // Both should succeed.
+  assert(result_sqlite.error_message.empty());
+  assert(result_jsonl.error_message.empty());
+
+  // Both should have the same number of edges.
+  assert(result_sqlite.edges.size() == result_jsonl.edges.size());
+  assert(result_sqlite.edges.size() > 0);
+
+  // Both should have the same visited node count.
+  assert(result_sqlite.visited_node_count == result_jsonl.visited_node_count);
+
+  // Compare edge-by-edge (sorted by relationship ID).
+  auto compare_edges = [](svp::query::TraversalResult& r) {
+    std::sort(r.edges.begin(), r.edges.end(),
+              [](const svp::query::TraversalEdge& a, const svp::query::TraversalEdge& b) {
+                return a.relationship_id < b.relationship_id;
+              });
+  };
+  compare_edges(result_sqlite);
+  compare_edges(result_jsonl);
+
+  for (std::size_t i = 0; i < result_sqlite.edges.size(); ++i) {
+    assert(result_sqlite.edges[i].relationship_id == result_jsonl.edges[i].relationship_id);
+    assert(result_sqlite.edges[i].relationship_type == result_jsonl.edges[i].relationship_type);
+    assert(result_sqlite.edges[i].source_id == result_jsonl.edges[i].source_id);
+    assert(result_sqlite.edges[i].target_id == result_jsonl.edges[i].target_id);
+  }
+
+  // Verify graph health reports the correct backend.
+  auto health_sqlite = svp::query::compute_graph_health(pkg_with_sqlite);
+  assert(health_sqlite.backend_used == svp::query::TraversalBackend::sqlite_index);
+  assert(health_sqlite.index_available);
+  assert(health_sqlite.total_edges > 0);
+
+  auto health_jsonl = svp::query::compute_graph_health(pkg_jsonl_only);
+  assert(health_jsonl.backend_used == svp::query::TraversalBackend::jsonl);
+  assert(!health_jsonl.index_available);
+  assert(health_jsonl.total_edges > 0);
+
+  // Both health reports should have the same total_edges.
+  assert(health_sqlite.total_edges == health_jsonl.total_edges);
+
+  // --- Path parity ---
+  // Find a path from word_000001 to speaker_0001 (direct edge via word_spoken_by).
+  svp::query::TraversalOptions path_opts;
+  path_opts.start_id = "word_000001";
+  path_opts.target_id = "speaker_0001";
+  path_opts.max_depth = 3;
+  path_opts.direction = svp::query::TraversalDirection::Both;
+  path_opts.limit = 100;
+
+  auto path_sqlite = svp::query::find_shortest_path(pkg_with_sqlite, path_opts);
+  auto path_jsonl = svp::query::find_shortest_path(pkg_jsonl_only, path_opts);
+
+  assert(path_sqlite.error_message.empty());
+  assert(path_jsonl.error_message.empty());
+  assert(path_sqlite.path_found == path_jsonl.path_found);
+  assert(path_sqlite.path_found);  // word_000001 -> speaker_0001 exists
+  assert(path_sqlite.path_edges.size() == path_jsonl.path_edges.size());
+  assert(path_sqlite.path_nodes.size() == path_jsonl.path_nodes.size());
+
+  // Compare path edges
+  for (std::size_t i = 0; i < path_sqlite.path_edges.size(); ++i) {
+    assert(path_sqlite.path_edges[i].relationship_id ==
+           path_jsonl.path_edges[i].relationship_id);
+    assert(path_sqlite.path_edges[i].source_id ==
+           path_jsonl.path_edges[i].source_id);
+    assert(path_sqlite.path_edges[i].target_id ==
+           path_jsonl.path_edges[i].target_id);
+  }
+
+  // --- Context parity ---
+  // Build context for word_000001.
+  auto ctx_sqlite = svp::query::build_context(pkg_with_sqlite, "word_000001", 100);
+  auto ctx_jsonl = svp::query::build_context(pkg_jsonl_only, "word_000001", 100);
+
+  assert(ctx_sqlite.error_message.empty());
+  assert(ctx_jsonl.error_message.empty());
+  assert(ctx_sqlite.resolved == ctx_jsonl.resolved);
+  assert(ctx_sqlite.resolved);  // word_000001 exists in both packages
+  assert(ctx_sqlite.context_edges.size() == ctx_jsonl.context_edges.size());
+  assert(ctx_sqlite.context_nodes.size() == ctx_jsonl.context_nodes.size());
+
+  // Compare context edges (sorted by relationship ID for determinism)
+  auto sort_ctx_edges = [](svp::query::ContextResult& r) {
+    std::sort(r.context_edges.begin(), r.context_edges.end(),
+              [](const svp::query::TraversalEdge& a, const svp::query::TraversalEdge& b) {
+                return a.relationship_id < b.relationship_id;
+              });
+  };
+  sort_ctx_edges(ctx_sqlite);
+  sort_ctx_edges(ctx_jsonl);
+
+  for (std::size_t i = 0; i < ctx_sqlite.context_edges.size(); ++i) {
+    assert(ctx_sqlite.context_edges[i].relationship_id ==
+           ctx_jsonl.context_edges[i].relationship_id);
+    assert(ctx_sqlite.context_edges[i].source_id ==
+           ctx_jsonl.context_edges[i].source_id);
+    assert(ctx_sqlite.context_edges[i].target_id ==
+           ctx_jsonl.context_edges[i].target_id);
+  }
+
+  std::cout << "test_traversal_jsonl_sqlite_parity: passed\n";
+}
+
 }  // namespace
 
 int main() {
@@ -2728,6 +3304,8 @@ int main() {
   test_object_catalog_annotations();
   test_traversal_json_output();
   test_traversal_empty_relationships();
+  test_traversal_missing_relationships();
+  test_traversal_malformed_relationships();
   test_time_window_at_us();
   test_time_window_start_end();
   test_time_window_at_us_excludes_non_overlapping();
@@ -2762,6 +3340,8 @@ int main() {
   test_context_at_and_start_mutually_exclusive();
   test_graph_health_diagnostics();
   test_graph_health_diagnostics_json_deterministic();
+  test_graph_health_enhanced_diagnostics();
+  test_traversal_jsonl_sqlite_parity();
 
   std::cout << "All svp-query tests passed.\n";
   return 0;

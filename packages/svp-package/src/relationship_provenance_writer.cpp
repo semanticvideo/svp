@@ -1,8 +1,14 @@
 #include "svp/package/relationship_provenance_writer.hpp"
 
+#include "svp/blocks/block_stream.hpp"
+#include "svp/vision/visual_entity_tracker.hpp"
+
+#include <zstd.h>
+
 #include <algorithm>
 #include <cmath>
 #include <climits>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <set>
@@ -13,6 +19,15 @@ namespace svp::package {
 namespace {
 
 constexpr const char* kRelationshipProcessorId = "processor_relationship_writer_0001";
+
+// Spec §15: "All thresholds are written to provenance"
+// These named constants are the single source of truth for relationship
+// thresholds and are recorded in the processor provenance record.
+constexpr double kNearThreshold = 0.15;          // near: centroid distance below threshold
+constexpr double kMaskIoUThreshold = 0.1;        // overlaps: mask IoU exceeds threshold
+constexpr double kMaskContainmentThreshold = 0.8; // contains: one mask mostly contains another
+constexpr double kStationaryThreshold = 0.02;    // stationary_relative_to_camera: displacement below threshold
+constexpr double kMovesWithThreshold = 0.05;     // moves_with: displacement vectors within threshold
 
 std::vector<nlohmann::json> read_jsonl(const std::filesystem::path& path) {
   std::vector<nlohmann::json> records;
@@ -675,9 +690,8 @@ void build_spatial_region_pair_relationships(
     regions_by_frame[frame_id].push_back(std::move(info));
   }
 
-  // Distance threshold for "near" — regions whose centers are within 0.15
-  // of the normalized frame diagonal but do not overlap.
-  constexpr double kNearThreshold = 0.15;
+  // Distance threshold for "near" — regions whose centers are within
+  // kNearThreshold of the normalized frame diagonal but do not overlap.
 
   for (const auto& [frame_id, frame_regions] : regions_by_frame) {
     for (std::size_t i = 0; i < frame_regions.size(); ++i) {
@@ -689,12 +703,12 @@ void build_spatial_region_pair_relationships(
         const double iou = bbox_iou(a.bbox, b.bbox);
         const std::int64_t ts = a.pts_us;
 
-        if (iou > 0.0) {
-          builder.add("rel_spatial_overlap_", "overlaps",
-                      a.id, b.id, ts, ts, 1.0,
-                      "spatial/regions.jsonl");
-          ++builder.counts.spatial_overlaps;
-        } else {
+        // Do NOT emit 'overlaps' or 'contains'/'contained_by' from bbox —
+        // spec §15 requires mask IoU for overlaps and mask containment for
+        // contains/contained_by. These are emitted by
+        // build_mask_occlusion_relationships using real decoded RLE pixel
+        // evidence. Only emit 'near' from bbox centroid distance here.
+        if (iou <= 0.0) {
           const double dist = bbox_center_distance(a.bbox, b.bbox);
           if (dist <= kNearThreshold) {
             builder.add("rel_spatial_near_", "near",
@@ -702,18 +716,6 @@ void build_spatial_region_pair_relationships(
                         "spatial/regions.jsonl");
             ++builder.counts.spatial_near;
           }
-        }
-
-        if (bbox_contains(a.bbox, b.bbox)) {
-          builder.add("rel_spatial_contains_", "contains",
-                      a.id, b.id, ts, ts, 1.0,
-                      "spatial/regions.jsonl");
-          ++builder.counts.spatial_contains;
-        } else if (bbox_contains(b.bbox, a.bbox)) {
-          builder.add("rel_spatial_contained_by_", "contained_by",
-                      a.id, b.id, ts, ts, 1.0,
-                      "spatial/regions.jsonl");
-          ++builder.counts.spatial_contained_by;
         }
       }
     }
@@ -1115,6 +1117,665 @@ void build_frame_timeline_relationships(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Mask/depth-backed spatial semantic relationships (spec §15)
+//
+// These functions read binary block payloads from the block stream files to
+// derive spatial relationships from real pixel-level evidence:
+//   - occludes / occluded_by: from mask pixel overlap
+//   - foreground_relative_to / background_relative_to: from depth values
+//   - moves_with / stationary_relative_to_camera: from entity displacement
+// ---------------------------------------------------------------------------
+
+struct MaskBlockInfo {
+  std::string mask_id;
+  std::string region_id;
+  std::string frame_id;
+  int width = 0;
+  int height = 0;
+  std::uint64_t block_offset = 0;
+  std::uint64_t block_length = 0;
+  std::uint64_t uncompressed_size = 0;
+  std::uint64_t compressed_size = 0;
+  std::uint8_t compression = 0;
+};
+
+std::vector<std::uint8_t> read_and_decompress_block(
+    const std::filesystem::path& block_file_path,
+    std::uint64_t block_offset,
+    std::uint64_t block_length,
+    std::uint64_t uncompressed_size,
+    std::uint8_t compression) {
+  if (!std::filesystem::exists(block_file_path)) return {};
+
+  std::ifstream file(block_file_path, std::ios::binary);
+  if (!file) return {};
+
+  file.seekg(static_cast<std::streamoff>(block_offset));
+  if (!file) return {};
+
+  std::vector<std::uint8_t> block_data(static_cast<std::size_t>(block_length));
+  file.read(reinterpret_cast<char*>(block_data.data()),
+            static_cast<std::streamsize>(block_length));
+  if (!file) return {};
+
+  // Skip the 160-byte block header to get to the payload.
+  constexpr std::size_t kHeaderSize = 160;
+  if (block_data.size() < kHeaderSize) return {};
+
+  const std::uint8_t* payload = block_data.data() + kHeaderSize;
+  const std::size_t payload_size = block_data.size() - kHeaderSize;
+
+  if (compression == 0x01) {
+    // Zstd compressed
+    std::vector<std::uint8_t> output(static_cast<std::size_t>(uncompressed_size));
+    const auto result = ZSTD_decompress(
+        output.data(), output.size(),
+        payload, payload_size);
+    if (ZSTD_isError(result) != 0U) return {};
+    if (result != uncompressed_size) return {};
+    return output;
+  } else {
+    // Uncompressed
+    if (payload_size != uncompressed_size) return {};
+    return std::vector<std::uint8_t>(payload, payload + payload_size);
+  }
+}
+
+std::vector<MaskBlockInfo> collect_mask_infos(
+    const std::filesystem::path& staging_dir) {
+  const auto masks = read_jsonl(staging_dir / "spatial" / "masks.index.jsonl");
+  std::vector<MaskBlockInfo> infos;
+  for (const auto& mask : masks) {
+    MaskBlockInfo info;
+    info.mask_id = string_value(mask, "id");
+    info.region_id = string_value(mask, "region_id");
+    info.frame_id = string_value(mask, "frame_id");
+    info.width = static_cast<int>(int_value_or_zero(mask, "width"));
+    info.height = static_cast<int>(int_value_or_zero(mask, "height"));
+    if (mask.contains("block_offset") && mask["block_offset"].is_number_unsigned()) {
+      info.block_offset = mask["block_offset"].get<std::uint64_t>();
+    }
+    if (mask.contains("block_length") && mask["block_length"].is_number_unsigned()) {
+      info.block_length = mask["block_length"].get<std::uint64_t>();
+    }
+    if (mask.contains("uncompressed_size") && mask["uncompressed_size"].is_number_unsigned()) {
+      info.uncompressed_size = mask["uncompressed_size"].get<std::uint64_t>();
+    }
+    if (mask.contains("compressed_size") && mask["compressed_size"].is_number_unsigned()) {
+      info.compressed_size = mask["compressed_size"].get<std::uint64_t>();
+    }
+    if (info.mask_id.empty() || info.region_id.empty()) continue;
+    if (info.width <= 0 || info.height <= 0) continue;
+    if (info.block_length == 0) continue;
+    infos.push_back(std::move(info));
+  }
+  return infos;
+}
+
+struct DepthBlockInfo {
+  std::string depth_id;
+  std::string frame_id;
+  int width = 0;
+  int height = 0;
+  std::uint64_t block_offset = 0;
+  std::uint64_t block_length = 0;
+  std::uint64_t uncompressed_size = 0;
+  std::uint8_t compression = 0;
+  std::uint32_t dtype = 0;
+};
+
+// Pre-load regions to build a region_id -> pts_us lookup.
+std::map<std::string, std::int64_t> build_region_pts_lookup(
+    const std::filesystem::path& staging_dir) {
+  std::map<std::string, std::int64_t> lookup;
+  for (const auto& region : read_jsonl(staging_dir / "spatial" / "regions.jsonl")) {
+    const auto id = string_value(region, "id");
+    if (!id.empty()) {
+      lookup[id] = int_value_or_zero(region, "pts_us");
+    }
+  }
+  return lookup;
+}
+
+// Compute mean depth at masked pixels from a depth block.
+// Returns negative value on failure.
+double compute_mean_depth_at_mask(
+    const std::uint16_t* depth_pixels,
+    const std::vector<std::uint8_t>& mask_pixels,
+    int width, int height) {
+  double depth_sum = 0.0;
+  std::size_t pixel_count = 0;
+  const std::size_t total = static_cast<std::size_t>(width) * height;
+  for (std::size_t p = 0; p < total; ++p) {
+    if (mask_pixels[p]) {
+      depth_sum += static_cast<double>(depth_pixels[p]);
+      ++pixel_count;
+    }
+  }
+  if (pixel_count == 0) return -1.0;
+  return depth_sum / static_cast<double>(pixel_count);
+}
+
+void build_mask_occlusion_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto mask_infos = collect_mask_infos(staging_dir);
+  if (mask_infos.size() < 2) {
+    ++builder.counts.skipped_no_mask_data;
+    return;
+  }
+
+  const auto block_file_path = staging_dir / "spatial" / "masks.blocks.svpmz";
+  if (!std::filesystem::exists(block_file_path)) {
+    ++builder.counts.skipped_no_mask_data;
+    return;
+  }
+
+  const auto region_pts = build_region_pts_lookup(staging_dir);
+
+  // Check if depth data is available for z-order determination.
+  const auto depth_records = read_jsonl(staging_dir / "spatial" / "depth.index.jsonl");
+  const auto depth_block_path = staging_dir / "spatial" / "depth.blocks.svpdz";
+  const bool depth_available = !depth_records.empty() &&
+      std::filesystem::exists(depth_block_path);
+
+  // Collect depth block infos by frame_id for z-order lookup.
+  std::map<std::string, DepthBlockInfo> depth_by_frame;
+  if (depth_available) {
+    for (const auto& rec : depth_records) {
+      DepthBlockInfo info;
+      info.depth_id = string_value(rec, "id");
+      info.frame_id = string_value(rec, "frame_id");
+      info.width = static_cast<int>(int_value_or_zero(rec, "width"));
+      info.height = static_cast<int>(int_value_or_zero(rec, "height"));
+      if (rec.contains("block_offset") && rec["block_offset"].is_number_unsigned()) {
+        info.block_offset = rec["block_offset"].get<std::uint64_t>();
+      }
+      if (rec.contains("block_length") && rec["block_length"].is_number_unsigned()) {
+        info.block_length = rec["block_length"].get<std::uint64_t>();
+      }
+      if (rec.contains("uncompressed_size") && rec["uncompressed_size"].is_number_unsigned()) {
+        info.uncompressed_size = rec["uncompressed_size"].get<std::uint64_t>();
+      }
+      if (rec.contains("dtype") && rec["dtype"].is_number_unsigned()) {
+        info.dtype = rec["dtype"].get<std::uint32_t>();
+      }
+      if (info.frame_id.empty() || info.width <= 0 || info.height <= 0) continue;
+      info.compression = 0x01;
+      depth_by_frame[info.frame_id] = std::move(info);
+    }
+  }
+
+  // Group masks by frame_id so we only compare co-occurring masks.
+  std::map<std::string, std::vector<MaskBlockInfo>> masks_by_frame;
+  for (const auto& info : mask_infos) {
+    if (info.frame_id.empty()) continue;
+    if (builder.ids.spatial_mask_ids.count(info.mask_id) == 0) continue;
+    masks_by_frame[info.frame_id].push_back(info);
+  }
+
+  for (const auto& [frame_id, frame_masks] : masks_by_frame) {
+    // Decode all masks for this frame.
+    std::vector<std::vector<std::uint8_t>> decoded_masks;
+    decoded_masks.reserve(frame_masks.size());
+    bool all_decoded = true;
+    for (const auto& info : frame_masks) {
+      auto raw = read_and_decompress_block(
+          block_file_path,
+          info.block_offset, info.block_length,
+          info.uncompressed_size, 0x01);
+      if (raw.empty()) {
+        all_decoded = false;
+        break;
+      }
+      auto pixels = svp::vision::decode_mask_rle(
+          raw.data(), raw.size(), info.width, info.height);
+      if (pixels.empty()) {
+        all_decoded = false;
+        break;
+      }
+      decoded_masks.push_back(std::move(pixels));
+    }
+
+    if (!all_decoded || decoded_masks.size() < 2) continue;
+
+    // Try to load depth data for this frame for z-order determination.
+    const auto* depth_info = depth_available ? &depth_by_frame[frame_id] : nullptr;
+    std::vector<std::uint16_t> depth_pixels;
+    bool depth_loaded = false;
+    if (depth_info && depth_info->frame_id == frame_id && depth_info->dtype == 2) {
+      auto depth_raw = read_and_decompress_block(
+          depth_block_path,
+          depth_info->block_offset, depth_info->block_length,
+          depth_info->uncompressed_size, depth_info->compression);
+      if (depth_raw.size() >= static_cast<std::size_t>(depth_info->width) * depth_info->height * 2) {
+        depth_pixels.assign(
+            reinterpret_cast<const std::uint16_t*>(depth_raw.data()),
+            reinterpret_cast<const std::uint16_t*>(depth_raw.data()) +
+                static_cast<std::size_t>(depth_info->width) * depth_info->height);
+        depth_loaded = true;
+      }
+    }
+
+    for (std::size_t i = 0; i < frame_masks.size(); ++i) {
+      for (std::size_t j = i + 1; j < frame_masks.size(); ++j) {
+        const auto& info_a = frame_masks[i];
+        const auto& info_b = frame_masks[j];
+        const auto& mask_a = decoded_masks[i];
+        const auto& mask_b = decoded_masks[j];
+
+        if (info_a.width != info_b.width || info_a.height != info_b.height) {
+          continue;
+        }
+
+        std::size_t overlap_pixels = 0;
+        std::size_t a_only_pixels = 0;
+        std::size_t b_only_pixels = 0;
+        const std::size_t total = static_cast<std::size_t>(info_a.width) * info_a.height;
+        for (std::size_t p = 0; p < total; ++p) {
+          if (mask_a[p] && mask_b[p]) {
+            ++overlap_pixels;
+          } else if (mask_a[p]) {
+            ++a_only_pixels;
+          } else if (mask_b[p]) {
+            ++b_only_pixels;
+          }
+        }
+
+        if (overlap_pixels == 0) continue;
+
+        const auto pts_it = region_pts.find(info_a.region_id);
+        const std::int64_t pts_us = pts_it != region_pts.end() ? pts_it->second : 0;
+
+        if (depth_loaded &&
+            info_a.width == depth_info->width && info_a.height == depth_info->height) {
+          // Depth data available: use mean depth at masked regions to
+          // determine z-order. Lower depth = closer to camera = occluder.
+          const double mean_depth_a = compute_mean_depth_at_mask(
+              depth_pixels.data(), mask_a, info_a.width, info_a.height);
+          const double mean_depth_b = compute_mean_depth_at_mask(
+              depth_pixels.data(), mask_b, info_b.width, info_b.height);
+
+          if (mean_depth_a < 0 || mean_depth_b < 0) continue;
+
+          if (mean_depth_a < mean_depth_b) {
+            // A is closer to camera, A occludes B.
+            builder.add("rel_mask_occludes_", "occludes",
+                        info_a.region_id, info_b.region_id,
+                        pts_us, pts_us, 1.0,
+                        "spatial/masks.blocks.svpmz+spatial/depth.blocks.svpdz");
+            builder.add("rel_mask_occluded_by_", "occluded_by",
+                        info_b.region_id, info_a.region_id,
+                        pts_us, pts_us, 1.0,
+                        "spatial/masks.blocks.svpmz+spatial/depth.blocks.svpdz");
+            ++builder.counts.spatial_occludes;
+            ++builder.counts.spatial_occluded_by;
+          } else if (mean_depth_b < mean_depth_a) {
+            builder.add("rel_mask_occludes_", "occludes",
+                        info_b.region_id, info_a.region_id,
+                        pts_us, pts_us, 1.0,
+                        "spatial/masks.blocks.svpmz+spatial/depth.blocks.svpdz");
+            builder.add("rel_mask_occluded_by_", "occluded_by",
+                        info_a.region_id, info_b.region_id,
+                        pts_us, pts_us, 1.0,
+                        "spatial/masks.blocks.svpmz+spatial/depth.blocks.svpdz");
+            ++builder.counts.spatial_occludes;
+            ++builder.counts.spatial_occluded_by;
+          }
+          // If equal depth, no occlusion relationship — just overlap.
+          // Fall through to emit overlaps below for equal depth case.
+          if (mean_depth_a != mean_depth_b) continue;
+        }
+
+        // Without depth data (or equal depth), masks prove pixel overlap
+        // but not z-order. Emit the spec-defined 'overlaps' relationship
+        // using mask IoU as the evidence metric.
+        // Spec §15: "overlaps: mask IoU exceeds threshold"
+        // Spec §15: "All thresholds are written to provenance"
+        const double mask_iou =
+            static_cast<double>(overlap_pixels) /
+            static_cast<double>(overlap_pixels + a_only_pixels + b_only_pixels);
+
+        if (mask_iou >= kMaskIoUThreshold) {
+          builder.add("rel_mask_overlaps_", "overlaps",
+                      info_a.region_id, info_b.region_id,
+                      pts_us, pts_us, mask_iou,
+                      "spatial/masks.blocks.svpmz");
+          ++builder.counts.spatial_overlaps;
+        }
+
+        // Spec §15: "contains: one mask mostly contains another"
+        // Compute containment ratio: what fraction of B's pixels are
+        // inside A? If most of B is inside A, then A contains B.
+        const std::size_t b_total = overlap_pixels + b_only_pixels;
+        const std::size_t a_total = overlap_pixels + a_only_pixels;
+
+        if (b_total > 0) {
+          const double containment_b_in_a =
+              static_cast<double>(overlap_pixels) / static_cast<double>(b_total);
+          if (containment_b_in_a >= kMaskContainmentThreshold) {
+            builder.add("rel_mask_contains_", "contains",
+                        info_a.region_id, info_b.region_id,
+                        pts_us, pts_us, containment_b_in_a,
+                        "spatial/masks.blocks.svpmz");
+            ++builder.counts.spatial_contains;
+          }
+        }
+        if (a_total > 0) {
+          const double containment_a_in_b =
+              static_cast<double>(overlap_pixels) / static_cast<double>(a_total);
+          if (containment_a_in_b >= kMaskContainmentThreshold) {
+            builder.add("rel_mask_contained_by_", "contained_by",
+                        info_a.region_id, info_b.region_id,
+                        pts_us, pts_us, containment_a_in_b,
+                        "spatial/masks.blocks.svpmz");
+            ++builder.counts.spatial_contained_by;
+          }
+        }
+      }
+    }
+  }
+}
+
+void build_depth_foreground_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto depth_records = read_jsonl(staging_dir / "spatial" / "depth.index.jsonl");
+  if (depth_records.empty()) {
+    ++builder.counts.skipped_no_depth_data;
+    return;
+  }
+
+  const auto mask_infos = collect_mask_infos(staging_dir);
+  if (mask_infos.empty()) {
+    ++builder.counts.skipped_no_depth_data;
+    return;
+  }
+
+  const auto depth_block_path = staging_dir / "spatial" / "depth.blocks.svpdz";
+  if (!std::filesystem::exists(depth_block_path)) {
+    ++builder.counts.skipped_no_depth_data;
+    return;
+  }
+
+  // Collect depth block infos.
+  std::map<std::string, DepthBlockInfo> depth_by_frame;
+  for (const auto& rec : depth_records) {
+    DepthBlockInfo info;
+    info.depth_id = string_value(rec, "id");
+    info.frame_id = string_value(rec, "frame_id");
+    info.width = static_cast<int>(int_value_or_zero(rec, "width"));
+    info.height = static_cast<int>(int_value_or_zero(rec, "height"));
+    if (rec.contains("block_offset") && rec["block_offset"].is_number_unsigned()) {
+      info.block_offset = rec["block_offset"].get<std::uint64_t>();
+    }
+    if (rec.contains("block_length") && rec["block_length"].is_number_unsigned()) {
+      info.block_length = rec["block_length"].get<std::uint64_t>();
+    }
+    if (rec.contains("uncompressed_size") && rec["uncompressed_size"].is_number_unsigned()) {
+      info.uncompressed_size = rec["uncompressed_size"].get<std::uint64_t>();
+    }
+    if (rec.contains("dtype") && rec["dtype"].is_number_unsigned()) {
+      info.dtype = rec["dtype"].get<std::uint32_t>();
+    }
+    if (info.frame_id.empty() || info.width <= 0 || info.height <= 0) continue;
+    info.compression = 0x01;  // zstd
+    depth_by_frame[info.frame_id] = std::move(info);
+  }
+
+  // Group masks by frame.
+  std::map<std::string, std::vector<MaskBlockInfo>> masks_by_frame;
+  for (const auto& info : mask_infos) {
+    if (info.frame_id.empty()) continue;
+    if (builder.ids.spatial_mask_ids.count(info.mask_id) == 0) continue;
+    masks_by_frame[info.frame_id].push_back(info);
+  }
+
+  const auto mask_block_path = staging_dir / "spatial" / "masks.blocks.svpmz";
+
+  for (const auto& [frame_id, frame_masks] : masks_by_frame) {
+    const auto depth_it = depth_by_frame.find(frame_id);
+    if (depth_it == depth_by_frame.end()) continue;
+
+    const auto& depth_info = depth_it->second;
+
+    // Decode depth data.
+    auto depth_raw = read_and_decompress_block(
+        depth_block_path,
+        depth_info.block_offset, depth_info.block_length,
+        depth_info.uncompressed_size, depth_info.compression);
+    if (depth_raw.empty()) continue;
+
+    // Depth is stored as uint16 (DType=2) in row-major order.
+    if (depth_info.dtype != 2) continue;  // Only support uint16 depth
+    if (depth_raw.size() < static_cast<std::size_t>(depth_info.width) * depth_info.height * 2) {
+      continue;
+    }
+
+    const std::uint16_t* depth_pixels = reinterpret_cast<const std::uint16_t*>(depth_raw.data());
+
+    // Decode all masks for this frame and compute mean depth per masked region.
+    struct RegionDepth {
+      std::string region_id;
+      double mean_depth = 0.0;
+      std::int64_t pts_us = 0;
+    };
+
+    std::vector<RegionDepth> region_depths;
+    for (const auto& mask_info : frame_masks) {
+      auto mask_raw = read_and_decompress_block(
+          mask_block_path,
+          mask_info.block_offset, mask_info.block_length,
+          mask_info.uncompressed_size, 0x01);
+      if (mask_raw.empty()) continue;
+
+      auto mask_pixels = svp::vision::decode_mask_rle(
+          mask_raw.data(), mask_raw.size(), mask_info.width, mask_info.height);
+      if (mask_pixels.empty()) continue;
+
+      // Mask and depth must have the same dimensions.
+      if (mask_info.width != depth_info.width || mask_info.height != depth_info.height) {
+        continue;
+      }
+
+      double depth_sum = 0.0;
+      std::size_t pixel_count = 0;
+      const std::size_t total = static_cast<std::size_t>(mask_info.width) * mask_info.height;
+      for (std::size_t p = 0; p < total; ++p) {
+        if (mask_pixels[p]) {
+          depth_sum += static_cast<double>(depth_pixels[p]);
+          ++pixel_count;
+        }
+      }
+
+      if (pixel_count == 0) continue;
+
+      RegionDepth rd;
+      rd.region_id = mask_info.region_id;
+      rd.mean_depth = depth_sum / static_cast<double>(pixel_count);
+
+      // Look up pts_us from regions.
+      for (const auto& region : read_jsonl(staging_dir / "spatial" / "regions.jsonl")) {
+        if (string_value(region, "id") == mask_info.region_id) {
+          rd.pts_us = int_value_or_zero(region, "pts_us");
+          break;
+        }
+      }
+
+      region_depths.push_back(std::move(rd));
+    }
+
+    if (region_depths.size() < 2) continue;
+
+    // Compare each pair: lower mean depth = foreground (closer to camera).
+    // Depth values are typically disparity-like: higher = farther.
+    for (std::size_t i = 0; i < region_depths.size(); ++i) {
+      for (std::size_t j = i + 1; j < region_depths.size(); ++j) {
+        const auto& a = region_depths[i];
+        const auto& b = region_depths[j];
+
+        if (a.mean_depth < b.mean_depth) {
+          // A is closer to camera (foreground), B is background.
+          builder.add("rel_depth_fg_", "foreground_relative_to",
+                      a.region_id, b.region_id,
+                      a.pts_us, a.pts_us, 1.0,
+                      "spatial/depth.blocks.svpdz");
+          builder.add("rel_depth_bg_", "background_relative_to",
+                      b.region_id, a.region_id,
+                      a.pts_us, a.pts_us, 1.0,
+                      "spatial/depth.blocks.svpdz");
+          ++builder.counts.spatial_foreground_relative_to;
+          ++builder.counts.spatial_background_relative_to;
+        } else if (b.mean_depth < a.mean_depth) {
+          builder.add("rel_depth_fg_", "foreground_relative_to",
+                      b.region_id, a.region_id,
+                      a.pts_us, a.pts_us, 1.0,
+                      "spatial/depth.blocks.svpdz");
+          builder.add("rel_depth_bg_", "background_relative_to",
+                      a.region_id, b.region_id,
+                      a.pts_us, a.pts_us, 1.0,
+                      "spatial/depth.blocks.svpdz");
+          ++builder.counts.spatial_foreground_relative_to;
+          ++builder.counts.spatial_background_relative_to;
+        }
+        // If equal depth, no foreground/background relationship.
+      }
+    }
+  }
+}
+
+void build_motion_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto tracks = read_jsonl(staging_dir / "entities" / "entity_tracks.jsonl");
+  if (tracks.empty()) {
+    ++builder.counts.skipped_no_track_data;
+    return;
+  }
+
+  const auto regions = read_jsonl(staging_dir / "spatial" / "regions.jsonl");
+  if (regions.empty()) {
+    ++builder.counts.skipped_no_track_data;
+    return;
+  }
+
+  // Collect region positions grouped by entity_id and sorted by pts_us.
+  struct RegionPosition {
+    std::string region_id;
+    std::int64_t pts_us = 0;
+    std::vector<double> bbox;  // box_norm [x0, y0, x1, y1]
+  };
+
+  std::map<std::string, std::vector<RegionPosition>> positions_by_entity;
+  for (const auto& region : regions) {
+    const std::string entity_id = string_value(region, "entity_id");
+    if (entity_id.empty()) continue;
+    if (builder.ids.entity_ids.count(entity_id) == 0) continue;
+
+    RegionPosition pos;
+    pos.region_id = string_value(region, "id");
+    if (pos.region_id.empty()) continue;
+    if (builder.ids.spatial_region_ids.count(pos.region_id) == 0) continue;
+    pos.pts_us = int_value_or_zero(region, "pts_us");
+    pos.bbox = extract_bbox_norm(region, "box_norm");
+    if (pos.bbox.size() < 4) continue;
+
+    positions_by_entity[entity_id].push_back(std::move(pos));
+  }
+
+  if (positions_by_entity.empty()) {
+    ++builder.counts.skipped_no_track_data;
+    return;
+  }
+
+  // For each entity, compute displacement between first and last positions.
+  // If displacement is below a threshold, the entity is stationary relative
+  // to camera. If two entities have similar displacement vectors, they
+  // move_with each other.
+  struct EntityMotion {
+    std::string entity_id;
+    double cx_first = 0.0;
+    double cy_first = 0.0;
+    double cx_last = 0.0;
+    double cy_last = 0.0;
+    double dx = 0.0;
+    double dy = 0.0;
+    double displacement = 0.0;
+    std::int64_t first_pts = 0;
+    std::int64_t last_pts = 0;
+  };
+
+  // Threshold for stationary: less than kStationaryThreshold normalized displacement.
+  // Threshold for moves_with: displacement vectors within kMovesWithThreshold of each other.
+
+  std::vector<EntityMotion> motions;
+
+  for (const auto& [entity_id, positions] : positions_by_entity) {
+    if (positions.size() < 2) continue;
+
+    EntityMotion motion;
+    motion.entity_id = entity_id;
+    motion.cx_first = (positions.front().bbox[0] + positions.front().bbox[2]) / 2.0;
+    motion.cy_first = (positions.front().bbox[1] + positions.front().bbox[3]) / 2.0;
+    motion.cx_last = (positions.back().bbox[0] + positions.back().bbox[2]) / 2.0;
+    motion.cy_last = (positions.back().bbox[1] + positions.back().bbox[3]) / 2.0;
+    motion.dx = motion.cx_last - motion.cx_first;
+    motion.dy = motion.cy_last - motion.cy_first;
+    motion.displacement = std::sqrt(motion.dx * motion.dx + motion.dy * motion.dy);
+    motion.first_pts = positions.front().pts_us;
+    motion.last_pts = positions.back().pts_us;
+
+    motions.push_back(std::move(motion));
+  }
+
+  if (motions.empty()) {
+    ++builder.counts.skipped_no_track_data;
+    return;
+  }
+
+  // Emit stationary_relative_to_camera for entities with low displacement.
+  for (const auto& m : motions) {
+    if (m.displacement <= kStationaryThreshold) {
+      // Entity is stationary relative to camera.
+      // Self-relationship: entity -> camera (represented as entity -> its first frame).
+      // We use the entity's first frame as the reference point.
+      builder.add("rel_stationary_", "stationary_relative_to_camera",
+                  m.entity_id, m.entity_id,
+                  m.first_pts, m.last_pts, 1.0,
+                  "spatial/regions.jsonl");
+      ++builder.counts.spatial_stationary_relative_to_camera;
+    }
+  }
+
+  // Emit moves_with for entity pairs with similar displacement vectors.
+  for (std::size_t i = 0; i < motions.size(); ++i) {
+    for (std::size_t j = i + 1; j < motions.size(); ++j) {
+      const auto& a = motions[i];
+      const auto& b = motions[j];
+
+      // Both entities must be moving (displacement > stationary threshold).
+      if (a.displacement <= kStationaryThreshold) continue;
+      if (b.displacement <= kStationaryThreshold) continue;
+
+      // Compare displacement vectors.
+      const double ddx = a.dx - b.dx;
+      const double ddy = a.dy - b.dy;
+      const double vector_diff = std::sqrt(ddx * ddx + ddy * ddy);
+
+      if (vector_diff <= kMovesWithThreshold) {
+        const std::int64_t start = std::min(a.first_pts, b.first_pts);
+        const std::int64_t end = std::max(a.last_pts, b.last_pts);
+        builder.add("rel_moves_with_", "moves_with",
+                    a.entity_id, b.entity_id,
+                    start, end, 1.0,
+                    "spatial/regions.jsonl");
+        ++builder.counts.spatial_moves_with;
+      }
+    }
+  }
+}
+
 std::vector<nlohmann::json> build_relationships(const std::filesystem::path& staging_dir,
                                                  RelationshipTypeCounts& counts) {
   const KnownIds ids = collect_known_ids(staging_dir);
@@ -1136,6 +1797,9 @@ std::vector<nlohmann::json> build_relationships(const std::filesystem::path& sta
   build_visible_during_speech_relationships(builder, staging_dir);
   build_visible_during_word_range_relationships(builder, staging_dir);
   build_speaker_active_during_entity_visible_relationships(builder, staging_dir);
+  build_mask_occlusion_relationships(builder, staging_dir);
+  build_depth_foreground_relationships(builder, staging_dir);
+  build_motion_relationships(builder, staging_dir);
 
   counts = builder.counts;
 
@@ -1170,6 +1834,13 @@ nlohmann::json make_relationship_processor_record(const RelationshipTypeCounts& 
       {"model_refs", nlohmann::json::array()},
       {"task_ids", {"task.relationships.full_graph"}},
       {"cache_keys", nlohmann::json::array()},
+      {"thresholds", {
+          {"near_centroid_distance", kNearThreshold},
+          {"overlaps_mask_iou", kMaskIoUThreshold},
+          {"contains_mask_containment", kMaskContainmentThreshold},
+          {"stationary_displacement", kStationaryThreshold},
+          {"moves_with_displacement", kMovesWithThreshold}
+      }},
       {"relationship_type_counts", {
           {"text_region_shot", counts.text_region_shot},
           {"text_region_scene", counts.text_region_scene},
@@ -1196,7 +1867,16 @@ nlohmann::json make_relationship_processor_record(const RelationshipTypeCounts& 
           {"spatial_contained_by", counts.spatial_contained_by},
           {"spatial_near", counts.spatial_near},
           {"entity_enters_frame", counts.entity_enters_frame},
-          {"entity_exits_frame", counts.entity_exits_frame}
+          {"entity_exits_frame", counts.entity_exits_frame},
+          {"spatial_occludes", counts.spatial_occludes},
+          {"spatial_occluded_by", counts.spatial_occluded_by},
+          {"spatial_foreground_relative_to", counts.spatial_foreground_relative_to},
+          {"spatial_background_relative_to", counts.spatial_background_relative_to},
+          {"spatial_moves_with", counts.spatial_moves_with},
+          {"spatial_stationary_relative_to_camera", counts.spatial_stationary_relative_to_camera},
+          {"skipped_no_mask_data", counts.skipped_no_mask_data},
+          {"skipped_no_depth_data", counts.skipped_no_depth_data},
+          {"skipped_no_track_data", counts.skipped_no_track_data}
       }},
   };
 }
@@ -1298,6 +1978,15 @@ nlohmann::json relationship_provenance_write_summary_to_json(
           {"spatial_near", summary.type_counts.spatial_near},
           {"entity_enters_frame", summary.type_counts.entity_enters_frame},
           {"entity_exits_frame", summary.type_counts.entity_exits_frame},
+          {"spatial_occludes", summary.type_counts.spatial_occludes},
+          {"spatial_occluded_by", summary.type_counts.spatial_occluded_by},
+          {"spatial_foreground_relative_to", summary.type_counts.spatial_foreground_relative_to},
+          {"spatial_background_relative_to", summary.type_counts.spatial_background_relative_to},
+          {"spatial_moves_with", summary.type_counts.spatial_moves_with},
+          {"spatial_stationary_relative_to_camera", summary.type_counts.spatial_stationary_relative_to_camera},
+          {"skipped_no_mask_data", summary.type_counts.skipped_no_mask_data},
+          {"skipped_no_depth_data", summary.type_counts.skipped_no_depth_data},
+          {"skipped_no_track_data", summary.type_counts.skipped_no_track_data},
       }},
   };
 }
