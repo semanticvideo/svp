@@ -20,6 +20,15 @@ namespace {
 
 constexpr const char* kRelationshipProcessorId = "processor_relationship_writer_0001";
 
+// Spec §15: "All thresholds are written to provenance"
+// These named constants are the single source of truth for relationship
+// thresholds and are recorded in the processor provenance record.
+constexpr double kNearThreshold = 0.15;          // near: centroid distance below threshold
+constexpr double kMaskIoUThreshold = 0.1;        // overlaps: mask IoU exceeds threshold
+constexpr double kMaskContainmentThreshold = 0.8; // contains: one mask mostly contains another
+constexpr double kStationaryThreshold = 0.02;    // stationary_relative_to_camera: displacement below threshold
+constexpr double kMovesWithThreshold = 0.05;     // moves_with: displacement vectors within threshold
+
 std::vector<nlohmann::json> read_jsonl(const std::filesystem::path& path) {
   std::vector<nlohmann::json> records;
   if (!std::filesystem::exists(path)) {
@@ -681,9 +690,8 @@ void build_spatial_region_pair_relationships(
     regions_by_frame[frame_id].push_back(std::move(info));
   }
 
-  // Distance threshold for "near" — regions whose centers are within 0.15
-  // of the normalized frame diagonal but do not overlap.
-  constexpr double kNearThreshold = 0.15;
+  // Distance threshold for "near" — regions whose centers are within
+  // kNearThreshold of the normalized frame diagonal but do not overlap.
 
   for (const auto& [frame_id, frame_regions] : regions_by_frame) {
     for (std::size_t i = 0; i < frame_regions.size(); ++i) {
@@ -1425,7 +1433,6 @@ void build_mask_occlusion_relationships(
         // using mask IoU as the evidence metric.
         // Spec §15: "overlaps: mask IoU exceeds threshold"
         // Spec §15: "All thresholds are written to provenance"
-        constexpr double kMaskIoUThreshold = 0.1;
         const double mask_iou =
             static_cast<double>(overlap_pixels) /
             static_cast<double>(overlap_pixels + a_only_pixels + b_only_pixels);
@@ -1441,7 +1448,6 @@ void build_mask_occlusion_relationships(
         // Spec §15: "contains: one mask mostly contains another"
         // Compute containment ratio: what fraction of B's pixels are
         // inside A? If most of B is inside A, then A contains B.
-        constexpr double kMaskContainmentThreshold = 0.8;
         const std::size_t b_total = overlap_pixels + b_only_pixels;
         const std::size_t a_total = overlap_pixels + a_only_pixels;
 
@@ -1700,10 +1706,8 @@ void build_motion_relationships(
     std::int64_t last_pts = 0;
   };
 
-  // Threshold for stationary: less than 0.02 normalized displacement.
-  // Threshold for moves_with: displacement vectors within 0.05 of each other.
-  constexpr double kStationaryThreshold = 0.02;
-  constexpr double kMovesWithThreshold = 0.05;
+  // Threshold for stationary: less than kStationaryThreshold normalized displacement.
+  // Threshold for moves_with: displacement vectors within kMovesWithThreshold of each other.
 
   std::vector<EntityMotion> motions;
 
@@ -1830,6 +1834,13 @@ nlohmann::json make_relationship_processor_record(const RelationshipTypeCounts& 
       {"model_refs", nlohmann::json::array()},
       {"task_ids", {"task.relationships.full_graph"}},
       {"cache_keys", nlohmann::json::array()},
+      {"thresholds", {
+          {"near_centroid_distance", kNearThreshold},
+          {"overlaps_mask_iou", kMaskIoUThreshold},
+          {"contains_mask_containment", kMaskContainmentThreshold},
+          {"stationary_displacement", kStationaryThreshold},
+          {"moves_with_displacement", kMovesWithThreshold}
+      }},
       {"relationship_type_counts", {
           {"text_region_shot", counts.text_region_shot},
           {"text_region_scene", counts.text_region_scene},
