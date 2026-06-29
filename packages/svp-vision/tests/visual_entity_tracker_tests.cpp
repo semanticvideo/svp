@@ -1,9 +1,11 @@
 #include "svp/vision/visual_entity_tracker.hpp"
 #include "svp/vision/mask_writer.hpp"
+#include "svp/blocks/block_stream.hpp"
 
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <filesystem>
 #include <iostream>
 #include <map>
@@ -369,6 +371,46 @@ static void test_moving_object_integration() {
     assert(!rec.contains("mask_id"));
     assert(rec["encoding"] == "svp-rle-v1");
     assert(rec["block_file"] == "spatial/masks.blocks.svpmz");
+  }
+
+  // Verify written mask blocks pass block stream validation
+  {
+    const auto block_path = tmp_dir / "spatial" / "masks.blocks.svpmz";
+    std::ifstream block_file(block_path, std::ios::binary);
+    assert(block_file.good());
+    std::vector<char> char_data(
+        (std::istreambuf_iterator<char>(block_file)),
+        std::istreambuf_iterator<char>());
+    block_file.close();
+    std::vector<std::byte> block_data(char_data.size());
+    for (std::size_t i = 0; i < char_data.size(); ++i) {
+      block_data[i] = std::byte{static_cast<std::uint8_t>(char_data[i])};
+    }
+
+    svp::blocks::ParseOptions options;
+    options.required_block_type = svp::blocks::BlockType::mask;
+    options.verify_hashes = true;
+    options.verify_zstd_decompression = true;
+
+    std::size_t read_pos = 0;
+    auto result = svp::blocks::parse_block_stream(
+        block_data.size(), options,
+        [&](std::byte* output, std::size_t count, std::string& err) -> bool {
+          if (read_pos + count > block_data.size()) {
+            err = "read past end";
+            return false;
+          }
+          std::memcpy(output, block_data.data() + read_pos, count);
+          read_pos += count;
+          return true;
+        });
+
+    assert(result.issues.empty());
+    assert(result.blocks.size() == mask_entries.size());
+    for (const auto& hdr : result.blocks) {
+      assert(hdr.start_us == -1);
+      assert(hdr.end_us == -1);
+    }
   }
 
   // Cleanup

@@ -54,8 +54,10 @@ MaskWriteSummary write_masks(
     spec.dtype = svp::blocks::DType::svp_rle_v1;
     spec.start_frame = 0;
     spec.frame_count = 1;
-    spec.start_us = mask.timestamp_us;
-    spec.end_us = mask.timestamp_us;
+    // For single-frame mask blocks, use absent time range (-1) since the
+    // validator requires end_us > start_us and a single frame has no
+    // duration span.  Spec §14.5 allows start_us/end_us = -1 when not
+    // time-bound.
 
     auto block_info = svp::blocks::write_block_to_stream(
         block_file, spec,
@@ -95,8 +97,8 @@ MaskWriteSummary write_masks(
     block_entry["dtype"] = static_cast<std::uint32_t>(svp::blocks::DType::svp_rle_v1);
     block_entry["start_frame"] = 0;
     block_entry["frame_count"] = 1;
-    block_entry["start_us"] = mask.timestamp_us;
-    block_entry["end_us"] = mask.timestamp_us;
+    block_entry["start_us"] = -1;
+    block_entry["end_us"] = -1;
     block_entry["payload_blake3"] = "blake3:" + hash_to_hex(block_info.payload_blake3);
     block_entry["header_blake3"] = "blake3:" + hash_to_hex(block_info.header_blake3);
     block_entry["block_blake3"] = "blake3:" + hash_to_hex(block_info.payload_blake3);
