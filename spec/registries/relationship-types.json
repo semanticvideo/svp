@@ -1,0 +1,48 @@
+{
+  "schema_version": "svp-relationship-types-1",
+  "svp_version": "1.0-rc.2",
+  "description": "Classifies relationship types into support/provenance/structural graph edges and spec-level semantic relationship observations. This registry is the single owner of relationship type classification policy.",
+  "classes": {
+    "support": {
+      "description": "Low-level support, provenance, or structural graph edges that connect observations to their sources, containers, or evidence. These are not spec Section 15 semantic relationship observations.",
+      "types": [
+        "word_spoken_by",
+        "word_in_speaker_segment",
+        "embedding_source_is",
+        "observation_in_region",
+        "color_observation_of",
+        "depth_for_frame",
+        "numeric_value_from_observation",
+        "appears_in_frame",
+        "region_in_frame",
+        "has_mask",
+        "track_observation",
+        "has_evidence_crop",
+        "text_region_overlaps_entity"
+      ]
+    },
+    "semantic": {
+      "description": "Spec Section 15 controlled relationship types. These are higher-level semantic relationship observations computed from time, masks, depth, transcript, speaker segments, and motion.",
+      "types": [
+        "appears_in_shot",
+        "appears_in_scene",
+        "visible_during_speech",
+        "visible_during_word_range",
+        "overlaps",
+        "near",
+        "contains",
+        "contained_by",
+        "enters_frame",
+        "exits_frame",
+        "occludes",
+        "occluded_by",
+        "moves_with",
+        "stationary_relative_to_camera",
+        "foreground_relative_to",
+        "background_relative_to",
+        "speaker_active_during_entity_visible"
+      ]
+    }
+  },
+  "unclassified_behavior": "Relationship types not listed in this registry are classified as unknown. Unknown types are not rejected but are reported honestly as unknown during traversal."
+}

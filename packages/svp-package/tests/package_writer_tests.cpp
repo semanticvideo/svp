@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -1014,6 +1015,42 @@ void test_write_index_foundation() {
     sqlite3_close(raw_db);
 
     assert(vector_count == 2);
+  }
+
+  // Verify relationship_class column exists and is populated correctly
+  {
+    sqlite3* raw_db = nullptr;
+    const auto sqlite_path = staging_dir / "index" / "index.sqlite";
+    assert(sqlite3_open_v2(sqlite_path.string().c_str(), &raw_db,
+                           SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK);
+    assert(raw_db != nullptr);
+
+    sqlite3_stmt* stmt = nullptr;
+    // Verify relationship_type still indexes JSON type
+    assert(sqlite3_prepare_v2(raw_db,
+               "SELECT relationship_type, relationship_class FROM relationships "
+               "ORDER BY relationship_id", -1, &stmt, nullptr) == SQLITE_OK);
+
+    std::map<std::string, std::string> type_to_class;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+      const char* type_text = reinterpret_cast<const char*>(
+          sqlite3_column_text(stmt, 0));
+      const char* class_text = reinterpret_cast<const char*>(
+          sqlite3_column_text(stmt, 1));
+      assert(type_text != nullptr);
+      assert(class_text != nullptr);
+      type_to_class[type_text] = class_text;
+    }
+    sqlite3_finalize(stmt);
+    sqlite3_close(raw_db);
+
+    // The 4 relationships from this test are:
+    // observation_in_region (support), numeric_value_from_observation (support),
+    // embedding_source_is (support x2)
+    assert(!type_to_class.empty());
+    for (const auto& [type, cls] : type_to_class) {
+      assert(cls == "support");
+    }
   }
 
   std::filesystem::remove_all(root);
