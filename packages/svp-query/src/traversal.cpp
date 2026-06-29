@@ -443,6 +443,13 @@ LoadedEdges load_edges_from_jsonl(
     return result;
   }
 
+  // If the JSONL was readable but had malformed lines, propagate the error.
+  if (jsonl.has_malformed) {
+    result.error_message = jsonl.error_message;
+    result.has_malformed = true;
+    return result;
+  }
+
   for (const auto& record : jsonl.records) {
     const auto type = json_string_val(record, "type");
     const auto source_id = json_string_val(record, "source_id");
