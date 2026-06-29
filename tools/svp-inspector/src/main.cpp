@@ -801,6 +801,20 @@ void print_traversal(const std::filesystem::path& package_path,
   if (result.limit_applied) {
     std::cout << "  (limit applied)\n";
   }
+  if (!result.time_window_json.is_null()) {
+    std::cout << "  time window: " << result.time_window_json.dump() << "\n";
+  }
+  if (result.graph_health.total_edges > 0) {
+    std::cout << "  graph health: " << result.graph_health.total_edges << " edges, "
+              << result.graph_health.total_nodes << " nodes";
+    if (result.graph_health.unresolved_endpoints > 0) {
+      std::cout << ", " << result.graph_health.unresolved_endpoints << " unresolved";
+    }
+    if (result.graph_health.unknown_relationship_types > 0) {
+      std::cout << ", " << result.graph_health.unknown_relationship_types << " unknown types";
+    }
+    std::cout << "\n";
+  }
   if (!result.missing_object_ids.empty()) {
     std::cout << "  unresolved IDs: " << result.missing_object_ids.size() << "\n";
     for (const auto& id : result.missing_object_ids) {
@@ -827,6 +841,108 @@ void print_traversal(const std::filesystem::path& package_path,
   for (const auto& edge : result.edges) {
     std::cout << "  [d" << edge.depth << "] "
               << edge.direction << " "
+              << edge.source_id << " -> " << edge.target_id
+              << "  [" << edge.relationship_class << "] "
+              << edge.relationship_type;
+    if (!edge.relationship_id.empty()) {
+      std::cout << "  id=" << edge.relationship_id;
+    }
+    std::cout << "\n";
+  }
+}
+
+void print_path(const std::filesystem::path& package_path,
+                const svp::query::TraversalOptions& options,
+                bool json_output) {
+  auto result = svp::query::find_shortest_path(package_path, options);
+
+  if (json_output) {
+    std::cout << svp::query::path_result_to_json(result).dump(2) << "\n";
+    return;
+  }
+
+  if (!result.error_message.empty() && !result.path_found) {
+    std::cout << "Path error: " << result.error_message << "\n";
+    return;
+  }
+
+  std::cout << "Shortest path from " << result.start_id
+            << " to " << result.target_id << "\n";
+  std::cout << "  path found: " << (result.path_found ? "yes" : "no") << "\n";
+  std::cout << "  path length: " << result.path_edges.size() << " edges\n\n";
+
+  std::cout << "Nodes:\n";
+  for (const auto& node : result.path_nodes) {
+    std::cout << "  [d" << node.depth << "] " << node.object_id;
+    if (node.resolved) {
+      const auto desc = compact_node_summary(node.summary);
+      if (!desc.empty()) {
+        std::cout << "  " << desc;
+      }
+    } else {
+      std::cout << "  (unresolved)";
+    }
+    std::cout << "\n";
+  }
+
+  std::cout << "\nEdges:\n";
+  for (const auto& edge : result.path_edges) {
+    std::cout << "  [d" << edge.depth << "] "
+              << edge.direction << " "
+              << edge.source_id << " -> " << edge.target_id
+              << "  [" << edge.relationship_class << "] "
+              << edge.relationship_type;
+    if (!edge.relationship_id.empty()) {
+      std::cout << "  id=" << edge.relationship_id;
+    }
+    std::cout << "\n";
+  }
+}
+
+void print_context(const std::filesystem::path& package_path,
+                   const std::string& object_id,
+                   std::size_t limit,
+                   bool json_output) {
+  auto result = svp::query::build_context(package_path, object_id, limit);
+
+  if (json_output) {
+    std::cout << svp::query::context_result_to_json(result).dump(2) << "\n";
+    return;
+  }
+
+  if (!result.error_message.empty()) {
+    std::cout << "Context error: " << result.error_message << "\n";
+    return;
+  }
+
+  std::cout << "Context for " << result.object_id << "\n";
+  std::cout << "  resolved: " << (result.resolved ? "yes" : "no") << "\n";
+  if (!result.source_layer.empty()) {
+    std::cout << "  source_layer: " << result.source_layer << "\n";
+  }
+  const auto desc = compact_node_summary(result.summary);
+  if (!desc.empty()) {
+    std::cout << "  summary: " << desc << "\n";
+  }
+  std::cout << "  neighbors: " << result.context_nodes.size() << "\n\n";
+
+  std::cout << "Context nodes:\n";
+  for (const auto& node : result.context_nodes) {
+    std::cout << "  " << node.object_id;
+    if (node.resolved) {
+      const auto d = compact_node_summary(node.summary);
+      if (!d.empty()) {
+        std::cout << "  " << d;
+      }
+    } else {
+      std::cout << "  (unresolved)";
+    }
+    std::cout << "\n";
+  }
+
+  std::cout << "\nContext edges:\n";
+  for (const auto& edge : result.context_edges) {
+    std::cout << "  " << edge.direction << " "
               << edge.source_id << " -> " << edge.target_id
               << "  [" << edge.relationship_class << "] "
               << edge.relationship_type;
@@ -867,10 +983,11 @@ int main(int argc, char** argv) {
   auto* query = app.add_subcommand("query", "Query SVP package semantic layers");
   query->add_option("package", query_package_path, "Path to a .svp package")->required();
   query->add_option("--mode", query_mode,
-                    "Query mode: layers, transcript, words, speakers, ocr, colors, validation, relationships, traverse")
+                    "Query mode: layers, transcript, words, speakers, ocr, colors, validation, relationships, traverse, path, context")
       ->check(CLI::IsMember({"layers", "transcript", "words", "speakers",
                               "ocr", "colors", "validation",
-                              "relationships", "traverse"}));
+                              "relationships", "traverse",
+                              "path", "context"}));
   query->add_option("--text", query_text, "Search text for words or OCR mode");
   query->add_option("--bucket", query_color_bucket, "Filter color observations by dominant bucket");
   query->add_option("--min-coverage", query_min_coverage,
@@ -879,12 +996,17 @@ int main(int argc, char** argv) {
   query->add_flag("--json", query_json, "Emit JSON output for agent consumption");
 
   std::string query_from;
+  std::string query_to;
   int query_depth = 2;
   std::string query_direction = "both";
   std::string query_class = "all";
   std::string query_rel_type;
-  query->add_option("--from", query_from, "Starting object ID for traverse mode");
-  query->add_option("--depth", query_depth, "Max graph depth for traverse mode");
+  long long query_at_us = -1;
+  long long query_start_us = -1;
+  long long query_end_us = -1;
+  query->add_option("--from", query_from, "Starting object ID for traverse/path mode");
+  query->add_option("--to", query_to, "Target object ID for path mode");
+  query->add_option("--depth", query_depth, "Max graph depth for traverse/path mode");
   query->add_option("--direction", query_direction,
                     "Traversal direction: outgoing, incoming, both")
       ->check(CLI::IsMember({"outgoing", "incoming", "both"}));
@@ -892,6 +1014,9 @@ int main(int argc, char** argv) {
                     "Relationship class filter: support, semantic, unknown, all")
       ->check(CLI::IsMember({"support", "semantic", "unknown", "all"}));
   query->add_option("--type", query_rel_type, "Filter by exact relationship type");
+  query->add_option("--at-us", query_at_us, "Filter to relationships active at this microsecond");
+  query->add_option("--start-us", query_start_us, "Time window start in microseconds");
+  query->add_option("--end-us", query_end_us, "Time window end in microseconds");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -956,7 +1081,43 @@ int main(int argc, char** argv) {
         opts.type_filter = query_rel_type;
       }
       opts.limit = query_limit;
+      if (query_at_us >= 0) opts.time_window.at_us = query_at_us;
+      if (query_start_us >= 0) opts.time_window.start_us = query_start_us;
+      if (query_end_us >= 0) opts.time_window.end_us = query_end_us;
       query_cmd::print_traversal(query_package_path, opts, query_json);
+    } else if (query_mode == "path") {
+      svp::query::TraversalOptions opts;
+      opts.start_id = query_from;
+      opts.target_id = query_to;
+      opts.max_depth = query_depth;
+      if (query_direction == "outgoing") {
+        opts.direction = svp::query::TraversalDirection::Outgoing;
+      } else if (query_direction == "incoming") {
+        opts.direction = svp::query::TraversalDirection::Incoming;
+      } else {
+        opts.direction = svp::query::TraversalDirection::Both;
+      }
+      opts.class_filter = query_class;
+      if (!query_rel_type.empty()) {
+        opts.type_filter = query_rel_type;
+      }
+      opts.limit = query_limit;
+      if (query_at_us >= 0) opts.time_window.at_us = query_at_us;
+      if (query_start_us >= 0) opts.time_window.start_us = query_start_us;
+      if (query_end_us >= 0) opts.time_window.end_us = query_end_us;
+      auto path_result = svp::query::find_shortest_path(query_package_path, opts);
+      if (query_json) {
+        std::cout << svp::query::path_result_to_json(path_result).dump(2) << "\n";
+      } else {
+        query_cmd::print_path(query_package_path, opts, query_json);
+      }
+    } else if (query_mode == "context") {
+      auto ctx_result = svp::query::build_context(query_package_path, query_from, query_limit);
+      if (query_json) {
+        std::cout << svp::query::context_result_to_json(ctx_result).dump(2) << "\n";
+      } else {
+        query_cmd::print_context(query_package_path, query_from, query_limit, query_json);
+      }
     }
     return 0;
   }

@@ -171,7 +171,8 @@ KnownIds collect_known_ids(const std::filesystem::path& staging_dir) {
   }
 
   for (const auto& rec : read_jsonl(staging_dir / "transcript" / "speaker_segments.jsonl")) {
-    const std::string id = string_value(rec, "id");
+    std::string id = string_value(rec, "id");
+    if (id.empty()) id = string_value(rec, "segment_id");
     if (!id.empty()) ids.speaker_segment_ids.insert(id);
   }
 
@@ -385,7 +386,8 @@ void build_transcript_speaker_relationships(
          int_value_or_zero(word, "end_us")) / 2;
     bool matched_segment = false;
     for (const auto& seg : speaker_segments) {
-      const std::string seg_id = string_value(seg, "id");
+      std::string seg_id = string_value(seg, "id");
+      if (seg_id.empty()) seg_id = string_value(seg, "segment_id");
       if (seg_id.empty()) continue;
       const std::int64_t seg_start = int_value_or_zero(seg, "start_us");
       const std::int64_t seg_end = int_value_or_zero(seg, "end_us");
@@ -662,6 +664,246 @@ void build_text_region_entity_overlap_relationships(
   }
 }
 
+bool intervals_overlap(std::int64_t a_start, std::int64_t a_end,
+                       std::int64_t b_start, std::int64_t b_end) {
+  if (a_start == a_end) {
+    return a_start >= b_start && a_start < b_end;
+  }
+  if (b_start == b_end) {
+    return b_start >= a_start && b_start < a_end;
+  }
+  return a_start < b_end && b_start < a_end;
+}
+
+struct IntervalRecord {
+  std::string id;
+  std::int64_t start_us = 0;
+  std::int64_t end_us = 0;
+};
+
+std::vector<IntervalRecord> read_shots_as_intervals(
+    const std::filesystem::path& staging_dir) {
+  std::vector<IntervalRecord> intervals;
+  for (const auto& rec : read_jsonl(staging_dir / "timeline" / "shots.jsonl")) {
+    IntervalRecord iv;
+    iv.id = string_value(rec, "id");
+    iv.start_us = int_value_or_zero(rec, "start_us");
+    iv.end_us = int_value_or_zero(rec, "end_us");
+    if (!iv.id.empty() && iv.end_us > iv.start_us) {
+      intervals.push_back(std::move(iv));
+    }
+  }
+  return intervals;
+}
+
+std::vector<IntervalRecord> read_scenes_as_intervals(
+    const std::filesystem::path& staging_dir) {
+  std::vector<IntervalRecord> intervals;
+  for (const auto& rec : read_jsonl(staging_dir / "timeline" / "scenes.jsonl")) {
+    IntervalRecord iv;
+    iv.id = string_value(rec, "id");
+    iv.start_us = int_value_or_zero(rec, "start_us");
+    iv.end_us = int_value_or_zero(rec, "end_us");
+    if (!iv.id.empty() && iv.end_us > iv.start_us) {
+      intervals.push_back(std::move(iv));
+    }
+  }
+  return intervals;
+}
+
+std::vector<IntervalRecord> read_speaker_segments_as_intervals(
+    const std::filesystem::path& staging_dir) {
+  std::vector<IntervalRecord> intervals;
+  for (const auto& rec : read_jsonl(staging_dir / "transcript" / "speaker_segments.jsonl")) {
+    IntervalRecord iv;
+    iv.id = string_value(rec, "id");
+    if (iv.id.empty()) {
+      iv.id = string_value(rec, "segment_id");
+    }
+    iv.start_us = int_value_or_zero(rec, "start_us");
+    iv.end_us = int_value_or_zero(rec, "end_us");
+    if (!iv.id.empty() && iv.end_us > iv.start_us) {
+      intervals.push_back(std::move(iv));
+    }
+  }
+  return intervals;
+}
+
+void build_entity_shot_scene_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto regions = read_jsonl(staging_dir / "spatial" / "regions.jsonl");
+  if (regions.empty()) return;
+  if (builder.ids.entity_ids.empty()) return;
+
+  const auto shots = read_shots_as_intervals(staging_dir);
+  const auto scenes = read_scenes_as_intervals(staging_dir);
+
+  if (shots.empty() && scenes.empty()) return;
+
+  for (const auto& region : regions) {
+    const std::string entity_id = string_value(region, "entity_id");
+    if (entity_id.empty()) continue;
+    if (builder.ids.entity_ids.count(entity_id) == 0) continue;
+
+    const std::int64_t pts_us = int_value_or_zero(region, "pts_us");
+    if (pts_us == 0) continue;
+
+    for (const auto& shot : shots) {
+      if (pts_us >= shot.start_us && pts_us < shot.end_us) {
+        builder.add("rel_entity_shot_", "appears_in_shot",
+                    entity_id, shot.id,
+                    pts_us, pts_us, 1.0,
+                    "spatial/regions.jsonl+timeline/shots.jsonl");
+        ++builder.counts.semantic_entity_appears_in_shot;
+      }
+    }
+
+    for (const auto& scene : scenes) {
+      if (pts_us >= scene.start_us && pts_us < scene.end_us) {
+        builder.add("rel_entity_scene_", "appears_in_scene",
+                    entity_id, scene.id,
+                    pts_us, pts_us, 1.0,
+                    "spatial/regions.jsonl+timeline/scenes.jsonl");
+        ++builder.counts.semantic_entity_appears_in_scene;
+      }
+    }
+  }
+}
+
+void build_visible_during_speech_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto speaker_segments = read_speaker_segments_as_intervals(staging_dir);
+  if (speaker_segments.empty()) return;
+
+  const auto text_regions = read_jsonl(staging_dir / "text" / "text_regions.jsonl");
+
+  for (const auto& tr : text_regions) {
+    const std::string tr_id = string_value(tr, "text_region_id");
+    if (tr_id.empty()) continue;
+    if (builder.ids.text_region_ids.count(tr_id) == 0) continue;
+
+    const std::int64_t tr_start = int_value_or_zero(tr, "start_us");
+    const std::int64_t tr_end = int_value_or_zero(tr, "end_us");
+    if (tr_end <= tr_start) continue;
+
+    for (const auto& seg : speaker_segments) {
+      if (intervals_overlap(tr_start, tr_end, seg.start_us, seg.end_us)) {
+        if (builder.ids.speaker_segment_ids.count(seg.id)) {
+          builder.add("rel_tr_speech_", "visible_during_speech",
+                      tr_id, seg.id,
+                      tr_start, tr_end,
+                      confidence_value_or_one(tr),
+                      "text/text_regions.jsonl+transcript/speaker_segments.jsonl");
+          ++builder.counts.semantic_visible_during_speech;
+        }
+      }
+    }
+  }
+
+  if (!builder.ids.entity_ids.empty()) {
+    const auto regions = read_jsonl(staging_dir / "spatial" / "regions.jsonl");
+    for (const auto& region : regions) {
+      const std::string entity_id = string_value(region, "entity_id");
+      if (entity_id.empty()) continue;
+      if (builder.ids.entity_ids.count(entity_id) == 0) continue;
+
+      const std::int64_t pts_us = int_value_or_zero(region, "pts_us");
+      if (pts_us == 0) continue;
+
+      for (const auto& seg : speaker_segments) {
+        if (pts_us >= seg.start_us && pts_us < seg.end_us) {
+          if (builder.ids.speaker_segment_ids.count(seg.id)) {
+            builder.add("rel_entity_speech_", "visible_during_speech",
+                        entity_id, seg.id,
+                        pts_us, pts_us, 1.0,
+                        "spatial/regions.jsonl+transcript/speaker_segments.jsonl");
+            ++builder.counts.semantic_visible_during_speech;
+          }
+        }
+      }
+    }
+  }
+}
+
+void build_visible_during_word_range_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto words = read_jsonl(staging_dir / "transcript" / "words.jsonl");
+  if (words.empty()) return;
+
+  const auto text_regions = read_jsonl(staging_dir / "text" / "text_regions.jsonl");
+
+  for (const auto& tr : text_regions) {
+    const std::string tr_id = string_value(tr, "text_region_id");
+    if (tr_id.empty()) continue;
+    if (builder.ids.text_region_ids.count(tr_id) == 0) continue;
+
+    const std::int64_t tr_start = int_value_or_zero(tr, "start_us");
+    const std::int64_t tr_end = int_value_or_zero(tr, "end_us");
+    if (tr_end <= tr_start) continue;
+
+    for (const auto& word : words) {
+      const std::string word_id = string_value(word, "id");
+      if (word_id.empty()) continue;
+      if (builder.ids.word_ids.count(word_id) == 0) continue;
+
+      const std::int64_t w_start = int_value_or_zero(word, "start_us");
+      const std::int64_t w_end = int_value_or_zero(word, "end_us");
+      if (w_end <= w_start) continue;
+
+      if (intervals_overlap(tr_start, tr_end, w_start, w_end)) {
+        builder.add("rel_tr_word_", "visible_during_word_range",
+                    tr_id, word_id,
+                    tr_start, tr_end,
+                    confidence_value_or_one(tr),
+                    "text/text_regions.jsonl+transcript/words.jsonl");
+        ++builder.counts.semantic_visible_during_word_range;
+      }
+    }
+  }
+}
+
+void build_speaker_active_during_entity_visible_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto speaker_segments = read_speaker_segments_as_intervals(staging_dir);
+  if (speaker_segments.empty()) return;
+  if (builder.ids.entity_ids.empty()) return;
+
+  const auto regions = read_jsonl(staging_dir / "spatial" / "regions.jsonl");
+  if (regions.empty()) return;
+
+  std::set<std::string> emitted_pairs;
+
+  for (const auto& seg : speaker_segments) {
+    if (builder.ids.speaker_segment_ids.count(seg.id) == 0) continue;
+
+    for (const auto& region : regions) {
+      const std::string entity_id = string_value(region, "entity_id");
+      if (entity_id.empty()) continue;
+      if (builder.ids.entity_ids.count(entity_id) == 0) continue;
+
+      const std::int64_t pts_us = int_value_or_zero(region, "pts_us");
+      if (pts_us == 0) continue;
+
+      if (pts_us >= seg.start_us && pts_us < seg.end_us) {
+        const std::string pair_key = seg.id + "|" + entity_id;
+        if (emitted_pairs.count(pair_key) > 0) continue;
+        emitted_pairs.insert(pair_key);
+
+        builder.add("rel_seg_entity_", "speaker_active_during_entity_visible",
+                    seg.id, entity_id,
+                    seg.start_us, seg.end_us,
+                    1.0,
+                    "transcript/speaker_segments.jsonl+spatial/regions.jsonl");
+        ++builder.counts.semantic_speaker_active_during_entity_visible;
+      }
+    }
+  }
+}
+
 std::vector<nlohmann::json> build_relationships(const std::filesystem::path& staging_dir,
                                                  RelationshipTypeCounts& counts) {
   const KnownIds ids = collect_known_ids(staging_dir);
@@ -676,6 +918,10 @@ std::vector<nlohmann::json> build_relationships(const std::filesystem::path& sta
   build_embedding_source_relationships(builder, staging_dir);
   build_spatial_region_relationships(builder, staging_dir);
   build_text_region_entity_overlap_relationships(builder, staging_dir);
+  build_entity_shot_scene_relationships(builder, staging_dir);
+  build_visible_during_speech_relationships(builder, staging_dir);
+  build_visible_during_word_range_relationships(builder, staging_dir);
+  build_speaker_active_during_entity_visible_relationships(builder, staging_dir);
 
   counts = builder.counts;
 
@@ -690,7 +936,7 @@ nlohmann::json make_relationship_processor_record(const RelationshipTypeCounts& 
   return {
       {"id", kRelationshipProcessorId},
       {"name", "svp package relationship writer"},
-      {"version", "svp-package-relationship-writer-v3"},
+      {"version", "svp-package-relationship-writer-v4"},
       {"input_refs", {
           "text/text_regions.jsonl",
           "text/text_observations.jsonl",
@@ -723,7 +969,12 @@ nlohmann::json make_relationship_processor_record(const RelationshipTypeCounts& 
           {"depth_frame", counts.depth_frame},
           {"embedding_source", counts.embedding_source},
           {"text_region_overlaps_entity", counts.text_region_overlaps_entity},
-          {"skipped_dangling", counts.skipped_dangling}
+          {"skipped_dangling", counts.skipped_dangling},
+          {"semantic_visible_during_speech", counts.semantic_visible_during_speech},
+          {"semantic_visible_during_word_range", counts.semantic_visible_during_word_range},
+          {"semantic_speaker_active_during_entity_visible", counts.semantic_speaker_active_during_entity_visible},
+          {"semantic_entity_appears_in_shot", counts.semantic_entity_appears_in_shot},
+          {"semantic_entity_appears_in_scene", counts.semantic_entity_appears_in_scene}
       }},
   };
 }
@@ -812,6 +1063,11 @@ nlohmann::json relationship_provenance_write_summary_to_json(
           {"embedding_source", summary.type_counts.embedding_source},
           {"text_region_overlaps_entity", summary.type_counts.text_region_overlaps_entity},
           {"skipped_dangling", summary.type_counts.skipped_dangling},
+          {"semantic_visible_during_speech", summary.type_counts.semantic_visible_during_speech},
+          {"semantic_visible_during_word_range", summary.type_counts.semantic_visible_during_word_range},
+          {"semantic_speaker_active_during_entity_visible", summary.type_counts.semantic_speaker_active_during_entity_visible},
+          {"semantic_entity_appears_in_shot", summary.type_counts.semantic_entity_appears_in_shot},
+          {"semantic_entity_appears_in_scene", summary.type_counts.semantic_entity_appears_in_scene},
       }},
   };
 }
