@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <climits>
 #include <fstream>
 #include <map>
 #include <set>
@@ -577,13 +578,19 @@ void build_spatial_region_relationships(
     }
   }
 
-  // Region-to-region visual spatial relationships (overlaps, contains, occludes)
-  // per §20.8 require mask-based intersection and depth comparison.
-  // These are not yet implemented because the relationship builder operates on
-  // JSONL records which do not carry mask pixel data.  Emitting box-based
-  // approximations under spec-named relationship types would be dishonest.
-  // TODO: implement mask-based spatial relationships when mask block reading
-  // is available in the relationship builder.
+  // Region-to-region spatial relationships that can be honestly derived from
+  // bounding-box data in the JSONL records:
+  //   overlaps, contains, contained_by, near
+  // These use normalized bounding boxes (box_norm) which are real spatial
+  // observations from the detection pipeline — not mask pixel data, but
+  // legitimate geometric evidence from the region metadata.
+  //
+  // Relationships that require depth pixel data (occludes, occluded_by,
+  // foreground_relative_to, background_relative_to) or multi-frame motion
+  // analysis (moves_with, stationary_relative_to_camera) are NOT emitted
+  // here because the JSONL metadata does not carry the necessary pixel-level
+  // evidence.  They remain defined in the registry but ungenerated until
+  // the builder can read binary block payloads.
 }
 
 // Compute IoU (intersection-over-union) of two normalized bounding boxes.
@@ -601,6 +608,174 @@ double bbox_iou(const std::vector<double>& a, const std::vector<double>& b) {
   const double union_area = area_a + area_b - intersection;
   if (union_area <= 0.0) return 0.0;
   return intersection / union_area;
+}
+
+// Check if bbox a fully contains bbox b.
+bool bbox_contains(const std::vector<double>& a, const std::vector<double>& b) {
+  if (a.size() < 4 || b.size() < 4) return false;
+  return a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3];
+}
+
+// Compute center-to-center distance between two bboxes (normalized).
+double bbox_center_distance(const std::vector<double>& a, const std::vector<double>& b) {
+  if (a.size() < 4 || b.size() < 4) return 1.0;
+  const double acx = (a[0] + a[2]) / 2.0;
+  const double acy = (a[1] + a[3]) / 2.0;
+  const double bcx = (b[0] + b[2]) / 2.0;
+  const double bcy = (b[1] + b[3]) / 2.0;
+  const double dx = acx - bcx;
+  const double dy = acy - bcy;
+  return std::sqrt(dx * dx + dy * dy);
+}
+
+std::vector<double> extract_bbox_norm(const nlohmann::json& record, const std::string& field) {
+  std::vector<double> bbox;
+  if (record.contains(field) && record[field].is_array()) {
+    for (const auto& val : record[field]) {
+      if (val.is_number()) {
+        bbox.push_back(val.get<double>());
+      }
+    }
+  }
+  return bbox;
+}
+
+struct RegionInfo {
+  std::string id;
+  std::string entity_id;
+  std::string frame_id;
+  std::int64_t pts_us = 0;
+  std::vector<double> bbox;
+};
+
+void build_spatial_region_pair_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto regions = read_jsonl(staging_dir / "spatial" / "regions.jsonl");
+  if (regions.size() < 2) return;
+
+  // Group regions by frame_id so we only compare co-occurring regions.
+  std::map<std::string, std::vector<RegionInfo>> regions_by_frame;
+  for (const auto& region : regions) {
+    const std::string region_id = string_value(region, "id");
+    if (region_id.empty()) continue;
+    if (builder.ids.spatial_region_ids.count(region_id) == 0) continue;
+
+    const std::string frame_id = string_value(region, "frame_id");
+    if (frame_id.empty()) continue;
+
+    RegionInfo info;
+    info.id = region_id;
+    info.entity_id = string_value(region, "entity_id");
+    info.frame_id = frame_id;
+    info.pts_us = int_value_or_zero(region, "pts_us");
+    info.bbox = extract_bbox_norm(region, "box_norm");
+    if (info.bbox.size() < 4) continue;
+
+    regions_by_frame[frame_id].push_back(std::move(info));
+  }
+
+  // Distance threshold for "near" — regions whose centers are within 0.15
+  // of the normalized frame diagonal but do not overlap.
+  constexpr double kNearThreshold = 0.15;
+
+  for (const auto& [frame_id, frame_regions] : regions_by_frame) {
+    for (std::size_t i = 0; i < frame_regions.size(); ++i) {
+      for (std::size_t j = i + 1; j < frame_regions.size(); ++j) {
+        const auto& a = frame_regions[i];
+        const auto& b = frame_regions[j];
+        if (a.id == b.id) continue;
+
+        const double iou = bbox_iou(a.bbox, b.bbox);
+        const std::int64_t ts = a.pts_us;
+
+        if (iou > 0.0) {
+          builder.add("rel_spatial_overlap_", "overlaps",
+                      a.id, b.id, ts, ts, 1.0,
+                      "spatial/regions.jsonl");
+          ++builder.counts.spatial_overlaps;
+        } else {
+          const double dist = bbox_center_distance(a.bbox, b.bbox);
+          if (dist <= kNearThreshold) {
+            builder.add("rel_spatial_near_", "near",
+                        a.id, b.id, ts, ts, 1.0,
+                        "spatial/regions.jsonl");
+            ++builder.counts.spatial_near;
+          }
+        }
+
+        if (bbox_contains(a.bbox, b.bbox)) {
+          builder.add("rel_spatial_contains_", "contains",
+                      a.id, b.id, ts, ts, 1.0,
+                      "spatial/regions.jsonl");
+          ++builder.counts.spatial_contains;
+        } else if (bbox_contains(b.bbox, a.bbox)) {
+          builder.add("rel_spatial_contained_by_", "contained_by",
+                      a.id, b.id, ts, ts, 1.0,
+                      "spatial/regions.jsonl");
+          ++builder.counts.spatial_contained_by;
+        }
+      }
+    }
+  }
+}
+
+void build_entity_enters_exits_frame_relationships(
+    RelationshipBuilder& builder,
+    const std::filesystem::path& staging_dir) {
+  const auto regions = read_jsonl(staging_dir / "spatial" / "regions.jsonl");
+  if (regions.empty()) return;
+  if (builder.ids.entity_ids.empty()) return;
+
+  // For each entity, find the first and last frame it appears in.
+  struct EntityFrameRange {
+    std::int64_t min_pts = INT64_MAX;
+    std::int64_t max_pts = INT64_MIN;
+    std::string first_frame_id;
+    std::string last_frame_id;
+  };
+
+  std::map<std::string, EntityFrameRange> entity_ranges;
+
+  for (const auto& region : regions) {
+    const std::string entity_id = string_value(region, "entity_id");
+    if (entity_id.empty()) continue;
+    if (builder.ids.entity_ids.count(entity_id) == 0) continue;
+
+    const std::string frame_id = string_value(region, "frame_id");
+    if (frame_id.empty()) continue;
+    if (builder.ids.frame_ids.count(frame_id) == 0) continue;
+
+    if (!has_int_field(region, "pts_us")) continue;
+    const std::int64_t pts = int_value_or_zero(region, "pts_us");
+
+    auto& range = entity_ranges[entity_id];
+    if (pts < range.min_pts) {
+      range.min_pts = pts;
+      range.first_frame_id = frame_id;
+    }
+    if (pts > range.max_pts) {
+      range.max_pts = pts;
+      range.last_frame_id = frame_id;
+    }
+  }
+
+  for (const auto& [entity_id, range] : entity_ranges) {
+    if (!range.first_frame_id.empty()) {
+      builder.add("rel_entity_enters_", "enters_frame",
+                  entity_id, range.first_frame_id,
+                  range.min_pts, range.min_pts, 1.0,
+                  "spatial/regions.jsonl");
+      ++builder.counts.entity_enters_frame;
+    }
+    if (!range.last_frame_id.empty() && range.last_frame_id != range.first_frame_id) {
+      builder.add("rel_entity_exits_", "exits_frame",
+                  entity_id, range.last_frame_id,
+                  range.max_pts, range.max_pts, 1.0,
+                  "spatial/regions.jsonl");
+      ++builder.counts.entity_exits_frame;
+    }
+  }
 }
 
 void build_text_region_entity_overlap_relationships(
@@ -953,6 +1128,8 @@ std::vector<nlohmann::json> build_relationships(const std::filesystem::path& sta
   build_depth_frame_relationships(builder, staging_dir);
   build_embedding_source_relationships(builder, staging_dir);
   build_spatial_region_relationships(builder, staging_dir);
+  build_spatial_region_pair_relationships(builder, staging_dir);
+  build_entity_enters_exits_frame_relationships(builder, staging_dir);
   build_text_region_entity_overlap_relationships(builder, staging_dir);
   build_frame_timeline_relationships(builder, staging_dir);
   build_entity_shot_scene_relationships(builder, staging_dir);
@@ -1013,7 +1190,13 @@ nlohmann::json make_relationship_processor_record(const RelationshipTypeCounts& 
           {"semantic_entity_appears_in_shot", counts.semantic_entity_appears_in_shot},
           {"semantic_entity_appears_in_scene", counts.semantic_entity_appears_in_scene},
           {"frame_in_shot", counts.frame_in_shot},
-          {"frame_in_scene", counts.frame_in_scene}
+          {"frame_in_scene", counts.frame_in_scene},
+          {"spatial_overlaps", counts.spatial_overlaps},
+          {"spatial_contains", counts.spatial_contains},
+          {"spatial_contained_by", counts.spatial_contained_by},
+          {"spatial_near", counts.spatial_near},
+          {"entity_enters_frame", counts.entity_enters_frame},
+          {"entity_exits_frame", counts.entity_exits_frame}
       }},
   };
 }
@@ -1109,6 +1292,12 @@ nlohmann::json relationship_provenance_write_summary_to_json(
           {"semantic_entity_appears_in_scene", summary.type_counts.semantic_entity_appears_in_scene},
           {"frame_in_shot", summary.type_counts.frame_in_shot},
           {"frame_in_scene", summary.type_counts.frame_in_scene},
+          {"spatial_overlaps", summary.type_counts.spatial_overlaps},
+          {"spatial_contains", summary.type_counts.spatial_contains},
+          {"spatial_contained_by", summary.type_counts.spatial_contained_by},
+          {"spatial_near", summary.type_counts.spatial_near},
+          {"entity_enters_frame", summary.type_counts.entity_enters_frame},
+          {"entity_exits_frame", summary.type_counts.entity_exits_frame},
       }},
   };
 }

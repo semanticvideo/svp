@@ -118,6 +118,31 @@ struct ContextResult {
   std::string error_message;
 };
 
+struct ContextOptions {
+  std::string object_id;
+  int max_depth = 2;
+  std::optional<std::int64_t> at_us;
+  std::optional<std::int64_t> start_us;
+  std::optional<std::int64_t> end_us;
+  std::size_t limit = 1000;
+  std::string class_filter = "all";
+};
+
+struct GraphHealthDiagnostics {
+  std::size_t total_edges = 0;
+  std::size_t total_nodes = 0;
+  std::size_t resolved_nodes = 0;
+  std::size_t unresolved_nodes = 0;
+  std::size_t orphan_nodes = 0;
+  std::size_t unknown_relationship_types = 0;
+  std::unordered_map<std::string, std::size_t> class_counts;
+  std::unordered_map<std::string, std::size_t> type_counts;
+  std::vector<std::string> unresolved_ids;
+  std::vector<std::string> unknown_types;
+  std::vector<std::string> orphan_ids;
+  std::string error_message;
+};
+
 [[nodiscard]] ObjectCatalog build_object_catalog(
     const std::filesystem::path& package_path);
 
@@ -138,8 +163,17 @@ struct ContextResult {
     const std::string& object_id,
     std::size_t limit);
 
+[[nodiscard]] ContextResult build_context(
+    const std::filesystem::path& package_path,
+    const ContextOptions& options);
+
 [[nodiscard]] nlohmann::json context_result_to_json(const ContextResult& result);
 
 [[nodiscard]] nlohmann::json time_window_to_json(const TimeWindow& tw);
+
+[[nodiscard]] GraphHealthDiagnostics compute_graph_health(
+    const std::filesystem::path& package_path);
+
+[[nodiscard]] nlohmann::json graph_health_to_json(const GraphHealthDiagnostics& health);
 
 }  // namespace svp::query
