@@ -2,10 +2,15 @@
 
 #include "svp/query/query_reader.hpp"
 #include "svp/package/relationship_type_policy.hpp"
+#include "svp/package/package_layout.hpp"
+
+#include <sqlite3.h>
 
 #include <algorithm>
 #include <array>
 #include <climits>
+#include <fstream>
+#include <memory>
 #include <queue>
 #include <string>
 #include <string_view>
@@ -266,6 +271,237 @@ std::int64_t json_int_val(const nlohmann::json& j, std::string_view key) {
   return it->get<std::int64_t>();
 }
 
+struct SqliteDeleter {
+  void operator()(sqlite3* db) const noexcept {
+    if (db) sqlite3_close(db);
+  }
+};
+
+struct StmtDeleter {
+  void operator()(sqlite3_stmt* stmt) const noexcept {
+    if (stmt) sqlite3_finalize(stmt);
+  }
+};
+
+struct LoadedEdges {
+  std::vector<GraphEdge> edges;
+  std::unordered_map<std::string, GraphNode> nodes;
+  TraversalBackend backend = TraversalBackend::none;
+  bool index_available = false;
+  bool has_malformed = false;
+  std::string error_message;
+};
+
+bool check_index_available(const std::filesystem::path& package_path) {
+  const auto layout = svp::package::read_package_layout(package_path);
+  if (!layout.has_value()) return false;
+  return layout.value().has_entry("index/index.sqlite");
+}
+
+LoadedEdges load_edges_from_sqlite(
+    const std::filesystem::path& package_path,
+    const std::string& class_filter,
+    const std::optional<std::string>& type_filter,
+    const TimeWindow& time_window) {
+  LoadedEdges result;
+  result.backend = TraversalBackend::sqlite_index;
+
+  const auto layout = svp::package::read_package_layout(package_path);
+  if (!layout.has_value()) {
+    result.error_message = layout.error_message();
+    return result;
+  }
+
+  const auto entry_result = svp::package::read_package_entry(
+      package_path, "index/index.sqlite");
+  if (!entry_result.has_value()) {
+    result.error_message = entry_result.error_message();
+    return result;
+  }
+
+  const auto& sqlite_data = entry_result.value();
+
+  // Write SQLite bytes to a temp file so we can open it with sqlite3_open.
+  // sqlite3_deserialize would avoid the temp file but requires
+  // SQLITE_ENABLE_DESERIALIZE which may not be enabled in all builds.
+  const auto temp_dir = std::filesystem::temp_directory_path();
+  const auto temp_db_path = temp_dir / "svp-query-traversal-tmp.sqlite";
+  {
+    std::ofstream out(temp_db_path, std::ios::binary | std::ios::trunc);
+    if (!out) {
+      result.error_message = "failed to create temp sqlite file";
+      return result;
+    }
+    out.write(sqlite_data.data(), static_cast<std::streamsize>(sqlite_data.size()));
+    if (!out) {
+      result.error_message = "failed to write temp sqlite file";
+      return result;
+    }
+  }
+
+  sqlite3* raw_db = nullptr;
+  if (sqlite3_open(temp_db_path.string().c_str(), &raw_db) != SQLITE_OK) {
+    result.error_message = "failed to open sqlite database";
+    if (raw_db) sqlite3_close(raw_db);
+    std::filesystem::remove(temp_db_path);
+    return result;
+  }
+  std::unique_ptr<sqlite3, SqliteDeleter> db{raw_db};
+
+  sqlite3_stmt* select_stmt = nullptr;
+  const char* select_sql =
+      "SELECT relationship_id, relationship_type, relationship_class, "
+      "source_id, target_id, start_us, end_us, confidence "
+      "FROM relationships";
+  if (sqlite3_prepare_v2(db.get(), select_sql, -1, &select_stmt, nullptr) != SQLITE_OK) {
+    result.error_message = "sqlite: failed to prepare relationships query (table may not exist)";
+    db.reset();
+    std::filesystem::remove(temp_db_path);
+    return result;
+  }
+  std::unique_ptr<sqlite3_stmt, StmtDeleter> stmt_guard{select_stmt};
+
+  while (sqlite3_step(select_stmt) == SQLITE_ROW) {
+    const auto rel_id = reinterpret_cast<const char*>(sqlite3_column_text(select_stmt, 0));
+    const auto rel_type = reinterpret_cast<const char*>(sqlite3_column_text(select_stmt, 1));
+    const auto rel_class = reinterpret_cast<const char*>(sqlite3_column_text(select_stmt, 2));
+    const auto source_id = reinterpret_cast<const char*>(sqlite3_column_text(select_stmt, 3));
+    const auto target_id = reinterpret_cast<const char*>(sqlite3_column_text(select_stmt, 4));
+    const auto start_us = sqlite3_column_int64(select_stmt, 5);
+    const auto end_us = sqlite3_column_int64(select_stmt, 6);
+    const auto confidence = sqlite3_column_double(select_stmt, 7);
+
+    if (!source_id || !target_id) continue;
+    const std::string src{source_id};
+    const std::string tgt{target_id};
+    if (src.empty() || tgt.empty()) continue;
+
+    const std::string cls_str = rel_class ? std::string{rel_class} : "unknown";
+    if (!class_matches(cls_str, class_filter)) continue;
+
+    const std::string type_str = rel_type ? std::string{rel_type} : "";
+    if (type_filter.has_value() && type_str != *type_filter) continue;
+
+    if (time_window.active() && !time_window.matches(start_us, end_us)) continue;
+
+    nlohmann::json record = {
+        {"id", rel_id ? std::string{rel_id} : ""},
+        {"type", type_str},
+        {"source_id", src},
+        {"target_id", tgt},
+        {"start_us", start_us},
+        {"end_us", end_us},
+        {"confidence", confidence},
+    };
+
+    const auto edge_idx = result.edges.size();
+    GraphEdge edge;
+    edge.relationship_id = rel_id ? std::string{rel_id} : "";
+    edge.relationship_type = type_str;
+    edge.relationship_class = cls_str;
+    edge.source_id = src;
+    edge.target_id = tgt;
+    edge.record = std::move(record);
+    result.edges.push_back(std::move(edge));
+
+    result.nodes[src].outgoing.push_back(edge_idx);
+    result.nodes[tgt].incoming.push_back(edge_idx);
+  }
+
+  // db and stmt_guard will close/finalize via their unique_ptr deleters.
+  // Clean up the temp file after the SQLite connection is closed.
+  db.reset();
+  std::filesystem::remove(temp_db_path);
+
+  return result;
+}
+
+LoadedEdges load_edges_from_jsonl(
+    const std::filesystem::path& package_path,
+    const std::string& class_filter,
+    const std::optional<std::string>& type_filter,
+    const TimeWindow& time_window) {
+  LoadedEdges result;
+  result.backend = TraversalBackend::jsonl;
+
+  const auto jsonl = read_jsonl_entry(package_path, "relationships/relationships.jsonl");
+  if (!jsonl.present) {
+    result.error_message = "relationships file not present";
+    return result;
+  }
+  if (!jsonl.readable) {
+    result.error_message = jsonl.error_message;
+    result.has_malformed = jsonl.has_malformed;
+    return result;
+  }
+
+  for (const auto& record : jsonl.records) {
+    const auto type = json_string_val(record, "type");
+    const auto source_id = json_string_val(record, "source_id");
+    const auto target_id = json_string_val(record, "target_id");
+    const auto rel_id = json_string_val(record, "id");
+
+    if (source_id.empty() || target_id.empty()) continue;
+
+    const auto cls = svp::package::classify_relationship_type(type);
+    const auto class_str = std::string{svp::package::relationship_class_to_string(cls)};
+
+    if (!class_matches(class_str, class_filter)) continue;
+    if (type_filter.has_value() && type != *type_filter) continue;
+
+    const auto rel_start = json_int_val(record, "start_us");
+    const auto rel_end = json_int_val(record, "end_us");
+    if (time_window.active() && !time_window.matches(rel_start, rel_end)) continue;
+
+    const auto edge_idx = result.edges.size();
+    GraphEdge edge;
+    edge.relationship_id = rel_id;
+    edge.relationship_type = type;
+    edge.relationship_class = class_str;
+    edge.source_id = source_id;
+    edge.target_id = target_id;
+    edge.record = record;
+    result.edges.push_back(std::move(edge));
+
+    result.nodes[source_id].outgoing.push_back(edge_idx);
+    result.nodes[target_id].incoming.push_back(edge_idx);
+  }
+
+  return result;
+}
+
+LoadedEdges load_relationship_edges(
+    const std::filesystem::path& package_path,
+    const std::string& class_filter,
+    const std::optional<std::string>& type_filter,
+    const TimeWindow& time_window) {
+  LoadedEdges result;
+  result.index_available = check_index_available(package_path);
+
+  if (result.index_available) {
+    auto sqlite_result = load_edges_from_sqlite(
+        package_path, class_filter, type_filter, time_window);
+    if (sqlite_result.error_message.empty()) {
+      return sqlite_result;
+    }
+    // SQLite failed (maybe table doesn't exist or schema mismatch) — fall back to JSONL
+  }
+
+  auto jsonl_result = load_edges_from_jsonl(
+      package_path, class_filter, type_filter, time_window);
+  return jsonl_result;
+}
+
+bool check_mask_data_available(const std::filesystem::path& package_path) {
+  const auto jsonl = read_jsonl_entry(package_path, "spatial/masks.index.jsonl");
+  return jsonl.present && jsonl.readable && !jsonl.records.empty();
+}
+
+bool check_depth_data_available(const std::filesystem::path& package_path) {
+  const auto jsonl = read_jsonl_entry(package_path, "spatial/depth.index.jsonl");
+  return jsonl.present && jsonl.readable && !jsonl.records.empty();
+}
+
 }  // namespace
 
 bool TimeWindow::matches(std::int64_t rel_start, std::int64_t rel_end) const {
@@ -350,53 +586,15 @@ TraversalResult traverse_relationships(
     return result;
   }
 
-  const auto jsonl = read_jsonl_entry(package_path, "relationships/relationships.jsonl");
-  if (!jsonl.present) {
-    result.error_message = "relationships file not present";
-    return result;
-  }
-  if (!jsonl.readable) {
-    result.error_message = jsonl.error_message;
+  const auto loaded = load_relationship_edges(
+      package_path, options.class_filter, options.type_filter, options.time_window);
+  if (!loaded.error_message.empty()) {
+    result.error_message = loaded.error_message;
     return result;
   }
 
-  std::vector<GraphEdge> edges;
-  std::unordered_map<std::string, GraphNode> nodes;
-
-  for (const auto& record : jsonl.records) {
-    const auto type = json_string_val(record, "type");
-    const auto source_id = json_string_val(record, "source_id");
-    const auto target_id = json_string_val(record, "target_id");
-    const auto rel_id = json_string_val(record, "id");
-
-    if (source_id.empty() || target_id.empty()) continue;
-
-    const auto cls = svp::package::classify_relationship_type(type);
-    const auto class_str = std::string{svp::package::relationship_class_to_string(cls)};
-
-    if (!class_matches(class_str, options.class_filter)) continue;
-
-    if (options.type_filter.has_value() && type != *options.type_filter) continue;
-
-    const auto rel_start = json_int_val(record, "start_us");
-    const auto rel_end = json_int_val(record, "end_us");
-    if (options.time_window.active() && !options.time_window.matches(rel_start, rel_end)) {
-      continue;
-    }
-
-    const auto edge_idx = edges.size();
-    GraphEdge edge;
-    edge.relationship_id = rel_id;
-    edge.relationship_type = type;
-    edge.relationship_class = class_str;
-    edge.source_id = source_id;
-    edge.target_id = target_id;
-    edge.record = record;
-    edges.push_back(std::move(edge));
-
-    nodes[source_id].outgoing.push_back(edge_idx);
-    nodes[target_id].incoming.push_back(edge_idx);
-  }
+  std::vector<GraphEdge> edges = std::move(loaded.edges);
+  std::unordered_map<std::string, GraphNode> nodes = std::move(loaded.nodes);
 
   ObjectCatalog catalog = build_object_catalog(package_path);
 
@@ -621,52 +819,15 @@ PathResult find_shortest_path(
     return result;
   }
 
-  const auto jsonl = read_jsonl_entry(package_path, "relationships/relationships.jsonl");
-  if (!jsonl.present) {
-    result.error_message = "relationships file not present";
-    return result;
-  }
-  if (!jsonl.readable) {
-    result.error_message = jsonl.error_message;
+  const auto loaded = load_relationship_edges(
+      package_path, options.class_filter, options.type_filter, options.time_window);
+  if (!loaded.error_message.empty()) {
+    result.error_message = loaded.error_message;
     return result;
   }
 
-  std::vector<GraphEdge> edges;
-  std::unordered_map<std::string, GraphNode> nodes;
-
-  for (const auto& record : jsonl.records) {
-    const auto type = json_string_val(record, "type");
-    const auto source_id = json_string_val(record, "source_id");
-    const auto target_id = json_string_val(record, "target_id");
-    const auto rel_id = json_string_val(record, "id");
-
-    if (source_id.empty() || target_id.empty()) continue;
-
-    const auto cls = svp::package::classify_relationship_type(type);
-    const auto class_str = std::string{svp::package::relationship_class_to_string(cls)};
-
-    if (!class_matches(class_str, options.class_filter)) continue;
-    if (options.type_filter.has_value() && type != *options.type_filter) continue;
-
-    const auto rel_start = json_int_val(record, "start_us");
-    const auto rel_end = json_int_val(record, "end_us");
-    if (options.time_window.active() && !options.time_window.matches(rel_start, rel_end)) {
-      continue;
-    }
-
-    const auto edge_idx = edges.size();
-    GraphEdge edge;
-    edge.relationship_id = rel_id;
-    edge.relationship_type = type;
-    edge.relationship_class = class_str;
-    edge.source_id = source_id;
-    edge.target_id = target_id;
-    edge.record = record;
-    edges.push_back(std::move(edge));
-
-    nodes[source_id].outgoing.push_back(edge_idx);
-    nodes[target_id].incoming.push_back(edge_idx);
-  }
+  std::vector<GraphEdge> edges = std::move(loaded.edges);
+  std::unordered_map<std::string, GraphNode> nodes = std::move(loaded.nodes);
 
   ObjectCatalog catalog = build_object_catalog(package_path);
 
@@ -835,8 +996,9 @@ ContextResult build_context(
     result.summary = catalog.node_summary(object_id);
   }
 
-  const auto jsonl = read_jsonl_entry(package_path, "relationships/relationships.jsonl");
-  if (!jsonl.present || !jsonl.readable) {
+  const auto loaded = load_relationship_edges(
+      package_path, "all", std::nullopt, TimeWindow{});
+  if (!loaded.error_message.empty()) {
     if (!result.resolved) {
       result.error_message = "object not found in catalog and relationships not readable";
     }
@@ -846,36 +1008,28 @@ ContextResult build_context(
   std::unordered_set<std::string> emitted_edge_ids;
   std::size_t edge_count = 0;
 
-  for (const auto& record : jsonl.records) {
+  for (const auto& edge : loaded.edges) {
     if (edge_count >= limit) break;
 
-    const auto source_id = json_string_val(record, "source_id");
-    const auto target_id = json_string_val(record, "target_id");
-    const auto rel_id = json_string_val(record, "id");
-    const auto type = json_string_val(record, "type");
+    if (edge.source_id != object_id && edge.target_id != object_id) continue;
 
-    if (source_id != object_id && target_id != object_id) continue;
-
-    if (!rel_id.empty()) {
-      if (emitted_edge_ids.count(rel_id) > 0) continue;
-      emitted_edge_ids.insert(rel_id);
+    if (!edge.relationship_id.empty()) {
+      if (emitted_edge_ids.count(edge.relationship_id) > 0) continue;
+      emitted_edge_ids.insert(edge.relationship_id);
     }
 
-    const auto cls = svp::package::classify_relationship_type(type);
-    const auto class_str = std::string{svp::package::relationship_class_to_string(cls)};
-
-    const auto neighbor_id = (source_id == object_id) ? target_id : source_id;
-    const auto direction = (source_id == object_id) ? "outgoing" : "incoming";
+    const auto neighbor_id = (edge.source_id == object_id) ? edge.target_id : edge.source_id;
+    const auto direction = (edge.source_id == object_id) ? "outgoing" : "incoming";
 
     TraversalEdge tedge;
-    tedge.relationship_id = rel_id;
-    tedge.relationship_type = type;
-    tedge.relationship_class = class_str;
-    tedge.source_id = source_id;
-    tedge.target_id = target_id;
+    tedge.relationship_id = edge.relationship_id;
+    tedge.relationship_type = edge.relationship_type;
+    tedge.relationship_class = edge.relationship_class;
+    tedge.source_id = edge.source_id;
+    tedge.target_id = edge.target_id;
     tedge.direction = direction;
     tedge.depth = 1;
-    tedge.record = record;
+    tedge.record = edge.record;
     result.context_edges.push_back(std::move(tedge));
 
     TraversalNode tnode;
@@ -919,8 +1073,14 @@ ContextResult build_context(
     result.summary = catalog.node_summary(options.object_id);
   }
 
-  const auto jsonl = read_jsonl_entry(package_path, "relationships/relationships.jsonl");
-  if (!jsonl.present || !jsonl.readable) {
+  TimeWindow time_window;
+  time_window.at_us = options.at_us;
+  time_window.start_us = options.start_us;
+  time_window.end_us = options.end_us;
+
+  const auto loaded = load_relationship_edges(
+      package_path, options.class_filter, std::nullopt, time_window);
+  if (!loaded.error_message.empty()) {
     if (!result.resolved) {
       result.error_message = "object not found in catalog and relationships not readable";
     }
@@ -928,46 +1088,8 @@ ContextResult build_context(
   }
 
   // Build the graph for multi-hop traversal.
-  std::vector<GraphEdge> edges;
-  std::unordered_map<std::string, GraphNode> nodes;
-
-  TimeWindow time_window;
-  time_window.at_us = options.at_us;
-  time_window.start_us = options.start_us;
-  time_window.end_us = options.end_us;
-
-  for (const auto& record : jsonl.records) {
-    const auto type = json_string_val(record, "type");
-    const auto source_id = json_string_val(record, "source_id");
-    const auto target_id = json_string_val(record, "target_id");
-    const auto rel_id = json_string_val(record, "id");
-
-    if (source_id.empty() || target_id.empty()) continue;
-
-    const auto cls = svp::package::classify_relationship_type(type);
-    const auto class_str = std::string{svp::package::relationship_class_to_string(cls)};
-
-    if (!class_matches(class_str, options.class_filter)) continue;
-
-    const auto rel_start = json_int_val(record, "start_us");
-    const auto rel_end = json_int_val(record, "end_us");
-    if (time_window.active() && !time_window.matches(rel_start, rel_end)) {
-      continue;
-    }
-
-    const auto edge_idx = edges.size();
-    GraphEdge edge;
-    edge.relationship_id = rel_id;
-    edge.relationship_type = type;
-    edge.relationship_class = class_str;
-    edge.source_id = source_id;
-    edge.target_id = target_id;
-    edge.record = record;
-    edges.push_back(std::move(edge));
-
-    nodes[source_id].outgoing.push_back(edge_idx);
-    nodes[target_id].incoming.push_back(edge_idx);
-  }
+  std::vector<GraphEdge> edges = std::move(loaded.edges);
+  std::unordered_map<std::string, GraphNode> nodes = std::move(loaded.nodes);
 
   // BFS from the target object up to max_depth.
   std::unordered_set<std::string> visited;
@@ -1085,53 +1207,57 @@ nlohmann::json context_result_to_json(const ContextResult& result) {
   return j;
 }
 
+std::string_view traversal_backend_to_string(TraversalBackend backend) {
+  switch (backend) {
+    case TraversalBackend::jsonl:        return "jsonl";
+    case TraversalBackend::sqlite_index: return "sqlite_index";
+    case TraversalBackend::none:         return "none";
+  }
+  return "none";
+}
+
 GraphHealthDiagnostics compute_graph_health(
     const std::filesystem::path& package_path) {
   GraphHealthDiagnostics health;
 
-  const auto jsonl = read_jsonl_entry(package_path, "relationships/relationships.jsonl");
-  if (!jsonl.present) {
-    health.error_message = "relationships file not present";
+  health.index_available = check_index_available(package_path);
+  health.mask_data_available = check_mask_data_available(package_path);
+  health.depth_data_available = check_depth_data_available(package_path);
+
+  const auto loaded = load_relationship_edges(
+      package_path, "all", std::nullopt, TimeWindow{});
+  if (!loaded.error_message.empty()) {
+    health.error_message = loaded.error_message;
     return health;
   }
-  if (!jsonl.readable) {
-    health.error_message = jsonl.error_message;
-    return health;
-  }
+
+  health.backend_used = loaded.backend;
 
   ObjectCatalog catalog = build_object_catalog(package_path);
 
   std::unordered_set<std::string> graph_node_ids;
   std::unordered_set<std::string> catalog_node_ids;
-  for (const auto& [id, _] : catalog.entries) {
+  for (const auto& [id, entry] : catalog.entries) {
     catalog_node_ids.insert(id);
   }
 
-  for (const auto& record : jsonl.records) {
-    const auto type = json_string_val(record, "type");
-    const auto source_id = json_string_val(record, "source_id");
-    const auto target_id = json_string_val(record, "target_id");
-
-    if (source_id.empty() || target_id.empty()) continue;
-
+  for (const auto& edge : loaded.edges) {
     ++health.total_edges;
-    graph_node_ids.insert(source_id);
-    graph_node_ids.insert(target_id);
+    graph_node_ids.insert(edge.source_id);
+    graph_node_ids.insert(edge.target_id);
 
-    const auto cls = svp::package::classify_relationship_type(type);
-    const auto class_str = std::string{svp::package::relationship_class_to_string(cls)};
-    health.class_counts[class_str]++;
-    health.type_counts[type]++;
+    health.class_counts[edge.relationship_class]++;
+    health.type_counts[edge.relationship_type]++;
 
-    if (class_str == "unknown") {
-      health.unknown_types.push_back(type);
+    if (edge.relationship_class == "unknown") {
+      health.unknown_types.push_back(edge.relationship_type);
     }
 
-    if (catalog.find(source_id) == nullptr) {
-      health.unresolved_ids.push_back(source_id);
+    if (catalog.find(edge.source_id) == nullptr) {
+      health.unresolved_ids.push_back(edge.source_id);
     }
-    if (catalog.find(target_id) == nullptr) {
-      health.unresolved_ids.push_back(target_id);
+    if (catalog.find(edge.target_id) == nullptr) {
+      health.unresolved_ids.push_back(edge.target_id);
     }
   }
 
@@ -1145,14 +1271,42 @@ GraphHealthDiagnostics compute_graph_health(
     }
   }
 
-  // Orphan nodes: in catalog but not in any relationship.
+  // Orphan nodes: in catalog but not in any relationship, grouped by layer.
   for (const auto& id : catalog_node_ids) {
     if (graph_node_ids.count(id) == 0) {
       health.orphan_ids.push_back(id);
+      const auto* entry = catalog.find(id);
+      if (entry) {
+        health.orphan_counts_by_layer[entry->source_layer]++;
+      }
     }
   }
   health.orphan_nodes = health.orphan_ids.size();
   health.unknown_relationship_types = health.unknown_types.size();
+
+  // Report skipped semantic relationship categories honestly.
+  // These categories require evidence that may not be present in the package.
+  if (!health.mask_data_available) {
+    health.skipped_categories.push_back({
+        "occludes/occluded_by",
+        "mask pixel data not available (spatial/masks.index.jsonl is empty or missing)"
+    });
+  }
+  if (!health.depth_data_available) {
+    health.skipped_categories.push_back({
+        "foreground_relative_to/background_relative_to",
+        "depth pixel data not available (spatial/depth.index.jsonl is empty or missing)"
+    });
+  }
+  // moves_with / stationary_relative_to_camera require multi-frame entity track data
+  // with motion vectors. Check if entity_tracks.jsonl has meaningful track data.
+  const auto tracks_jsonl = read_jsonl_entry(package_path, "entities/entity_tracks.jsonl");
+  if (!tracks_jsonl.present || !tracks_jsonl.readable || tracks_jsonl.records.empty()) {
+    health.skipped_categories.push_back({
+        "moves_with/stationary_relative_to_camera",
+        "entity track data not available (entities/entity_tracks.jsonl is empty or missing)"
+    });
+  }
 
   return health;
 }
@@ -1165,6 +1319,10 @@ nlohmann::json graph_health_to_json(const GraphHealthDiagnostics& health) {
       {"unresolved_nodes", health.unresolved_nodes},
       {"orphan_nodes", health.orphan_nodes},
       {"unknown_relationship_types", health.unknown_relationship_types},
+      {"backend_used", std::string{traversal_backend_to_string(health.backend_used)}},
+      {"index_available", health.index_available},
+      {"mask_data_available", health.mask_data_available},
+      {"depth_data_available", health.depth_data_available},
   };
 
   nlohmann::json class_counts_json = nlohmann::json::object();
@@ -1178,6 +1336,25 @@ nlohmann::json graph_health_to_json(const GraphHealthDiagnostics& health) {
     type_counts_json[type] = cnt;
   }
   j["type_counts"] = type_counts_json;
+
+  if (!health.orphan_counts_by_layer.empty()) {
+    nlohmann::json orphan_by_layer = nlohmann::json::object();
+    for (const auto& [layer, cnt] : health.orphan_counts_by_layer) {
+      orphan_by_layer[layer] = cnt;
+    }
+    j["orphan_counts_by_layer"] = orphan_by_layer;
+  }
+
+  if (!health.skipped_categories.empty()) {
+    nlohmann::json skipped = nlohmann::json::array();
+    for (const auto& cat : health.skipped_categories) {
+      skipped.push_back({
+          {"category", cat.category},
+          {"reason", cat.reason},
+      });
+    }
+    j["skipped_categories"] = skipped;
+  }
 
   if (!health.unresolved_ids.empty()) {
     j["unresolved_ids"] = health.unresolved_ids;

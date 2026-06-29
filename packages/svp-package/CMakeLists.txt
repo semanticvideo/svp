@@ -3,6 +3,8 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_path(BLAKE3_INCLUDE_DIR NAMES blake3.h REQUIRED)
 find_library(BLAKE3_LIBRARY NAMES blake3 REQUIRED)
+find_path(ZSTD_INCLUDE_DIR NAMES zstd.h REQUIRED)
+find_library(ZSTD_LIBRARY NAMES zstd REQUIRED)
 
 add_library(svp-package
   src/package_contract.cpp
@@ -27,6 +29,7 @@ target_include_directories(svp-package
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
     ${BLAKE3_INCLUDE_DIR}
+    ${ZSTD_INCLUDE_DIR}
 )
 
 target_compile_features(svp-package PUBLIC cxx_std_20)
@@ -39,6 +42,7 @@ target_link_libraries(svp-package
     libzip::zip
     SQLite::SQLite3
     ${BLAKE3_LIBRARY}
+    ${ZSTD_LIBRARY}
     svp::vision
     svp::media
 )

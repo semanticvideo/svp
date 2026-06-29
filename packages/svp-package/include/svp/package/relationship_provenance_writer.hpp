@@ -33,6 +33,15 @@ struct RelationshipTypeCounts {
   std::size_t spatial_near = 0;
   std::size_t entity_enters_frame = 0;
   std::size_t entity_exits_frame = 0;
+  std::size_t spatial_occludes = 0;
+  std::size_t spatial_occluded_by = 0;
+  std::size_t spatial_foreground_relative_to = 0;
+  std::size_t spatial_background_relative_to = 0;
+  std::size_t spatial_moves_with = 0;
+  std::size_t spatial_stationary_relative_to_camera = 0;
+  std::size_t skipped_no_mask_data = 0;
+  std::size_t skipped_no_depth_data = 0;
+  std::size_t skipped_no_track_data = 0;
 };
 
 struct RelationshipProvenanceWriteSummary {

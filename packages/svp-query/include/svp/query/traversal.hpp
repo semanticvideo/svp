@@ -128,6 +128,17 @@ struct ContextOptions {
   std::string class_filter = "all";
 };
 
+enum class TraversalBackend {
+  jsonl,
+  sqlite_index,
+  none,
+};
+
+struct SkippedRelationshipCategory {
+  std::string category;
+  std::string reason;
+};
+
 struct GraphHealthDiagnostics {
   std::size_t total_edges = 0;
   std::size_t total_nodes = 0;
@@ -141,6 +152,12 @@ struct GraphHealthDiagnostics {
   std::vector<std::string> unknown_types;
   std::vector<std::string> orphan_ids;
   std::string error_message;
+  TraversalBackend backend_used = TraversalBackend::none;
+  bool index_available = false;
+  bool mask_data_available = false;
+  bool depth_data_available = false;
+  std::unordered_map<std::string, std::size_t> orphan_counts_by_layer;
+  std::vector<SkippedRelationshipCategory> skipped_categories;
 };
 
 [[nodiscard]] ObjectCatalog build_object_catalog(
@@ -175,5 +192,7 @@ struct GraphHealthDiagnostics {
     const std::filesystem::path& package_path);
 
 [[nodiscard]] nlohmann::json graph_health_to_json(const GraphHealthDiagnostics& health);
+
+[[nodiscard]] std::string_view traversal_backend_to_string(TraversalBackend backend);
 
 }  // namespace svp::query
