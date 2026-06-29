@@ -404,7 +404,10 @@ void test_full_relationship_graph() {
   // 10. color_001 -> frame_000001 (color_observation_of)
   // 11. depth_000001 -> frame_000001 (depth_for_frame)
   // 12. embed_obs_001 -> obs_001 (embedding_source_is)
-  assert(summary.relationships_written == 12);
+  // 13. tr_001 -> seg_001 (visible_during_speech)
+  // 14. tr_001 -> word_001 (visible_during_word_range)
+  // 15. tr_001 -> word_002 (visible_during_word_range)
+  assert(summary.relationships_written == 15);
   assert(summary.type_counts.text_region_shot == 1);
   assert(summary.type_counts.text_region_scene == 1);
   assert(summary.type_counts.text_observation_region == 1);
@@ -416,6 +419,8 @@ void test_full_relationship_graph() {
   assert(summary.type_counts.color_observation_target == 1);
   assert(summary.type_counts.depth_frame == 1);
   assert(summary.type_counts.embedding_source == 1);
+  assert(summary.type_counts.semantic_visible_during_speech == 1);
+  assert(summary.type_counts.semantic_visible_during_word_range == 2);
   assert(summary.type_counts.skipped_dangling == 0);
 
   // Verify processor provenance includes type counts
@@ -429,6 +434,8 @@ void test_full_relationship_graph() {
       assert(proc["relationship_type_counts"]["text_region_shot"] == 1);
       assert(proc["relationship_type_counts"]["skipped_dangling"] == 0);
       assert(proc["relationship_type_counts"]["word_speaker_segment_unmatched"] == 0);
+      assert(proc["relationship_type_counts"]["semantic_visible_during_speech"] == 1);
+      assert(proc["relationship_type_counts"]["semantic_visible_during_word_range"] == 2);
     }
   }
   assert(found_rel_processor);
@@ -986,7 +993,7 @@ void test_write_index_foundation() {
   nlohmann::json index_manifest;
   manifest_in >> index_manifest;
   assert(index_manifest["schema_version"] == "svp-index-manifest-v1");
-  assert(index_manifest["table_count"] == 15);
+  assert(index_manifest["table_count"] == 17);
   assert(index_manifest["row_count"] > 0);
   assert(index_manifest["created_from"]["manifest_blake3"].get<std::string>().find("blake3:") == 0);
 

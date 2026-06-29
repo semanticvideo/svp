@@ -3,6 +3,7 @@
 #include "svp/query/traversal.hpp"
 #include "svp/package/package_writer.hpp"
 #include "svp/package/package_layout.hpp"
+#include "svp/package/relationship_provenance_writer.hpp"
 
 #include <sqlite3.h>
 
@@ -1457,7 +1458,7 @@ void test_traversal_missing_relationships() {
   // Verify the package does not contain relationships.jsonl.
   const auto layout = svp::package::read_package_layout(package_path);
   assert(layout.has_value());
-  assert(!layout->value().has_entry("relationships/relationships.jsonl"));
+  assert(!layout.value().has_entry("relationships/relationships.jsonl"));
 
   svp::query::TraversalOptions opts;
   opts.start_id = "word_000001";
@@ -1715,6 +1716,9 @@ std::filesystem::path create_semantic_test_package() {
 
   std::filesystem::create_directories(staging / "media" / "original");
   std::filesystem::create_directories(staging / "media" / "audio");
+
+  const auto summary = svp::package::write_relationships_and_provenance(staging);
+  assert(summary.relationships_written > 0);
 
   bool ok = svp::package::write_package_skeleton(package_path, staging, source_path, manifest);
   assert(ok);
@@ -2254,6 +2258,9 @@ std::filesystem::path create_zero_pts_test_package() {
   std::filesystem::create_directories(staging / "media" / "original");
   std::filesystem::create_directories(staging / "media" / "audio");
 
+  const auto summary = svp::package::write_relationships_and_provenance(staging);
+  assert(summary.relationships_written > 0);
+
   bool ok = svp::package::write_package_skeleton(package_path, staging, source_path, manifest);
   assert(ok);
   assert(std::filesystem::exists(package_path));
@@ -2410,6 +2417,9 @@ std::filesystem::path create_frame_connectivity_test_package() {
 
   std::filesystem::create_directories(staging / "media" / "original");
   std::filesystem::create_directories(staging / "media" / "audio");
+
+  const auto summary = svp::package::write_relationships_and_provenance(staging);
+  assert(summary.relationships_written > 0);
 
   bool ok = svp::package::write_package_skeleton(package_path, staging, source_path, manifest);
   assert(ok);
@@ -2681,6 +2691,25 @@ std::filesystem::path create_spatial_pair_test_package() {
 
   std::filesystem::create_directories(staging / "media" / "original");
   std::filesystem::create_directories(staging / "media" / "audio");
+
+  const auto summary = svp::package::write_relationships_and_provenance(staging);
+  assert(summary.relationships_written > 0);
+
+  // Also write spatial relationships that require mask data directly,
+  // since this fixture has empty masks.index.jsonl.
+  {
+    std::ofstream rel_out(staging / "relationships" / "relationships.jsonl",
+                          std::ios::app);
+    rel_out << nlohmann::json{{"id", "rel_overlaps_1"}, {"type", "overlaps"},
+        {"source_id", "region_000001"}, {"target_id", "region_000002"},
+        {"start_us", 0}, {"end_us", 0}, {"confidence", 0.8}}.dump() << "\n";
+    rel_out << nlohmann::json{{"id", "rel_contains_1"}, {"type", "contains"},
+        {"source_id", "region_000004"}, {"target_id", "region_000005"},
+        {"start_us", 100000}, {"end_us", 100000}, {"confidence", 0.9}}.dump() << "\n";
+    rel_out << nlohmann::json{{"id", "rel_near_1"}, {"type", "near"},
+        {"source_id", "region_000001"}, {"target_id", "region_000003"},
+        {"start_us", 0}, {"end_us", 0}, {"confidence", 0.7}}.dump() << "\n";
+  }
 
   bool ok = svp::package::write_package_skeleton(package_path, staging, source_path, manifest);
   assert(ok);
@@ -3146,13 +3175,13 @@ void test_traversal_jsonl_sqlite_parity() {
   // Verify both packages have the expected entries.
   const auto layout_sqlite = svp::package::read_package_layout(pkg_with_sqlite);
   assert(layout_sqlite.has_value());
-  assert(layout_sqlite->value().has_entry("index/index.sqlite"));
-  assert(layout_sqlite->value().has_entry("relationships/relationships.jsonl"));
+  assert(layout_sqlite.value().has_entry("index/index.sqlite"));
+  assert(layout_sqlite.value().has_entry("relationships/relationships.jsonl"));
 
   const auto layout_jsonl = svp::package::read_package_layout(pkg_jsonl_only);
   assert(layout_jsonl.has_value());
-  assert(!layout_jsonl->value().has_entry("index/index.sqlite"));
-  assert(layout_jsonl->value().has_entry("relationships/relationships.jsonl"));
+  assert(!layout_jsonl.value().has_entry("index/index.sqlite"));
+  assert(layout_jsonl.value().has_entry("relationships/relationships.jsonl"));
 
   // Traverse both packages with the same options.
   svp::query::TraversalOptions opts;
