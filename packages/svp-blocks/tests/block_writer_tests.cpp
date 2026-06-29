@@ -268,6 +268,173 @@ void test_write_block_to_file() {
   std::cout << "test_write_block_to_file: PASS\n";
 }
 
+void test_round_trip_mask_block_absent_time_range() {
+  const std::uint32_t width = 4;
+  const std::uint32_t height = 2;
+  const std::uint64_t frame_count = 1;
+  const std::uint64_t uncompressed_size =
+      static_cast<std::uint64_t>(width) * height * frame_count;
+
+  std::vector<std::byte> payload(uncompressed_size);
+  for (std::size_t i = 0; i < payload.size(); ++i) {
+    payload[i] = std::byte{static_cast<std::uint8_t>(i % 256)};
+  }
+
+  BlockWriteSpec spec;
+  spec.block_type = BlockType::mask;
+  spec.extent_0 = width;
+  spec.extent_1 = height;
+  spec.extent_2 = 1;
+  spec.dtype = DType::svp_rle_v1;
+  spec.start_frame = 0;
+  spec.frame_count = frame_count;
+  spec.start_us = -1;
+  spec.end_us = -1;
+
+  std::vector<std::byte> stream;
+  auto info = write_block(stream, spec, payload.data(), payload.size());
+
+  assert(info.block_offset == 0);
+  assert(info.compressed_size > 0);
+
+  ParseOptions options;
+  options.required_block_type = BlockType::mask;
+  options.required_raster_extent = RasterExtent{width, height};
+  options.verify_hashes = true;
+  options.verify_zstd_decompression = true;
+
+  std::size_t read_pos = 0;
+  auto result = parse_block_stream(
+      stream.size(), options,
+      [&](std::byte* output, std::size_t count, std::string& err) -> bool {
+        if (read_pos + count > stream.size()) {
+          err = "read past end";
+          return false;
+        }
+        std::memcpy(output, stream.data() + read_pos, count);
+        read_pos += count;
+        return true;
+      });
+
+  assert(result.issues.empty());
+  assert(result.blocks.size() == 1);
+  assert(result.blocks[0].block_type == static_cast<std::uint8_t>(BlockType::mask));
+  assert(result.blocks[0].start_us == -1);
+  assert(result.blocks[0].end_us == -1);
+
+  std::cout << "test_round_trip_mask_block_absent_time_range: PASS\n";
+}
+
+void test_mask_block_equal_time_range_rejected() {
+  const std::uint32_t width = 4;
+  const std::uint32_t height = 2;
+  const std::uint64_t frame_count = 1;
+  const std::uint64_t uncompressed_size =
+      static_cast<std::uint64_t>(width) * height * frame_count;
+
+  std::vector<std::byte> payload(uncompressed_size);
+  for (std::size_t i = 0; i < payload.size(); ++i) {
+    payload[i] = std::byte{static_cast<std::uint8_t>(i % 256)};
+  }
+
+  BlockWriteSpec spec;
+  spec.block_type = BlockType::mask;
+  spec.extent_0 = width;
+  spec.extent_1 = height;
+  spec.extent_2 = 1;
+  spec.dtype = DType::svp_rle_v1;
+  spec.start_frame = 0;
+  spec.frame_count = frame_count;
+  spec.start_us = 50000;
+  spec.end_us = 50000;
+
+  std::vector<std::byte> stream;
+  write_block(stream, spec, payload.data(), payload.size());
+
+  ParseOptions options;
+  options.required_block_type = BlockType::mask;
+  options.required_raster_extent = RasterExtent{width, height};
+  options.verify_hashes = true;
+  options.verify_zstd_decompression = true;
+
+  std::size_t read_pos = 0;
+  auto result = parse_block_stream(
+      stream.size(), options,
+      [&](std::byte* output, std::size_t count, std::string& err) -> bool {
+        if (read_pos + count > stream.size()) {
+          err = "read past end";
+          return false;
+        }
+        std::memcpy(output, stream.data() + read_pos, count);
+        read_pos += count;
+        return true;
+      });
+
+  bool found_time_range_issue = false;
+  for (const auto& issue : result.issues) {
+    if (issue.message.find("time range") != std::string::npos) {
+      found_time_range_issue = true;
+      break;
+    }
+  }
+  assert(found_time_range_issue);
+
+  std::cout << "test_mask_block_equal_time_range_rejected: PASS\n";
+}
+
+void test_round_trip_mask_block_positive_time_range() {
+  const std::uint32_t width = 4;
+  const std::uint32_t height = 2;
+  const std::uint64_t frame_count = 3;
+  const std::uint64_t uncompressed_size =
+      static_cast<std::uint64_t>(width) * height * frame_count;
+
+  std::vector<std::byte> payload(uncompressed_size);
+  for (std::size_t i = 0; i < payload.size(); ++i) {
+    payload[i] = std::byte{static_cast<std::uint8_t>(i % 256)};
+  }
+
+  BlockWriteSpec spec;
+  spec.block_type = BlockType::mask;
+  spec.extent_0 = width;
+  spec.extent_1 = height;
+  spec.extent_2 = 1;
+  spec.dtype = DType::svp_rle_v1;
+  spec.start_frame = 5;
+  spec.frame_count = frame_count;
+  spec.start_us = 100000;
+  spec.end_us = 200000;
+
+  std::vector<std::byte> stream;
+  write_block(stream, spec, payload.data(), payload.size());
+
+  ParseOptions options;
+  options.required_block_type = BlockType::mask;
+  options.required_raster_extent = RasterExtent{width, height};
+  options.verify_hashes = true;
+  options.verify_zstd_decompression = true;
+
+  std::size_t read_pos = 0;
+  auto result = parse_block_stream(
+      stream.size(), options,
+      [&](std::byte* output, std::size_t count, std::string& err) -> bool {
+        if (read_pos + count > stream.size()) {
+          err = "read past end";
+          return false;
+        }
+        std::memcpy(output, stream.data() + read_pos, count);
+        read_pos += count;
+        return true;
+      });
+
+  assert(result.issues.empty());
+  assert(result.blocks.size() == 1);
+  assert(result.blocks[0].start_us == 100000);
+  assert(result.blocks[0].end_us == 200000);
+
+  std::cout << "test_round_trip_mask_block_positive_time_range: PASS\n";
+}
+
 }  // namespace
 
 int main() {
@@ -276,6 +443,9 @@ int main() {
   test_multiple_blocks_in_stream();
   test_stream_writer_matches_vector_writer();
   test_write_block_to_file();
+  test_round_trip_mask_block_absent_time_range();
+  test_mask_block_equal_time_range_rejected();
+  test_round_trip_mask_block_positive_time_range();
   std::cout << "All svp-blocks writer tests passed.\n";
   return 0;
 }
