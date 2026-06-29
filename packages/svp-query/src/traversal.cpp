@@ -1296,14 +1296,14 @@ GraphHealthDiagnostics compute_graph_health(
   // These categories require evidence that may not be present in the package.
   if (!health.mask_data_available) {
     health.skipped_categories.push_back({
-        "mask_overlaps/occludes/occluded_by",
+        "overlaps (mask IoU)/occludes/occluded_by",
         "mask pixel data not available (spatial/masks.index.jsonl is empty or missing)"
     });
   }
   if (health.mask_data_available && !health.depth_data_available) {
     health.skipped_categories.push_back({
         "occludes/occluded_by (z-order)",
-        "depth pixel data not available — mask_overlaps emitted without z-order; occludes/occluded_by require depth evidence"
+        "depth pixel data not available — mask-based overlaps emitted without z-order; occludes/occluded_by require depth evidence"
     });
   }
   if (!health.depth_data_available) {

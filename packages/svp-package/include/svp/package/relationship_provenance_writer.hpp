@@ -35,7 +35,6 @@ struct RelationshipTypeCounts {
   std::size_t entity_exits_frame = 0;
   std::size_t spatial_occludes = 0;
   std::size_t spatial_occluded_by = 0;
-  std::size_t spatial_mask_overlaps = 0;
   std::size_t spatial_foreground_relative_to = 0;
   std::size_t spatial_background_relative_to = 0;
   std::size_t spatial_moves_with = 0;

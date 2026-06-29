@@ -1374,10 +1374,16 @@ void build_mask_occlusion_relationships(
         }
 
         std::size_t overlap_pixels = 0;
+        std::size_t a_only_pixels = 0;
+        std::size_t b_only_pixels = 0;
         const std::size_t total = static_cast<std::size_t>(info_a.width) * info_a.height;
         for (std::size_t p = 0; p < total; ++p) {
           if (mask_a[p] && mask_b[p]) {
             ++overlap_pixels;
+          } else if (mask_a[p]) {
+            ++a_only_pixels;
+          } else if (mask_b[p]) {
+            ++b_only_pixels;
           }
         }
 
@@ -1422,17 +1428,27 @@ void build_mask_occlusion_relationships(
             ++builder.counts.spatial_occluded_by;
           }
           // If equal depth, no occlusion relationship — just overlap.
-          // Fall through to emit mask_overlaps below for equal depth case.
+          // Fall through to emit overlaps below for equal depth case.
           if (mean_depth_a != mean_depth_b) continue;
         }
 
-        // Without depth data (or equal depth), masks only prove pixel
-        // overlap, not z-order. Emit an honest mask_overlaps relationship.
-        builder.add("rel_mask_overlaps_", "mask_overlaps",
-                    info_a.region_id, info_b.region_id,
-                    pts_us, pts_us, 1.0,
-                    "spatial/masks.blocks.svpmz");
-        ++builder.counts.spatial_mask_overlaps;
+        // Without depth data (or equal depth), masks prove pixel overlap
+        // but not z-order. Emit the spec-defined 'overlaps' relationship
+        // using mask IoU as the evidence metric.
+        // Spec §15: "overlaps: mask IoU exceeds threshold"
+        // Spec §15: "All thresholds are written to provenance"
+        constexpr double kMaskIoUThreshold = 0.1;
+        const double mask_iou =
+            static_cast<double>(overlap_pixels) /
+            static_cast<double>(overlap_pixels + a_only_pixels + b_only_pixels);
+
+        if (mask_iou >= kMaskIoUThreshold) {
+          builder.add("rel_mask_overlaps_", "overlaps",
+                      info_a.region_id, info_b.region_id,
+                      pts_us, pts_us, mask_iou,
+                      "spatial/masks.blocks.svpmz");
+          ++builder.counts.spatial_overlaps;
+        }
       }
     }
   }
@@ -1825,7 +1841,6 @@ nlohmann::json make_relationship_processor_record(const RelationshipTypeCounts& 
           {"entity_exits_frame", counts.entity_exits_frame},
           {"spatial_occludes", counts.spatial_occludes},
           {"spatial_occluded_by", counts.spatial_occluded_by},
-          {"spatial_mask_overlaps", counts.spatial_mask_overlaps},
           {"spatial_foreground_relative_to", counts.spatial_foreground_relative_to},
           {"spatial_background_relative_to", counts.spatial_background_relative_to},
           {"spatial_moves_with", counts.spatial_moves_with},
@@ -1936,7 +1951,6 @@ nlohmann::json relationship_provenance_write_summary_to_json(
           {"entity_exits_frame", summary.type_counts.entity_exits_frame},
           {"spatial_occludes", summary.type_counts.spatial_occludes},
           {"spatial_occluded_by", summary.type_counts.spatial_occluded_by},
-          {"spatial_mask_overlaps", summary.type_counts.spatial_mask_overlaps},
           {"spatial_foreground_relative_to", summary.type_counts.spatial_foreground_relative_to},
           {"spatial_background_relative_to", summary.type_counts.spatial_background_relative_to},
           {"spatial_moves_with", summary.type_counts.spatial_moves_with},

@@ -25,7 +25,7 @@ constexpr std::array<std::string_view, 15> kSupportTypes{{
     "frame_in_scene",
 }};
 
-constexpr std::array<std::string_view, 18> kSemanticTypes{{
+constexpr std::array<std::string_view, 17> kSemanticTypes{{
     "appears_in_shot",
     "appears_in_scene",
     "visible_during_speech",
@@ -38,7 +38,6 @@ constexpr std::array<std::string_view, 18> kSemanticTypes{{
     "exits_frame",
     "occludes",
     "occluded_by",
-    "mask_overlaps",
     "moves_with",
     "stationary_relative_to_camera",
     "foreground_relative_to",
