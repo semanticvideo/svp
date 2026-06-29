@@ -14,7 +14,8 @@ constexpr int kColorMaxDecodedFrames = 15;
 
 RealFrameSamplingResult build_real_frame_color_sampling_input(
     const media::MediaIngestPlan& plan,
-    const std::filesystem::path& ffmpeg_path) {
+    const std::filesystem::path& ffmpeg_path,
+    FrameCatalog* frame_catalog) {
   RealFrameSamplingResult result;
 
   const DecodedCanonicalFrames decoded =
@@ -22,7 +23,9 @@ RealFrameSamplingResult build_real_frame_color_sampling_input(
           plan, ffmpeg_path,
           plan.canonical_raster.width,
           plan.canonical_raster.height,
-          kColorMaxDecodedFrames);
+          kColorMaxDecodedFrames,
+          frame_catalog,
+          "color");
 
   result.real_decoding_attempted = decoded.decoding_attempted;
   result.real_decoding_succeeded = decoded.decoding_succeeded;

@@ -2,6 +2,7 @@
 
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/vision/color_frame_sampling.hpp"
+#include "svp/vision/frame_catalog.hpp"
 
 #include <filesystem>
 #include <functional>
@@ -52,7 +53,8 @@ struct DecodedCanonicalFrames {
 // decoding_succeeded set accordingly.
 [[nodiscard]] DecodedCanonicalFrames decode_canonical_frames(
     const media::MediaIngestPlan& plan,
-    const std::filesystem::path& ffmpeg_path);
+    const std::filesystem::path& ffmpeg_path,
+    FrameCatalog* frame_catalog = nullptr);
 
 // Decode frames at a custom resolution using the same deterministic timestamp
 // selection as decode_canonical_frames.  Used by OCR generation which needs
@@ -64,7 +66,9 @@ struct DecodedCanonicalFrames {
     const std::filesystem::path& ffmpeg_path,
     int target_width,
     int target_height,
-    int max_frames);
+    int max_frames,
+    FrameCatalog* frame_catalog = nullptr,
+    const std::string& purpose = "canonical");
 
 // Extract the media duration in microseconds from the MediaIngestPlan.
 // Returns 0 if the duration cannot be determined.
@@ -78,7 +82,9 @@ struct DecodedCanonicalFrames {
     const std::filesystem::path& ffmpeg_path,
     int target_width,
     int target_height,
-    const std::vector<std::int64_t>& timestamps_us);
+    const std::vector<std::int64_t>& timestamps_us,
+    FrameCatalog* frame_catalog = nullptr,
+    const std::string& purpose = "canonical");
 
 // Decode frames at explicit timestamps and invoke on_frame for each decoded
 // frame without retaining decoded pixel buffers after the callback returns.
@@ -89,6 +95,8 @@ struct DecodedCanonicalFrames {
     int target_width,
     int target_height,
     const std::vector<std::int64_t>& timestamps_us,
-    const std::function<void(const ColorRasterFrame&, std::size_t)>& on_frame);
+    const std::function<void(const ColorRasterFrame&, std::size_t)>& on_frame,
+    FrameCatalog* frame_catalog = nullptr,
+    const std::string& purpose = "canonical");
 
 }  // namespace svp::vision

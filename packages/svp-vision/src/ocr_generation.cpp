@@ -560,7 +560,7 @@ OcrGenerationResult generate_ocr_observations(
       FrameDetection fdet;
       fdet.frame_id = frame.frame_id;
       fdet.timestamp_us = frame.timestamp_us;
-      fdet.frame_index = frame_idx;
+      fdet.frame_index = frame.frame_index;
       fdet.frame_width = frame.width;
       fdet.frame_height = frame.height;
       fdet.raw_text = det.text;
@@ -580,7 +580,9 @@ OcrGenerationResult generate_ocr_observations(
         options.ocr_frame_width,
         options.ocr_frame_height,
         result.temporal_sampling.timestamps_us,
-        process_ocr_frame);
+        process_ocr_frame,
+        options.frame_catalog,
+        "ocr");
     result.ocr_frame_input_available =
         streamed_frame_status.decoding_succeeded &&
         streamed_frame_status.frames_decoded > 0;
@@ -1065,7 +1067,9 @@ DecodedCanonicalFrames decode_ocr_frames_temporal(
   return decode_frames_at_timestamps(
       *options.media_plan, options.ffmpeg_path,
       options.ocr_frame_width, options.ocr_frame_height,
-      out_sampling.timestamps_us);
+      out_sampling.timestamps_us,
+      options.frame_catalog,
+      "ocr");
 }
 
 }  // namespace svp::vision

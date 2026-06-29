@@ -4,6 +4,7 @@
 #include "svp/vision/canonical_frame_input.hpp"
 #include "svp/vision/depth_generation.hpp"
 #include "svp/vision/embedding_generation.hpp"
+#include "svp/vision/frame_catalog.hpp"
 #include "svp/vision/ocr_generation.hpp"
 #include "svp/vision/visual_entity_tracker.hpp"
 #include "svp/package/entity_writer.hpp"
@@ -160,7 +161,8 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     const nlohmann::json& media_plan_json,
     const std::filesystem::path& model_cache_root,
     const svp::media::MediaIngestPlan* media_plan,
-    const std::filesystem::path& ffmpeg_path) {
+    const std::filesystem::path& ffmpeg_path,
+    svp::vision::FrameCatalog* frame_catalog) {
   SpatialEmbeddingPlaceholderSummary summary;
   summary.model_runtime_available = model_runtime_available;
 
@@ -182,7 +184,8 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     // depth generation and OCR generation.
     svp::vision::DecodedCanonicalFrames decoded_frames;
     if (media_plan != nullptr && !ffmpeg_path.empty()) {
-      decoded_frames = svp::vision::decode_canonical_frames(*media_plan, ffmpeg_path);
+      decoded_frames = svp::vision::decode_canonical_frames(*media_plan, ffmpeg_path,
+                                                             frame_catalog);
     }
 
     // Run OCR generation on decoded frames before embedding generation so
@@ -225,6 +228,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     // Enable evidence crop generation for text regions.
     // This extracts bounded crop images as visual evidence.
     ocr_opts.generate_evidence_crops = (media_plan != nullptr);
+    ocr_opts.frame_catalog = frame_catalog;
 
     svp::vision::OcrGenerationResult ocr_result;
     try {
@@ -398,7 +402,8 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
   // Decode frames and run OCR so text artifacts are produced.
   svp::vision::DecodedCanonicalFrames decoded_frames;
   if (media_plan != nullptr && !ffmpeg_path.empty()) {
-    decoded_frames = svp::vision::decode_canonical_frames(*media_plan, ffmpeg_path);
+    decoded_frames = svp::vision::decode_canonical_frames(*media_plan, ffmpeg_path,
+                                                           frame_catalog);
   }
 
   // Determine canonical raster dimensions for bbox normalization
@@ -440,6 +445,8 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
       ocr_opts.ocr_frame_height = src_h;
     }
   }
+
+  ocr_opts.frame_catalog = frame_catalog;
 
   svp::vision::OcrGenerationResult ocr_result;
   try {

@@ -175,12 +175,15 @@ std::int64_t compute_media_duration_us(const media::MediaIngestPlan& plan) {
 
 DecodedCanonicalFrames decode_canonical_frames(
     const media::MediaIngestPlan& plan,
-    const std::filesystem::path& ffmpeg_path) {
+    const std::filesystem::path& ffmpeg_path,
+    FrameCatalog* frame_catalog) {
   return decode_frames_at_resolution(
       plan, ffmpeg_path,
       plan.canonical_raster.width,
       plan.canonical_raster.height,
-      kMaxDecodedFrames);
+      kMaxDecodedFrames,
+      frame_catalog,
+      "canonical");
 }
 
 DecodedCanonicalFrames decode_frames_at_resolution(
@@ -188,7 +191,9 @@ DecodedCanonicalFrames decode_frames_at_resolution(
     const std::filesystem::path& ffmpeg_path,
     int target_width,
     int target_height,
-    int max_frames) {
+    int max_frames,
+    FrameCatalog* frame_catalog,
+    const std::string& purpose) {
   DecodedCanonicalFrames result;
 
   if (!ffmpeg_is_available(ffmpeg_path)) {
@@ -220,7 +225,8 @@ DecodedCanonicalFrames decode_frames_at_resolution(
   const std::vector<std::int64_t> timestamps =
       deterministic_seek_timestamps_us(duration_us, frame_count);
 
-  return decode_frames_at_timestamps(plan, ffmpeg_path, width, height, timestamps);
+  return decode_frames_at_timestamps(plan, ffmpeg_path, width, height, timestamps,
+                                      frame_catalog, purpose);
 }
 
 DecodedCanonicalFrames decode_frames_at_timestamps(
@@ -228,7 +234,9 @@ DecodedCanonicalFrames decode_frames_at_timestamps(
     const std::filesystem::path& ffmpeg_path,
     int target_width,
     int target_height,
-    const std::vector<std::int64_t>& timestamps_us) {
+    const std::vector<std::int64_t>& timestamps_us,
+    FrameCatalog* frame_catalog,
+    const std::string& purpose) {
   DecodedCanonicalFrames result;
 
   if (!ffmpeg_is_available(ffmpeg_path)) {
@@ -266,14 +274,29 @@ DecodedCanonicalFrames decode_frames_at_timestamps(
     }
 
     const bool is_keyframe = result.frames.empty();
-    result.frames.push_back(ColorRasterFrame{
-        frame_id(static_cast<int>(result.frames.size())),
+    std::string fid;
+    std::size_t fidx = result.frames.size();
+    if (frame_catalog) {
+      fid = frame_catalog->register_frame(
+          timestamps_us[static_cast<std::size_t>(i)],
+          purpose, is_keyframe);
+      const auto idx = frame_catalog->get_frame_index(
+          timestamps_us[static_cast<std::size_t>(i)]);
+      if (idx.has_value())
+        fidx = *idx;
+    } else {
+      fid = frame_id(static_cast<int>(result.frames.size()));
+    }
+    ColorRasterFrame frame{
+        fid,
         timestamps_us[static_cast<std::size_t>(i)],
         width,
         height,
         is_keyframe,
         std::move(pixels),
-    });
+    };
+    frame.frame_index = fidx;
+    result.frames.push_back(std::move(frame));
   }
 
   result.frames_decoded = static_cast<int>(result.frames.size());
@@ -293,7 +316,9 @@ DecodedCanonicalFrames decode_frames_at_timestamps_streaming(
     int target_width,
     int target_height,
     const std::vector<std::int64_t>& timestamps_us,
-    const std::function<void(const ColorRasterFrame&, std::size_t)>& on_frame) {
+    const std::function<void(const ColorRasterFrame&, std::size_t)>& on_frame,
+    FrameCatalog* frame_catalog,
+    const std::string& purpose) {
   DecodedCanonicalFrames result;
 
   if (!ffmpeg_is_available(ffmpeg_path)) {
@@ -333,15 +358,29 @@ DecodedCanonicalFrames decode_frames_at_timestamps_streaming(
       continue;
     }
 
+    std::string fid;
+    std::size_t fidx = static_cast<std::size_t>(result.frames_decoded);
+    if (frame_catalog) {
+      fid = frame_catalog->register_frame(
+          timestamps_us[static_cast<std::size_t>(i)],
+          purpose, result.frames_decoded == 0);
+      const auto idx = frame_catalog->get_frame_index(
+          timestamps_us[static_cast<std::size_t>(i)]);
+      if (idx.has_value())
+        fidx = *idx;
+    } else {
+      fid = frame_id(result.frames_decoded);
+    }
     ColorRasterFrame frame{
-        frame_id(result.frames_decoded),
+        fid,
         timestamps_us[static_cast<std::size_t>(i)],
         width,
         height,
         result.frames_decoded == 0,
         std::move(pixels),
     };
-    on_frame(frame, static_cast<std::size_t>(result.frames_decoded));
+    frame.frame_index = fidx;
+    on_frame(frame, fidx);
     ++result.frames_decoded;
   }
 

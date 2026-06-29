@@ -14,7 +14,8 @@ void run_foundation_ocr_stage(BuildPipelineContext& context) {
   // Decode canonical frames (used as fallback) and run real OCR.
   // OCR decodes its own higher-resolution frames for text detection.
   svp::vision::DecodedCanonicalFrames decoded_frames =
-      svp::vision::decode_canonical_frames(context.plan, context.options.ffmpeg_path);
+      svp::vision::decode_canonical_frames(context.plan, context.options.ffmpeg_path,
+                                           &context.frame_catalog);
 
   svp::vision::OcrGenerationOptions ocr_opts;
   ocr_opts.model_cache_root = std::filesystem::path(context.options.model_cache_dir);
@@ -44,6 +45,8 @@ void run_foundation_ocr_stage(BuildPipelineContext& context) {
       ocr_opts.ocr_frame_height = src_h;
     }
   }
+
+  ocr_opts.frame_catalog = &context.frame_catalog;
 
   svp::vision::OcrGenerationResult ocr_result =
       svp::vision::generate_ocr_observations(

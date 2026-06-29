@@ -4,6 +4,7 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc video calib3d)
 add_library(svp-vision
   src/canonical_frame_input.cpp
   src/color_frame_sampling.cpp
+  src/frame_catalog.cpp
   src/color_observation_records.cpp
   src/color_quantization.cpp
   src/depth_generation.cpp

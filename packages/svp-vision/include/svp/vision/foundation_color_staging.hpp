@@ -3,6 +3,7 @@
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/vision/color_frame_sampling.hpp"
 #include "svp/vision/color_observation_records.hpp"
+#include "svp/vision/frame_catalog.hpp"
 
 #include <filesystem>
 #include <nlohmann/json.hpp>
@@ -29,6 +30,7 @@ struct FoundationColorStagingArtifact {
 // falls back to the synthetic input and real_media_frame_decoding_run=false.
 [[nodiscard]] FoundationColorStagingArtifact build_real_frame_color_staging_artifact(
     const media::MediaIngestPlan& plan,
-    const std::filesystem::path& ffmpeg_path);
+    const std::filesystem::path& ffmpeg_path,
+    FrameCatalog* frame_catalog = nullptr);
 
 }  // namespace svp::vision

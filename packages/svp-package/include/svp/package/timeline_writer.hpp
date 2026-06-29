@@ -1,9 +1,10 @@
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 
 namespace svp::media { struct MediaIngestPlan; }
-namespace svp::vision { struct FoundationColorStagingArtifact; }
+namespace svp::vision { struct FoundationColorStagingArtifact; class FrameCatalog; }
 
 namespace svp::package {
 
@@ -32,5 +33,20 @@ struct TimelineWriteSummary {
     const std::filesystem::path& staging_dir,
     const svp::media::MediaIngestPlan& plan,
     const svp::vision::FoundationColorStagingArtifact& color_artifact);
+
+/**
+ * Rewrites timeline/frames.jsonl with the complete set of frame IDs from
+ * the FrameCatalog.  After all pipeline stages have decoded frames and
+ * registered them with the catalog, this function overwrites the initial
+ * frames.jsonl (which only contained color-sampled frames) with the full
+ * catalog so that every frame ID referenced by OCR, depth, masks, entities,
+ * and relationships is present in the timeline.
+ *
+ * Returns the number of frames written.
+ */
+[[nodiscard]] std::size_t rewrite_frames_jsonl(
+    const std::filesystem::path& staging_dir,
+    const svp::media::MediaIngestPlan& plan,
+    const svp::vision::FrameCatalog& frame_catalog);
 
 } // namespace svp::package
