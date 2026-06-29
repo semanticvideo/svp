@@ -25,6 +25,8 @@ struct RelationshipTypeCounts {
   std::size_t semantic_speaker_active_during_entity_visible = 0;
   std::size_t semantic_entity_appears_in_shot = 0;
   std::size_t semantic_entity_appears_in_scene = 0;
+  std::size_t frame_in_shot = 0;
+  std::size_t frame_in_scene = 0;
 };
 
 struct RelationshipProvenanceWriteSummary {

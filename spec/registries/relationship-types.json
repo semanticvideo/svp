@@ -18,7 +18,9 @@
         "has_mask",
         "track_observation",
         "has_evidence_crop",
-        "text_region_overlaps_entity"
+        "text_region_overlaps_entity",
+        "frame_in_shot",
+        "frame_in_scene"
       ]
     },
     "semantic": {

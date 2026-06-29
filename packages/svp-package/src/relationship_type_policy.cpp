@@ -7,7 +7,7 @@
 namespace svp::package {
 namespace {
 
-constexpr std::array<std::string_view, 13> kSupportTypes{{
+constexpr std::array<std::string_view, 15> kSupportTypes{{
     "word_spoken_by",
     "word_in_speaker_segment",
     "embedding_source_is",
@@ -21,6 +21,8 @@ constexpr std::array<std::string_view, 13> kSupportTypes{{
     "track_observation",
     "has_evidence_crop",
     "text_region_overlaps_entity",
+    "frame_in_shot",
+    "frame_in_scene",
 }};
 
 constexpr std::array<std::string_view, 17> kSemanticTypes{{
