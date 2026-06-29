@@ -123,8 +123,26 @@ struct EvidenceCropOptions {
   // Maximum total number of crops across all regions
   std::size_t max_total_crops = 50;
 
-  // Maximum total bytes for all crop images
+  // Base byte budget for crop images. Under the one_per_observation policy
+  // this is scaled up proportionally: effective_budget = max(max_total_crop_bytes,
+  // target_crop_bytes_per_observation * observation_count).
   std::int64_t max_total_crop_bytes = 2 * 1024 * 1024;
+
+  // Per-observation byte target used to scale the byte budget under
+  // one_per_observation policy.  10 KiB per observation means a video
+  // with 100 observations gets ~1 MiB, 1000 observations gets ~10 MiB.
+  std::int64_t target_crop_bytes_per_observation = 10 * 1024;
+
+  // Coverage policy for evidence crops.
+  // "one_per_observation" (default): scales max_total_crops to match the
+  //   number of text observations, ensuring at least one crop per accepted
+  //   observation when byte budget allows.  If byte budget is tight, JPEG
+  //   quality is reduced to fit more crops.
+  // "fixed_cap": uses max_total_crops as a hard cap (legacy behavior).
+  std::string crop_coverage_policy = "one_per_observation";
+
+  // Minimum JPEG quality to use when reducing quality to fit byte budget.
+  int min_jpeg_quality = 50;
 
   // Image format for crops: "jpeg" or "png"
   std::string crop_image_format = "jpeg";
@@ -141,6 +159,17 @@ struct EvidenceCropResult {
   std::int64_t crop_count = 0;
   std::int64_t crops_skipped_count = 0;
   std::string crops_skipped_reason;
+
+  // Detailed crop coverage provenance
+  std::string crop_coverage_policy;
+  std::size_t effective_max_total_crops = 0;
+  std::int64_t effective_max_total_crop_bytes = 0;
+  std::int64_t crops_skipped_by_count_cap = 0;
+  std::int64_t crops_skipped_by_byte_cap = 0;
+  std::int64_t crops_skipped_by_extraction = 0;
+  std::int64_t total_observations_requested = 0;
+  bool every_observation_has_crop = false;
+  std::string crop_coverage_status;  // "full" or "partial"
 
   // ROI OCR results, one per reconciled observation (parallel index).
   // If ROI OCR improved the result, the caller should use this text.

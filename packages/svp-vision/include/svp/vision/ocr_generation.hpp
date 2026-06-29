@@ -19,7 +19,13 @@ struct OcrGenerationOptions {
   std::filesystem::path model_cache_root;
   std::filesystem::path ffmpeg_path = "ffmpeg";
   std::string language = "eng";
-  std::size_t max_observations = 100;
+
+  // Soft target for total text observations.  Instead of a hard cap that
+  // silently drops observations from later frames, the reconciliation step
+  // will report observation_count_capped when this target is exceeded.
+  // Set to 0 to disable the cap entirely.
+  std::size_t target_max_observations = 0;
+
   const svp::media::MediaIngestPlan* media_plan = nullptr;
   int ocr_frame_width = 0;
   int ocr_frame_height = 0;
@@ -28,6 +34,8 @@ struct OcrGenerationOptions {
   bool generate_evidence_crops = false;
   std::size_t max_total_crops = 50;
   std::int64_t max_total_crop_bytes = 2 * 1024 * 1024;
+  std::string crop_coverage_policy = "one_per_observation";
+  int crop_min_jpeg_quality = 50;
   OcrSamplingConfig sampling_config;
   FrameCatalog* frame_catalog = nullptr;
 };
@@ -44,6 +52,9 @@ struct OcrGenerationResult {
   std::int64_t text_region_count = 0;
   std::int64_t text_observation_count = 0;
   std::int64_t numeric_value_count = 0;
+  std::int64_t total_reconciled_observations = 0;
+  bool observation_count_capped = false;
+  std::size_t target_max_observations = 0;
   std::string blocker;
   std::vector<TextRegionRecord> text_regions;
   std::vector<TextObservationRecord> text_observations;
@@ -57,6 +68,15 @@ struct OcrGenerationResult {
   bool evidence_crops_written = false;
   std::int64_t evidence_crops_skipped = 0;
   std::string evidence_crops_skipped_reason;
+  std::string crop_coverage_policy;
+  std::size_t crop_effective_max_total_crops = 0;
+  std::int64_t crop_effective_max_total_crop_bytes = 0;
+  std::int64_t crops_skipped_by_count_cap = 0;
+  std::int64_t crops_skipped_by_byte_cap = 0;
+  std::int64_t crops_skipped_by_extraction = 0;
+  std::int64_t crop_total_observations_requested = 0;
+  bool every_observation_has_crop = false;
+  std::string crop_coverage_status;
   // ROI hardening results, parallel to text_observations.
   // When ROI OCR produced better text, the observation's raw_text
   // is updated to the ROI result (with provenance preserved).

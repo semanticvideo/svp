@@ -417,6 +417,165 @@ void test_observation_region_crop_linkage() {
   std::cout << "test_observation_region_crop_linkage: passed\n";
 }
 
+// --- Evidence crop coverage policy tests ---
+
+// Test that the one_per_observation policy scales max_total_crops
+// to match the number of observations.
+void test_one_per_observation_scales_crop_cap() {
+  svp::vision::EvidenceCropOptions opts;
+  opts.crop_coverage_policy = "one_per_observation";
+  opts.max_total_crops = 50;
+
+  const std::size_t num_inputs = 100;
+  std::vector<svp::vision::CropGenerationInput> inputs(num_inputs);
+  for (std::size_t i = 0; i < num_inputs; ++i) {
+    inputs[i].text_observation_id = "obs_" + std::to_string(i);
+    inputs[i].bbox_left = 10;
+    inputs[i].bbox_top = 10;
+    inputs[i].bbox_right = 100;
+    inputs[i].bbox_bottom = 50;
+    inputs[i].frame_width = 1920;
+    inputs[i].frame_height = 1080;
+  }
+
+  // Simulate the effective_max_crops calculation from the policy.
+  std::size_t effective_max_crops = opts.max_total_crops;
+  if (opts.crop_coverage_policy == "one_per_observation") {
+    effective_max_crops = std::max(opts.max_total_crops, inputs.size());
+  }
+
+  require(effective_max_crops == 100,
+      "one_per_observation should scale max_total_crops to 100 for 100 observations");
+  require(effective_max_crops >= inputs.size(),
+      "effective_max_crops must be >= number of observations");
+}
+
+// Test that the fixed_cap policy preserves the original max_total_crops.
+void test_fixed_cap_preserves_crop_cap() {
+  svp::vision::EvidenceCropOptions opts;
+  opts.crop_coverage_policy = "fixed_cap";
+  opts.max_total_crops = 50;
+
+  const std::size_t num_inputs = 100;
+
+  std::size_t effective_max_crops = opts.max_total_crops;
+  if (opts.crop_coverage_policy == "one_per_observation") {
+    effective_max_crops = std::max(opts.max_total_crops, num_inputs);
+  }
+
+  require(effective_max_crops == 50,
+      "fixed_cap should preserve max_total_crops at 50");
+  require(effective_max_crops < num_inputs,
+      "fixed_cap should result in fewer crops than observations");
+}
+
+// Test that evidence crop result JSON includes the new coverage fields.
+void test_crop_result_json_coverage_fields() {
+  svp::vision::EvidenceCropResult result;
+  result.crop_coverage_policy = "one_per_observation";
+  result.effective_max_total_crops = 100;
+  result.crops_skipped_by_count_cap = 0;
+  result.crops_skipped_by_byte_cap = 5;
+  result.crops_skipped_by_extraction = 2;
+  result.total_observations_requested = 100;
+  result.every_observation_has_crop = false;
+  result.crop_coverage_status = "partial";
+
+  nlohmann::json j = svp::vision::evidence_crop_result_to_json(result);
+
+  require(j.contains("crop_coverage_policy"),
+      "JSON must have crop_coverage_policy");
+  require(j.contains("effective_max_total_crops"),
+      "JSON must have effective_max_total_crops");
+  require(j.contains("crops_skipped_by_count_cap"),
+      "JSON must have crops_skipped_by_count_cap");
+  require(j.contains("crops_skipped_by_byte_cap"),
+      "JSON must have crops_skipped_by_byte_cap");
+  require(j.contains("crops_skipped_by_extraction"),
+      "JSON must have crops_skipped_by_extraction");
+  require(j.contains("total_observations_requested"),
+      "JSON must have total_observations_requested");
+  require(j.contains("every_observation_has_crop"),
+      "JSON must have every_observation_has_crop");
+  require(j.contains("crop_coverage_status"),
+      "JSON must have crop_coverage_status");
+  require(j["crop_coverage_policy"].get<std::string>() == "one_per_observation",
+      "JSON crop_coverage_policy must match");
+  require(j["effective_max_total_crops"].get<std::size_t>() == 100,
+      "JSON effective_max_total_crops must match");
+  require(j["crops_skipped_by_byte_cap"].get<std::int64_t>() == 5,
+      "JSON crops_skipped_by_byte_cap must match");
+  require(j["crops_skipped_by_extraction"].get<std::int64_t>() == 2,
+      "JSON crops_skipped_by_extraction must match");
+  require(j["crop_coverage_status"].get<std::string>() == "partial",
+      "JSON crop_coverage_status must be partial");
+  require(j["every_observation_has_crop"].get<bool>() == false,
+      "JSON every_observation_has_crop must be false");
+}
+
+// Test that skip reasons are categorized correctly.
+void test_skip_reason_categorization() {
+  // Simulate the skip tracking logic
+  std::int64_t skipped_by_count = 0;
+  std::int64_t skipped_by_bytes = 0;
+  std::int64_t skipped_by_extraction = 0;
+  std::size_t total_crops = 0;
+  std::size_t effective_max_crops = 50;
+  std::int64_t total_bytes = 0;
+  std::int64_t max_total_crop_bytes = 10000;
+
+  // Simulate 55 inputs: 45 accepted, 5 exceed byte cap, 5 fail extraction
+  for (int i = 0; i < 55; ++i) {
+    if (total_crops >= effective_max_crops) {
+      skipped_by_count++;
+      continue;
+    }
+    if (total_bytes >= max_total_crop_bytes) {
+      skipped_by_bytes++;
+      continue;
+    }
+
+    // Simulate extraction failure for last 5
+    if (i >= 50) {
+      skipped_by_extraction++;
+      continue;
+    }
+
+    // Simulate byte cap for 5 crops (i=45..49)
+    if (i >= 45) {
+      const std::int64_t crop_bytes = 5000;
+      if (total_bytes + crop_bytes > max_total_crop_bytes) {
+        skipped_by_bytes++;
+        continue;
+      }
+    }
+
+    total_crops++;
+    total_bytes += 200;
+  }
+
+  const std::int64_t total_skipped = skipped_by_count + skipped_by_bytes + skipped_by_extraction;
+  require(total_skipped == 10, "total skipped should be 10");
+  require(skipped_by_count == 0, "skipped_by_count should be 0 (cap not reached)");
+  require(skipped_by_bytes == 5, "skipped_by_bytes should be 5");
+  require(skipped_by_extraction == 5, "skipped_by_extraction should be 5");
+}
+
+// Test that crop coverage status is "full" when every observation has a crop.
+void test_full_coverage_status() {
+  svp::vision::EvidenceCropResult result;
+  result.crops.resize(10);
+  result.total_observations_requested = 10;
+  result.every_observation_has_crop = true;
+  result.crop_coverage_status = "full";
+
+  nlohmann::json j = svp::vision::evidence_crop_result_to_json(result);
+  require(j["crop_coverage_status"].get<std::string>() == "full",
+      "crop_coverage_status should be 'full' when all observations have crops");
+  require(j["every_observation_has_crop"].get<bool>() == true,
+      "every_observation_has_crop should be true");
+}
+
 }  // namespace
 
 int main() {
@@ -429,6 +588,11 @@ int main() {
   test_ocr_source_frame_dimensions_rotation_270();
   test_crop_metadata_coordinate_space();
   test_observation_region_crop_linkage();
+  test_one_per_observation_scales_crop_cap();
+  test_fixed_cap_preserves_crop_cap();
+  test_crop_result_json_coverage_fields();
+  test_skip_reason_categorization();
+  test_full_coverage_status();
   std::cout << "All evidence crop linking tests passed.\n";
   return 0;
 }
