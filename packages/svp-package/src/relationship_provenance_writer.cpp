@@ -62,6 +62,11 @@ std::int64_t int_value_or_zero(const nlohmann::json& record, const char* key) {
   return iterator->get<std::int64_t>();
 }
 
+bool has_int_field(const nlohmann::json& record, const char* key) {
+  const auto iterator = record.find(key);
+  return iterator != record.end() && iterator->is_number_integer();
+}
+
 double confidence_value_or_one(const nlohmann::json& record) {
   const auto iterator = record.find("confidence");
   if (iterator == record.end() || !iterator->is_number()) {
@@ -747,7 +752,7 @@ void build_entity_shot_scene_relationships(
     if (builder.ids.entity_ids.count(entity_id) == 0) continue;
 
     const std::int64_t pts_us = int_value_or_zero(region, "pts_us");
-    if (pts_us == 0) continue;
+    if (!has_int_field(region, "pts_us")) continue;
 
     for (const auto& shot : shots) {
       if (pts_us >= shot.start_us && pts_us < shot.end_us) {
@@ -810,7 +815,7 @@ void build_visible_during_speech_relationships(
       if (builder.ids.entity_ids.count(entity_id) == 0) continue;
 
       const std::int64_t pts_us = int_value_or_zero(region, "pts_us");
-      if (pts_us == 0) continue;
+      if (!has_int_field(region, "pts_us")) continue;
 
       for (const auto& seg : speaker_segments) {
         if (pts_us >= seg.start_us && pts_us < seg.end_us) {
@@ -886,7 +891,7 @@ void build_speaker_active_during_entity_visible_relationships(
       if (builder.ids.entity_ids.count(entity_id) == 0) continue;
 
       const std::int64_t pts_us = int_value_or_zero(region, "pts_us");
-      if (pts_us == 0) continue;
+      if (!has_int_field(region, "pts_us")) continue;
 
       if (pts_us >= seg.start_us && pts_us < seg.end_us) {
         const std::string pair_key = seg.id + "|" + entity_id;
