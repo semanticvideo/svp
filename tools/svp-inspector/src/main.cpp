@@ -3,6 +3,7 @@
 #include "svp/package/package_summary.hpp"
 #include "svp/query/query_ops.hpp"
 #include "svp/query/query_reader.hpp"
+#include "svp/query/traversal.hpp"
 
 #include <CLI/CLI.hpp>
 #include <nlohmann/json.hpp>
@@ -642,6 +643,200 @@ void print_validation(const std::filesystem::path& package_path, bool json_outpu
   }
 }
 
+void print_relationships(const std::filesystem::path& package_path,
+                          const std::optional<std::string>& class_filter,
+                          std::size_t max_results, bool json_output) {
+  const auto summary = svp::query::relationship_summary(package_path);
+
+  if (!summary.present) {
+    if (json_output) {
+      std::cout << R"({"present":false})" << "\n";
+    } else {
+      std::cout << "Relationships: not present\n";
+    }
+    return;
+  }
+
+  if (!summary.readable) {
+    if (json_output) {
+      std::cout << nlohmann::json{
+          {"present", true}, {"readable", false},
+          {"error", summary.error_message}
+      }.dump(2) << "\n";
+    } else {
+      std::cout << "Relationships: present but unreadable: "
+                << summary.error_message << "\n";
+    }
+    return;
+  }
+
+  const auto rels = svp::query::list_relationships(package_path, class_filter, max_results);
+
+  if (json_output) {
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& r : rels) {
+      nlohmann::json entry = r.record;
+      entry["_relationship_class"] = r.relationship_class;
+      arr.push_back(entry);
+    }
+    std::cout << nlohmann::json{
+        {"present", true},
+        {"readable", true},
+        {"total_count", summary.total_count},
+        {"support_count", summary.support_count},
+        {"semantic_count", summary.semantic_count},
+        {"unknown_count", summary.unknown_count},
+        {"returned_count", rels.size()},
+        {"relationships", arr}
+    }.dump(2) << "\n";
+    return;
+  }
+
+  std::cout << "Relationships (" << summary.total_count << " total)\n";
+  std::cout << "  support: " << summary.support_count << "\n";
+  std::cout << "  semantic: " << summary.semantic_count << "\n";
+  std::cout << "  unknown: " << summary.unknown_count << "\n";
+  std::cout << "  showing " << rels.size() << " (limit " << max_results << ")\n\n";
+
+  for (const auto& r : rels) {
+    const auto& rec = r.record;
+    std::cout << "  " << rec.value("id", "?")
+              << " [" << r.relationship_class << "] "
+              << rec.value("type", "?")
+              << "  " << rec.value("source_id", "?")
+              << " -> " << rec.value("target_id", "?");
+    if (rec.contains("confidence")) {
+      std::cout << "  conf=" << rec.value("confidence", 0.0);
+    }
+    std::cout << "\n";
+  }
+}
+
+std::string summary_kind(const nlohmann::json& summary) {
+  if (!summary.is_object()) return "";
+  return summary.value("kind", "");
+}
+
+std::string compact_node_summary(const nlohmann::json& summary) {
+  if (!summary.is_object()) return "";
+  const auto kind = summary.value("kind", "");
+  if (kind == "word") {
+    return "word text=\"" + summary.value("text", "?") + "\""
+           + " start_us=" + std::to_string(summary.value("start_us", 0))
+           + " end_us=" + std::to_string(summary.value("end_us", 0));
+  }
+  if (kind == "speaker") {
+    return "speaker name=\"" + summary.value("display_name", "?") + "\"";
+  }
+  if (kind == "speaker_segment") {
+    return "segment speaker=" + summary.value("speaker_id", "?")
+           + " start_us=" + std::to_string(summary.value("start_us", 0))
+           + " end_us=" + std::to_string(summary.value("end_us", 0));
+  }
+  if (kind == "text_region") {
+    return "text_region type=" + summary.value("observation_type", "?")
+           + " start_us=" + std::to_string(summary.value("start_us", 0))
+           + " end_us=" + std::to_string(summary.value("end_us", 0));
+  }
+  if (kind == "text_observation") {
+    return "text_obs raw=\"" + summary.value("raw_text", "?") + "\""
+           + " norm=\"" + summary.value("normalized_text", "?") + "\"";
+  }
+  if (kind == "numeric_value") {
+    return "numeric_value value=" + summary.value("numeric_value", "?")
+           + " unit=" + summary.value("unit", "?");
+  }
+  if (kind == "evidence_crop") {
+    return "crop path=" + summary.value("crop_file_path", "?")
+           + " size=" + std::to_string(summary.value("crop_size_bytes", 0));
+  }
+  if (kind == "color_observation") {
+    return "color dominant=" + summary.value("dominant_bucket", "?")
+           + " target=" + summary.value("target_type", "?")
+           + ":" + summary.value("target_id", "?");
+  }
+  if (kind == "frame") {
+    return "frame pts_us=" + std::to_string(summary.value("pts_us", 0));
+  }
+  if (kind == "shot") {
+    return "shot start_us=" + std::to_string(summary.value("start_us", 0))
+           + " end_us=" + std::to_string(summary.value("end_us", 0));
+  }
+  if (kind == "scene") {
+    return "scene start_us=" + std::to_string(summary.value("start_us", 0))
+           + " end_us=" + std::to_string(summary.value("end_us", 0));
+  }
+  if (kind == "entity") {
+    return "entity type=" + summary.value("entity_type", "?")
+           + " label=" + summary.value("label", "?");
+  }
+  if (kind == "entity_track") {
+    return "track entity=" + summary.value("entity_id", "?");
+  }
+  if (kind == "region") {
+    return "region frame=" + summary.value("frame_id", "?");
+  }
+  return kind;
+}
+
+void print_traversal(const std::filesystem::path& package_path,
+                     const svp::query::TraversalOptions& options,
+                     bool json_output) {
+  auto result = svp::query::traverse_relationships(package_path, options);
+
+  if (json_output) {
+    std::cout << svp::query::traversal_result_to_json(result).dump(2) << "\n";
+    return;
+  }
+
+  if (!result.error_message.empty()) {
+    std::cout << "Traversal error: " << result.error_message << "\n";
+    return;
+  }
+
+  std::cout << "Traversal from " << result.start_id
+            << " (depth " << result.requested_depth << ")\n";
+  std::cout << "  nodes visited: " << result.visited_node_count << "\n";
+  std::cout << "  edges found: " << result.edge_count << "\n";
+  if (result.limit_applied) {
+    std::cout << "  (limit applied)\n";
+  }
+  if (!result.missing_object_ids.empty()) {
+    std::cout << "  unresolved IDs: " << result.missing_object_ids.size() << "\n";
+    for (const auto& id : result.missing_object_ids) {
+      std::cout << "    - " << id << "\n";
+    }
+  }
+  std::cout << "\n";
+
+  std::cout << "Nodes:\n";
+  for (const auto& node : result.nodes) {
+    std::cout << "  [d" << node.depth << "] " << node.object_id;
+    if (node.resolved) {
+      const auto desc = compact_node_summary(node.summary);
+      if (!desc.empty()) {
+        std::cout << "  " << desc;
+      }
+    } else {
+      std::cout << "  (unresolved)";
+    }
+    std::cout << "\n";
+  }
+
+  std::cout << "\nEdges:\n";
+  for (const auto& edge : result.edges) {
+    std::cout << "  [d" << edge.depth << "] "
+              << edge.direction << " "
+              << edge.source_id << " -> " << edge.target_id
+              << "  [" << edge.relationship_class << "] "
+              << edge.relationship_type;
+    if (!edge.relationship_id.empty()) {
+      std::cout << "  id=" << edge.relationship_id;
+    }
+    std::cout << "\n";
+  }
+}
+
 }  // namespace query_cmd
 
 int main(int argc, char** argv) {
@@ -672,15 +867,31 @@ int main(int argc, char** argv) {
   auto* query = app.add_subcommand("query", "Query SVP package semantic layers");
   query->add_option("package", query_package_path, "Path to a .svp package")->required();
   query->add_option("--mode", query_mode,
-                    "Query mode: layers, transcript, words, speakers, ocr, colors, validation")
+                    "Query mode: layers, transcript, words, speakers, ocr, colors, validation, relationships, traverse")
       ->check(CLI::IsMember({"layers", "transcript", "words", "speakers",
-                              "ocr", "colors", "validation"}));
+                              "ocr", "colors", "validation",
+                              "relationships", "traverse"}));
   query->add_option("--text", query_text, "Search text for words or OCR mode");
   query->add_option("--bucket", query_color_bucket, "Filter color observations by dominant bucket");
   query->add_option("--min-coverage", query_min_coverage,
                     "Minimum dominant bucket coverage (0.0-1.0)");
   query->add_option("--limit", query_limit, "Maximum results to return");
   query->add_flag("--json", query_json, "Emit JSON output for agent consumption");
+
+  std::string query_from;
+  int query_depth = 2;
+  std::string query_direction = "both";
+  std::string query_class = "all";
+  std::string query_rel_type;
+  query->add_option("--from", query_from, "Starting object ID for traverse mode");
+  query->add_option("--depth", query_depth, "Max graph depth for traverse mode");
+  query->add_option("--direction", query_direction,
+                    "Traversal direction: outgoing, incoming, both")
+      ->check(CLI::IsMember({"outgoing", "incoming", "both"}));
+  query->add_option("--class", query_class,
+                    "Relationship class filter: support, semantic, unknown, all")
+      ->check(CLI::IsMember({"support", "semantic", "unknown", "all"}));
+  query->add_option("--type", query_rel_type, "Filter by exact relationship type");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -722,6 +933,30 @@ int main(int argc, char** argv) {
                                query_limit, query_json);
     } else if (query_mode == "validation") {
       query_cmd::print_validation(query_package_path, query_json);
+    } else if (query_mode == "relationships") {
+      std::optional<std::string> class_filter;
+      if (query_class != "all" && !query_class.empty()) {
+        class_filter = query_class;
+      }
+      query_cmd::print_relationships(query_package_path, class_filter,
+                                      query_limit, query_json);
+    } else if (query_mode == "traverse") {
+      svp::query::TraversalOptions opts;
+      opts.start_id = query_from;
+      opts.max_depth = query_depth;
+      if (query_direction == "outgoing") {
+        opts.direction = svp::query::TraversalDirection::Outgoing;
+      } else if (query_direction == "incoming") {
+        opts.direction = svp::query::TraversalDirection::Incoming;
+      } else {
+        opts.direction = svp::query::TraversalDirection::Both;
+      }
+      opts.class_filter = query_class;
+      if (!query_rel_type.empty()) {
+        opts.type_filter = query_rel_type;
+      }
+      opts.limit = query_limit;
+      query_cmd::print_traversal(query_package_path, opts, query_json);
     }
     return 0;
   }
