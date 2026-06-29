@@ -2,6 +2,7 @@
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/vision/foundation_color_staging.hpp"
 #include "svp/vision/canonical_frame_input.hpp"
+#include "svp/vision/frame_catalog.hpp"
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -347,6 +348,58 @@ TimelineWriteSummary write_timeline_artifacts(
   append_processor_records(staging_dir / "provenance" / "processors.jsonl", {proc});
 
   return summary;
+}
+
+std::size_t rewrite_frames_jsonl(
+    const std::filesystem::path& staging_dir,
+    const svp::vision::FrameCatalog& frame_catalog) {
+  const std::filesystem::path frames_path =
+      staging_dir / "timeline" / "frames.jsonl";
+
+  const auto existing = read_jsonl(frames_path);
+
+  std::map<std::string, nlohmann::json> existing_by_id;
+  for (const auto& rec : existing) {
+    const std::string id = string_value(rec, "id");
+    if (!id.empty()) {
+      existing_by_id[id] = rec;
+    }
+  }
+
+  std::vector<nlohmann::json> new_records;
+  for (const auto& entry : frame_catalog.entries()) {
+    auto it = existing_by_id.find(entry.frame_id);
+    if (it != existing_by_id.end()) {
+      nlohmann::json rec = it->second;
+      rec["frame_index"] = entry.frame_index;
+      new_records.push_back(std::move(rec));
+    } else {
+      nlohmann::json rec = {
+          {"id", entry.frame_id},
+          {"frame_index", entry.frame_index},
+          {"source_stream_id", "stream_000001"},
+          {"pts_us", entry.timestamp_us},
+          {"pts_sec", [&entry] {
+            std::ostringstream oss;
+            oss << std::fixed << std::setprecision(6)
+                << (static_cast<double>(entry.timestamp_us) / 1000000.0);
+            return oss.str();
+          }()},
+          {"source_width", entry.width},
+          {"source_height", entry.height},
+          {"display_width", entry.width},
+          {"display_height", entry.height},
+          {"pixel_aspect_ratio", "1:1"},
+          {"rotation_degrees_applied", 0},
+          {"analysis_width", entry.width},
+          {"analysis_height", entry.height},
+      };
+      new_records.push_back(std::move(rec));
+    }
+  }
+
+  write_jsonl(frames_path, new_records);
+  return new_records.size();
 }
 
 } // namespace svp::package

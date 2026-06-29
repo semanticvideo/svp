@@ -2,6 +2,7 @@
 
 #include "svp/builder/build_pipeline.hpp"
 #include "svp/media/media_ingest_plan.hpp"
+#include "svp/vision/frame_catalog.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -17,6 +18,7 @@ struct BuildPipelineContext {
   const std::filesystem::path& staging_dir;
   bool model_runtime_available = false;
   nlohmann::json& output;
+  svp::vision::FrameCatalog frame_catalog;
 };
 
 struct PackageSkeletonStageResult {

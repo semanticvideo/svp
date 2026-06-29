@@ -6,6 +6,7 @@
 #include "svp/package/package_writer.hpp"
 #include "svp/package/relationship_provenance_writer.hpp"
 #include "svp/package/spatial_embedding_placeholders.hpp"
+#include "svp/package/timeline_writer.hpp"
 #include "svp/package/validation_report_storage.hpp"
 #include "svp/validation/report_json.hpp"
 #include "svp/validation/validator.hpp"
@@ -83,10 +84,19 @@ PackageSkeletonStageResult run_package_skeleton_stage(
                 ? std::filesystem::path{}
                 : std::filesystem::path(context.options.model_cache_dir),
             &context.plan,
-            context.options.ffmpeg_path);
+            context.options.ffmpeg_path,
+            &context.frame_catalog);
     context.output["spatial_embedding_placeholders"] =
         svp::package::spatial_embedding_placeholder_summary_to_json(
             placeholder_summary);
+
+    // Rewrite frames.jsonl with the complete frame catalog so that every
+    // frame ID referenced by OCR, depth, masks, entities, and relationships
+    // is present in the timeline.
+    const std::size_t total_frames =
+        svp::package::rewrite_frames_jsonl(context.staging_dir,
+                                           context.frame_catalog);
+    context.output["frame_catalog_total_frames"] = total_frames;
 
     // Write entity and entity-track artifacts after OCR text regions
     // and observations exist, so entities have real evidence.

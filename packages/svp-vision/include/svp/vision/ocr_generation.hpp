@@ -3,6 +3,7 @@
 #include "svp/vision/canonical_frame_input.hpp"
 #include "svp/vision/evidence_crop.hpp"
 #include "svp/vision/foundation_ocr_staging.hpp"
+#include "svp/vision/frame_catalog.hpp"
 #include "svp/vision/ocr_temporal_sampling.hpp"
 
 #include <filesystem>
@@ -28,6 +29,7 @@ struct OcrGenerationOptions {
   std::size_t max_total_crops = 50;
   std::int64_t max_total_crop_bytes = 2 * 1024 * 1024;
   OcrSamplingConfig sampling_config;
+  FrameCatalog* frame_catalog = nullptr;
 };
 
 struct OcrGenerationResult {

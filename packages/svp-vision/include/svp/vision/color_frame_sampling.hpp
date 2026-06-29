@@ -16,6 +16,7 @@ struct ColorRasterFrame {
   int height = 0;
   bool keyframe = false;
   std::vector<Srgb8Pixel> pixels;
+  std::size_t frame_index = 0;
 };
 
 struct ColorTimelineRange {
