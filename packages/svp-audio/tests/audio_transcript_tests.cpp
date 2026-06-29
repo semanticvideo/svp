@@ -2087,6 +2087,18 @@ void test_force_single_speaker_transcript_provenance() {
     assert(seg["overlap"] == false);
   }
 
+  {
+    std::ifstream input(root / "transcript/asr_chunk_provenance.jsonl");
+    std::string line;
+    int count = 0;
+    while (std::getline(input, line)) {
+      const nlohmann::json record = nlohmann::json::parse(line);
+      assert(record["asr_limitations"]["speaker_mode"] == "user_declared_single_speaker");
+      ++count;
+    }
+    assert(count > 0);
+  }
+
   std::filesystem::remove_all(root);
 }
 

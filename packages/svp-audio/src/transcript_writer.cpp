@@ -164,12 +164,19 @@ nlohmann::json ran_transcript_json(const AsrExecutionBoundary& boundary,
 
 nlohmann::json chunk_provenance_json(const AsrChunkPlan& chunk,
                                      const std::string& processor_id,
-                                     const std::string& asr_status) {
+                                     const std::string& asr_status,
+                                     const std::string& diarization_status) {
+  std::string speaker_mode = "diarization_assigned";
+  if (diarization_status == "fallback_one_speaker") {
+    speaker_mode = "one_speaker_fallback";
+  } else if (diarization_status == "user_declared_single_speaker") {
+    speaker_mode = "user_declared_single_speaker";
+  }
   nlohmann::json asr_limitations = {
       {"timestamp_method", "whisper_timestamp_token_segments"},
       {"timestamp_precision", "words_distributed_evenly_within_segment"},
       {"confidence_status", "decoder_token_softmax_mean"},
-      {"speaker_mode", "one_speaker_fallback"},
+      {"speaker_mode", speaker_mode},
   };
 
   return {
@@ -371,7 +378,8 @@ TranscriptWriteResult write_transcript_artifacts(const AsrExecutionBoundary& bou
   for (const AsrChunkPlan& chunk : boundary.chunk_plan.chunks) {
     provenance_records.push_back(
         chunk_provenance_json(chunk, boundary.processor_id,
-                              asr_status_string(boundary.asr_status)));
+                              asr_status_string(boundary.asr_status),
+                              boundary.diarization_status));
   }
   write_jsonl_file(provenance_path, provenance_records);
   result.chunk_provenance_written = true;
