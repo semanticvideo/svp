@@ -807,8 +807,18 @@ std::filesystem::path create_traversal_test_package() {
 
   std::filesystem::create_directories(staging / "spatial");
   write_jsonl(staging / "spatial" / "regions.jsonl", {});
-  write_file(staging / "spatial" / "masks.index.jsonl", "");
-  write_file(staging / "spatial" / "depth.index.jsonl", "");
+  write_jsonl(staging / "spatial" / "masks.index.jsonl", {
+      {{"mask_id", "mask_000001"}, {"block_id", "block_mask_001"},
+       {"frame_id", "frame_000001"},
+       {"block_path", "spatial/masks/mask_000001.bin"},
+       {"block_size_bytes", 2048}}
+  });
+  write_jsonl(staging / "spatial" / "depth.index.jsonl", {
+      {{"depth_frame_id", "depth_frame_000001"}, {"block_id", "block_depth_001"},
+       {"frame_id", "frame_000001"},
+       {"block_path", "spatial/depth/depth_000001.bin"},
+       {"block_size_bytes", 4096}}
+  });
 
   write_jsonl(staging / "text" / "text_regions.jsonl", {
       {{"text_region_id", "text_region_000001"},
@@ -917,7 +927,12 @@ std::filesystem::path create_traversal_test_package() {
 
   std::filesystem::create_directories(staging / "embeddings");
   write_json(staging / "embeddings" / "embedding_sets.json", {{"schema_version", "svp-embedding-sets-v1"}});
-  write_file(staging / "embeddings" / "embeddings.index.jsonl", "");
+  write_jsonl(staging / "embeddings" / "embeddings.index.jsonl", {
+      {{"embedding_id", "embed_000001"}, {"embedding_set_id", "embed_set_001"},
+       {"source_type", "text_observation"}, {"source_id", "text_obs_000001"},
+       {"block_path", "embeddings/embed_000001.bin"},
+       {"block_size_bytes", 512}}
+  });
 
   std::filesystem::create_directories(staging / "index");
   write_json(staging / "index" / "index_manifest.json", {
@@ -1196,7 +1211,8 @@ void test_object_catalog_annotations() {
 
   const char* required_ids[] = {
       "word_000001", "text_obs_000001", "text_region_000001",
-      "frame_000001", "entity_001", "crop_000001"
+      "frame_000001", "entity_001", "crop_000001",
+      "mask_000001", "depth_frame_000001", "embed_000001"
   };
   for (const auto* id : required_ids) {
     const auto* entry = catalog.find(id);
@@ -1226,6 +1242,19 @@ void test_object_catalog_annotations() {
   const auto crop_summary = catalog.node_summary("crop_000001");
   assert(crop_summary.value("kind", "") == "evidence_crop");
   assert(crop_summary.value("crop_file_path", "") == "text/evidence_crops/crop_000001.jpg");
+
+  const auto mask_summary = catalog.node_summary("mask_000001");
+  assert(mask_summary.value("kind", "") == "mask");
+  assert(mask_summary.value("block_path", "") == "spatial/masks/mask_000001.bin");
+
+  const auto depth_summary = catalog.node_summary("depth_frame_000001");
+  assert(depth_summary.value("kind", "") == "depth");
+  assert(depth_summary.value("block_path", "") == "spatial/depth/depth_000001.bin");
+
+  const auto embed_summary = catalog.node_summary("embed_000001");
+  assert(embed_summary.value("kind", "") == "embedding");
+  assert(embed_summary.value("source_type", "") == "text_observation");
+  assert(embed_summary.value("source_id", "") == "text_obs_000001");
 
   std::cout << "test_object_catalog_annotations: passed\n";
 }

@@ -55,6 +55,7 @@ struct TraversalNode {
   std::string object_id;
   int depth = 0;
   bool resolved = false;
+  std::string source_layer;
   nlohmann::json summary;
 };
 

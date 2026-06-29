@@ -182,6 +182,35 @@ nlohmann::json make_region_summary(const nlohmann::json& record) {
   return summary;
 }
 
+nlohmann::json make_mask_summary(const nlohmann::json& record) {
+  nlohmann::json summary;
+  summary["kind"] = "mask";
+  if (record.contains("block_path")) summary["block_path"] = record["block_path"];
+  if (record.contains("block_size_bytes")) summary["block_size_bytes"] = record["block_size_bytes"];
+  if (record.contains("frame_id")) summary["frame_id"] = record["frame_id"];
+  return summary;
+}
+
+nlohmann::json make_depth_summary(const nlohmann::json& record) {
+  nlohmann::json summary;
+  summary["kind"] = "depth";
+  if (record.contains("block_path")) summary["block_path"] = record["block_path"];
+  if (record.contains("block_size_bytes")) summary["block_size_bytes"] = record["block_size_bytes"];
+  if (record.contains("frame_id")) summary["frame_id"] = record["frame_id"];
+  return summary;
+}
+
+nlohmann::json make_embedding_summary(const nlohmann::json& record) {
+  nlohmann::json summary;
+  summary["kind"] = "embedding";
+  if (record.contains("embedding_set_id")) summary["embedding_set_id"] = record["embedding_set_id"];
+  if (record.contains("source_type")) summary["source_type"] = record["source_type"];
+  if (record.contains("source_id")) summary["source_id"] = record["source_id"];
+  if (record.contains("block_path")) summary["block_path"] = record["block_path"];
+  if (record.contains("block_size_bytes")) summary["block_size_bytes"] = record["block_size_bytes"];
+  return summary;
+}
+
 nlohmann::json make_generic_summary(const nlohmann::json& record) {
   nlohmann::json summary;
   summary["kind"] = "unknown";
@@ -204,6 +233,9 @@ nlohmann::json make_summary_for_layer(const std::string& source_layer,
   if (source_layer == "entities/entities.jsonl") return make_entity_summary(record);
   if (source_layer == "entities/entity_tracks.jsonl") return make_entity_track_summary(record);
   if (source_layer == "spatial/regions.jsonl") return make_region_summary(record);
+  if (source_layer == "spatial/masks.index.jsonl") return make_mask_summary(record);
+  if (source_layer == "spatial/depth.index.jsonl") return make_depth_summary(record);
+  if (source_layer == "embeddings/embeddings.index.jsonl") return make_embedding_summary(record);
   return make_generic_summary(record);
 }
 
@@ -333,6 +365,8 @@ TraversalResult traverse_relationships(
   start_node.object_id = options.start_id;
   start_node.depth = 0;
   start_node.resolved = catalog.find(options.start_id) != nullptr;
+  const auto* start_entry = catalog.find(options.start_id);
+  if (start_entry) start_node.source_layer = start_entry->source_layer;
   start_node.summary = catalog.node_summary(options.start_id);
   result.nodes.push_back(std::move(start_node));
 
@@ -378,6 +412,8 @@ TraversalResult traverse_relationships(
           tnode.object_id = neighbor_id;
           tnode.depth = depth + 1;
           tnode.resolved = catalog.find(neighbor_id) != nullptr;
+          const auto* neighbor_entry = catalog.find(neighbor_id);
+          if (neighbor_entry) tnode.source_layer = neighbor_entry->source_layer;
           tnode.summary = catalog.node_summary(neighbor_id);
           result.nodes.push_back(std::move(tnode));
 
@@ -417,6 +453,9 @@ nlohmann::json traversal_result_to_json(const TraversalResult& result) {
         {"depth", node.depth},
         {"resolved", node.resolved},
     };
+    if (!node.source_layer.empty()) {
+      n["source_layer"] = node.source_layer;
+    }
     if (!node.summary.is_null()) {
       n["summary"] = node.summary;
     }
