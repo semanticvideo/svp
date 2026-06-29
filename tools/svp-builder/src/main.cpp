@@ -64,6 +64,7 @@ int main(int argc, char** argv) {
   std::string stop_after = "media-ingest";
   std::string build_sherpa_lib_path;
   bool build_allow_fallback_diarization = false;
+  bool build_force_single_speaker = false;
 
   auto* build = app.add_subcommand(
       "build", "Write an honest builder foundation JSON artifact");
@@ -87,6 +88,9 @@ int main(int argc, char** argv) {
   build->add_flag("--allow-fallback-diarization", build_allow_fallback_diarization,
                   "Proceed without diarization if sherpa-onnx is not available. "
                   "Speaker data will be fabricated fallback, not real. NOT RECOMMENDED.");
+  build->add_flag("--force-single-speaker", build_force_single_speaker,
+                  "Skip Sherpa diarization entirely and emit one speaker segment. "
+                  "Use when you know the clip contains only one speaker.");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -125,6 +129,7 @@ int main(int argc, char** argv) {
       options.stop_after = *parsed_stage;
       options.sherpa_lib_path = build_sherpa_lib_path;
       options.allow_fallback_diarization = build_allow_fallback_diarization;
+      options.force_single_speaker = build_force_single_speaker;
 
       const svp::builder::BuildPipelineResult result =
           svp::builder::BuildPipeline{}.run(options);
