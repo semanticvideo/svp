@@ -712,6 +712,8 @@ OcrGenerationResult generate_ocr_observations(
 
   // Phase 2: Reconcile detections across frames
   auto reconciled = reconcile_detections(all_detections, processed_frame_count);
+  result.total_reconciled_observations = static_cast<std::int64_t>(reconciled.size());
+  result.target_max_observations = options.target_max_observations;
 
   // Phase 3: Emit reconciled observations as records
   int region_counter = 0;
@@ -719,7 +721,11 @@ OcrGenerationResult generate_ocr_observations(
   int numeric_counter = 0;
 
   for (const auto& robs : reconciled) {
-    if (static_cast<std::size_t>(obs_counter) >= options.max_observations) break;
+    if (options.target_max_observations > 0 &&
+        static_cast<std::size_t>(obs_counter) >= options.target_max_observations) {
+      result.observation_count_capped = true;
+      break;
+    }
 
     ++region_counter;
     ++obs_counter;
@@ -844,6 +850,8 @@ OcrGenerationResult generate_ocr_observations(
     crop_opts.canonical_raster_height = options.canonical_raster_height;
     crop_opts.max_total_crops = options.max_total_crops;
     crop_opts.max_total_crop_bytes = options.max_total_crop_bytes;
+    crop_opts.crop_coverage_policy = options.crop_coverage_policy;
+    crop_opts.min_jpeg_quality = options.crop_min_jpeg_quality;
     crop_opts.crop_image_format = "jpeg";
     crop_opts.jpeg_quality = 95;
 
@@ -863,6 +871,15 @@ OcrGenerationResult generate_ocr_observations(
     result.evidence_crops_written = crop_result.crops_written;
     result.evidence_crops_skipped = crop_result.crops_skipped_count;
     result.evidence_crops_skipped_reason = crop_result.crops_skipped_reason;
+    result.crop_coverage_policy = crop_result.crop_coverage_policy;
+    result.crop_effective_max_total_crops = crop_result.effective_max_total_crops;
+    result.crop_effective_max_total_crop_bytes = crop_result.effective_max_total_crop_bytes;
+    result.crops_skipped_by_count_cap = crop_result.crops_skipped_by_count_cap;
+    result.crops_skipped_by_byte_cap = crop_result.crops_skipped_by_byte_cap;
+    result.crops_skipped_by_extraction = crop_result.crops_skipped_by_extraction;
+    result.crop_total_observations_requested = crop_result.total_observations_requested;
+    result.every_observation_has_crop = crop_result.every_observation_has_crop;
+    result.crop_coverage_status = crop_result.crop_coverage_status;
     result.roi_hardening_run = true;
 
     // Evidence crops are extracted and written to evidence_crops.jsonl with
@@ -933,6 +950,28 @@ OcrGenerationResult generate_ocr_observations(
   if (!result.processors.empty()) {
     result.processors[0]["temporal_sampling"] =
         ocr_temporal_sampling_result_to_json(result.temporal_sampling);
+    result.processors[0]["ocr_coverage"] = {
+        {"total_reconciled_observations", result.total_reconciled_observations},
+        {"observation_count_capped", result.observation_count_capped},
+        {"target_max_observations", result.target_max_observations},
+    };
+  }
+
+  // Attach evidence crop coverage provenance to the recognizer processor
+  if (result.processors.size() >= 2) {
+    result.processors[1]["evidence_crop_coverage"] = {
+        {"crop_coverage_policy", result.crop_coverage_policy},
+        {"effective_max_total_crops", result.crop_effective_max_total_crops},
+        {"effective_max_total_crop_bytes", result.crop_effective_max_total_crop_bytes},
+        {"crop_count", result.evidence_crop_count},
+        {"crops_skipped_count", result.evidence_crops_skipped},
+        {"crops_skipped_by_count_cap", result.crops_skipped_by_count_cap},
+        {"crops_skipped_by_byte_cap", result.crops_skipped_by_byte_cap},
+        {"crops_skipped_by_extraction", result.crops_skipped_by_extraction},
+        {"total_observations_requested", result.crop_total_observations_requested},
+        {"every_observation_has_crop", result.every_observation_has_crop},
+        {"crop_coverage_status", result.crop_coverage_status},
+    };
   }
 
   // Write text artifacts to staging
@@ -1019,6 +1058,9 @@ nlohmann::json ocr_generation_result_to_json(const OcrGenerationResult& result) 
       {"text_region_count", result.text_region_count},
       {"text_observation_count", result.text_observation_count},
       {"numeric_value_count", result.numeric_value_count},
+      {"total_reconciled_observations", result.total_reconciled_observations},
+      {"observation_count_capped", result.observation_count_capped},
+      {"target_max_observations", result.target_max_observations},
       {"blocker", sanitize_utf8(result.blocker)},
       {"text_regions", regions_arr},
       {"text_observations", obs_arr},
@@ -1030,6 +1072,15 @@ nlohmann::json ocr_generation_result_to_json(const OcrGenerationResult& result) 
       {"evidence_crop_total_bytes", result.evidence_crop_total_bytes},
       {"evidence_crops_skipped", result.evidence_crops_skipped},
       {"evidence_crops_skipped_reason", sanitize_utf8(result.evidence_crops_skipped_reason)},
+      {"crop_coverage_policy", sanitize_utf8(result.crop_coverage_policy)},
+      {"crop_effective_max_total_crops", result.crop_effective_max_total_crops},
+      {"crop_effective_max_total_crop_bytes", result.crop_effective_max_total_crop_bytes},
+      {"crops_skipped_by_count_cap", result.crops_skipped_by_count_cap},
+      {"crops_skipped_by_byte_cap", result.crops_skipped_by_byte_cap},
+      {"crops_skipped_by_extraction", result.crops_skipped_by_extraction},
+      {"crop_total_observations_requested", result.crop_total_observations_requested},
+      {"every_observation_has_crop", result.every_observation_has_crop},
+      {"crop_coverage_status", sanitize_utf8(result.crop_coverage_status)},
       {"roi_hardening_run", result.roi_hardening_run},
       {"temporal_sampling", ocr_temporal_sampling_result_to_json(result.temporal_sampling)},
       {"evidence_crops", evidence_crop_result_to_json(
@@ -1040,6 +1091,15 @@ nlohmann::json ocr_generation_result_to_json(const OcrGenerationResult& result) 
               result.evidence_crop_count,
               result.evidence_crops_skipped,
               result.evidence_crops_skipped_reason,
+              result.crop_coverage_policy,
+              result.crop_effective_max_total_crops,
+              result.crop_effective_max_total_crop_bytes,
+              result.crops_skipped_by_count_cap,
+              result.crops_skipped_by_byte_cap,
+              result.crops_skipped_by_extraction,
+              result.crop_total_observations_requested,
+              result.every_observation_has_crop,
+              result.crop_coverage_status,
               {}})},
   };
 }

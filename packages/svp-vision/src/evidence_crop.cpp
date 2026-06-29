@@ -248,6 +248,15 @@ nlohmann::json evidence_crop_result_to_json(const EvidenceCropResult& result) {
       {"total_crop_bytes", result.total_crop_bytes},
       {"crops_skipped_count", result.crops_skipped_count},
       {"crops_skipped_reason", result.crops_skipped_reason},
+      {"crop_coverage_policy", result.crop_coverage_policy},
+      {"effective_max_total_crops", result.effective_max_total_crops},
+      {"effective_max_total_crop_bytes", result.effective_max_total_crop_bytes},
+      {"crops_skipped_by_count_cap", result.crops_skipped_by_count_cap},
+      {"crops_skipped_by_byte_cap", result.crops_skipped_by_byte_cap},
+      {"crops_skipped_by_extraction", result.crops_skipped_by_extraction},
+      {"total_observations_requested", result.total_observations_requested},
+      {"every_observation_has_crop", result.every_observation_has_crop},
+      {"crop_coverage_status", result.crop_coverage_status},
       {"crops", crops_arr},
   };
 }
@@ -257,6 +266,8 @@ EvidenceCropResult generate_evidence_crops_internal(
     const std::vector<CropGenerationInput>& inputs,
     const std::filesystem::path& staging_dir) {
   EvidenceCropResult result;
+  result.crop_coverage_policy = options.crop_coverage_policy;
+  result.total_observations_requested = static_cast<std::int64_t>(inputs.size());
 
   const std::filesystem::path crops_dir = staging_dir / "text" / "evidence_crops";
   std::filesystem::create_directories(crops_dir);
@@ -264,9 +275,27 @@ EvidenceCropResult generate_evidence_crops_internal(
   const std::string ext =
       (options.crop_image_format == "png") ? "png" : "jpg";
 
+  // Determine effective max_total_crops and byte budget based on coverage policy.
+  std::size_t effective_max_crops = options.max_total_crops;
+  std::int64_t effective_byte_budget = options.max_total_crop_bytes;
+  if (options.crop_coverage_policy == "one_per_observation") {
+    effective_max_crops = std::max(options.max_total_crops, inputs.size());
+    if (options.target_crop_bytes_per_observation > 0) {
+      const std::int64_t scaled_budget =
+          options.target_crop_bytes_per_observation *
+          static_cast<std::int64_t>(inputs.size());
+      effective_byte_budget = std::max(effective_byte_budget, scaled_budget);
+    }
+  }
+  result.effective_max_total_crops = effective_max_crops;
+  result.effective_max_total_crop_bytes = effective_byte_budget;
+
   std::int64_t total_bytes = 0;
   std::size_t total_crops = 0;
   std::size_t crops_skipped = 0;
+  std::int64_t skipped_by_count = 0;
+  std::int64_t skipped_by_bytes = 0;
+  std::int64_t skipped_by_extraction = 0;
 
   result.roi_ocr_results.resize(inputs.size());
 
@@ -284,17 +313,23 @@ EvidenceCropResult generate_evidence_crops_internal(
   const double scale_y = (ocr_h > 0) ?
       static_cast<double>(src_h) / static_cast<double>(ocr_h) : 1.0;
 
+  // Adaptive JPEG quality: start at configured quality, reduce if byte
+  // budget is tight to fit more crops.
+  int current_jpeg_quality = options.jpeg_quality;
+
   for (std::size_t i = 0; i < inputs.size(); ++i) {
     const auto& input = inputs[i];
 
-    if (total_crops >= options.max_total_crops) {
+    if (total_crops >= effective_max_crops) {
       crops_skipped++;
+      skipped_by_count++;
       result.roi_ocr_results[i].succeeded = false;
       continue;
     }
 
-    if (total_bytes >= options.max_total_crop_bytes) {
+    if (total_bytes >= effective_byte_budget) {
       crops_skipped++;
+      skipped_by_bytes++;
       result.roi_ocr_results[i].succeeded = false;
       continue;
     }
@@ -321,6 +356,7 @@ EvidenceCropResult generate_evidence_crops_internal(
 
     if (src_crop_width < 1 || src_crop_height < 1) {
       crops_skipped++;
+      skipped_by_extraction++;
       result.roi_ocr_results[i].succeeded = false;
       continue;
     }
@@ -336,29 +372,121 @@ EvidenceCropResult generate_evidence_crops_internal(
         src_crop_left, src_crop_top, src_crop_width, src_crop_height,
         src_crop_width, src_crop_height,
         options.crop_image_format,
-        options.jpeg_quality,
+        current_jpeg_quality,
         crop_path, extract_error);
 
     if (!crop_ok) {
       crops_skipped++;
+      skipped_by_extraction++;
       result.roi_ocr_results[i].succeeded = false;
       continue;
     }
 
     const std::int64_t crop_bytes = get_file_size(crop_path);
 
-    if (total_bytes + crop_bytes > options.max_total_crop_bytes) {
+    if (total_bytes + crop_bytes > effective_byte_budget) {
+      // If we haven't tried reducing quality yet and there are more
+      // observations to process, try re-extracting at lower quality.
+      if (current_jpeg_quality > options.min_jpeg_quality &&
+          i + 1 < inputs.size()) {
+        std::error_code rm_ec;
+        std::filesystem::remove(crop_path, rm_ec);
+        const int reduced_quality = std::max(
+            options.min_jpeg_quality,
+            current_jpeg_quality - 15);
+        if (reduced_quality < current_jpeg_quality) {
+          current_jpeg_quality = reduced_quality;
+          // Re-try this crop at lower quality
+          crop_ok = extract_crop_from_source(
+              options.ffmpeg_path, options.source_media_path,
+              input.source_timestamp_us,
+              src_crop_left, src_crop_top, src_crop_width, src_crop_height,
+              src_crop_width, src_crop_height,
+              options.crop_image_format,
+              current_jpeg_quality,
+              crop_path, extract_error);
+          if (crop_ok) {
+            const std::int64_t reduced_bytes = get_file_size(crop_path);
+            if (total_bytes + reduced_bytes <= effective_byte_budget) {
+              // Accept the reduced-quality crop
+              total_bytes += reduced_bytes;
+
+              std::string blake3_hash;
+              try {
+                blake3_hash = svp::models::blake3_hex_for_file(crop_path);
+              } catch (...) {
+                blake3_hash = "";
+              }
+
+              EvidenceCropRecord crop;
+              crop.crop_id = crop_id;
+              crop.text_region_id = input.text_region_id;
+              crop.text_observation_id = input.text_observation_id;
+              crop.source_frame_id = input.source_frame_id;
+              crop.source_timestamp_us = input.source_timestamp_us;
+              crop.original_bbox_left = input.bbox_left;
+              crop.original_bbox_top = input.bbox_top;
+              crop.original_bbox_right = input.bbox_right;
+              crop.original_bbox_bottom = input.bbox_bottom;
+              crop.crop_bbox_ocr_left = ocr_crop_left;
+              crop.crop_bbox_ocr_top = ocr_crop_top;
+              crop.crop_bbox_ocr_right = ocr_crop_left + ocr_crop_width;
+              crop.crop_bbox_ocr_bottom = ocr_crop_top + ocr_crop_height;
+              crop.crop_bbox_left = src_crop_left;
+              crop.crop_bbox_top = src_crop_top;
+              crop.crop_bbox_right = src_crop_left + src_crop_width;
+              crop.crop_bbox_bottom = src_crop_top + src_crop_height;
+              crop.ocr_frame_width = ocr_w;
+              crop.ocr_frame_height = ocr_h;
+              crop.source_frame_width = src_w;
+              crop.source_frame_height = src_h;
+              crop.canonical_raster_width = options.canonical_raster_width;
+              crop.canonical_raster_height = options.canonical_raster_height;
+              crop.bbox_coordinate_space = "ocr_frame";
+              crop.transform_scale_x = scale_x;
+              crop.transform_scale_y = scale_y;
+              crop.crop_extraction_method = "ffmpeg_crop_scaled_to_source";
+              crop.evidence_quality = "unverified";
+              crop.evidence_quality_reason = "Crop extracted but not mechanically verified to support linked observation (PP-OCR re-read not implemented for crops)";
+              crop.roi_ocr_text = "";
+              crop.roi_ocr_confidence = 0.0;
+              crop.roi_ocr_word_count = 0;
+              crop.frame_width = input.frame_width;
+              crop.frame_height = input.frame_height;
+              crop.crop_transform = "color";
+              crop.image_format = options.crop_image_format;
+              crop.crop_file_path = "text/evidence_crops/" + crop_filename;
+              crop.crop_size_bytes = reduced_bytes;
+              crop.blake3_hash = blake3_hash;
+
+              if (input.detection_count > 1) {
+                crop.selection_reason = "representative";
+              } else if (input.confidence >= 0.5) {
+                crop.selection_reason = "best_confidence";
+              } else {
+                crop.selection_reason = "first_detection";
+              }
+
+              result.crops.push_back(std::move(crop));
+              total_crops++;
+              continue;
+            }
+          }
+        }
+      }
+
       std::error_code rm_ec;
       std::filesystem::remove(crop_path, rm_ec);
       crops_skipped++;
+      skipped_by_bytes++;
       result.roi_ocr_results[i].succeeded = false;
       if (result.crops_skipped_reason.empty()) {
         result.crops_skipped_reason =
             "Total crop bytes cap reached (" +
-            std::to_string(options.max_total_crop_bytes) +
+            std::to_string(effective_byte_budget) +
             "); crop of " + std::to_string(crop_bytes) +
             " bytes would exceed remaining budget of " +
-            std::to_string(options.max_total_crop_bytes - total_bytes) +
+            std::to_string(effective_byte_budget - total_bytes) +
             " bytes";
       }
       continue;
@@ -432,16 +560,23 @@ EvidenceCropResult generate_evidence_crops_internal(
   result.crop_count = static_cast<std::int64_t>(result.crops.size());
   result.total_crop_bytes = total_bytes;
   result.crops_skipped_count = static_cast<std::int64_t>(crops_skipped);
+  result.crops_skipped_by_count_cap = skipped_by_count;
+  result.crops_skipped_by_byte_cap = skipped_by_bytes;
+  result.crops_skipped_by_extraction = skipped_by_extraction;
+  result.every_observation_has_crop =
+      (result.crops.size() == inputs.size()) && !inputs.empty();
+  result.crop_coverage_status =
+      result.every_observation_has_crop ? "full" : "partial";
 
   if (crops_skipped > 0 && result.crops_skipped_reason.empty()) {
-    if (total_crops >= options.max_total_crops) {
+    if (total_crops >= effective_max_crops) {
       result.crops_skipped_reason =
           "Total crop count cap reached (" +
-          std::to_string(options.max_total_crops) + ")";
-    } else if (total_bytes >= options.max_total_crop_bytes) {
+          std::to_string(effective_max_crops) + ")";
+    } else if (total_bytes >= effective_byte_budget) {
       result.crops_skipped_reason =
           "Total crop bytes cap reached (" +
-          std::to_string(options.max_total_crop_bytes) + ")";
+          std::to_string(effective_byte_budget) + ")";
     } else {
       result.crops_skipped_reason = "Extraction failures";
     }

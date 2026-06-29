@@ -47,6 +47,9 @@ void run_foundation_ocr_stage(BuildPipelineContext& context) {
   }
 
   ocr_opts.frame_catalog = &context.frame_catalog;
+  ocr_opts.generate_evidence_crops = true;
+  ocr_opts.crop_coverage_policy = "one_per_observation";
+  ocr_opts.crop_min_jpeg_quality = 50;
 
   svp::vision::OcrGenerationResult ocr_result =
       svp::vision::generate_ocr_observations(
