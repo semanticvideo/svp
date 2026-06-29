@@ -1217,16 +1217,56 @@ std::vector<MaskBlockInfo> collect_mask_infos(
   return infos;
 }
 
+struct DepthBlockInfo {
+  std::string depth_id;
+  std::string frame_id;
+  int width = 0;
+  int height = 0;
+  std::uint64_t block_offset = 0;
+  std::uint64_t block_length = 0;
+  std::uint64_t uncompressed_size = 0;
+  std::uint8_t compression = 0;
+  std::uint32_t dtype = 0;
+};
+
+// Pre-load regions to build a region_id -> pts_us lookup.
+std::map<std::string, std::int64_t> build_region_pts_lookup(
+    const std::filesystem::path& staging_dir) {
+  std::map<std::string, std::int64_t> lookup;
+  for (const auto& region : read_jsonl(staging_dir / "spatial" / "regions.jsonl")) {
+    const auto id = string_value(region, "id");
+    if (!id.empty()) {
+      lookup[id] = int_value_or_zero(region, "pts_us");
+    }
+  }
+  return lookup;
+}
+
+// Compute mean depth at masked pixels from a depth block.
+// Returns negative value on failure.
+double compute_mean_depth_at_mask(
+    const std::uint16_t* depth_pixels,
+    const std::vector<std::uint8_t>& mask_pixels,
+    int width, int height) {
+  double depth_sum = 0.0;
+  std::size_t pixel_count = 0;
+  const std::size_t total = static_cast<std::size_t>(width) * height;
+  for (std::size_t p = 0; p < total; ++p) {
+    if (mask_pixels[p]) {
+      depth_sum += static_cast<double>(depth_pixels[p]);
+      ++pixel_count;
+    }
+  }
+  if (pixel_count == 0) return -1.0;
+  return depth_sum / static_cast<double>(pixel_count);
+}
+
 void build_mask_occlusion_relationships(
     RelationshipBuilder& builder,
     const std::filesystem::path& staging_dir) {
   const auto mask_infos = collect_mask_infos(staging_dir);
   if (mask_infos.size() < 2) {
-    if (!mask_infos.empty()) {
-      ++builder.counts.skipped_no_mask_data;
-    } else {
-      ++builder.counts.skipped_no_mask_data;
-    }
+    ++builder.counts.skipped_no_mask_data;
     return;
   }
 
@@ -1234,6 +1274,41 @@ void build_mask_occlusion_relationships(
   if (!std::filesystem::exists(block_file_path)) {
     ++builder.counts.skipped_no_mask_data;
     return;
+  }
+
+  const auto region_pts = build_region_pts_lookup(staging_dir);
+
+  // Check if depth data is available for z-order determination.
+  const auto depth_records = read_jsonl(staging_dir / "spatial" / "depth.index.jsonl");
+  const auto depth_block_path = staging_dir / "spatial" / "depth.blocks.svpdz";
+  const bool depth_available = !depth_records.empty() &&
+      std::filesystem::exists(depth_block_path);
+
+  // Collect depth block infos by frame_id for z-order lookup.
+  std::map<std::string, DepthBlockInfo> depth_by_frame;
+  if (depth_available) {
+    for (const auto& rec : depth_records) {
+      DepthBlockInfo info;
+      info.depth_id = string_value(rec, "id");
+      info.frame_id = string_value(rec, "frame_id");
+      info.width = static_cast<int>(int_value_or_zero(rec, "width"));
+      info.height = static_cast<int>(int_value_or_zero(rec, "height"));
+      if (rec.contains("block_offset") && rec["block_offset"].is_number_unsigned()) {
+        info.block_offset = rec["block_offset"].get<std::uint64_t>();
+      }
+      if (rec.contains("block_length") && rec["block_length"].is_number_unsigned()) {
+        info.block_length = rec["block_length"].get<std::uint64_t>();
+      }
+      if (rec.contains("uncompressed_size") && rec["uncompressed_size"].is_number_unsigned()) {
+        info.uncompressed_size = rec["uncompressed_size"].get<std::uint64_t>();
+      }
+      if (rec.contains("dtype") && rec["dtype"].is_number_unsigned()) {
+        info.dtype = rec["dtype"].get<std::uint32_t>();
+      }
+      if (info.frame_id.empty() || info.width <= 0 || info.height <= 0) continue;
+      info.compression = 0x01;
+      depth_by_frame[info.frame_id] = std::move(info);
+    }
   }
 
   // Group masks by frame_id so we only compare co-occurring masks.
@@ -1269,11 +1344,24 @@ void build_mask_occlusion_relationships(
 
     if (!all_decoded || decoded_masks.size() < 2) continue;
 
-    // Compare each pair of masks in the same frame.
-    // Mask A occludes mask B if there are pixels where both A=1 and B=1,
-    // and A's region is in front (we can't determine z-order from masks
-    // alone, so we report bidirectional overlap as occludes/occluded_by
-    // based on which mask has more foreground pixels in the overlap region).
+    // Try to load depth data for this frame for z-order determination.
+    const auto* depth_info = depth_available ? &depth_by_frame[frame_id] : nullptr;
+    std::vector<std::uint16_t> depth_pixels;
+    bool depth_loaded = false;
+    if (depth_info && depth_info->frame_id == frame_id && depth_info->dtype == 2) {
+      auto depth_raw = read_and_decompress_block(
+          depth_block_path,
+          depth_info->block_offset, depth_info->block_length,
+          depth_info->uncompressed_size, depth_info->compression);
+      if (depth_raw.size() >= static_cast<std::size_t>(depth_info->width) * depth_info->height * 2) {
+        depth_pixels.assign(
+            reinterpret_cast<const std::uint16_t*>(depth_raw.data()),
+            reinterpret_cast<const std::uint16_t*>(depth_raw.data()) +
+                static_cast<std::size_t>(depth_info->width) * depth_info->height);
+        depth_loaded = true;
+      }
+    }
+
     for (std::size_t i = 0; i < frame_masks.size(); ++i) {
       for (std::size_t j = i + 1; j < frame_masks.size(); ++j) {
         const auto& info_a = frame_masks[i];
@@ -1281,76 +1369,74 @@ void build_mask_occlusion_relationships(
         const auto& mask_a = decoded_masks[i];
         const auto& mask_b = decoded_masks[j];
 
-        // Masks must have the same dimensions for pixel comparison.
         if (info_a.width != info_b.width || info_a.height != info_b.height) {
           continue;
         }
 
         std::size_t overlap_pixels = 0;
-        std::size_t a_only_pixels = 0;
-        std::size_t b_only_pixels = 0;
-
         const std::size_t total = static_cast<std::size_t>(info_a.width) * info_a.height;
         for (std::size_t p = 0; p < total; ++p) {
           if (mask_a[p] && mask_b[p]) {
             ++overlap_pixels;
-          } else if (mask_a[p]) {
-            ++a_only_pixels;
-          } else if (mask_b[p]) {
-            ++b_only_pixels;
           }
         }
 
         if (overlap_pixels == 0) continue;
 
-        // Look up pts_us from regions for region_id.
-        std::int64_t pts_us = 0;
-        for (const auto& region : read_jsonl(staging_dir / "spatial" / "regions.jsonl")) {
-          if (string_value(region, "id") == info_a.region_id) {
-            pts_us = int_value_or_zero(region, "pts_us");
-            break;
+        const auto pts_it = region_pts.find(info_a.region_id);
+        const std::int64_t pts_us = pts_it != region_pts.end() ? pts_it->second : 0;
+
+        if (depth_loaded &&
+            info_a.width == depth_info->width && info_a.height == depth_info->height) {
+          // Depth data available: use mean depth at masked regions to
+          // determine z-order. Lower depth = closer to camera = occluder.
+          const double mean_depth_a = compute_mean_depth_at_mask(
+              depth_pixels.data(), mask_a, info_a.width, info_a.height);
+          const double mean_depth_b = compute_mean_depth_at_mask(
+              depth_pixels.data(), mask_b, info_b.width, info_b.height);
+
+          if (mean_depth_a < 0 || mean_depth_b < 0) continue;
+
+          if (mean_depth_a < mean_depth_b) {
+            // A is closer to camera, A occludes B.
+            builder.add("rel_mask_occludes_", "occludes",
+                        info_a.region_id, info_b.region_id,
+                        pts_us, pts_us, 1.0,
+                        "spatial/masks.blocks.svpmz+spatial/depth.blocks.svpdz");
+            builder.add("rel_mask_occluded_by_", "occluded_by",
+                        info_b.region_id, info_a.region_id,
+                        pts_us, pts_us, 1.0,
+                        "spatial/masks.blocks.svpmz+spatial/depth.blocks.svpdz");
+            ++builder.counts.spatial_occludes;
+            ++builder.counts.spatial_occluded_by;
+          } else if (mean_depth_b < mean_depth_a) {
+            builder.add("rel_mask_occludes_", "occludes",
+                        info_b.region_id, info_a.region_id,
+                        pts_us, pts_us, 1.0,
+                        "spatial/masks.blocks.svpmz+spatial/depth.blocks.svpdz");
+            builder.add("rel_mask_occluded_by_", "occluded_by",
+                        info_a.region_id, info_b.region_id,
+                        pts_us, pts_us, 1.0,
+                        "spatial/masks.blocks.svpmz+spatial/depth.blocks.svpdz");
+            ++builder.counts.spatial_occludes;
+            ++builder.counts.spatial_occluded_by;
           }
+          // If equal depth, no occlusion relationship — just overlap.
+          // Fall through to emit mask_overlaps below for equal depth case.
+          if (mean_depth_a != mean_depth_b) continue;
         }
 
-        if (a_only_pixels >= b_only_pixels) {
-          builder.add("rel_mask_occludes_", "occludes",
-                      info_a.region_id, info_b.region_id,
-                      pts_us, pts_us, 1.0,
-                      "spatial/masks.blocks.svpmz");
-          builder.add("rel_mask_occluded_by_", "occluded_by",
-                      info_b.region_id, info_a.region_id,
-                      pts_us, pts_us, 1.0,
-                      "spatial/masks.blocks.svpmz");
-          ++builder.counts.spatial_occludes;
-          ++builder.counts.spatial_occluded_by;
-        } else {
-          builder.add("rel_mask_occludes_", "occludes",
-                      info_b.region_id, info_a.region_id,
-                      pts_us, pts_us, 1.0,
-                      "spatial/masks.blocks.svpmz");
-          builder.add("rel_mask_occluded_by_", "occluded_by",
-                      info_a.region_id, info_b.region_id,
-                      pts_us, pts_us, 1.0,
-                      "spatial/masks.blocks.svpmz");
-          ++builder.counts.spatial_occludes;
-          ++builder.counts.spatial_occluded_by;
-        }
+        // Without depth data (or equal depth), masks only prove pixel
+        // overlap, not z-order. Emit an honest mask_overlaps relationship.
+        builder.add("rel_mask_overlaps_", "mask_overlaps",
+                    info_a.region_id, info_b.region_id,
+                    pts_us, pts_us, 1.0,
+                    "spatial/masks.blocks.svpmz");
+        ++builder.counts.spatial_mask_overlaps;
       }
     }
   }
 }
-
-struct DepthBlockInfo {
-  std::string depth_id;
-  std::string frame_id;
-  int width = 0;
-  int height = 0;
-  std::uint64_t block_offset = 0;
-  std::uint64_t block_length = 0;
-  std::uint64_t uncompressed_size = 0;
-  std::uint8_t compression = 0;
-  std::uint32_t dtype = 0;
-};
 
 void build_depth_foreground_relationships(
     RelationshipBuilder& builder,
@@ -1739,6 +1825,7 @@ nlohmann::json make_relationship_processor_record(const RelationshipTypeCounts& 
           {"entity_exits_frame", counts.entity_exits_frame},
           {"spatial_occludes", counts.spatial_occludes},
           {"spatial_occluded_by", counts.spatial_occluded_by},
+          {"spatial_mask_overlaps", counts.spatial_mask_overlaps},
           {"spatial_foreground_relative_to", counts.spatial_foreground_relative_to},
           {"spatial_background_relative_to", counts.spatial_background_relative_to},
           {"spatial_moves_with", counts.spatial_moves_with},
@@ -1849,6 +1936,7 @@ nlohmann::json relationship_provenance_write_summary_to_json(
           {"entity_exits_frame", summary.type_counts.entity_exits_frame},
           {"spatial_occludes", summary.type_counts.spatial_occludes},
           {"spatial_occluded_by", summary.type_counts.spatial_occluded_by},
+          {"spatial_mask_overlaps", summary.type_counts.spatial_mask_overlaps},
           {"spatial_foreground_relative_to", summary.type_counts.spatial_foreground_relative_to},
           {"spatial_background_relative_to", summary.type_counts.spatial_background_relative_to},
           {"spatial_moves_with", summary.type_counts.spatial_moves_with},

@@ -34,6 +34,7 @@ if(BUILD_TESTING)
   target_link_libraries(svp-query-tests
     PRIVATE
       svp::query
+      SQLite3::SQLite3
   )
 
   add_test(NAME svp-query-tests COMMAND svp-query-tests)

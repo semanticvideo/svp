@@ -6,6 +6,8 @@
 
 #include <sqlite3.h>
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <array>
 #include <climits>
@@ -324,17 +326,23 @@ LoadedEdges load_edges_from_sqlite(
   // Write SQLite bytes to a temp file so we can open it with sqlite3_open.
   // sqlite3_deserialize would avoid the temp file but requires
   // SQLITE_ENABLE_DESERIALIZE which may not be enabled in all builds.
+  // Use PID to avoid concurrent queries clobbering each other's temp file.
   const auto temp_dir = std::filesystem::temp_directory_path();
-  const auto temp_db_path = temp_dir / "svp-query-traversal-tmp.sqlite";
+  const auto temp_db_path = temp_dir / ("svp-query-traversal-" +
+      std::to_string(::getpid()) + ".sqlite");
+  // Clean up any stale temp file from a previous run.
+  std::filesystem::remove(temp_db_path);
   {
     std::ofstream out(temp_db_path, std::ios::binary | std::ios::trunc);
     if (!out) {
       result.error_message = "failed to create temp sqlite file";
+      std::filesystem::remove(temp_db_path);
       return result;
     }
     out.write(sqlite_data.data(), static_cast<std::streamsize>(sqlite_data.size()));
     if (!out) {
       result.error_message = "failed to write temp sqlite file";
+      std::filesystem::remove(temp_db_path);
       return result;
     }
   }
@@ -1288,8 +1296,14 @@ GraphHealthDiagnostics compute_graph_health(
   // These categories require evidence that may not be present in the package.
   if (!health.mask_data_available) {
     health.skipped_categories.push_back({
-        "occludes/occluded_by",
+        "mask_overlaps/occludes/occluded_by",
         "mask pixel data not available (spatial/masks.index.jsonl is empty or missing)"
+    });
+  }
+  if (health.mask_data_available && !health.depth_data_available) {
+    health.skipped_categories.push_back({
+        "occludes/occluded_by (z-order)",
+        "depth pixel data not available — mask_overlaps emitted without z-order; occludes/occluded_by require depth evidence"
     });
   }
   if (!health.depth_data_available) {
