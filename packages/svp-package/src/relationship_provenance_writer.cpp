@@ -695,12 +695,11 @@ void build_spatial_region_pair_relationships(
         const double iou = bbox_iou(a.bbox, b.bbox);
         const std::int64_t ts = a.pts_us;
 
-        if (iou > 0.0) {
-          builder.add("rel_spatial_overlap_", "overlaps",
-                      a.id, b.id, ts, ts, 1.0,
-                      "spatial/regions.jsonl");
-          ++builder.counts.spatial_overlaps;
-        } else {
+        // Do NOT emit 'overlaps' from bbox IoU — spec §15 requires
+        // "overlaps: mask IoU exceeds threshold". Mask-based overlaps
+        // are emitted by build_mask_occlusion_relationships using real
+        // decoded RLE pixel evidence. Only emit 'near' from bbox here.
+        if (iou <= 0.0) {
           const double dist = bbox_center_distance(a.bbox, b.bbox);
           if (dist <= kNearThreshold) {
             builder.add("rel_spatial_near_", "near",
