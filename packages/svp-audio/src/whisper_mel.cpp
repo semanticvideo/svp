@@ -174,6 +174,13 @@ WhisperMelFeatures compute_whisper_mel_from_wav(const std::filesystem::path& wav
   PcmWavData wav = read_pcm_s16le_mono_wav(wav_path);
 
   std::vector<float> audio = std::move(wav.samples);
+
+  // Prepend a short silence so the encoder sees a speech onset boundary.
+  // Without this, chunks that start mid-speech produce low-confidence decoder
+  // logits that collapse to a near-empty timestamp segment.
+  constexpr int kLeadSilenceSamples = kSampleRate * 3 / 10;  // 0.3 seconds
+  audio.insert(audio.begin(), kLeadSilenceSamples, 0.0f);
+
   if (static_cast<int>(audio.size()) < kRequiredSamples) {
     audio.resize(kRequiredSamples, 0.0f);
   } else if (static_cast<int>(audio.size()) > kRequiredSamples) {
@@ -224,7 +231,12 @@ WhisperMelFeatures compute_whisper_mel_from_wav(const std::filesystem::path& wav
     }
   }
 
-  return {std::move(mel_data), kNMels, kNFrames};
+  WhisperMelFeatures result;
+  result.data = std::move(mel_data);
+  result.n_mels = kNMels;
+  result.n_frames = kNFrames;
+  result.lead_silence_us = static_cast<std::int64_t>(kLeadSilenceSamples) * 1000000LL / kSampleRate;
+  return result;
 }
 
 void write_u16_le(std::ostream& out, std::uint16_t v) {

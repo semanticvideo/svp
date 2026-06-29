@@ -279,7 +279,8 @@ std::vector<AsrWord> decode_tokens_to_words(const std::vector<int>& token_ids,
                                              const WhisperTokenTable& token_table,
                                              std::int64_t chunk_start_us,
                                              std::int64_t chunk_end_us,
-                                             const std::vector<double>& token_probs) {
+                                             const std::vector<double>& token_probs,
+                                             std::int64_t lead_silence_us) {
   constexpr int kTimestampBase = 50357;
   constexpr double kTimestampIntervalUs = 20000.0;
 
@@ -302,7 +303,9 @@ std::vector<AsrWord> decode_tokens_to_words(const std::vector<int>& token_ids,
 
     if (id >= kTimestampBase) {
       std::int64_t ts_us = static_cast<std::int64_t>(
-          static_cast<double>(id - kTimestampBase) * kTimestampIntervalUs) + chunk_start_us;
+          static_cast<double>(id - kTimestampBase) * kTimestampIntervalUs)
+          - lead_silence_us + chunk_start_us;
+      if (ts_us < chunk_start_us) ts_us = chunk_start_us;
 
       if (!in_segment) {
         current.start_us = ts_us;
@@ -476,7 +479,7 @@ WhisperInferenceResult run_whisper_internal(
 
     segment.words = decode_tokens_to_words(decoded_token_ids, token_table,
                                             chunk_start_us, chunk_end_us,
-                                            token_probs);
+                                            token_probs, mel.lead_silence_us);
     result.all_words = segment.words;
 
     result.segments.push_back(std::move(segment));
