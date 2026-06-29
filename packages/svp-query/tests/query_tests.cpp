@@ -3146,13 +3146,13 @@ void test_traversal_jsonl_sqlite_parity() {
   // Verify both packages have the expected entries.
   const auto layout_sqlite = svp::package::read_package_layout(pkg_with_sqlite);
   assert(layout_sqlite.has_value());
-  assert(layout_sqlite->value().has_entry("index/index.sqlite"));
-  assert(layout_sqlite->value().has_entry("relationships/relationships.jsonl"));
+  assert(layout_sqlite.value().has_entry("index/index.sqlite"));
+  assert(layout_sqlite.value().has_entry("relationships/relationships.jsonl"));
 
   const auto layout_jsonl = svp::package::read_package_layout(pkg_jsonl_only);
   assert(layout_jsonl.has_value());
-  assert(!layout_jsonl->value().has_entry("index/index.sqlite"));
-  assert(layout_jsonl->value().has_entry("relationships/relationships.jsonl"));
+  assert(!layout_jsonl.value().has_entry("index/index.sqlite"));
+  assert(layout_jsonl.value().has_entry("relationships/relationships.jsonl"));
 
   // Traverse both packages with the same options.
   svp::query::TraversalOptions opts;
