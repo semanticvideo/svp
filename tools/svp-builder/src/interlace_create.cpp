@@ -302,14 +302,6 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
   BuildPipeline pipeline;
   auto pipeline_result = pipeline.run(pipeline_opts);
 
-  if (pipeline_result.exit_code != 0) {
-    std::filesystem::remove_all(staging_dir);
-    return write_core_only_svpi(
-        options, binding_doc, result.blake3_state,
-        "blocked",
-        "SVPI sidecar created with core-only content (semantic pipeline failed, sections marked blocked)");
-  }
-
   if (std::filesystem::exists(temp_svp_path)) {
     std::filesystem::remove(temp_svp_path);
   }
@@ -318,11 +310,31 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
   }
 
   auto sections = detect_section_states(staging_dir);
+  bool has_semantic_content = false;
+  for (const auto& key : {"transcript", "timeline", "text", "colors",
+                          "entities", "spatial", "relationships", "embeddings"}) {
+    if (sections[key]["state"] == "generated") {
+      has_semantic_content = true;
+      break;
+    }
+  }
+
+  if (pipeline_result.exit_code != 0 && !has_semantic_content) {
+    std::filesystem::remove_all(staging_dir);
+    return write_core_only_svpi(
+        options, binding_doc, result.blake3_state,
+        "blocked",
+        "SVPI sidecar created with core-only content (semantic pipeline failed, sections marked blocked)");
+  }
+
+  std::string provenance_notes =
+      has_semantic_content
+          ? "SVPI sidecar created from source media with semantic pipeline output, without embedding primary media bytes"
+          : "SVPI sidecar created with core-only content (semantic pipeline produced no section output, sections marked not_generated)";
 
   return write_svpi_from_staging(
       options, binding_doc, result.blake3_state,
-      staging_dir, sections,
-      "SVPI sidecar created from source media with semantic pipeline output, without embedding primary media bytes");
+      staging_dir, sections, provenance_notes);
 }
 
 }  // namespace svp::builder
