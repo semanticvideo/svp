@@ -103,6 +103,7 @@ nlohmann::json to_json(const StreamMetadata& metadata) {
 
 nlohmann::json to_json(const ChunkProof& proof) {
   return {
+    {"algorithm", "blake3"},
     {"chunk_size_bytes", proof.chunk_size_bytes},
     {"chunk_count", proof.chunk_count},
     {"last_chunk_hash", proof.last_chunk_hash},
@@ -125,6 +126,12 @@ nlohmann::json to_json(const MediaIdentity& identity) {
 
   if (identity.chunk_proof.has_value()) {
     obj["chunk_hashes"] = to_json(identity.chunk_proof.value());
+  } else {
+    obj["chunk_hashes"] = {
+      {"algorithm", "blake3"},
+      {"chunk_size_bytes", 0},
+      {"chunk_count", 0},
+    };
   }
 
   return obj;

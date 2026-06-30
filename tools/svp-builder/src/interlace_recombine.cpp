@@ -229,18 +229,34 @@ InterlaceRecombineResult interlace_recombine(
     extract_zip_entry(archive.get(), name, dest);
   }
 
-  write_jsonl(staging_dir / "provenance" / "interlace_events.jsonl", {
-    nlohmann::json{
+  {
+    auto events_path = staging_dir / "provenance" / "interlace_events.jsonl";
+    std::vector<nlohmann::json> existing_events;
+    if (std::filesystem::exists(events_path)) {
+      std::ifstream in(events_path);
+      std::string line;
+      while (std::getline(in, line)) {
+        if (!line.empty()) {
+          auto j = nlohmann::json::parse(line, nullptr, false);
+          if (!j.is_discarded()) {
+            existing_events.push_back(std::move(j));
+          }
+        }
+      }
+    }
+    existing_events.push_back(nlohmann::json{
       {"event_id", "evt_interlace_recombine_000001"},
-      {"event_type", "interlace_recombine"},
-      {"timestamp_utc", make_utc_timestamp()},
+      {"event_type", "svp_recombined_from_svpi"},
+      {"event_utc", make_utc_timestamp()},
+      {"authority", "builder_derived"},
       {"source_svpi", svpi_path.filename().string()},
       {"source_media", media_path.filename().string()},
       {"binding_id", binding_doc.primary_binding_id},
       {"binding_verification", "verified"},
       {"output_svp", std::filesystem::path(options.output_path).filename().string()}
-    }
-  });
+    });
+    write_jsonl(events_path, existing_events);
+  }
 
   auto manifest_copy = svp_manifest;
   if (!svp::package::write_index_foundation(staging_dir, manifest_copy)) {
