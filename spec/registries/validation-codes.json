@@ -544,6 +544,16 @@
       "introduced": "svpi-0.1"
     },
     {
+      "code": "ERR_SVPI_FORBIDDEN_REPLAYABLE_MEDIA_DERIVATIVE",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "svpi-8.3",
+      "description": "SVPI must not contain replayable or intelligible source-derived audio, video, or muxed media derivatives such as extracted original audio streams or analysis WAV/FLAC files.",
+      "introduced": "svpi-0.1"
+    },
+    {
       "code": "ERR_SVPI_WRONG_MANIFEST_FORMAT",
       "severity": "error",
       "report_bucket": "errors",

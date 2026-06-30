@@ -58,6 +58,8 @@ The key words `MUST`, `MUST NOT`, `REQUIRED`, `SHOULD`, `SHOULD NOT`, `MAY`, and
 
 `primary media bytes` means the full bytes of the source media file. An SVPI v0.1 MUST NOT contain these as a replacement for the source media.
 
+`replayable source media derivative` means a source-derived audio, video, or muxed media file that can substantially replay the source presentation or any intelligible source stream. Examples include extracted original audio streams, transcoded audio streams, analysis WAV/FLAC files, proxy videos, and preview files with intelligible synchronized audio.
+
 `media binding` means the set of required and optional identity fields used to verify that a candidate media file is the source media for a given SVPI.
 
 `location hint` means a filename, relative path, absolute path, volume name, catalog key, or similar convenience value that may help software find the source media. A location hint is never proof of identity.
@@ -76,7 +78,7 @@ The key words `MUST`, `MUST NOT`, `REQUIRED`, `SHOULD`, `SHOULD NOT`, `MAY`, and
 
 `label` means an interpretation or classification. Labels are not the core observation model.
 
-`evidence artifact` means a compact derived artifact, such as an OCR crop, preview thumbnail, waveform summary, or diagnostic sample. Evidence artifacts MAY be stored in SVPI, but they do not replace source media.
+`evidence artifact` means a compact derived artifact, such as an OCR crop, still thumbnail, non-replayable waveform summary, or diagnostic sample. Evidence artifacts MAY be stored in SVPI, but they do not replace source media and MUST NOT be replayable source media derivatives.
 
 `authority` means the origin class for an observation, such as capture-time device observation, builder-derived observation, package-extracted observation, user-imported observation, or provider extension observation.
 
@@ -280,7 +282,7 @@ These entries are the minimum SVPI package spine. A conforming profile MAY also 
 
 `provenance/interlace_events.jsonl` MUST include at least one event describing the creation, extraction, or import of the SVPI artifact.
 
-### 8.3 Forbidden Primary Media
+### 8.3 Forbidden Primary And Replayable Media
 
 An SVPI v0.1 package MUST NOT contain the full source media as replacement primary media.
 
@@ -292,19 +294,32 @@ media/original/
 
 A validator MUST fail an SVPI if it appears to contain a complete primary media file under `media/original/`.
 
+An SVPI v0.1 package MUST NOT contain replayable source media derivatives. In particular, SVPI MUST NOT include extracted or transcoded source audio that can be decoded into intelligible playback. The following entries are forbidden in SVPI:
+
+```text
+media/audio/original_stream_*.flac
+media/audio/original_stream_*
+media/audio/analysis_mono_16k.wav
+```
+
+The prohibition applies by semantics, not only by filename. A writer MUST NOT evade it by placing replayable or intelligible source-derived audio under `media/derived/`, `evidence/`, `extensions/`, or any other path. A validator MUST fail an SVPI that contains source-derived audio/video/muxed media assets whose content can substantially replay the source or an intelligible source stream.
+
+SVPI may still carry non-replayable audio observations and proofs, including transcript records, word timestamps, speaker segments, audio absence records, waveform envelope summaries, stream metadata, stream hashes, chunk hashes, and provenance.
+
 ### 8.4 Derived Media And Evidence Artifacts
 
-An SVPI MAY contain small derived evidence artifacts, including OCR crops, diagnostic thumbnails, waveform summaries, low-resolution previews, or compact sampling records. These artifacts MUST be represented as derived evidence, not as source media.
+An SVPI MAY contain small derived evidence artifacts, including OCR crops, diagnostic still thumbnails, non-replayable waveform summaries, or compact sampling records. These artifacts MUST be represented as derived evidence, not as source media.
 
 Recommended locations are:
 
 ```text
 text/evidence_crops/
 evidence/
-media/derived/
 ```
 
-Evidence artifacts MUST include provenance and references back to source media time ranges or regions. Evidence artifacts MUST NOT be accepted as proof that the sidecar has the primary media bytes.
+Evidence artifacts MUST include provenance and references back to source media time ranges or regions. Evidence artifacts MUST NOT be accepted as proof that the sidecar has the primary media bytes. Evidence artifacts MUST NOT contain replayable or intelligible source-derived audio, video, or muxed media.
+
+`media/audio/waveform.jsonl` MAY be present only when it stores a compact envelope or feature summary that is not sufficient to reconstruct intelligible audio. It MUST NOT contain PCM samples, encoded audio payloads, spectrogram payloads intended for playback reconstruction, or enough dense signal data to serve as a replayable proxy for the source audio.
 
 ### 8.5 Index Files
 
@@ -884,13 +899,14 @@ Structure validation MUST check:
 9. Valid JSON and JSONL syntax for required records.
 10. No invalid paths, duplicate paths, or traversal paths.
 11. No forbidden primary media under `media/original/`.
-12. Manifest `format` equals `svpi`.
-13. Manifest version support.
-14. Media binding schema support.
-15. Section declarations match present files.
-16. Observation records conform to declared SVP-compatible schemas when validators for those sections are available.
-17. Index manifest matches index file and declared media binding.
-18. Unknown required extensions are reported as unsupported.
+12. No forbidden replayable source media derivatives, including extracted original audio streams or intelligible analysis audio.
+13. Manifest `format` equals `svpi`.
+14. Manifest version support.
+15. Media binding schema support.
+16. Section declarations match present files.
+17. Observation records conform to declared SVP-compatible schemas when validators for those sections are available.
+18. Index manifest matches index file and declared media binding.
+19. Unknown required extensions are reported as unsupported.
 
 ### 13.2 Binding Validation
 
