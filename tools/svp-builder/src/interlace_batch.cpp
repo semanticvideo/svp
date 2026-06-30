@@ -1,3 +1,4 @@
+#include "svp/builder/interlace.hpp"
 #include "svp/builder/interlace_batch.hpp"
 
 #include "svp/package/media_binding.hpp"
@@ -106,72 +107,33 @@ bool create_single_svpi(
     const std::string& ffmpeg_path,
     bool compute_full_blake3,
     const std::string& staging_dir_override,
+    const std::string& model_cache_dir,
+    const std::string& sherpa_lib_path,
+    bool core_only_diagnostic,
+    bool allow_fallback_diarization,
+    bool force_single_speaker,
     std::string& error_message,
     std::string& blake3_state_out) {
 
-  svp::package::MediaBindingFactoryOptions binding_opts;
-  binding_opts.ffprobe_path = ffprobe_path;
-  binding_opts.compute_full_blake3 = compute_full_blake3;
-  binding_opts.compute_chunk_proof = true;
+  svp::builder::InterlaceCreateOptions opts;
+  opts.source_path = source_path.string();
+  opts.output_path = svpi_output_path.string();
+  opts.ffprobe_path = ffprobe_path;
+  opts.ffmpeg_path = ffmpeg_path;
+  opts.compute_full_blake3 = compute_full_blake3;
+  opts.staging_dir = staging_dir_override;
+  opts.model_cache_dir = model_cache_dir;
+  opts.sherpa_lib_path = sherpa_lib_path;
+  opts.core_only_diagnostic = core_only_diagnostic;
+  opts.allow_fallback_diarization = allow_fallback_diarization;
+  opts.force_single_speaker = force_single_speaker;
 
-  auto binding_doc = svp::package::create_media_binding(source_path, binding_opts);
-  blake3_state_out = svp::package::to_string(
-      binding_doc.bindings[0].identity.blake3_state);
-
-  auto manifest = make_svpi_manifest(source_path.filename().string(), binding_doc);
-
-  std::filesystem::path staging_dir;
-  if (!staging_dir_override.empty()) {
-    staging_dir = staging_dir_override;
-  } else {
-    staging_dir = svpi_output_path.string() + ".staging";
-  }
-  std::filesystem::remove_all(staging_dir);
-  std::filesystem::create_directories(staging_dir);
-
-  std::filesystem::create_directories(staging_dir / "provenance");
-  std::filesystem::create_directories(staging_dir / "index");
-
-  write_jsonl(staging_dir / "provenance" / "processors.jsonl", {
-    nlohmann::json{
-      {"processor_id", "proc_interlace_create_000001"},
-      {"processor_name", "svp-builder-interlace"},
-      {"processor_version", "1.0.0"},
-      {"stage", "interlace-create"},
-      {"ran_utc", make_utc_timestamp()},
-      {"inputs", nlohmann::json::array({source_path.filename().string()})},
-      {"outputs", nlohmann::json::array({svpi_output_path.filename().string()})},
-      {"notes", "SVPI sidecar created from source media without embedding primary media bytes"}
-    }
-  });
-
-  write_jsonl(staging_dir / "provenance" / "interlace_events.jsonl", {
-    nlohmann::json{
-      {"event_id", "evt_interlace_create_000001"},
-      {"event_type", "svpi_created_from_media"},
-      {"event_utc", make_utc_timestamp()},
-      {"authority", "builder_derived"},
-      {"source_media", source_path.filename().string()},
-      {"binding_id", binding_doc.primary_binding_id},
-      {"binding_contract", std::string{svp::package::kSvpiBindingContract}},
-      {"blake3_state", blake3_state_out}
-    }
-  });
-
-  auto manifest_copy = manifest;
-  if (!svp::package::write_index_foundation(staging_dir, manifest_copy)) {
-    error_message = "failed to write index foundation";
+  auto result = svp::builder::interlace_create(opts);
+  blake3_state_out = result.blake3_state;
+  if (!result.success) {
+    error_message = result.error_message;
     return false;
   }
-
-  bool success = svp::package::write_svpi_package(
-      svpi_output_path, staging_dir, manifest, binding_doc);
-
-  if (!success) {
-    error_message = "failed to write SVPI package";
-    return false;
-  }
-
   return true;
 }
 
@@ -402,6 +364,10 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
                   media_path, file_result.svpi_path,
                   options.ffprobe_path, options.ffmpeg_path,
                   !options.no_blake3, options.staging_dir,
+                  options.model_cache_dir, options.sherpa_lib_path,
+                  options.core_only_diagnostic,
+                  options.allow_fallback_diarization,
+                  options.force_single_speaker,
                   create_err, blake3_state)) {
             file_result.status = BatchFileStatus::replaced;
             file_result.blake3_state = blake3_state;
@@ -424,6 +390,10 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
               media_path, file_result.svpi_path,
               options.ffprobe_path, options.ffmpeg_path,
               !options.no_blake3, options.staging_dir,
+              options.model_cache_dir, options.sherpa_lib_path,
+              options.core_only_diagnostic,
+              options.allow_fallback_diarization,
+              options.force_single_speaker,
               create_err, blake3_state)) {
         file_result.status = BatchFileStatus::created;
         file_result.blake3_state = blake3_state;

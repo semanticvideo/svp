@@ -30,10 +30,14 @@ struct BatchCreateOptions {
   std::string ffprobe_path = "ffprobe";
   std::string ffmpeg_path = "ffmpeg";
   std::string staging_dir;
+  std::string sherpa_lib_path;
   bool recursive = false;
   SidecarVisibility visibility = SidecarVisibility::visible;
   bool no_blake3 = false;
   bool replace_mismatched = false;
+  bool core_only_diagnostic = false;
+  bool allow_fallback_diarization = false;
+  bool force_single_speaker = false;
 };
 
 enum class BatchFileStatus {

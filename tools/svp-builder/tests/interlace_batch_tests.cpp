@@ -214,6 +214,7 @@ void test_batch_create_creates_sidecars() {
   opts.source_dir = dir.string();
   opts.ffprobe_path = "/usr/bin/true";
   opts.visibility = svp::builder::SidecarVisibility::visible;
+  opts.core_only_diagnostic = true;
 
   auto result = svp::builder::interlace_create_batch(opts);
   CHECK(result.created_count == 2);
@@ -236,6 +237,7 @@ void test_no_duplicate_on_rerun() {
   svp::builder::BatchCreateOptions opts;
   opts.source_dir = dir.string();
   opts.ffprobe_path = "/usr/bin/true";
+  opts.core_only_diagnostic = true;
 
   auto result1 = svp::builder::interlace_create_batch(opts);
   CHECK(result1.created_count == 1);
@@ -267,6 +269,7 @@ void test_existing_mismatched_not_overwritten() {
   opts.source_dir = dir.string();
   opts.ffprobe_path = "/usr/bin/true";
   opts.replace_mismatched = false;
+  opts.core_only_diagnostic = true;
 
   auto result = svp::builder::interlace_create_batch(opts);
   bool found_mismatch = false;
@@ -294,6 +297,7 @@ void test_batch_create_hidden_sidecars() {
   opts.source_dir = dir.string();
   opts.ffprobe_path = "/usr/bin/true";
   opts.visibility = svp::builder::SidecarVisibility::hidden;
+  opts.core_only_diagnostic = true;
 
   auto result = svp::builder::interlace_create_batch(opts);
   CHECK(result.created_count == 1);
@@ -316,6 +320,7 @@ void test_batch_create_managed_dir_sidecars() {
   opts.source_dir = dir.string();
   opts.ffprobe_path = "/usr/bin/true";
   opts.visibility = svp::builder::SidecarVisibility::managed_dir;
+  opts.core_only_diagnostic = true;
 
   auto result = svp::builder::interlace_create_batch(opts);
   CHECK(result.created_count == 1);
@@ -654,6 +659,7 @@ void test_batch_create_recursive() {
   opts.source_dir = dir.string();
   opts.ffprobe_path = "/usr/bin/true";
   opts.recursive = true;
+  opts.core_only_diagnostic = true;
 
   auto result = svp::builder::interlace_create_batch(opts);
   CHECK(result.created_count == 2);
@@ -677,6 +683,7 @@ void test_batch_create_skips_unsupported() {
   svp::builder::BatchCreateOptions opts;
   opts.source_dir = dir.string();
   opts.ffprobe_path = "/usr/bin/true";
+  opts.core_only_diagnostic = true;
 
   auto result = svp::builder::interlace_create_batch(opts);
   CHECK(result.created_count == 1);
@@ -698,6 +705,7 @@ void test_scan_discovers_hidden_sidecar() {
   opts.source_dir = dir.string();
   opts.ffprobe_path = "/usr/bin/true";
   opts.visibility = svp::builder::SidecarVisibility::hidden;
+  opts.core_only_diagnostic = true;
 
   auto create_result = svp::builder::interlace_create_batch(opts);
   CHECK(create_result.created_count == 1);
@@ -729,6 +737,7 @@ void test_complete_identity_batch() {
   create_opts.source_dir = dir.string();
   create_opts.ffprobe_path = "/usr/bin/true";
   create_opts.no_blake3 = true;
+  create_opts.core_only_diagnostic = true;
   auto create_result = svp::builder::interlace_create_batch(create_opts);
   CHECK(create_result.created_count == 2);
 
@@ -756,6 +765,7 @@ void test_complete_identity_rejects_same_size_wrong_content() {
   create_opts.source_dir = dir.string();
   create_opts.ffprobe_path = "/usr/bin/true";
   create_opts.no_blake3 = true;
+  create_opts.core_only_diagnostic = true;
   auto create_result = svp::builder::interlace_create_batch(create_opts);
   CHECK(create_result.created_count == 1);
 
@@ -801,6 +811,7 @@ void test_validate_batch_managed_dir() {
   create_opts.source_dir = dir.string();
   create_opts.ffprobe_path = "/usr/bin/true";
   create_opts.visibility = svp::builder::SidecarVisibility::managed_dir;
+  create_opts.core_only_diagnostic = true;
   auto create_result = svp::builder::interlace_create_batch(create_opts);
   CHECK(create_result.created_count == 1);
   CHECK(std::filesystem::exists(dir / ".svpi" / "clip.svpi"));
@@ -831,6 +842,7 @@ void test_complete_identity_batch_managed_dir() {
   create_opts.ffprobe_path = "/usr/bin/true";
   create_opts.visibility = svp::builder::SidecarVisibility::managed_dir;
   create_opts.no_blake3 = true;
+  create_opts.core_only_diagnostic = true;
   auto create_result = svp::builder::interlace_create_batch(create_opts);
   CHECK(create_result.created_count == 1);
 
@@ -860,6 +872,7 @@ void test_batch_create_out_dir_visible() {
   opts.out_dir = out.string();
   opts.ffprobe_path = "/usr/bin/true";
   opts.visibility = svp::builder::SidecarVisibility::visible;
+  opts.core_only_diagnostic = true;
 
   auto result = svp::builder::interlace_create_batch(opts);
   CHECK(result.created_count == 1);

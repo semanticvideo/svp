@@ -107,7 +107,11 @@ int main(int argc, char** argv) {
   std::string ic_ffprobe = "ffprobe";
   std::string ic_ffmpeg = "ffmpeg";
   std::string ic_probe_json;
+  std::string ic_sherpa_lib;
   bool ic_no_blake3 = false;
+  bool ic_core_only = false;
+  bool ic_allow_fallback = false;
+  bool ic_force_single = false;
 
   auto* ic_create = interlace->add_subcommand(
       "create", "Create a .svpi sidecar from source media");
@@ -118,7 +122,14 @@ int main(int argc, char** argv) {
   ic_create->add_option("--ffprobe", ic_ffprobe, "ffprobe executable path");
   ic_create->add_option("--ffmpeg", ic_ffmpeg, "ffmpeg executable path");
   ic_create->add_option("--probe-json", ic_probe_json, "Precomputed probe JSON");
+  ic_create->add_option("--sherpa-lib", ic_sherpa_lib, "Path to sherpa-onnx shared library");
   ic_create->add_flag("--no-blake3", ic_no_blake3, "Skip full-file BLAKE3 computation");
+  ic_create->add_flag("--core-only-diagnostic", ic_core_only,
+      "Emit core-only SVPI without running semantic pipeline (diagnostic mode)");
+  ic_create->add_flag("--allow-fallback-diarization", ic_allow_fallback,
+      "Allow fallback diarization when sherpa-onnx is unavailable");
+  ic_create->add_flag("--force-single-speaker", ic_force_single,
+      "Force single-speaker diarization");
 
   // interlace validate
   std::string iv_svpi;
@@ -181,11 +192,15 @@ int main(int argc, char** argv) {
   std::string cb_ffprobe = "ffprobe";
   std::string cb_ffmpeg = "ffmpeg";
   std::string cb_staging;
+  std::string cb_sherpa_lib;
   std::string cb_visibility = "visible";
   bool cb_recursive = false;
   bool cb_no_blake3 = false;
   bool cb_replace_mismatched = false;
   bool cb_json = false;
+  bool cb_core_only = false;
+  bool cb_allow_fallback = false;
+  bool cb_force_single = false;
 
   auto* cb_create_batch = interlace->add_subcommand(
       "create-batch", "Create .svpi sidecars for all supported videos in a directory");
@@ -195,6 +210,7 @@ int main(int argc, char** argv) {
   cb_create_batch->add_option("--ffprobe", cb_ffprobe, "ffprobe executable path");
   cb_create_batch->add_option("--ffmpeg", cb_ffmpeg, "ffmpeg executable path");
   cb_create_batch->add_option("--staging-dir", cb_staging, "Staging directory");
+  cb_create_batch->add_option("--sherpa-lib", cb_sherpa_lib, "Path to sherpa-onnx shared library");
   cb_create_batch->add_option("--sidecar-visibility", cb_visibility,
       "Sidecar naming: visible, hidden, managed-dir")
       ->check(CLI::IsMember({"visible", "hidden", "managed-dir"}));
@@ -203,6 +219,12 @@ int main(int argc, char** argv) {
   cb_create_batch->add_flag("--replace-mismatched", cb_replace_mismatched,
       "Replace existing sidecars that fail binding verification");
   cb_create_batch->add_flag("--json", cb_json, "Emit JSON summary report");
+  cb_create_batch->add_flag("--core-only-diagnostic", cb_core_only,
+      "Emit core-only SVPI without running semantic pipeline (diagnostic mode)");
+  cb_create_batch->add_flag("--allow-fallback-diarization", cb_allow_fallback,
+      "Allow fallback diarization when sherpa-onnx is unavailable");
+  cb_create_batch->add_flag("--force-single-speaker", cb_force_single,
+      "Force single-speaker diarization");
 
   // interlace scan
   std::string sc_source_dir;
@@ -274,7 +296,11 @@ int main(int argc, char** argv) {
       opts.ffprobe_path = ic_ffprobe;
       opts.ffmpeg_path = ic_ffmpeg;
       opts.probe_json_path = ic_probe_json;
+      opts.sherpa_lib_path = ic_sherpa_lib;
       opts.compute_full_blake3 = !ic_no_blake3;
+      opts.core_only_diagnostic = ic_core_only;
+      opts.allow_fallback_diarization = ic_allow_fallback;
+      opts.force_single_speaker = ic_force_single;
 
       auto result = svp::builder::interlace_create(opts);
       if (!result.success) {
@@ -456,10 +482,14 @@ int main(int argc, char** argv) {
       opts.ffprobe_path = cb_ffprobe;
       opts.ffmpeg_path = cb_ffmpeg;
       opts.staging_dir = cb_staging;
+      opts.sherpa_lib_path = cb_sherpa_lib;
       opts.recursive = cb_recursive;
       opts.visibility = *visibility;
       opts.no_blake3 = cb_no_blake3;
       opts.replace_mismatched = cb_replace_mismatched;
+      opts.core_only_diagnostic = cb_core_only;
+      opts.allow_fallback_diarization = cb_allow_fallback;
+      opts.force_single_speaker = cb_force_single;
 
       auto result = svp::builder::interlace_create_batch(opts);
 
