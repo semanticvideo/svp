@@ -182,11 +182,47 @@ void add_svpi_media_binding_findings(ValidationReport& report,
     return;
   }
 
-  const auto primary = binding.find("primary_source");
-  if (primary == binding.end() || !primary->is_object()) {
+  const auto primary_binding_id_it = binding.find("primary_binding_id");
+  if (primary_binding_id_it == binding.end() || !primary_binding_id_it->is_string()) {
     add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
                                      "/media_binding.json",
-                                     "media_binding.json must contain primary_source."));
+                                     "media_binding.json must contain primary_binding_id."));
+    return;
+  }
+
+  const auto bindings_it = binding.find("bindings");
+  if (bindings_it == binding.end() || !bindings_it->is_array()) {
+    add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                     "/media_binding.json",
+                                     "media_binding.json must contain a bindings array."));
+    return;
+  }
+
+  if (bindings_it->empty()) {
+    add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                     "/media_binding.json",
+                                     "bindings array must not be empty."));
+    return;
+  }
+
+  int primary_source_count = 0;
+  const nlohmann::json* primary = nullptr;
+  for (const auto& b : *bindings_it) {
+    if (!b.is_object()) {
+      continue;
+    }
+    const auto role_it = b.find("media_role");
+    if (role_it != b.end() && role_it->is_string() &&
+        role_it->get<std::string>() == "primary_source") {
+      ++primary_source_count;
+      primary = &b;
+    }
+  }
+
+  if (primary_source_count != 1) {
+    add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                     "/media_binding.json",
+                                     "bindings must contain exactly one binding with media_role=primary_source."));
     return;
   }
 
@@ -194,7 +230,7 @@ void add_svpi_media_binding_findings(ValidationReport& report,
   if (contract_it == primary->end() || !contract_it->is_string()) {
     add_finding(report, make_finding(registry, kCodeSvpiWrongBindingContract,
                                      "/media_binding.json",
-                                     "primary_source must contain binding_contract."));
+                                     "primary_source binding must contain binding_contract."));
   } else if (contract_it->get<std::string>() != std::string{svp::package::kSvpiBindingContract}) {
     add_finding(report, make_finding(registry, kCodeSvpiWrongBindingContract,
                                      "/media_binding.json",
@@ -205,20 +241,20 @@ void add_svpi_media_binding_findings(ValidationReport& report,
   if (identity == primary->end() || !identity->is_object()) {
     add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
                                      "/media_binding.json",
-                                     "primary_source must contain identity."));
+                                     "primary_source binding must contain identity."));
     return;
   }
 
-  if (!identity->contains("media_id") || !(*identity)["media_id"].is_string()) {
+  if (!primary->contains("media_id") || !(*primary)["media_id"].is_string()) {
     add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
                                      "/media_binding.json",
-                                     "identity must contain media_id."));
+                                     "binding must contain media_id."));
   }
 
-  if (!identity->contains("size_bytes")) {
+  if (!primary->contains("size_bytes")) {
     add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
                                      "/media_binding.json",
-                                     "identity must contain size_bytes."));
+                                     "binding must contain size_bytes."));
   }
 }
 
@@ -252,17 +288,46 @@ void add_svpi_provenance_findings(ValidationReport& report,
 
 void add_svpi_index_findings(ValidationReport& report,
                              const ValidationCodeRegistry& registry,
+                             const std::filesystem::path& path,
                              const svp::package::PackageLayout& layout) {
   if (!layout.has_entry("index/index.sqlite")) {
     add_finding(report, make_finding(registry, kCodeSvpiMissingIndex,
                                      "/index/index.sqlite",
                                      "index/index.sqlite is required for SVPI."));
+  } else {
+    const auto sqlite_data = svp::package::read_package_entry(path, "index/index.sqlite");
+    if (!sqlite_data.has_value()) {
+      add_finding(report, make_finding(registry, kCodeSvpiMissingIndex,
+                                       "/index/index.sqlite",
+                                       "index/index.sqlite is unreadable."));
+    } else {
+      const auto& data = sqlite_data.value();
+      if (data.size() < 16 || data.substr(0, 15) != "SQLite format 3") {
+        add_finding(report, make_finding(registry, kCodeSvpiMissingIndex,
+                                         "/index/index.sqlite",
+                                         "index/index.sqlite is not a valid SQLite database."));
+      }
+    }
   }
 
   if (!layout.has_entry("index/index_manifest.json")) {
     add_finding(report, make_finding(registry, kCodeSvpiMissingIndex,
                                      "/index/index_manifest.json",
                                      "index/index_manifest.json is required for SVPI."));
+  } else {
+    const auto manifest_data = svp::package::read_package_entry(path, "index/index_manifest.json");
+    if (!manifest_data.has_value()) {
+      add_finding(report, make_finding(registry, kCodeSvpiMissingIndex,
+                                       "/index/index_manifest.json",
+                                       "index/index_manifest.json is unreadable."));
+    } else {
+      const auto manifest = nlohmann::json::parse(manifest_data.value(), nullptr, false);
+      if (manifest.is_discarded() || !manifest.is_object()) {
+        add_finding(report, make_finding(registry, kCodeSvpiMissingIndex,
+                                         "/index/index_manifest.json",
+                                         "index/index_manifest.json is not valid JSON."));
+      }
+    }
   }
 }
 
@@ -316,7 +381,7 @@ ValidationReport validate_svpi_package(
   add_svpi_media_binding_findings(report, registry, probe.path, layout);
   add_svpi_forbidden_media_findings(report, registry, layout);
   add_svpi_provenance_findings(report, registry, layout);
-  add_svpi_index_findings(report, registry, layout);
+  add_svpi_index_findings(report, registry, probe.path, layout);
 
   recompute_status(report);
   return report;

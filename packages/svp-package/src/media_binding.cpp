@@ -112,51 +112,76 @@ nlohmann::json to_json(const ChunkProof& proof) {
 
 nlohmann::json to_json(const MediaIdentity& identity) {
   nlohmann::json obj = nlohmann::json::object();
-  obj["media_id"] = identity.media_id;
-  obj["size_bytes"] = identity.size_bytes;
-  obj["duration_us"] = identity.duration_us;
-  obj["container_format"] = identity.container_format;
-
-  nlohmann::json streams = nlohmann::json::array();
-  for (const auto& stream : identity.streams) {
-    streams.push_back(to_json(stream));
-  }
-  obj["streams"] = streams;
-
-  if (identity.chunk_proof.has_value()) {
-    obj["chunk_proof"] = to_json(identity.chunk_proof.value());
-  }
 
   nlohmann::json blake3 = nlohmann::json::object();
   blake3["state"] = to_string(identity.blake3_state);
   if (!identity.blake3_hash.empty()) {
-    blake3["hash"] = identity.blake3_hash;
+    blake3["value"] = identity.blake3_hash;
   }
   if (!identity.blake3_state_reason.empty()) {
     blake3["reason"] = identity.blake3_state_reason;
   }
   obj["full_file_blake3"] = blake3;
 
-  if (!identity.original_filename_hint.empty()) {
-    obj["original_filename_hint"] = identity.original_filename_hint;
+  if (identity.chunk_proof.has_value()) {
+    obj["chunk_hashes"] = to_json(identity.chunk_proof.value());
   }
 
   return obj;
 }
 
+nlohmann::json to_json(const LocationHints& hints) {
+  nlohmann::json obj = nlohmann::json::object();
+  if (!hints.original_filename.empty()) {
+    obj["original_filename"] = hints.original_filename;
+  }
+  if (!hints.relative_path.empty()) {
+    obj["relative_path"] = hints.relative_path;
+  }
+  if (!hints.original_absolute_path.empty()) {
+    obj["original_absolute_path"] = hints.original_absolute_path;
+  }
+  if (!hints.volume_hint.empty()) {
+    obj["volume_hint"] = hints.volume_hint;
+  }
+  if (!hints.last_seen_utc.empty()) {
+    obj["last_seen_utc"] = hints.last_seen_utc;
+  }
+  return obj;
+}
+
 nlohmann::json to_json(const MediaBinding& binding) {
-  return {
-    {"binding_id", binding.binding_id},
-    {"binding_contract", binding.binding_contract},
-    {"verification_state", binding.verification_state},
-    {"identity", to_json(binding.identity)},
-  };
+  nlohmann::json obj = nlohmann::json::object();
+  obj["binding_id"] = binding.binding_id;
+  obj["media_role"] = binding.media_role;
+  obj["media_id"] = binding.media_id;
+  obj["binding_contract"] = binding.binding_contract;
+  obj["verification_state"] = binding.verification_state;
+  obj["duration_us"] = binding.duration_us;
+  obj["size_bytes"] = binding.size_bytes;
+  obj["container_format"] = binding.container_format;
+
+  nlohmann::json streams = nlohmann::json::array();
+  for (const auto& stream : binding.streams) {
+    streams.push_back(to_json(stream));
+  }
+  obj["streams"] = streams;
+
+  obj["identity"] = to_json(binding.identity);
+  obj["location_hints"] = to_json(binding.location_hints);
+
+  return obj;
 }
 
 nlohmann::json to_json(const MediaBindingDocument& doc) {
+  nlohmann::json bindings = nlohmann::json::array();
+  for (const auto& binding : doc.bindings) {
+    bindings.push_back(to_json(binding));
+  }
   return {
     {"schema", doc.schema},
-    {"primary_source", to_json(doc.primary_source)},
+    {"primary_binding_id", doc.primary_binding_id},
+    {"bindings", bindings},
   };
 }
 

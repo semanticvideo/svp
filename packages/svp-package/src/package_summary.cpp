@@ -305,30 +305,48 @@ void populate_svpi(const std::filesystem::path& path,
     return;
   }
 
-  const auto primary = binding.find("primary_source");
-  if (primary != binding.end() && primary->is_object()) {
-    summary.svpi.media_binding.binding_id = object_scalar(*primary, "binding_id");
-    summary.svpi.media_binding.binding_contract =
-        object_scalar(*primary, "binding_contract");
-    summary.svpi.media_binding.verification_state =
-        object_scalar(*primary, "verification_state");
+  const auto bindings_it = binding.find("bindings");
+  if (bindings_it == binding.end() || !bindings_it->is_array() || bindings_it->empty()) {
+    return;
+  }
 
-    const auto identity = primary->find("identity");
-    if (identity != primary->end() && identity->is_object()) {
-      summary.svpi.media_binding.media_id = object_scalar(*identity, "media_id");
-      summary.svpi.media_binding.size_bytes = object_scalar(*identity, "size_bytes");
-      summary.svpi.media_binding.duration_us = object_scalar(*identity, "duration_us");
-      summary.svpi.media_binding.container_format =
-          object_scalar(*identity, "container_format");
-      summary.svpi.media_binding.original_filename_hint =
-          object_scalar(*identity, "original_filename_hint");
-
-      const auto blake3 = identity->find("full_file_blake3");
-      if (blake3 != identity->end() && blake3->is_object()) {
-        summary.svpi.media_binding.blake3_state = object_scalar(*blake3, "state");
-        summary.svpi.media_binding.blake3_hash = object_scalar(*blake3, "hash");
-      }
+  const nlohmann::json* primary = nullptr;
+  for (const auto& b : *bindings_it) {
+    if (b.is_object() && b.contains("media_role") &&
+        b["media_role"].is_string() &&
+        b["media_role"].get<std::string>() == "primary_source") {
+      primary = &b;
+      break;
     }
+  }
+  if (primary == nullptr) {
+    primary = &bindings_it->at(0);
+  }
+
+  summary.svpi.media_binding.binding_id = object_scalar(*primary, "binding_id");
+  summary.svpi.media_binding.binding_contract =
+      object_scalar(*primary, "binding_contract");
+  summary.svpi.media_binding.verification_state =
+      object_scalar(*primary, "verification_state");
+  summary.svpi.media_binding.media_id = object_scalar(*primary, "media_id");
+  summary.svpi.media_binding.size_bytes = object_scalar(*primary, "size_bytes");
+  summary.svpi.media_binding.duration_us = object_scalar(*primary, "duration_us");
+  summary.svpi.media_binding.container_format =
+      object_scalar(*primary, "container_format");
+
+  const auto identity = primary->find("identity");
+  if (identity != primary->end() && identity->is_object()) {
+    const auto blake3 = identity->find("full_file_blake3");
+    if (blake3 != identity->end() && blake3->is_object()) {
+      summary.svpi.media_binding.blake3_state = object_scalar(*blake3, "state");
+      summary.svpi.media_binding.blake3_hash = object_scalar(*blake3, "value");
+    }
+  }
+
+  const auto location_hints = primary->find("location_hints");
+  if (location_hints != primary->end() && location_hints->is_object()) {
+    summary.svpi.media_binding.original_filename_hint =
+        object_scalar(*location_hints, "original_filename");
   }
 }
 

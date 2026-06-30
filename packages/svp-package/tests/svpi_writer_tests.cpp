@@ -40,20 +40,23 @@ std::string make_utc_timestamp() {
 
 svp::package::MediaBindingDocument make_minimal_media_binding(
     const std::filesystem::path& source_path) {
-  svp::package::MediaBindingDocument doc;
-  doc.primary_source.binding_id = "mb_primary_000001";
-  doc.primary_source.verification_state = "pending";
-
-  auto& identity = doc.primary_source.identity;
-  identity.media_id = "media_src_000001";
-  identity.size_bytes = 0;
-  identity.duration_us = 0;
-  identity.container_format = "unknown";
-  identity.blake3_state = svp::package::Blake3State::pending;
-  identity.blake3_state_reason = "BLAKE3 not yet computed for Phase 1 proof";
+  svp::package::MediaBinding binding;
+  binding.binding_id = "mb_primary_000001";
+  binding.media_role = "primary_source";
+  binding.media_id = "media_src_000001";
+  binding.size_bytes = 0;
+  binding.duration_us = 0;
+  binding.container_format = "unknown";
+  binding.verification_state = "pending";
+  binding.identity.blake3_state = svp::package::Blake3State::pending;
+  binding.identity.blake3_state_reason = "BLAKE3 not yet computed for Phase 1 proof";
   if (!source_path.empty()) {
-    identity.original_filename_hint = source_path.filename().string();
+    binding.location_hints.original_filename = source_path.filename().string();
   }
+
+  svp::package::MediaBindingDocument doc;
+  doc.primary_binding_id = "mb_primary_000001";
+  doc.bindings.push_back(std::move(binding));
 
   return doc;
 }
@@ -520,11 +523,155 @@ void test_svpi_media_binding_json_structure() {
   auto binding = nlohmann::json::parse(binding_data.value());
 
   CHECK(binding["schema"] == "svpi.media_binding.v0.1");
-  CHECK(binding["primary_source"]["binding_id"] == "mb_primary_000001");
-  CHECK(binding["primary_source"]["binding_contract"] == "svpi.media_identity.v0.1");
-  CHECK(binding["primary_source"]["verification_state"] == "pending");
-  CHECK(binding["primary_source"]["identity"]["media_id"] == "media_src_000001");
-  CHECK(binding["primary_source"]["identity"]["full_file_blake3"]["state"] == "pending");
+  CHECK(binding["primary_binding_id"] == "mb_primary_000001");
+  CHECK(binding["bindings"].is_array());
+  CHECK(binding["bindings"].size() == 1);
+  const auto& b = binding["bindings"][0];
+  CHECK(b["binding_id"] == "mb_primary_000001");
+  CHECK(b["media_role"] == "primary_source");
+  CHECK(b["media_id"] == "media_src_000001");
+  CHECK(b["binding_contract"] == "svpi.media_identity.v0.1");
+  CHECK(b["verification_state"] == "pending");
+  CHECK(b["identity"]["full_file_blake3"]["state"] == "pending");
+  CHECK(b["location_hints"].is_object());
+
+  std::filesystem::remove_all(root);
+}
+
+void test_svpi_writer_fails_without_required_spine_files() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-svpi-missing-spine-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir);
+
+  // Only create provenance, skip index files
+  write_jsonl(staging_dir / "provenance" / "processors.jsonl", {
+    {{"id", "processor_0001"}, {"version", "0.1"}}
+  });
+  write_jsonl(staging_dir / "provenance" / "interlace_events.jsonl", {
+    {{"event_id", "event_0001"}, {"event_type", "svpi_created"},
+     {"utc", make_utc_timestamp()}}
+  });
+
+  const auto manifest = make_svpi_manifest("svpi_test_missing_spine");
+  auto binding = make_minimal_media_binding("");
+
+  const auto package_path = root / "output.svpi";
+  CHECK(!svp::package::write_svpi_package(package_path, staging_dir, manifest, binding));
+  CHECK(!std::filesystem::exists(package_path));
+
+  std::filesystem::remove_all(root);
+}
+
+void test_svpi_malformed_index_manifest_fails_validation() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-svpi-malformed-index-manifest-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto package_path = create_valid_svpi(root);
+
+  // Replace index/index_manifest.json with invalid JSON
+  const std::filesystem::path temp_path = root / "temp.svpi";
+  {
+    int err = 0;
+    zip_t* src = zip_open(package_path.string().c_str(), ZIP_RDONLY, &err);
+    CHECK(src != nullptr);
+    zip_t* dst = zip_open(temp_path.string().c_str(), ZIP_CREATE | ZIP_TRUNCATE, &err);
+    CHECK(dst != nullptr);
+
+    const auto count = zip_get_num_entries(src, 0);
+    for (zip_int64_t i = 0; i < count; ++i) {
+      zip_stat_t st;
+      zip_stat_init(&st);
+      zip_stat_index(src, static_cast<zip_uint64_t>(i), 0, &st);
+      const std::string name(st.name);
+      if (name == "index/index_manifest.json") {
+        std::string bad_content = "this is not valid json {{{";
+        zip_source_t* source =
+            zip_source_buffer(dst, bad_content.data(), bad_content.size(), 0);
+        CHECK(source != nullptr);
+        zip_file_add(dst, "index/index_manifest.json", source, ZIP_FL_OVERWRITE);
+        continue;
+      }
+      zip_source_t* source = zip_source_zip(dst, src, static_cast<zip_uint64_t>(i), 0, 0, -1);
+      CHECK(source != nullptr);
+      zip_file_add(dst, name.c_str(), source, ZIP_FL_OVERWRITE);
+    }
+
+    CHECK(zip_close(dst) == 0);
+    zip_discard(src);
+  }
+  std::filesystem::rename(temp_path, package_path);
+
+  auto opts = make_validator_options();
+  auto report = svp::validation::validate_svpi_package(package_path, opts);
+  CHECK(report.status == svp::validation::ValidationStatus::invalid);
+  bool found_index_error = false;
+  for (const auto& err : report.errors) {
+    if (err.code == std::string{svp::validation::kCodeSvpiMissingIndex}) {
+      found_index_error = true;
+    }
+  }
+  CHECK(found_index_error);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_svpi_invalid_index_sqlite_fails_validation() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-svpi-invalid-sqlite-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto package_path = create_valid_svpi(root);
+
+  // Replace index/index.sqlite with invalid content
+  const std::filesystem::path temp_path = root / "temp.svpi";
+  {
+    int err = 0;
+    zip_t* src = zip_open(package_path.string().c_str(), ZIP_RDONLY, &err);
+    CHECK(src != nullptr);
+    zip_t* dst = zip_open(temp_path.string().c_str(), ZIP_CREATE | ZIP_TRUNCATE, &err);
+    CHECK(dst != nullptr);
+
+    const auto count = zip_get_num_entries(src, 0);
+    for (zip_int64_t i = 0; i < count; ++i) {
+      zip_stat_t st;
+      zip_stat_init(&st);
+      zip_stat_index(src, static_cast<zip_uint64_t>(i), 0, &st);
+      const std::string name(st.name);
+      if (name == "index/index.sqlite") {
+        std::string bad_content = "not a sqlite database";
+        zip_source_t* source =
+            zip_source_buffer(dst, bad_content.data(), bad_content.size(), 0);
+        CHECK(source != nullptr);
+        zip_file_add(dst, "index/index.sqlite", source, ZIP_FL_OVERWRITE);
+        continue;
+      }
+      zip_source_t* source = zip_source_zip(dst, src, static_cast<zip_uint64_t>(i), 0, 0, -1);
+      CHECK(source != nullptr);
+      zip_file_add(dst, name.c_str(), source, ZIP_FL_OVERWRITE);
+    }
+
+    CHECK(zip_close(dst) == 0);
+    zip_discard(src);
+  }
+  std::filesystem::rename(temp_path, package_path);
+
+  auto opts = make_validator_options();
+  auto report = svp::validation::validate_svpi_package(package_path, opts);
+  CHECK(report.status == svp::validation::ValidationStatus::invalid);
+  bool found_index_error = false;
+  for (const auto& err : report.errors) {
+    if (err.code == std::string{svp::validation::kCodeSvpiMissingIndex}) {
+      found_index_error = true;
+    }
+  }
+  CHECK(found_index_error);
 
   std::filesystem::remove_all(root);
 }
@@ -543,6 +690,9 @@ int main() {
   test_svpi_inspector_recognizes_svpi();
   test_svpi_writer_excludes_media_original();
   test_svpi_media_binding_json_structure();
+  test_svpi_writer_fails_without_required_spine_files();
+  test_svpi_malformed_index_manifest_fails_validation();
+  test_svpi_invalid_index_sqlite_fails_validation();
 
   std::cout << "All SVPI tests passed.\n";
   return 0;

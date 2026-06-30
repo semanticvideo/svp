@@ -44,33 +44,44 @@ struct ChunkProof {
 };
 
 struct MediaIdentity {
-  std::string media_id;
-  std::int64_t size_bytes = 0;
-  std::int64_t duration_us = 0;
-  std::string container_format;
-  std::vector<StreamMetadata> streams;
-  std::optional<ChunkProof> chunk_proof;
   Blake3State blake3_state = Blake3State::pending;
   std::string blake3_hash;
   std::string blake3_state_reason;
-  std::string original_filename_hint;
+  std::optional<ChunkProof> chunk_proof;
+};
+
+struct LocationHints {
+  std::string original_filename;
+  std::string relative_path;
+  std::string original_absolute_path;
+  std::string volume_hint;
+  std::string last_seen_utc;
 };
 
 struct MediaBinding {
   std::string binding_id;
+  std::string media_role{"primary_source"};
+  std::string media_id;
   std::string binding_contract{std::string{kSvpiBindingContract}};
   std::string verification_state{"pending"};
+  std::int64_t duration_us = 0;
+  std::int64_t size_bytes = 0;
+  std::string container_format;
+  std::vector<StreamMetadata> streams;
   MediaIdentity identity;
+  LocationHints location_hints;
 };
 
 struct MediaBindingDocument {
   std::string schema{"svpi.media_binding.v0.1"};
-  MediaBinding primary_source;
+  std::string primary_binding_id;
+  std::vector<MediaBinding> bindings;
 };
 
 [[nodiscard]] nlohmann::json to_json(const StreamMetadata& metadata);
 [[nodiscard]] nlohmann::json to_json(const ChunkProof& proof);
 [[nodiscard]] nlohmann::json to_json(const MediaIdentity& identity);
+[[nodiscard]] nlohmann::json to_json(const LocationHints& hints);
 [[nodiscard]] nlohmann::json to_json(const MediaBinding& binding);
 [[nodiscard]] nlohmann::json to_json(const MediaBindingDocument& doc);
 

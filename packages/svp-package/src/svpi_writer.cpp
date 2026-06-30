@@ -118,7 +118,21 @@ bool write_svpi_package(
       }
     }
 
-    // 2. Gather entries from staging directory
+    // 2. Verify required spine files exist in staging
+    const std::vector<std::string> required_spine_files = {
+        "provenance/processors.jsonl",
+        "provenance/interlace_events.jsonl",
+        "index/index.sqlite",
+        "index/index_manifest.json",
+    };
+    for (const auto& rel : required_spine_files) {
+      const auto full_path = staging_dir / rel;
+      if (!std::filesystem::exists(full_path)) {
+        throw std::runtime_error("required spine file missing from staging: " + rel);
+      }
+    }
+
+    // 3. Gather entries from staging directory
     std::set<std::string> dirs_to_add;
     std::map<std::string, std::filesystem::path> files_to_add;
 
