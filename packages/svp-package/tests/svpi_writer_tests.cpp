@@ -676,6 +676,193 @@ void test_svpi_invalid_index_sqlite_fails_validation() {
   std::filesystem::remove_all(root);
 }
 
+void test_svpi_writer_excludes_forbidden_audio_derivatives() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-svpi-exclude-audio-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir);
+
+  write_text(staging_dir / "media" / "audio" / "original_stream_000.flac", "fake flac");
+  write_text(staging_dir / "media" / "audio" / "analysis_mono_16k.wav", "fake wav");
+  write_text(staging_dir / "media" / "audio" / "waveform.jsonl", "{\"amp\":0.1}\n");
+  write_text(staging_dir / "media" / "audio" / "audio_absence.json", "{\"absent\":false}");
+
+  write_jsonl(staging_dir / "provenance" / "processors.jsonl", {
+    {{"id", "processor_0001"}, {"version", "0.1"}}
+  });
+  write_jsonl(staging_dir / "provenance" / "interlace_events.jsonl", {
+    {{"event_id", "event_0001"}, {"event_type", "svpi_created"},
+     {"utc", make_utc_timestamp()}}
+  });
+
+  const auto manifest = make_svpi_manifest("svpi_test_exclude_audio");
+  CHECK(svp::package::write_index_foundation(staging_dir, manifest));
+  auto binding = make_minimal_media_binding("");
+
+  const auto package_path = root / "output.svpi";
+  CHECK(svp::package::write_svpi_package(package_path, staging_dir, manifest, binding));
+
+  auto layout_result = svp::package::read_package_layout(package_path);
+  CHECK(layout_result.has_value());
+  const auto& layout = layout_result.value();
+
+  CHECK(!layout.has_entry("media/audio/original_stream_000.flac"));
+  CHECK(!layout.has_entry("media/audio/analysis_mono_16k.wav"));
+  CHECK(layout.has_entry("media/audio/waveform.jsonl"));
+  CHECK(layout.has_entry("media/audio/audio_absence.json"));
+
+  std::filesystem::remove_all(root);
+}
+
+void test_svpi_writer_excludes_all_original_stream_patterns() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-svpi-exclude-stream-patterns-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir);
+
+  write_text(staging_dir / "media" / "audio" / "original_stream_001.flac", "fake flac 1");
+  write_text(staging_dir / "media" / "audio" / "original_stream_002.flac", "fake flac 2");
+
+  write_jsonl(staging_dir / "provenance" / "processors.jsonl", {
+    {{"id", "processor_0001"}, {"version", "0.1"}}
+  });
+  write_jsonl(staging_dir / "provenance" / "interlace_events.jsonl", {
+    {{"event_id", "event_0001"}, {"event_type", "svpi_created"},
+     {"utc", make_utc_timestamp()}}
+  });
+
+  const auto manifest = make_svpi_manifest("svpi_test_exclude_stream_patterns");
+  CHECK(svp::package::write_index_foundation(staging_dir, manifest));
+  auto binding = make_minimal_media_binding("");
+
+  const auto package_path = root / "output.svpi";
+  CHECK(svp::package::write_svpi_package(package_path, staging_dir, manifest, binding));
+
+  auto layout_result = svp::package::read_package_layout(package_path);
+  CHECK(layout_result.has_value());
+  const auto& layout = layout_result.value();
+
+  CHECK(!layout.has_entry("media/audio/original_stream_001.flac"));
+  CHECK(!layout.has_entry("media/audio/original_stream_002.flac"));
+
+  std::filesystem::remove_all(root);
+}
+
+void test_svpi_validator_rejects_original_stream_flac() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-svpi-reject-flac-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto package_path = create_valid_svpi(root);
+
+  {
+    int err = 0;
+    zip_t* archive = zip_open(package_path.string().c_str(), 0, &err);
+    CHECK(archive != nullptr);
+    add_file_to_zip(archive, "media/audio/original_stream_000.flac", "fake flac bytes");
+    CHECK(zip_close(archive) == 0);
+  }
+
+  auto opts = make_validator_options();
+  auto report = svp::validation::validate_svpi_package(package_path, opts);
+  CHECK(report.status == svp::validation::ValidationStatus::invalid);
+  bool found_derivative = false;
+  for (const auto& err : report.errors) {
+    if (err.code == std::string{svp::validation::kCodeSvpiForbiddenReplayableMediaDerivative}) {
+      found_derivative = true;
+    }
+  }
+  CHECK(found_derivative);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_svpi_validator_rejects_analysis_wav() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-svpi-reject-wav-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto package_path = create_valid_svpi(root);
+
+  {
+    int err = 0;
+    zip_t* archive = zip_open(package_path.string().c_str(), 0, &err);
+    CHECK(archive != nullptr);
+    add_file_to_zip(archive, "media/audio/analysis_mono_16k.wav", "fake wav bytes");
+    CHECK(zip_close(archive) == 0);
+  }
+
+  auto opts = make_validator_options();
+  auto report = svp::validation::validate_svpi_package(package_path, opts);
+  CHECK(report.status == svp::validation::ValidationStatus::invalid);
+  bool found_derivative = false;
+  for (const auto& err : report.errors) {
+    if (err.code == std::string{svp::validation::kCodeSvpiForbiddenReplayableMediaDerivative}) {
+      found_derivative = true;
+    }
+  }
+  CHECK(found_derivative);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_svpi_validator_allows_waveform_and_absence() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-svpi-allow-waveform-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir);
+
+  write_text(staging_dir / "media" / "audio" / "waveform.jsonl", "{\"amp\":0.1}\n");
+  write_text(staging_dir / "media" / "audio" / "audio_absence.json", "{\"absent\":false}");
+
+  write_jsonl(staging_dir / "provenance" / "processors.jsonl", {
+    {{"id", "processor_0001"}, {"version", "0.1"}}
+  });
+  write_jsonl(staging_dir / "provenance" / "interlace_events.jsonl", {
+    {{"event_id", "event_0001"}, {"event_type", "svpi_created"},
+     {"utc", make_utc_timestamp()}}
+  });
+
+  const auto manifest = make_svpi_manifest("svpi_test_allow_waveform");
+  CHECK(svp::package::write_index_foundation(staging_dir, manifest));
+  auto binding = make_minimal_media_binding("");
+
+  const auto package_path = root / "output.svpi";
+  CHECK(svp::package::write_svpi_package(package_path, staging_dir, manifest, binding));
+
+  auto layout_result = svp::package::read_package_layout(package_path);
+  CHECK(layout_result.has_value());
+  CHECK(layout_result.value().has_entry("media/audio/waveform.jsonl"));
+  CHECK(layout_result.value().has_entry("media/audio/audio_absence.json"));
+
+  auto opts = make_validator_options();
+  auto report = svp::validation::validate_svpi_package(package_path, opts);
+  CHECK(report.status == svp::validation::ValidationStatus::valid ||
+        report.status == svp::validation::ValidationStatus::valid_with_warnings);
+
+  bool found_forbidden = false;
+  for (const auto& err : report.errors) {
+    if (err.code == std::string{svp::validation::kCodeSvpiForbiddenReplayableMediaDerivative} ||
+        err.code == std::string{svp::validation::kCodeSvpiForbiddenPrimaryMedia}) {
+      found_forbidden = true;
+    }
+  }
+  CHECK(!found_forbidden);
+
+  std::filesystem::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
@@ -693,6 +880,11 @@ int main() {
   test_svpi_writer_fails_without_required_spine_files();
   test_svpi_malformed_index_manifest_fails_validation();
   test_svpi_invalid_index_sqlite_fails_validation();
+  test_svpi_writer_excludes_forbidden_audio_derivatives();
+  test_svpi_writer_excludes_all_original_stream_patterns();
+  test_svpi_validator_rejects_original_stream_flac();
+  test_svpi_validator_rejects_analysis_wav();
+  test_svpi_validator_allows_waveform_and_absence();
 
   std::cout << "All SVPI tests passed.\n";
   return 0;

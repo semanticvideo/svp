@@ -1,4 +1,5 @@
 #include "svp/package/svpi_writer.hpp"
+#include "svp/package/svpi_media_policy.hpp"
 
 #include <zip.h>
 
@@ -52,8 +53,7 @@ void add_ancestors(const std::string& entry_path, std::set<std::string>& dirs) {
   std::size_t slash = entry_path.find('/');
   while (slash != std::string::npos) {
     std::string prefix = entry_path.substr(0, slash + 1);
-    // Don't add media/original/ as a directory in SVPI
-    if (prefix == "media/original/") {
+    if (is_svpi_entry_forbidden(prefix)) {
       return;
     }
     dirs.insert(prefix);
@@ -165,9 +165,8 @@ bool write_svpi_package(
         std::string rel_str = rel_path.string();
         std::replace(rel_str.begin(), rel_str.end(), '\\', '/');
 
-        // Skip media/original/ entries — forbidden in SVPI
-        if (starts_with(rel_str, "media/original/") ||
-            rel_str == "media/original") {
+        // Skip forbidden entries — media/original/ and replayable audio derivatives
+        if (is_svpi_entry_forbidden(rel_str)) {
           continue;
         }
 

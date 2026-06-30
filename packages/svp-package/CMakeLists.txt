@@ -23,6 +23,7 @@ add_library(svp-package
   src/media_binding.cpp
   src/media_binding_factory.cpp
   src/svpi_writer.cpp
+  src/svpi_media_policy.cpp
 )
 
 add_library(svp::package ALIAS svp-package)
