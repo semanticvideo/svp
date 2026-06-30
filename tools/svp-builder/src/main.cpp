@@ -1,5 +1,6 @@
 #include "svp/builder/build_pipeline.hpp"
 #include "svp/builder/interlace.hpp"
+#include "svp/builder/interlace_batch.hpp"
 #include "svp/core/version.hpp"
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/validation/report_json.hpp"
@@ -172,6 +173,94 @@ int main(int argc, char** argv) {
   ir_recombine->add_option("--staging-dir", ir_staging, "Staging directory");
   ir_recombine->add_option("--ffprobe", ir_ffprobe, "ffprobe executable path");
   ir_recombine->add_option("--validation-codes", ir_codes, "Validation codes registry path");
+
+  // interlace create-batch
+  std::string cb_source_dir;
+  std::string cb_out_dir;
+  std::string cb_model_cache;
+  std::string cb_ffprobe = "ffprobe";
+  std::string cb_ffmpeg = "ffmpeg";
+  std::string cb_staging;
+  std::string cb_visibility = "visible";
+  bool cb_recursive = false;
+  bool cb_no_blake3 = false;
+  bool cb_replace_mismatched = false;
+  bool cb_json = false;
+
+  auto* cb_create_batch = interlace->add_subcommand(
+      "create-batch", "Create .svpi sidecars for all supported videos in a directory");
+  cb_create_batch->add_option("source-dir", cb_source_dir, "Directory containing source videos")->required();
+  cb_create_batch->add_option("--out-dir", cb_out_dir, "Output directory (default: same as source)");
+  cb_create_batch->add_option("--model-cache", cb_model_cache, "Model cache directory");
+  cb_create_batch->add_option("--ffprobe", cb_ffprobe, "ffprobe executable path");
+  cb_create_batch->add_option("--ffmpeg", cb_ffmpeg, "ffmpeg executable path");
+  cb_create_batch->add_option("--staging-dir", cb_staging, "Staging directory");
+  cb_create_batch->add_option("--sidecar-visibility", cb_visibility,
+      "Sidecar naming: visible, hidden, managed-dir")
+      ->check(CLI::IsMember({"visible", "hidden", "managed-dir"}));
+  cb_create_batch->add_flag("--recursive", cb_recursive, "Search subdirectories recursively");
+  cb_create_batch->add_flag("--no-blake3", cb_no_blake3, "Skip full-file BLAKE3 computation");
+  cb_create_batch->add_flag("--replace-mismatched", cb_replace_mismatched,
+      "Replace existing sidecars that fail binding verification");
+  cb_create_batch->add_flag("--json", cb_json, "Emit JSON summary report");
+
+  // interlace scan
+  std::string sc_source_dir;
+  bool sc_recursive = false;
+  bool sc_json = false;
+  std::string sc_ffprobe = "ffprobe";
+  std::string sc_codes = "spec/registries/validation-codes.json";
+
+  auto* sc_scan = interlace->add_subcommand(
+      "scan", "Discover media/SVPI pairs in a directory");
+  sc_scan->add_option("source-dir", sc_source_dir, "Directory to scan")->required();
+  sc_scan->add_flag("--recursive", sc_recursive, "Search subdirectories recursively");
+  sc_scan->add_flag("--json", sc_json, "Emit JSON output");
+  sc_scan->add_option("--ffprobe", sc_ffprobe, "ffprobe executable path");
+  sc_scan->add_option("--validation-codes", sc_codes, "Validation codes registry path");
+
+  // interlace validate-batch
+  std::string vb_source_dir;
+  bool vb_recursive = false;
+  bool vb_json = false;
+  std::string vb_ffprobe = "ffprobe";
+  std::string vb_codes = "spec/registries/validation-codes.json";
+
+  auto* vb_validate_batch = interlace->add_subcommand(
+      "validate-batch", "Validate all .svpi files in a directory");
+  vb_validate_batch->add_option("source-dir", vb_source_dir, "Directory to validate")->required();
+  vb_validate_batch->add_flag("--recursive", vb_recursive, "Search subdirectories recursively");
+  vb_validate_batch->add_flag("--json", vb_json, "Emit JSON output");
+  vb_validate_batch->add_option("--ffprobe", vb_ffprobe, "ffprobe executable path");
+  vb_validate_batch->add_option("--validation-codes", vb_codes, "Validation codes registry path");
+
+  // interlace complete-identity
+  std::string ci_svpi;
+  std::string ci_media;
+  std::string ci_ffprobe = "ffprobe";
+  std::string ci_codes = "spec/registries/validation-codes.json";
+
+  auto* ci_complete = interlace->add_subcommand(
+      "complete-identity", "Complete pending full-file BLAKE3 identity for an SVPI");
+  ci_complete->add_option("svpi", ci_svpi, "SVPI file path")->required();
+  ci_complete->add_option("--media", ci_media, "Source media file")->required();
+  ci_complete->add_option("--ffprobe", ci_ffprobe, "ffprobe executable path");
+  ci_complete->add_option("--validation-codes", ci_codes, "Validation codes registry path");
+
+  // interlace complete-identity-batch
+  std::string cib_source_dir;
+  bool cib_recursive = false;
+  bool cib_json = false;
+  std::string cib_ffprobe = "ffprobe";
+  std::string cib_codes = "spec/registries/validation-codes.json";
+
+  auto* cib_complete_batch = interlace->add_subcommand(
+      "complete-identity-batch", "Complete pending BLAKE3 identity for all SVPI files in a directory");
+  cib_complete_batch->add_option("source-dir", cib_source_dir, "Directory containing SVPI files")->required();
+  cib_complete_batch->add_flag("--recursive", cib_recursive, "Search subdirectories recursively");
+  cib_complete_batch->add_flag("--json", cib_json, "Emit JSON output");
+  cib_complete_batch->add_option("--ffprobe", cib_ffprobe, "ffprobe executable path");
+  cib_complete_batch->add_option("--validation-codes", cib_codes, "Validation codes registry path");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -351,6 +440,220 @@ int main(int argc, char** argv) {
         }
       }
       return 0;
+    }
+
+    if (*cb_create_batch) {
+      auto visibility = svp::builder::parse_sidecar_visibility(cb_visibility);
+      if (!visibility) {
+        std::cerr << "invalid sidecar visibility: " << cb_visibility << "\n";
+        return 2;
+      }
+
+      svp::builder::BatchCreateOptions opts;
+      opts.source_dir = cb_source_dir;
+      opts.out_dir = cb_out_dir;
+      opts.model_cache_dir = cb_model_cache;
+      opts.ffprobe_path = cb_ffprobe;
+      opts.ffmpeg_path = cb_ffmpeg;
+      opts.staging_dir = cb_staging;
+      opts.recursive = cb_recursive;
+      opts.visibility = *visibility;
+      opts.no_blake3 = cb_no_blake3;
+      opts.replace_mismatched = cb_replace_mismatched;
+
+      auto result = svp::builder::interlace_create_batch(opts);
+
+      if (cb_json) {
+        nlohmann::json j;
+        j["created"] = result.created_count;
+        j["already_valid"] = result.already_valid_count;
+        j["skipped"] = result.skipped_count;
+        j["binding_mismatch"] = result.mismatch_count;
+        j["failed"] = result.failed_count;
+        j["replaced"] = result.replaced_count;
+        nlohmann::json files = nlohmann::json::array();
+        for (const auto& r : result.results) {
+          nlohmann::json file;
+          file["source"] = r.source_filename;
+          file["status"] = std::string(svp::builder::batch_file_status_label(r.status));
+          if (!r.error_message.empty()) file["error"] = r.error_message;
+          if (!r.blake3_state.empty()) file["blake3_state"] = r.blake3_state;
+          files.push_back(std::move(file));
+        }
+        j["files"] = files;
+        std::cout << j.dump(2) << "\n";
+      } else {
+        std::cout << "Batch create summary:\n";
+        std::cout << "  created: " << result.created_count << "\n";
+        std::cout << "  already_valid: " << result.already_valid_count << "\n";
+        std::cout << "  binding_mismatch: " << result.mismatch_count << "\n";
+        std::cout << "  failed: " << result.failed_count << "\n";
+        std::cout << "  replaced: " << result.replaced_count << "\n";
+        for (const auto& r : result.results) {
+          std::cout << "  " << r.source_filename << ": "
+                    << svp::builder::batch_file_status_label(r.status) << "\n";
+          if (!r.error_message.empty()) {
+            std::cout << "    error: " << r.error_message << "\n";
+          }
+        }
+      }
+      return result.failed_count > 0 ? 1 : 0;
+    }
+
+    if (*sc_scan) {
+      svp::builder::ScanOptions opts;
+      opts.source_dir = sc_source_dir;
+      opts.recursive = sc_recursive;
+      opts.ffprobe_path = sc_ffprobe;
+      opts.validation_codes_path = sc_codes;
+
+      auto result = svp::builder::interlace_scan(opts);
+
+      if (sc_json) {
+        nlohmann::json j;
+        j["total_media"] = result.total_media;
+        j["total_svpi"] = result.total_svpi;
+        j["matched_pairs"] = result.matched_pairs;
+        j["verified_pairs"] = result.verified_pairs;
+        j["missing_sidecars"] = result.missing_sidecars;
+        j["unbound_sidecars"] = result.unbound_sidecars;
+        nlohmann::json pairs = nlohmann::json::array();
+        for (const auto& p : result.pairs) {
+          nlohmann::json pair;
+          pair["media"] = p.media_filename;
+          pair["svpi_found"] = p.svpi_found;
+          pair["binding_verified"] = p.binding_verified;
+          if (!p.binding_state_label.empty()) pair["binding_state"] = p.binding_state_label;
+          if (!p.svpi_error.empty()) pair["svpi_error"] = p.svpi_error;
+          pairs.push_back(std::move(pair));
+        }
+        j["pairs"] = pairs;
+        std::cout << j.dump(2) << "\n";
+      } else {
+        std::cout << "Scan results:\n";
+        std::cout << "  total media: " << result.total_media << "\n";
+        std::cout << "  total SVPI: " << result.total_svpi << "\n";
+        std::cout << "  matched pairs: " << result.matched_pairs << "\n";
+        std::cout << "  verified pairs: " << result.verified_pairs << "\n";
+        if (!result.missing_sidecars.empty()) {
+          std::cout << "  missing sidecars:\n";
+          for (const auto& m : result.missing_sidecars) {
+            std::cout << "    " << m << "\n";
+          }
+        }
+        if (!result.unbound_sidecars.empty()) {
+          std::cout << "  unbound sidecars:\n";
+          for (const auto& u : result.unbound_sidecars) {
+            std::cout << "    " << u << "\n";
+          }
+        }
+        for (const auto& p : result.pairs) {
+          std::cout << "  " << p.media_filename << " -> "
+                    << (p.svpi_found ? "paired" : "no sidecar")
+                    << (p.binding_verified ? " (verified)" : "")
+                    << "\n";
+        }
+      }
+      return 0;
+    }
+
+    if (*vb_validate_batch) {
+      svp::builder::BatchValidateOptions opts;
+      opts.source_dir = vb_source_dir;
+      opts.recursive = vb_recursive;
+      opts.ffprobe_path = vb_ffprobe;
+      opts.validation_codes_path = vb_codes;
+
+      auto result = svp::builder::interlace_validate_batch(opts);
+
+      if (vb_json) {
+        nlohmann::json j;
+        j["valid_bound"] = result.valid_bound_count;
+        j["valid_unbound"] = result.valid_unbound_count;
+        j["binding_mismatch"] = result.mismatch_count;
+        j["invalid_structure"] = result.invalid_structure_count;
+        j["failed"] = result.failed_count;
+        nlohmann::json files = nlohmann::json::array();
+        for (const auto& r : result.results) {
+          nlohmann::json file;
+          file["svpi"] = r.svpi_filename;
+          file["state"] = std::string(svp::builder::batch_validation_state_label(r.state));
+          if (!r.media_filename.empty()) file["media"] = r.media_filename;
+          if (!r.errors.empty()) file["errors"] = r.errors;
+          files.push_back(std::move(file));
+        }
+        j["files"] = files;
+        std::cout << j.dump(2) << "\n";
+      } else {
+        std::cout << "Batch validate summary:\n";
+        std::cout << "  valid_bound: " << result.valid_bound_count << "\n";
+        std::cout << "  valid_unbound: " << result.valid_unbound_count << "\n";
+        std::cout << "  binding_mismatch: " << result.mismatch_count << "\n";
+        std::cout << "  invalid_structure: " << result.invalid_structure_count << "\n";
+        std::cout << "  failed: " << result.failed_count << "\n";
+        for (const auto& r : result.results) {
+          std::cout << "  " << r.svpi_filename << ": "
+                    << svp::builder::batch_validation_state_label(r.state) << "\n";
+          for (const auto& err : r.errors) {
+            std::cout << "    " << err << "\n";
+          }
+        }
+      }
+      return (result.mismatch_count + result.invalid_structure_count + result.failed_count) > 0 ? 1 : 0;
+    }
+
+    if (*ci_complete) {
+      svp::builder::CompleteIdentityOptions opts;
+      opts.svpi_path = ci_svpi;
+      opts.media_path = ci_media;
+      opts.ffprobe_path = ci_ffprobe;
+      opts.validation_codes_path = ci_codes;
+
+      auto result = svp::builder::interlace_complete_identity(opts);
+      if (!result.success) {
+        std::cerr << "complete-identity failed: " << result.error_message << "\n";
+        return 1;
+      }
+      std::cout << "Identity completion for " << ci_svpi << "\n";
+      std::cout << "  previous state: " << result.previous_state << "\n";
+      std::cout << "  new state: " << result.new_state << "\n";
+      if (!result.blake3_hash.empty()) {
+        std::cout << "  blake3 hash: " << result.blake3_hash << "\n";
+      }
+      std::cout << "  rebuilt: " << (result.rebuilt ? "yes" : "no") << "\n";
+      return 0;
+    }
+
+    if (*cib_complete_batch) {
+      svp::builder::CompleteIdentityBatchOptions opts;
+      opts.source_dir = cib_source_dir;
+      opts.recursive = cib_recursive;
+      opts.ffprobe_path = cib_ffprobe;
+      opts.validation_codes_path = cib_codes;
+
+      auto result = svp::builder::interlace_complete_identity_batch(opts);
+
+      if (cib_json) {
+        nlohmann::json j;
+        j["completed"] = result.completed_count;
+        j["already_present"] = result.already_present_count;
+        j["failed"] = result.failed_count;
+        std::cout << j.dump(2) << "\n";
+      } else {
+        std::cout << "Complete-identity batch summary:\n";
+        std::cout << "  completed: " << result.completed_count << "\n";
+        std::cout << "  already_present: " << result.already_present_count << "\n";
+        std::cout << "  failed: " << result.failed_count << "\n";
+        for (size_t i = 0; i < result.results.size(); ++i) {
+          std::cout << "  " << result.svpi_filenames[i] << ": "
+                    << (result.results[i].success ? "ok" : "failed");
+          if (!result.results[i].error_message.empty()) {
+            std::cout << " - " << result.results[i].error_message;
+          }
+          std::cout << "\n";
+        }
+      }
+      return result.failed_count > 0 ? 1 : 0;
     }
 
     if (*probe) {

@@ -17,6 +17,7 @@ add_library(svp-builder-lib
   src/interlace_inspect.cpp
   src/interlace_extract.cpp
   src/interlace_recombine.cpp
+  src/interlace_batch.cpp
 )
 
 add_library(svp::builder ALIAS svp-builder-lib)
@@ -66,8 +67,13 @@ if(BUILD_TESTING)
     tests/interlace_tests.cpp
   )
 
+  add_executable(svp-interlace-batch-tests
+    tests/interlace_batch_tests.cpp
+  )
+
   target_compile_features(svp-builder-pipeline-tests PRIVATE cxx_std_20)
   target_compile_features(svp-interlace-tests PRIVATE cxx_std_20)
+  target_compile_features(svp-interlace-batch-tests PRIVATE cxx_std_20)
 
   target_link_libraries(svp-builder-pipeline-tests
     PRIVATE
@@ -82,7 +88,18 @@ if(BUILD_TESTING)
       libzip::zip
   )
 
+  target_link_libraries(svp-interlace-batch-tests
+    PRIVATE
+      svp::builder
+      svp::package
+      svp::validation
+      svp::query
+      libzip::zip
+  )
+
   add_test(NAME svp-builder-pipeline-tests COMMAND svp-builder-pipeline-tests)
   add_test(NAME svp-interlace-tests COMMAND svp-interlace-tests
+           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  add_test(NAME svp-interlace-batch-tests COMMAND svp-interlace-batch-tests
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endif()

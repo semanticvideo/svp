@@ -1016,19 +1016,19 @@ void print_context(const std::filesystem::path& package_path,
 }  // namespace query_cmd
 
 int main(int argc, char** argv) {
-  CLI::App app{"SVP package inspector"};
+  CLI::App app{"SVP/SVPI package inspector"};
   app.set_version_flag("--version",
                        svp::core::tool_version_label("svp-inspector"));
   app.require_subcommand(0, 1);
 
   std::string package_path;
-  auto* inspect = app.add_subcommand("inspect", "Print a concise SVP package summary");
-  inspect->add_option("package", package_path, "Path to a .svp package")->required();
+  auto* inspect = app.add_subcommand("inspect", "Print a concise SVP/SVPI package summary");
+  inspect->add_option("package", package_path, "Path to a .svp or .svpi package")->required();
 
   std::string dump_package_path;
   std::string dump_section = "manifest";
   auto* dump = app.add_subcommand("dump", "Print manifest or index manifest JSON");
-  dump->add_option("package", dump_package_path, "Path to a .svp package")->required();
+  dump->add_option("package", dump_package_path, "Path to a .svp or .svpi package")->required();
   dump->add_option("--section", dump_section,
                    "Section to dump: manifest, index_manifest, or all")
       ->check(CLI::IsMember({"manifest", "index_manifest", "all"}));
@@ -1040,8 +1040,8 @@ int main(int argc, char** argv) {
   double query_min_coverage = -1.0;
   std::size_t query_limit = 100;
   bool query_json = false;
-  auto* query = app.add_subcommand("query", "Query SVP package semantic layers");
-  query->add_option("package", query_package_path, "Path to a .svp package")->required();
+  auto* query = app.add_subcommand("query", "Query SVP/SVPI package semantic layers");
+  query->add_option("package", query_package_path, "Path to a .svp or .svpi package")->required();
   query->add_option("--mode", query_mode,
                     "Query mode: layers, transcript, words, speakers, ocr, colors, validation, relationships, traverse, path, context, health")
       ->check(CLI::IsMember({"layers", "transcript", "words", "speakers",
