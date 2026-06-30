@@ -86,6 +86,29 @@ struct ValidationReportSummary {
   std::string authenticity_status;
 };
 
+struct MediaBindingSummary {
+  PackageJsonFileSummary file;
+  std::string binding_id;
+  std::string binding_contract;
+  std::string verification_state;
+  std::string media_id;
+  std::string size_bytes;
+  std::string duration_us;
+  std::string container_format;
+  std::string blake3_state;
+  std::string blake3_hash;
+  std::string original_filename_hint;
+};
+
+struct SvpiSummary {
+  bool is_svpi = false;
+  std::string svpi_version;
+  std::string media_binding_ref;
+  std::string primary_media_binding_id;
+  MediaBindingSummary media_binding;
+  bool has_media_original = false;
+};
+
 struct PackageSummary {
   PackageProbe probe;
   bool layout_readable = false;
@@ -99,6 +122,7 @@ struct PackageSummary {
   ColorSummary colors;
   IndexManifestSummary index;
   ValidationReportSummary validation_report;
+  SvpiSummary svpi;
 };
 
 [[nodiscard]] PackageSummary read_package_summary(const std::filesystem::path& path);

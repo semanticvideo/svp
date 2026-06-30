@@ -80,6 +80,15 @@ inline constexpr std::string_view kTempCodeBlockPayloadDecodeFailed =
 inline constexpr std::string_view kTempCodeMissingEmbeddingsEntry =
     "X_VALIDATOR_MISSING_EMBEDDINGS_ENTRY";
 
+inline constexpr std::string_view kCodeSvpiWrongMimetype = "ERR_SVPI_WRONG_MIMETYPE";
+inline constexpr std::string_view kCodeSvpiMissingMediaBinding = "ERR_SVPI_MISSING_MEDIA_BINDING";
+inline constexpr std::string_view kCodeSvpiForbiddenPrimaryMedia = "ERR_SVPI_FORBIDDEN_PRIMARY_MEDIA";
+inline constexpr std::string_view kCodeSvpiWrongManifestFormat = "ERR_SVPI_WRONG_MANIFEST_FORMAT";
+inline constexpr std::string_view kCodeSvpiMissingProvenance = "ERR_SVPI_MISSING_PROVENANCE";
+inline constexpr std::string_view kCodeSvpiMissingIndex = "ERR_SVPI_MISSING_INDEX";
+inline constexpr std::string_view kCodeSvpiWrongBindingContract = "ERR_SVPI_WRONG_BINDING_CONTRACT";
+inline constexpr std::string_view kCodeSvpiLegacyManifestName = "ERR_SVPI_LEGACY_MANIFEST_NAME";
+
 struct ValidationCode {
   std::string code;
   FindingSeverity severity = FindingSeverity::error;

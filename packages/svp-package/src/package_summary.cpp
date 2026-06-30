@@ -259,6 +259,79 @@ void populate_validation_report(const std::filesystem::path& path,
       object_scalar(validation_report, "authenticity_status");
 }
 
+void populate_svpi(const std::filesystem::path& path,
+                   const PackageLayout& layout,
+                   PackageSummary& summary) {
+  summary.svpi.is_svpi = summary.probe.has_svpi_extension;
+
+  // Check for media/original/ entries
+  for (const auto& entry : layout.entries) {
+    if (entry.rfind("media/original/", 0) == 0) {
+      summary.svpi.has_media_original = true;
+      break;
+    }
+  }
+
+  if (!summary.manifest.file.parsed) {
+    return;
+  }
+
+  // Re-read manifest to check for SVPI format field
+  const auto manifest_result = read_package_entry(path, "manifest.json");
+  if (!manifest_result.has_value()) {
+    return;
+  }
+  const auto manifest = nlohmann::json::parse(manifest_result.value(), nullptr, false);
+  if (manifest.is_discarded() || !manifest.is_object()) {
+    return;
+  }
+
+  const auto format_it = manifest.find("format");
+  if (format_it != manifest.end() && format_it->is_string()) {
+    if (format_it->get<std::string>() == "svpi") {
+      summary.svpi.is_svpi = true;
+    }
+  }
+
+  summary.svpi.svpi_version = object_scalar(manifest, "svpi_version");
+  summary.svpi.media_binding_ref = object_scalar(manifest, "media_binding_ref");
+  summary.svpi.primary_media_binding_id =
+      object_scalar(manifest, "primary_media_binding_id");
+
+  // Populate media binding summary
+  const auto binding = read_json_entry(
+      path, layout, "media_binding.json", summary.svpi.media_binding.file);
+  if (!summary.svpi.media_binding.file.parsed) {
+    return;
+  }
+
+  const auto primary = binding.find("primary_source");
+  if (primary != binding.end() && primary->is_object()) {
+    summary.svpi.media_binding.binding_id = object_scalar(*primary, "binding_id");
+    summary.svpi.media_binding.binding_contract =
+        object_scalar(*primary, "binding_contract");
+    summary.svpi.media_binding.verification_state =
+        object_scalar(*primary, "verification_state");
+
+    const auto identity = primary->find("identity");
+    if (identity != primary->end() && identity->is_object()) {
+      summary.svpi.media_binding.media_id = object_scalar(*identity, "media_id");
+      summary.svpi.media_binding.size_bytes = object_scalar(*identity, "size_bytes");
+      summary.svpi.media_binding.duration_us = object_scalar(*identity, "duration_us");
+      summary.svpi.media_binding.container_format =
+          object_scalar(*identity, "container_format");
+      summary.svpi.media_binding.original_filename_hint =
+          object_scalar(*identity, "original_filename_hint");
+
+      const auto blake3 = identity->find("full_file_blake3");
+      if (blake3 != identity->end() && blake3->is_object()) {
+        summary.svpi.media_binding.blake3_state = object_scalar(*blake3, "state");
+        summary.svpi.media_binding.blake3_hash = object_scalar(*blake3, "hash");
+      }
+    }
+  }
+}
+
 }  // namespace
 
 PackageSummary read_package_summary(const std::filesystem::path& path) {
@@ -283,6 +356,7 @@ PackageSummary read_package_summary(const std::filesystem::path& path) {
   populate_colors(path, layout, summary);
   populate_index(path, layout, summary);
   populate_validation_report(path, layout, summary);
+  populate_svpi(path, layout, summary);
 
   return summary;
 }
