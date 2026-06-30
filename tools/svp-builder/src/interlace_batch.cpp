@@ -249,6 +249,14 @@ std::vector<std::filesystem::path> discover_svpi_files(
         collect(entry.path());
       }
     }
+    auto managed = dir / ".svpi";
+    if (std::filesystem::exists(managed) && std::filesystem::is_directory(managed)) {
+      for (const auto& entry : std::filesystem::directory_iterator(managed)) {
+        if (entry.is_regular_file()) {
+          collect(entry.path());
+        }
+      }
+    }
   }
   std::sort(result.begin(), result.end());
   return result;
@@ -269,6 +277,23 @@ std::filesystem::path find_candidate_sidecar(
     }
   }
   return {};
+}
+
+std::filesystem::path media_search_dir_for_svpi(
+    const std::filesystem::path& svpi_path) {
+  auto parent = svpi_path.parent_path();
+  if (parent.filename() == ".svpi") {
+    return parent.parent_path();
+  }
+  return parent;
+}
+
+std::string sidecar_stem(const std::filesystem::path& svpi_path) {
+  std::string stem = svpi_path.stem().string();
+  if (!stem.empty() && stem[0] == '.') {
+    stem = stem.substr(1);
+  }
+  return stem;
 }
 
 }  // namespace
@@ -354,10 +379,10 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
     file_result.source_relative_path =
         std::filesystem::relative(media_path, source_dir).string();
 
+    const bool use_out_dir =
+        !options.out_dir.empty() && options.out_dir != "same-as-source";
     const auto local_out_dir =
-        options.visibility == SidecarVisibility::managed_dir
-            ? out_dir
-            : media_path.parent_path();
+        use_out_dir ? out_dir : media_path.parent_path();
 
     file_result.svpi_path = resolve_sidecar_path(
         media_path, options.visibility, local_out_dir);
@@ -536,11 +561,8 @@ BatchValidateResult interlace_validate_batch(const BatchValidateOptions& options
 
     auto binding_doc = svp::package::parse_media_binding_json(binding_entry.value());
 
-    std::filesystem::path media_dir = svpi_path.parent_path();
-    std::string stem = svpi_path.stem().string();
-    if (!stem.empty() && stem[0] == '.') {
-      stem = stem.substr(1);
-    }
+    std::filesystem::path media_dir = media_search_dir_for_svpi(svpi_path);
+    std::string stem = sidecar_stem(svpi_path);
 
     std::vector<std::filesystem::path> media_candidates;
     for (auto ext : kSupportedVideoExts) {
@@ -632,6 +654,46 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
         result.error_message =
             "media binding verification failed: size_bytes mismatch";
         return result;
+      }
+      svp::package::MediaBindingFactoryOptions probe_opts;
+      probe_opts.ffprobe_path = options.ffprobe_path;
+      probe_opts.compute_full_blake3 = false;
+      probe_opts.compute_chunk_proof = true;
+      probe_opts.chunk_size_bytes =
+          binding_doc.bindings[0].identity.chunk_proof.has_value()
+              ? binding_doc.bindings[0].identity.chunk_proof->chunk_size_bytes
+              : 16777216;
+      auto candidate_doc = svp::package::create_media_binding(media_path, probe_opts);
+      const auto& cand = candidate_doc.bindings[0];
+      const auto& existing = binding_doc.bindings[0];
+
+      if (cand.duration_us > 0 && existing.duration_us > 0 &&
+          cand.duration_us != existing.duration_us) {
+        result.error_message = "media binding verification failed: duration_us mismatch";
+        return result;
+      }
+      if (!cand.container_format.empty() && cand.container_format != "unknown" &&
+          !existing.container_format.empty() && existing.container_format != "unknown" &&
+          cand.container_format != existing.container_format) {
+        result.error_message = "media binding verification failed: container_format mismatch";
+        return result;
+      }
+      if (existing.identity.chunk_proof.has_value() &&
+          cand.identity.chunk_proof.has_value()) {
+        const auto& expected = *existing.identity.chunk_proof;
+        const auto& actual = *cand.identity.chunk_proof;
+        if (actual.chunk_count != expected.chunk_count) {
+          result.error_message = "media binding verification failed: chunk_proof chunk_count mismatch";
+          return result;
+        }
+        if (actual.last_chunk_hash != expected.last_chunk_hash) {
+          result.error_message = "media binding verification failed: chunk_proof last_chunk_hash mismatch";
+          return result;
+        }
+        if (actual.last_chunk_size != expected.last_chunk_size) {
+          result.error_message = "media binding verification failed: chunk_proof last_chunk_size mismatch";
+          return result;
+        }
       }
     } else if (verification.state != svp::package::BindingVerificationState::verified) {
       result.error_message =
@@ -795,12 +857,8 @@ CompleteIdentityBatchResult interlace_complete_identity_batch(
   for (const auto& svpi_path : svpi_files) {
     result.svpi_filenames.push_back(svpi_path.filename().string());
 
-    std::string stem = svpi_path.stem().string();
-    if (!stem.empty() && stem[0] == '.') {
-      stem = stem.substr(1);
-    }
-
-    std::filesystem::path media_dir = svpi_path.parent_path();
+    std::string stem = sidecar_stem(svpi_path);
+    std::filesystem::path media_dir = media_search_dir_for_svpi(svpi_path);
     std::filesystem::path found_media;
     for (auto ext : kSupportedVideoExts) {
       auto candidate = media_dir / (stem + std::string(ext));

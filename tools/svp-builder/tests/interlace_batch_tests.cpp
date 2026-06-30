@@ -744,6 +744,132 @@ void test_complete_identity_batch() {
   std::cout << "  test_complete_identity_batch passed\n";
 }
 
+void test_complete_identity_rejects_same_size_wrong_content() {
+  auto root = make_test_dir("svp-phase3-complete-same-size-wrong");
+  auto dir = root / "videos";
+  std::filesystem::create_directories(dir);
+
+  auto media1 = dir / "clip.mov";
+  create_mock_source_media(media1, 512);
+
+  svp::builder::BatchCreateOptions create_opts;
+  create_opts.source_dir = dir.string();
+  create_opts.ffprobe_path = "/usr/bin/true";
+  create_opts.no_blake3 = true;
+  auto create_result = svp::builder::interlace_create_batch(create_opts);
+  CHECK(create_result.created_count == 1);
+
+  auto media2 = dir / "wrong.mov";
+  std::ofstream out(media2, std::ios::binary);
+  for (int i = 0; i < 512; ++i) {
+    out.put(static_cast<char>((i * 7 + 13) % 256));
+  }
+  out.close();
+
+  svp::builder::CompleteIdentityOptions opts;
+  opts.svpi_path = (dir / "clip.svpi").string();
+  opts.media_path = media2.string();
+  opts.ffprobe_path = "/usr/bin/true";
+
+  auto result = svp::builder::interlace_complete_identity(opts);
+  CHECK(!result.success);
+  CHECK(!result.error_message.empty());
+
+  svp::validation::SvpiValidatorOptions vopts;
+  vopts.validation_codes_path = "spec/registries/validation-codes.json";
+  auto report = svp::validation::validate_svpi_package(dir / "clip.svpi", vopts);
+  CHECK(svp::validation::exit_code(report) == 0);
+
+  auto binding_entry = svp::package::read_package_entry(dir / "clip.svpi", "media_binding.json");
+  CHECK(binding_entry.has_value());
+  auto binding_doc = svp::package::parse_media_binding_json(binding_entry.value());
+  CHECK(binding_doc.bindings[0].identity.blake3_state == svp::package::Blake3State::pending);
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_complete_identity_rejects_same_size_wrong_content passed\n";
+}
+
+void test_validate_batch_managed_dir() {
+  auto root = make_test_dir("svp-phase3-validate-managed-dir");
+  auto dir = root / "videos";
+  std::filesystem::create_directories(dir);
+
+  auto media = dir / "clip.mov";
+  create_mock_source_media(media, 512);
+
+  svp::builder::BatchCreateOptions create_opts;
+  create_opts.source_dir = dir.string();
+  create_opts.ffprobe_path = "/usr/bin/true";
+  create_opts.visibility = svp::builder::SidecarVisibility::managed_dir;
+  auto create_result = svp::builder::interlace_create_batch(create_opts);
+  CHECK(create_result.created_count == 1);
+  CHECK(std::filesystem::exists(dir / ".svpi" / "clip.svpi"));
+
+  svp::builder::BatchValidateOptions opts;
+  opts.source_dir = dir.string();
+  opts.ffprobe_path = "/usr/bin/true";
+
+  auto result = svp::builder::interlace_validate_batch(opts);
+  CHECK(result.valid_bound_count == 1);
+  CHECK(result.valid_unbound_count == 0);
+  CHECK(result.mismatch_count == 0);
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_validate_batch_managed_dir passed\n";
+}
+
+void test_complete_identity_batch_managed_dir() {
+  auto root = make_test_dir("svp-phase3-complete-batch-managed-dir");
+  auto dir = root / "videos";
+  std::filesystem::create_directories(dir);
+
+  auto media = dir / "clip.mov";
+  create_mock_source_media(media, 512);
+
+  svp::builder::BatchCreateOptions create_opts;
+  create_opts.source_dir = dir.string();
+  create_opts.ffprobe_path = "/usr/bin/true";
+  create_opts.visibility = svp::builder::SidecarVisibility::managed_dir;
+  create_opts.no_blake3 = true;
+  auto create_result = svp::builder::interlace_create_batch(create_opts);
+  CHECK(create_result.created_count == 1);
+
+  svp::builder::CompleteIdentityBatchOptions opts;
+  opts.source_dir = dir.string();
+  opts.ffprobe_path = "/usr/bin/true";
+
+  auto result = svp::builder::interlace_complete_identity_batch(opts);
+  CHECK(result.completed_count == 1);
+  CHECK(result.failed_count == 0);
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_complete_identity_batch_managed_dir passed\n";
+}
+
+void test_batch_create_out_dir_visible() {
+  auto root = make_test_dir("svp-phase3-out-dir-visible");
+  auto src = root / "src";
+  auto out = root / "out";
+  std::filesystem::create_directories(src);
+
+  auto media = src / "clip.mov";
+  create_mock_source_media(media, 512);
+
+  svp::builder::BatchCreateOptions opts;
+  opts.source_dir = src.string();
+  opts.out_dir = out.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.visibility = svp::builder::SidecarVisibility::visible;
+
+  auto result = svp::builder::interlace_create_batch(opts);
+  CHECK(result.created_count == 1);
+  CHECK(std::filesystem::exists(out / "clip.svpi"));
+  CHECK(!std::filesystem::exists(src / "clip.svpi"));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_create_out_dir_visible passed\n";
+}
+
 int main() {
   std::cout << "Running SVPI Phase 3 batch/scale tests...\n";
 
@@ -771,6 +897,10 @@ int main() {
   test_batch_create_skips_unsupported();
   test_scan_discovers_hidden_sidecar();
   test_complete_identity_batch();
+  test_complete_identity_rejects_same_size_wrong_content();
+  test_validate_batch_managed_dir();
+  test_complete_identity_batch_managed_dir();
+  test_batch_create_out_dir_visible();
 
   std::cout << "All SVPI Phase 3 batch/scale tests passed!\n";
   return 0;
