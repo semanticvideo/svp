@@ -19,6 +19,7 @@ add_library(svp-validation
   src/spec_assets.cpp
   src/text_record_validation.cpp
   src/validator.cpp
+  src/svpi_validator.cpp
 )
 
 add_library(svp::validation ALIAS svp-validation)

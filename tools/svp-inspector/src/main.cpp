@@ -251,12 +251,63 @@ void print_validation_report(const svp::package::PackageSummary& summary) {
   }
 }
 
+void print_svpi_summary(const svp::package::PackageSummary& summary) {
+  std::cout << "SVPI sidecar summary\n";
+  std::cout << "  artifact_type: SVPI\n";
+  std::cout << "  svpi_version: " << value_or_unknown(summary.svpi.svpi_version) << "\n";
+  std::cout << "  media_binding_ref: "
+            << value_or_unknown(summary.svpi.media_binding_ref) << "\n";
+  std::cout << "  primary_media_binding_id: "
+            << value_or_unknown(summary.svpi.primary_media_binding_id) << "\n";
+  std::cout << "  embedded_primary_media_absent: "
+            << yes_no(!summary.svpi.has_media_original) << "\n";
+
+  std::cout << "  media_binding:\n";
+  print_json_file_status("    media_binding.json", summary.svpi.media_binding.file);
+  if (summary.svpi.media_binding.file.parsed) {
+    std::cout << "    binding_id: "
+              << value_or_unknown(summary.svpi.media_binding.binding_id) << "\n";
+    std::cout << "    binding_contract: "
+              << value_or_unknown(summary.svpi.media_binding.binding_contract) << "\n";
+    std::cout << "    verification_state: "
+              << value_or_unknown(summary.svpi.media_binding.verification_state) << "\n";
+    std::cout << "    media_id: "
+              << value_or_unknown(summary.svpi.media_binding.media_id) << "\n";
+    std::cout << "    size_bytes: "
+              << value_or_unknown(summary.svpi.media_binding.size_bytes) << "\n";
+    std::cout << "    duration_us: "
+              << value_or_unknown(summary.svpi.media_binding.duration_us) << "\n";
+    std::cout << "    container_format: "
+              << value_or_unknown(summary.svpi.media_binding.container_format) << "\n";
+    std::cout << "    blake3_state: "
+              << value_or_unknown(summary.svpi.media_binding.blake3_state) << "\n";
+    if (!summary.svpi.media_binding.blake3_hash.empty()) {
+      std::cout << "    blake3_hash: "
+                << summary.svpi.media_binding.blake3_hash << "\n";
+    }
+    if (!summary.svpi.media_binding.original_filename_hint.empty()) {
+      std::cout << "    original_filename_hint: "
+                << summary.svpi.media_binding.original_filename_hint << "\n";
+    }
+  }
+
+  std::cout << "  index_present: "
+            << yes_no(summary.index.sqlite_present) << "\n";
+  std::cout << "  provenance_present: "
+            << yes_no(summary.layout_readable &&
+                      std::ranges::any_of(summary.required_items,
+                          [](const svp::package::PackageRequiredItemSummary& item) {
+                            return item.path == "provenance" && item.present;
+                          })) << "\n";
+}
+
 void print_summary(const svp::package::PackageSummary& summary) {
   std::cout << "SVP package summary\n";
   std::cout << "Path: " << summary.probe.path.string() << "\n";
   std::cout << "Exists: " << yes_no(summary.probe.exists) << "\n";
   std::cout << "Regular file: " << yes_no(summary.probe.is_regular_file) << "\n";
   std::cout << "SVP extension: " << yes_no(summary.probe.has_svp_extension) << "\n";
+  std::cout << "SVPI extension: " << yes_no(summary.probe.has_svpi_extension) << "\n";
   std::cout << "Readable ZIP layout: " << yes_no(summary.layout_readable) << "\n";
   if (!summary.layout_readable) {
     std::cout << "Layout error: " << summary.layout_error_message << "\n";
@@ -281,6 +332,11 @@ void print_summary(const svp::package::PackageSummary& summary) {
   print_index(summary);
   std::cout << "\n";
   print_validation_report(summary);
+
+  if (summary.svpi.is_svpi) {
+    std::cout << "\n";
+    print_svpi_summary(summary);
+  }
 }
 
 int dump_json_entry(const std::filesystem::path& package_path, const DumpTarget& target) {

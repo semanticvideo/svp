@@ -512,6 +512,86 @@
       "section": "11",
       "description": "Speaker diarization is unavailable. Package does not contain speaker data.",
       "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_SVPI_WRONG_MIMETYPE",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "svpi-4.1",
+      "description": "SVPI mimetype must be application/vnd.svp.interlace+zip.",
+      "introduced": "svpi-0.1"
+    },
+    {
+      "code": "ERR_SVPI_MISSING_MEDIA_BINDING",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "svpi-4.3",
+      "description": "media_binding.json is absent, unreadable, or missing required fields.",
+      "introduced": "svpi-0.1"
+    },
+    {
+      "code": "ERR_SVPI_FORBIDDEN_PRIMARY_MEDIA",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "svpi-4.2",
+      "description": "SVPI must not contain media/original/ primary media bytes.",
+      "introduced": "svpi-0.1"
+    },
+    {
+      "code": "ERR_SVPI_WRONG_MANIFEST_FORMAT",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "svpi-4.1",
+      "description": "manifest.json format field must be \"svpi\" for SVPI packages.",
+      "introduced": "svpi-0.1"
+    },
+    {
+      "code": "ERR_SVPI_MISSING_PROVENANCE",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "svpi-5",
+      "description": "Required provenance files are missing from the SVPI package.",
+      "introduced": "svpi-0.1"
+    },
+    {
+      "code": "ERR_SVPI_MISSING_INDEX",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "svpi-6",
+      "description": "Required index files are missing from the SVPI package.",
+      "introduced": "svpi-0.1"
+    },
+    {
+      "code": "ERR_SVPI_WRONG_BINDING_CONTRACT",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "svpi-4.3",
+      "description": "binding_contract must be svpi.media_identity.v0.1.",
+      "introduced": "svpi-0.1"
+    },
+    {
+      "code": "ERR_SVPI_LEGACY_MANIFEST_NAME",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "svpi-4.1",
+      "description": "SVPI must use manifest.json, not svpi_manifest.json.",
+      "introduced": "svpi-0.1"
     }
   ]
 }

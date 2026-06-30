@@ -20,6 +20,8 @@ add_library(svp-package
   src/spatial_embedding_placeholders.cpp
   src/timeline_writer.cpp
   src/validation_report_storage.cpp
+  src/media_binding.cpp
+  src/svpi_writer.cpp
 )
 
 add_library(svp::package ALIAS svp-package)
@@ -52,12 +54,21 @@ if(BUILD_TESTING)
     tests/package_writer_tests.cpp
   )
 
+  add_executable(svp-svpi-tests
+    tests/svpi_writer_tests.cpp
+  )
+
   add_executable(svp-relationship-type-policy-tests
     tests/relationship_type_policy_tests.cpp
   )
 
   target_compile_features(svp-package-tests PRIVATE cxx_std_20)
+  target_compile_features(svp-svpi-tests PRIVATE cxx_std_20)
   target_compile_features(svp-relationship-type-policy-tests PRIVATE cxx_std_20)
+
+  target_compile_definitions(svp-svpi-tests PRIVATE
+    SVP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
 
   target_link_libraries(svp-package-tests
     PRIVATE
@@ -66,11 +77,18 @@ if(BUILD_TESTING)
       svp::vision
   )
 
+  target_link_libraries(svp-svpi-tests
+    PRIVATE
+      svp::package
+      svp::validation
+  )
+
   target_link_libraries(svp-relationship-type-policy-tests
     PRIVATE
       svp::package
   )
 
   add_test(NAME svp-package-tests COMMAND svp-package-tests)
+  add_test(NAME svp-svpi-tests COMMAND svp-svpi-tests)
   add_test(NAME svp-relationship-type-policy-tests COMMAND svp-relationship-type-policy-tests)
 endif()
