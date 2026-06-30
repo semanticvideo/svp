@@ -13,6 +13,7 @@
 #include <zip.h>
 
 #include <chrono>
+#include <cstring>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -181,6 +182,15 @@ bool build_minimal_svp(
       {"processor_version", "1.0.0"},
       {"stage", "test"},
       {"ran_utc", make_utc_timestamp()}
+    }
+  });
+
+  write_jsonl(staging / "provenance" / "interlace_events.jsonl", {
+    nlohmann::json{
+      {"event_id", "evt_svp_build_000001"},
+      {"event_type", "svpi_created_from_media"},
+      {"event_utc", make_utc_timestamp()},
+      {"authority", "builder_derived"}
     }
   });
 
@@ -660,6 +670,168 @@ void test_media_original_in_svpi_fails_validation() {
   std::cout << "  test_media_original_in_svpi_fails_validation passed\n";
 }
 
+void test_binding_verification_fails_on_unavailable_blake3() {
+  auto root = make_test_dir("svp-phase2-unavailable-blake3");
+  auto source = root / "test.mov";
+  create_mock_source_media(source, 512);
+
+  svp::package::MediaBinding binding;
+  binding.binding_id = "mb_primary_000001";
+  binding.media_role = "primary_source";
+  binding.media_id = "media_src_000001";
+  binding.binding_contract = std::string{svp::package::kSvpiBindingContract};
+  binding.verification_state = "pending";
+  binding.size_bytes = 512;
+  binding.identity.blake3_state = svp::package::Blake3State::unavailable;
+  binding.identity.blake3_state_reason = "BLAKE3 not computed";
+
+  svp::package::MediaBindingDocument doc;
+  doc.primary_binding_id = "mb_primary_000001";
+  doc.bindings.push_back(std::move(binding));
+
+  auto result = svp::package::verify_media_binding(source, doc);
+  CHECK(result.state == svp::package::BindingVerificationState::unavailable);
+  CHECK(result.state_label == "unavailable");
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_binding_verification_fails_on_unavailable_blake3 passed\n";
+}
+
+void test_binding_verification_includes_container_and_streams() {
+  auto root = make_test_dir("svp-phase2-container-streams");
+  auto source = root / "test.mov";
+  create_mock_source_media(source, 1024);
+
+  svp::package::MediaBindingFactoryOptions opts;
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.compute_full_blake3 = true;
+  opts.compute_chunk_proof = true;
+  opts.chunk_size_bytes = 512;
+
+  auto doc = svp::package::create_media_binding(source, opts);
+  auto result = svp::package::verify_media_binding(source, doc);
+
+  CHECK(result.state == svp::package::BindingVerificationState::verified);
+  bool has_chunk_proof_check = false;
+  for (const auto& check : result.passing_checks) {
+    if (check == "chunk_proof") has_chunk_proof_check = true;
+  }
+  CHECK(has_chunk_proof_check);
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_binding_verification_includes_container_and_streams passed\n";
+}
+
+void test_validator_rejects_binding_without_chunk_hashes() {
+  auto root = make_test_dir("svp-phase2-no-chunk-hashes");
+  auto source = root / "test.mov";
+  create_mock_source_media(source, 256);
+  auto svpi_path = root / "test.svpi";
+
+  CHECK(build_minimal_svpi(svpi_path, source, true));
+
+  auto binding_entry = svp::package::read_package_entry(svpi_path, "media_binding.json");
+  CHECK(binding_entry.has_value());
+  auto binding_json = nlohmann::json::parse(binding_entry.value(), nullptr, false);
+  CHECK(binding_json.is_object());
+
+  if (binding_json.contains("bindings") && binding_json["bindings"].is_array() &&
+      !binding_json["bindings"].empty()) {
+    binding_json["bindings"][0].erase("identity");
+    binding_json["bindings"][0]["identity"] = {
+      {"full_file_blake3", {{"state", "present"}, {"value", "blake3:dummy"}}}
+    };
+  }
+
+  auto corrupted_path = root / "corrupted.svpi";
+  int error_code = ZIP_ER_OK;
+  zip_t* src = zip_open(svpi_path.string().c_str(), ZIP_RDONLY, &error_code);
+  CHECK(src != nullptr);
+  zip_t* dst = zip_open(corrupted_path.string().c_str(), ZIP_CREATE | ZIP_TRUNCATE, &error_code);
+  CHECK(dst != nullptr);
+
+  const auto num = zip_get_num_entries(src, 0);
+  for (zip_int64_t i = 0; i < num; ++i) {
+    zip_stat_t stat;
+    zip_stat_init(&stat);
+    if (zip_stat_index(src, static_cast<zip_uint64_t>(i), 0, &stat) != 0) continue;
+    if (stat.name == nullptr) continue;
+    std::string name(stat.name);
+    if (name == "media_binding.json") {
+      std::string replaced = binding_json.dump(2) + "\n";
+      char* buf = static_cast<char*>(malloc(replaced.size()));
+      std::memcpy(buf, replaced.data(), replaced.size());
+      zip_source_t* s = zip_source_buffer(dst, buf, replaced.size(), 1);
+      if (s) zip_file_add(dst, name.c_str(), s, ZIP_FL_OVERWRITE);
+    } else {
+      zip_source_t* s = zip_source_zip(dst, src, static_cast<zip_uint64_t>(i), 0, 0, -1);
+      if (s) zip_file_add(dst, name.c_str(), s, ZIP_FL_OVERWRITE);
+    }
+  }
+  CHECK(zip_close(dst) == 0);
+  zip_discard(src);
+
+  svp::validation::SvpiValidatorOptions vopts;
+  vopts.validation_codes_path = "spec/registries/validation-codes.json";
+  auto report = svp::validation::validate_svpi_package(corrupted_path, vopts);
+  CHECK(svp::validation::exit_code(report) != 0);
+
+  bool has_chunk_error = false;
+  for (const auto& err : report.errors) {
+    if (err.message.find("chunk_hashes") != std::string::npos) {
+      has_chunk_error = true;
+      break;
+    }
+  }
+  CHECK(has_chunk_error);
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_validator_rejects_binding_without_chunk_hashes passed\n";
+}
+
+void test_extract_preserves_existing_provenance_events() {
+  auto root = make_test_dir("svp-phase2-provenance-preserve");
+  auto source = root / "test.mov";
+  create_mock_source_media(source, 512);
+  auto svp_path = root / "test.svp";
+  auto out_dir = root / "extracted";
+
+  CHECK(build_minimal_svp(svp_path, source));
+
+  svp::builder::InterlaceExtractOptions opts;
+  opts.svp_path = svp_path.string();
+  opts.out_dir = out_dir.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.validation_codes_path = "spec/registries/validation-codes.json";
+
+  auto result = svp::builder::interlace_extract(opts);
+  CHECK(result.success);
+
+  auto events_entry = svp::package::read_package_entry(
+      result.extracted_svpi_path, "provenance/interlace_events.jsonl");
+  CHECK(events_entry.has_value());
+
+  int event_count = 0;
+  bool has_extract_event = false;
+  std::istringstream stream(events_entry.value());
+  std::string line;
+  while (std::getline(stream, line)) {
+    if (!line.empty()) {
+      event_count++;
+      auto j = nlohmann::json::parse(line, nullptr, false);
+      if (!j.is_discarded() && j.contains("event_type") &&
+          j["event_type"] == "svpi_extracted_from_svp") {
+        has_extract_event = true;
+      }
+    }
+  }
+  CHECK(event_count >= 2);
+  CHECK(has_extract_event);
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_extract_preserves_existing_provenance_events passed\n";
+}
+
 }  // namespace
 
 int main() {
@@ -679,6 +851,10 @@ int main() {
   test_filename_only_matching_does_not_pass_binding();
   test_missing_svpi_index_fails_validation();
   test_media_original_in_svpi_fails_validation();
+  test_binding_verification_fails_on_unavailable_blake3();
+  test_binding_verification_includes_container_and_streams();
+  test_validator_rejects_binding_without_chunk_hashes();
+  test_extract_preserves_existing_provenance_events();
 
   std::cout << "All SVPI Phase 2 interlace tests passed!\n";
   return 0;

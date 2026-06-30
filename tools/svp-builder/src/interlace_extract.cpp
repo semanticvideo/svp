@@ -230,17 +230,33 @@ InterlaceExtractResult interlace_extract(const InterlaceExtractOptions& options)
     }
   }
 
-  write_jsonl(staging_dir / "provenance" / "interlace_events.jsonl", {
-    nlohmann::json{
+  {
+    auto events_path = staging_dir / "provenance" / "interlace_events.jsonl";
+    std::vector<nlohmann::json> existing_events;
+    if (std::filesystem::exists(events_path)) {
+      std::ifstream in(events_path);
+      std::string line;
+      while (std::getline(in, line)) {
+        if (!line.empty()) {
+          auto j = nlohmann::json::parse(line, nullptr, false);
+          if (!j.is_discarded()) {
+            existing_events.push_back(std::move(j));
+          }
+        }
+      }
+    }
+    existing_events.push_back(nlohmann::json{
       {"event_id", "evt_interlace_extract_000001"},
-      {"event_type", "interlace_extract"},
-      {"timestamp_utc", make_utc_timestamp()},
+      {"event_type", "svpi_extracted_from_svp"},
+      {"event_utc", make_utc_timestamp()},
+      {"authority", "package_extracted"},
       {"source_svp", svp_path.filename().string()},
       {"extracted_media", media_filename},
       {"binding_id", binding_doc.primary_binding_id},
       {"binding_contract", std::string{svp::package::kSvpiBindingContract}}
-    }
-  });
+    });
+    write_jsonl(events_path, existing_events);
+  }
 
   if (!std::filesystem::exists(staging_dir / "provenance" / "processors.jsonl")) {
     write_jsonl(staging_dir / "provenance" / "processors.jsonl", {

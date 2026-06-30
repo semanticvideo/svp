@@ -289,7 +289,10 @@ BindingVerificationResult verify_media_binding(
     result.failing_checks.push_back("full_file_blake3 is pending in binding");
     return result;
   } else {
+    result.state = BindingVerificationState::unavailable;
+    result.state_label = "unavailable";
     result.failing_checks.push_back("full_file_blake3 is unavailable in binding");
+    return result;
   }
 
   if (binding.duration_us > 0) {
@@ -305,8 +308,67 @@ BindingVerificationResult verify_media_binding(
       if (candidate_duration > 0) {
         result.passing_checks.push_back("duration_us");
       }
+
+      if (!binding.container_format.empty() && binding.container_format != "unknown") {
+        const auto candidate_format = container_format_from_probe(probe);
+        if (!candidate_format.empty() && candidate_format != "unknown" &&
+            candidate_format != binding.container_format) {
+          result.state = BindingVerificationState::mismatch;
+          result.state_label = "mismatch";
+          result.failing_checks.push_back("container_format mismatch");
+          return result;
+        }
+        result.passing_checks.push_back("container_format");
+      }
+
+      const auto candidate_streams = streams_from_probe(probe);
+      if (!binding.streams.empty() && !candidate_streams.empty()) {
+        if (candidate_streams.size() != binding.streams.size()) {
+          result.state = BindingVerificationState::mismatch;
+          result.state_label = "mismatch";
+          result.failing_checks.push_back("stream count mismatch");
+          return result;
+        }
+        for (size_t i = 0; i < binding.streams.size(); ++i) {
+          if (binding.streams[i].codec_name != candidate_streams[i].codec_name) {
+            result.state = BindingVerificationState::mismatch;
+            result.state_label = "mismatch";
+            result.failing_checks.push_back("stream codec_name mismatch at index " + std::to_string(i));
+            return result;
+          }
+        }
+        result.passing_checks.push_back("streams");
+      }
     } catch (const std::exception&) {
-      result.failing_checks.push_back("could not probe candidate media for duration");
+      result.failing_checks.push_back("could not probe candidate media for metadata");
+    }
+  }
+
+  if (binding.identity.chunk_proof.has_value()) {
+    const auto& expected_proof = *binding.identity.chunk_proof;
+    if (expected_proof.chunk_count > 0 && expected_proof.chunk_size_bytes > 0) {
+      auto candidate_proof = compute_chunk_proof(
+          candidate_path, expected_proof.chunk_size_bytes,
+          result.candidate_size_bytes);
+      if (candidate_proof.chunk_count != expected_proof.chunk_count) {
+        result.state = BindingVerificationState::mismatch;
+        result.state_label = "mismatch";
+        result.failing_checks.push_back("chunk_proof chunk_count mismatch");
+        return result;
+      }
+      if (candidate_proof.last_chunk_hash != expected_proof.last_chunk_hash) {
+        result.state = BindingVerificationState::mismatch;
+        result.state_label = "mismatch";
+        result.failing_checks.push_back("chunk_proof last_chunk_hash mismatch");
+        return result;
+      }
+      if (candidate_proof.last_chunk_size != expected_proof.last_chunk_size) {
+        result.state = BindingVerificationState::mismatch;
+        result.state_label = "mismatch";
+        result.failing_checks.push_back("chunk_proof last_chunk_size mismatch");
+        return result;
+      }
+      result.passing_checks.push_back("chunk_proof");
     }
   }
 
@@ -383,6 +445,62 @@ MediaBindingDocument parse_media_binding_json(const std::string& json_content) {
             binding.identity.blake3_state_reason =
                 b3["reason"].get<std::string>();
           }
+        }
+
+        if (ident.contains("chunk_hashes") &&
+            ident["chunk_hashes"].is_object()) {
+          const auto& ch = ident["chunk_hashes"];
+          ChunkProof proof;
+          proof.chunk_size_bytes =
+              ch.value("chunk_size_bytes", static_cast<std::int64_t>(0));
+          proof.chunk_count =
+              ch.value("chunk_count", static_cast<std::int64_t>(0));
+          if (ch.contains("last_chunk_hash") && ch["last_chunk_hash"].is_string()) {
+            proof.last_chunk_hash = ch["last_chunk_hash"].get<std::string>();
+          }
+          if (ch.contains("last_chunk_size")) {
+            proof.last_chunk_size = ch["last_chunk_size"].get<std::int64_t>();
+          }
+          if (proof.chunk_count > 0) {
+            binding.identity.chunk_proof = proof;
+          }
+        }
+      }
+
+      if (j.contains("streams") && j["streams"].is_array()) {
+        for (const auto& s : j["streams"]) {
+          StreamMetadata sm;
+          if (s.contains("codec_name") && s["codec_name"].is_string()) {
+            sm.codec_name = s["codec_name"].get<std::string>();
+          }
+          if (s.contains("codec_long_name") && s["codec_long_name"].is_string()) {
+            sm.codec_long_name = s["codec_long_name"].get<std::string>();
+          }
+          if (s.contains("profile") && s["profile"].is_string()) {
+            sm.profile = s["profile"].get<std::string>();
+          }
+          if (s.contains("bit_rate") && s["bit_rate"].is_number_integer()) {
+            sm.bit_rate = s["bit_rate"].get<std::int64_t>();
+          }
+          if (s.contains("width") && s["width"].is_number_integer()) {
+            sm.width = static_cast<std::int64_t>(s["width"].get<std::int64_t>());
+          }
+          if (s.contains("height") && s["height"].is_number_integer()) {
+            sm.height = static_cast<std::int64_t>(s["height"].get<std::int64_t>());
+          }
+          if (s.contains("frame_rate") && s["frame_rate"].is_number()) {
+            sm.frame_rate = std::optional<double>(s["frame_rate"].get<double>());
+          }
+          if (s.contains("sample_rate") && s["sample_rate"].is_number_integer()) {
+            sm.sample_rate = static_cast<std::int64_t>(s["sample_rate"].get<std::int64_t>());
+          }
+          if (s.contains("channels") && s["channels"].is_number_integer()) {
+            sm.channels = static_cast<std::int64_t>(s["channels"].get<std::int64_t>());
+          }
+          if (s.contains("duration_us") && s["duration_us"].is_number_integer()) {
+            sm.duration_us = s["duration_us"].get<std::int64_t>();
+          }
+          binding.streams.push_back(std::move(sm));
         }
       }
 

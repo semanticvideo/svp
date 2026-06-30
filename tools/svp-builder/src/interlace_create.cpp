@@ -122,8 +122,9 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
   write_jsonl(staging_dir / "provenance" / "interlace_events.jsonl", {
     nlohmann::json{
       {"event_id", "evt_interlace_create_000001"},
-      {"event_type", "interlace_create"},
-      {"timestamp_utc", make_utc_timestamp()},
+      {"event_type", "svpi_created_from_media"},
+      {"event_utc", make_utc_timestamp()},
+      {"authority", "builder_derived"},
       {"source_media", source_path.filename().string()},
       {"binding_id", binding_doc.primary_binding_id},
       {"binding_contract", std::string{svp::package::kSvpiBindingContract}},
