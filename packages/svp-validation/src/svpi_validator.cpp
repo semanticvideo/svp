@@ -198,63 +198,82 @@ void add_svpi_media_binding_findings(ValidationReport& report,
     return;
   }
 
-  if (bindings_it->empty()) {
+  if (bindings_it->size() != 1) {
     add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
                                      "/media_binding.json",
-                                     "bindings array must not be empty."));
+                                     "SVPI v0.1 requires exactly one binding in the bindings array."));
     return;
   }
 
-  int primary_source_count = 0;
-  const nlohmann::json* primary = nullptr;
-  for (const auto& b : *bindings_it) {
-    if (!b.is_object()) {
-      continue;
-    }
-    const auto role_it = b.find("media_role");
-    if (role_it != b.end() && role_it->is_string() &&
-        role_it->get<std::string>() == "primary_source") {
-      ++primary_source_count;
-      primary = &b;
-    }
-  }
-
-  if (primary_source_count != 1) {
+  const auto& primary = bindings_it->at(0);
+  if (!primary.is_object()) {
     add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
                                      "/media_binding.json",
-                                     "bindings must contain exactly one binding with media_role=primary_source."));
+                                     "binding must be a JSON object."));
     return;
   }
 
-  const auto contract_it = primary->find("binding_contract");
-  if (contract_it == primary->end() || !contract_it->is_string()) {
+  const auto role_it = primary.find("media_role");
+  if (role_it == primary.end() || !role_it->is_string() ||
+      role_it->get<std::string>() != "primary_source") {
+    add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                     "/media_binding.json",
+                                     "binding media_role must be primary_source."));
+    return;
+  }
+
+  const std::vector<std::string_view> required_string_fields = {
+      "binding_id", "media_role", "media_id", "container_format",
+      "verification_state",
+  };
+  for (const auto& field : required_string_fields) {
+    if (!primary.contains(field) || !primary[field].is_string()) {
+      add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                       "/media_binding.json",
+                                       std::string("binding must contain ") + std::string(field) + "."));
+    }
+  }
+
+  const std::vector<std::string_view> required_int_fields = {
+      "duration_us", "size_bytes",
+  };
+  for (const auto& field : required_int_fields) {
+    if (!primary.contains(field)) {
+      add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                       "/media_binding.json",
+                                       std::string("binding must contain ") + std::string(field) + "."));
+    }
+  }
+
+  if (!primary.contains("streams") || !primary["streams"].is_array()) {
+    add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                     "/media_binding.json",
+                                     "binding must contain streams array."));
+  }
+
+  if (!primary.contains("location_hints") || !primary["location_hints"].is_object()) {
+    add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                     "/media_binding.json",
+                                     "binding must contain location_hints object."));
+  }
+
+  const auto contract_it = primary.find("binding_contract");
+  if (contract_it == primary.end() || !contract_it->is_string()) {
     add_finding(report, make_finding(registry, kCodeSvpiWrongBindingContract,
                                      "/media_binding.json",
-                                     "primary_source binding must contain binding_contract."));
+                                     "binding must contain binding_contract."));
   } else if (contract_it->get<std::string>() != std::string{svp::package::kSvpiBindingContract}) {
     add_finding(report, make_finding(registry, kCodeSvpiWrongBindingContract,
                                      "/media_binding.json",
                                      "binding_contract must be svpi.media_identity.v0.1."));
   }
 
-  const auto identity = primary->find("identity");
-  if (identity == primary->end() || !identity->is_object()) {
+  const auto identity = primary.find("identity");
+  if (identity == primary.end() || !identity->is_object()) {
     add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
                                      "/media_binding.json",
-                                     "primary_source binding must contain identity."));
+                                     "binding must contain identity."));
     return;
-  }
-
-  if (!primary->contains("media_id") || !(*primary)["media_id"].is_string()) {
-    add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
-                                     "/media_binding.json",
-                                     "binding must contain media_id."));
-  }
-
-  if (!primary->contains("size_bytes")) {
-    add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
-                                     "/media_binding.json",
-                                     "binding must contain size_bytes."));
   }
 }
 
