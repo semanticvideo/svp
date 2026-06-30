@@ -21,6 +21,7 @@ add_library(svp-package
   src/timeline_writer.cpp
   src/validation_report_storage.cpp
   src/media_binding.cpp
+  src/media_binding_factory.cpp
   src/svpi_writer.cpp
 )
 

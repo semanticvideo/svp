@@ -1,5 +1,6 @@
 find_package(CLI11 CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(libzip CONFIG REQUIRED)
 
 add_library(svp-builder-lib
   src/audio_stage.cpp
@@ -11,6 +12,11 @@ add_library(svp-builder-lib
   src/foundation_ocr_stage.cpp
   src/package_skeleton_stage.cpp
   src/vision_plan_stage.cpp
+  src/interlace_create.cpp
+  src/interlace_validate.cpp
+  src/interlace_inspect.cpp
+  src/interlace_extract.cpp
+  src/interlace_recombine.cpp
 )
 
 add_library(svp::builder ALIAS svp-builder-lib)
@@ -32,6 +38,7 @@ target_link_libraries(svp-builder-lib
     svp::vision
     svp::package
     svp::validation
+    libzip::zip
 )
 
 add_executable(svp-builder
@@ -46,6 +53,8 @@ target_link_libraries(svp-builder
     svp::builder
     svp::core
     svp::media
+    svp::package
+    svp::validation
 )
 
 if(BUILD_TESTING)
@@ -53,12 +62,27 @@ if(BUILD_TESTING)
     tests/build_pipeline_tests.cpp
   )
 
+  add_executable(svp-interlace-tests
+    tests/interlace_tests.cpp
+  )
+
   target_compile_features(svp-builder-pipeline-tests PRIVATE cxx_std_20)
+  target_compile_features(svp-interlace-tests PRIVATE cxx_std_20)
 
   target_link_libraries(svp-builder-pipeline-tests
     PRIVATE
       svp::builder
   )
 
+  target_link_libraries(svp-interlace-tests
+    PRIVATE
+      svp::builder
+      svp::package
+      svp::validation
+      libzip::zip
+  )
+
   add_test(NAME svp-builder-pipeline-tests COMMAND svp-builder-pipeline-tests)
+  add_test(NAME svp-interlace-tests COMMAND svp-interlace-tests
+           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endif()
