@@ -1017,6 +1017,81 @@ void test_svpi_writer_preserves_ocr_crops_and_transcript() {
   std::filesystem::remove_all(root);
 }
 
+void test_svpi_writer_excludes_uppercase_replayable_extensions() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-svpi-uppercase-ext-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir);
+
+  write_text(staging_dir / "evidence" / "audio_clip.WAV", "fake WAV");
+  write_text(staging_dir / "extensions" / "foo" / "original_audio.FLAC", "fake FLAC");
+  write_text(staging_dir / "media" / "derived" / "proxy_video.MP4", "fake MP4");
+  write_text(staging_dir / "media" / "derived" / "clip.MOV", "fake MOV");
+  write_text(staging_dir / "evidence" / "clip.Mp4", "fake mixed-case Mp4");
+
+  write_jsonl(staging_dir / "provenance" / "processors.jsonl", {
+    {{"id", "processor_0001"}, {"version", "0.1"}}
+  });
+  write_jsonl(staging_dir / "provenance" / "interlace_events.jsonl", {
+    {{"event_id", "event_0001"}, {"event_type", "svpi_created"},
+     {"utc", make_utc_timestamp()}}
+  });
+
+  const auto manifest = make_svpi_manifest("svpi_test_uppercase_ext");
+  CHECK(svp::package::write_index_foundation(staging_dir, manifest));
+  auto binding = make_minimal_media_binding("");
+
+  const auto package_path = root / "output.svpi";
+  CHECK(svp::package::write_svpi_package(package_path, staging_dir, manifest, binding));
+
+  auto layout_result = svp::package::read_package_layout(package_path);
+  CHECK(layout_result.has_value());
+  const auto& layout = layout_result.value();
+
+  CHECK(!layout.has_entry("evidence/audio_clip.WAV"));
+  CHECK(!layout.has_entry("extensions/foo/original_audio.FLAC"));
+  CHECK(!layout.has_entry("media/derived/proxy_video.MP4"));
+  CHECK(!layout.has_entry("media/derived/clip.MOV"));
+  CHECK(!layout.has_entry("evidence/clip.Mp4"));
+
+  std::filesystem::remove_all(root);
+}
+
+void test_svpi_validator_rejects_uppercase_replayable_extensions() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-svpi-reject-uppercase-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto package_path = create_valid_svpi(root);
+
+  {
+    int err = 0;
+    zip_t* archive = zip_open(package_path.string().c_str(), 0, &err);
+    CHECK(archive != nullptr);
+    add_file_to_zip(archive, "evidence/audio_clip.WAV", "fake WAV bytes");
+    add_file_to_zip(archive, "extensions/foo/original_audio.FLAC", "fake FLAC bytes");
+    add_file_to_zip(archive, "media/derived/proxy_video.MP4", "fake MP4 bytes");
+    CHECK(zip_close(archive) == 0);
+  }
+
+  auto opts = make_validator_options();
+  auto report = svp::validation::validate_svpi_package(package_path, opts);
+  CHECK(report.status == svp::validation::ValidationStatus::invalid);
+  int derivative_count = 0;
+  for (const auto& err : report.errors) {
+    if (err.code == std::string{svp::validation::kCodeSvpiForbiddenReplayableMediaDerivative}) {
+      derivative_count++;
+    }
+  }
+  CHECK(derivative_count == 3);
+
+  std::filesystem::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
@@ -1043,6 +1118,8 @@ int main() {
   test_svpi_validator_rejects_replayable_audio_under_unknown_path();
   test_svpi_validator_rejects_video_under_unknown_path();
   test_svpi_writer_preserves_ocr_crops_and_transcript();
+  test_svpi_writer_excludes_uppercase_replayable_extensions();
+  test_svpi_validator_rejects_uppercase_replayable_extensions();
 
   std::cout << "All SVPI tests passed.\n";
   return 0;

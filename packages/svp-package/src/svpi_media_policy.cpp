@@ -1,5 +1,8 @@
 #include "svp/package/svpi_media_policy.hpp"
 
+#include <algorithm>
+#include <string>
+
 namespace svp::package {
 namespace {
 
@@ -12,47 +15,57 @@ bool ends_with(std::string_view str, std::string_view suffix) {
          str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
+std::string to_lower(std::string_view sv) {
+  std::string s{sv};
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return s;
+}
+
 bool is_replayable_audio_extension(std::string_view path) {
-  return ends_with(path, ".flac") ||
-         ends_with(path, ".wav") ||
-         ends_with(path, ".mp3") ||
-         ends_with(path, ".aac") ||
-         ends_with(path, ".ogg") ||
-         ends_with(path, ".opus") ||
-         ends_with(path, ".m4a") ||
-         ends_with(path, ".wma") ||
-         ends_with(path, ".aiff") ||
-         ends_with(path, ".alac");
+  const std::string lower = to_lower(path);
+  return ends_with(lower, ".flac") ||
+         ends_with(lower, ".wav") ||
+         ends_with(lower, ".mp3") ||
+         ends_with(lower, ".aac") ||
+         ends_with(lower, ".ogg") ||
+         ends_with(lower, ".opus") ||
+         ends_with(lower, ".m4a") ||
+         ends_with(lower, ".wma") ||
+         ends_with(lower, ".aiff") ||
+         ends_with(lower, ".alac");
 }
 
 bool is_replayable_video_extension(std::string_view path) {
-  return ends_with(path, ".mp4") ||
-         ends_with(path, ".mov") ||
-         ends_with(path, ".mkv") ||
-         ends_with(path, ".avi") ||
-         ends_with(path, ".webm") ||
-         ends_with(path, ".wmv") ||
-         ends_with(path, ".flv") ||
-         ends_with(path, ".m4v") ||
-         ends_with(path, ".mpg") ||
-         ends_with(path, ".mpeg") ||
-         ends_with(path, ".ts") ||
-         ends_with(path, ".3gp") ||
-         ends_with(path, ".3g2") ||
-         ends_with(path, ".vob");
+  const std::string lower = to_lower(path);
+  return ends_with(lower, ".mp4") ||
+         ends_with(lower, ".mov") ||
+         ends_with(lower, ".mkv") ||
+         ends_with(lower, ".avi") ||
+         ends_with(lower, ".webm") ||
+         ends_with(lower, ".wmv") ||
+         ends_with(lower, ".flv") ||
+         ends_with(lower, ".m4v") ||
+         ends_with(lower, ".mpg") ||
+         ends_with(lower, ".mpeg") ||
+         ends_with(lower, ".ts") ||
+         ends_with(lower, ".3gp") ||
+         ends_with(lower, ".3g2") ||
+         ends_with(lower, ".vob");
 }
 
 bool is_known_non_replayable_artifact(std::string_view path) {
-  if (ends_with(path, "waveform.jsonl") ||
-      ends_with(path, "audio_absence.json")) {
+  const std::string lower = to_lower(path);
+  if (ends_with(lower, "waveform.jsonl") ||
+      ends_with(lower, "audio_absence.json")) {
     return true;
   }
-  if (starts_with(path, "text/evidence_crops/") && ends_with(path, ".jpg")) {
+  if (starts_with(lower, "text/evidence_crops/") && ends_with(lower, ".jpg")) {
     return true;
   }
-  if (ends_with(path, ".jsonl") || ends_with(path, ".json") ||
-      ends_with(path, ".svpdz") || ends_with(path, ".svpmz") ||
-      ends_with(path, ".svpez") || ends_with(path, ".sqlite")) {
+  if (ends_with(lower, ".jsonl") || ends_with(lower, ".json") ||
+      ends_with(lower, ".svpdz") || ends_with(lower, ".svpmz") ||
+      ends_with(lower, ".svpez") || ends_with(lower, ".sqlite")) {
     return true;
   }
   return false;
