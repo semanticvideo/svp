@@ -275,6 +275,81 @@ void add_svpi_media_binding_findings(ValidationReport& report,
                                      "binding must contain identity."));
     return;
   }
+
+  const auto full_file_blake3 = identity->find("full_file_blake3");
+  if (full_file_blake3 == identity->end() || !full_file_blake3->is_object()) {
+    add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                     "/media_binding.json",
+                                     "identity must contain full_file_blake3 object."));
+  } else {
+    const auto blake3_state = full_file_blake3->find("state");
+    if (blake3_state == full_file_blake3->end() || !blake3_state->is_string()) {
+      add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                       "/media_binding.json",
+                                       "identity.full_file_blake3 must contain state."));
+    } else {
+      const auto state_val = blake3_state->get<std::string>();
+      if (state_val != "present" && state_val != "pending" && state_val != "unavailable") {
+        add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                         "/media_binding.json",
+                                         "identity.full_file_blake3.state must be present, pending, or unavailable."));
+      }
+      if (state_val == "present") {
+        const auto blake3_value = full_file_blake3->find("value");
+        if (blake3_value == full_file_blake3->end() || !blake3_value->is_string() ||
+            blake3_value->get<std::string>().empty()) {
+          add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                           "/media_binding.json",
+                                           "identity.full_file_blake3.value must be non-empty when state is present."));
+        }
+      }
+      if (state_val == "unavailable") {
+        const auto reason = full_file_blake3->find("reason");
+        if (reason == full_file_blake3->end() || !reason->is_string() ||
+            reason->get<std::string>().empty()) {
+          add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                           "/media_binding.json",
+                                           "identity.full_file_blake3.reason must be recorded when state is unavailable."));
+        }
+      }
+    }
+  }
+
+  const auto chunk_hashes = identity->find("chunk_hashes");
+  if (chunk_hashes == identity->end() || !chunk_hashes->is_object()) {
+    add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                     "/media_binding.json",
+                                     "identity must contain chunk_hashes object."));
+  } else {
+    const auto chunk_algo = chunk_hashes->find("algorithm");
+    if (chunk_algo == chunk_hashes->end() || !chunk_algo->is_string()) {
+      add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                       "/media_binding.json",
+                                       "identity.chunk_hashes must contain algorithm."));
+    }
+    const auto chunk_size = chunk_hashes->find("chunk_size_bytes");
+    if (chunk_size == chunk_hashes->end() || !chunk_size->is_number_unsigned()) {
+      add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                       "/media_binding.json",
+                                       "identity.chunk_hashes must contain chunk_size_bytes."));
+    }
+    const auto chunk_count = chunk_hashes->find("chunk_count");
+    if (chunk_count == chunk_hashes->end() || !chunk_count->is_number_unsigned()) {
+      add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                       "/media_binding.json",
+                                       "identity.chunk_hashes must contain chunk_count."));
+    }
+  }
+
+  const auto vs_it = primary.find("verification_state");
+  if (vs_it != primary.end() && vs_it->is_string()) {
+    const auto vs = vs_it->get<std::string>();
+    if (vs != "verified" && vs != "pending" && vs != "mismatch" && vs != "unavailable") {
+      add_finding(report, make_finding(registry, kCodeSvpiMissingMediaBinding,
+                                       "/media_binding.json",
+                                       "verification_state must be verified, pending, mismatch, or unavailable."));
+    }
+  }
 }
 
 void add_svpi_forbidden_media_findings(ValidationReport& report,
