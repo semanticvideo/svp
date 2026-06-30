@@ -327,6 +327,7 @@ void test_interlace_create_produces_valid_svpi() {
   opts.ffprobe_path = "/usr/bin/true";
   opts.compute_full_blake3 = true;
   opts.compute_chunk_proof = false;
+  opts.core_only_diagnostic = true;
 
   auto result = svp::builder::interlace_create(opts);
   CHECK(result.success);
@@ -344,8 +345,49 @@ void test_interlace_create_produces_valid_svpi() {
   CHECK(layout.has_entry("provenance/interlace_events.jsonl"));
   CHECK(!zip_has_media_original(svpi_path));
 
+  auto manifest_entry = svp::package::read_package_entry(svpi_path, "manifest.json");
+  CHECK(manifest_entry.has_value());
+  auto manifest_json = nlohmann::json::parse(manifest_entry.value(), nullptr, false);
+  CHECK(manifest_json.is_object());
+  CHECK(manifest_json.contains("sections"));
+  for (const auto& key : {"transcript", "timeline", "text", "colors",
+                          "entities", "spatial", "relationships", "embeddings"}) {
+    CHECK(manifest_json["sections"][key]["state"] == "not_generated");
+  }
+
   std::filesystem::remove_all(root);
   std::cout << "  test_interlace_create_produces_valid_svpi passed\n";
+}
+
+void test_interlace_create_falls_back_on_pipeline_failure() {
+  auto root = make_test_dir("svp-phase2-create-fallback");
+  auto source = root / "test.mov";
+  create_mock_source_media(source, 1024);
+  auto svpi_path = root / "output.svpi";
+
+  svp::builder::InterlaceCreateOptions opts;
+  opts.source_path = source.string();
+  opts.output_path = svpi_path.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.compute_full_blake3 = true;
+  opts.compute_chunk_proof = false;
+
+  auto result = svp::builder::interlace_create(opts);
+  CHECK(result.success);
+  CHECK(std::filesystem::exists(svpi_path));
+
+  auto manifest_entry = svp::package::read_package_entry(svpi_path, "manifest.json");
+  CHECK(manifest_entry.has_value());
+  auto manifest_json = nlohmann::json::parse(manifest_entry.value(), nullptr, false);
+  CHECK(manifest_json.is_object());
+  CHECK(manifest_json.contains("sections"));
+  for (const auto& key : {"transcript", "timeline", "text", "colors",
+                          "entities", "spatial", "relationships", "embeddings"}) {
+    CHECK(manifest_json["sections"][key]["state"] == "blocked");
+  }
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_interlace_create_falls_back_on_pipeline_failure passed\n";
 }
 
 void test_interlace_validate_structure_only() {
@@ -841,6 +883,7 @@ int main() {
   test_media_binding_verification_matching();
   test_media_binding_verification_wrong_file();
   test_interlace_create_produces_valid_svpi();
+  test_interlace_create_falls_back_on_pipeline_failure();
   test_interlace_validate_structure_only();
   test_interlace_validate_with_matching_media();
   test_interlace_validate_with_wrong_media();

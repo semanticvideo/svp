@@ -18,8 +18,12 @@ struct InterlaceCreateOptions {
   std::string ffprobe_path = "ffprobe";
   std::string ffmpeg_path = "ffmpeg";
   std::string probe_json_path;
+  std::string sherpa_lib_path;
   bool compute_full_blake3 = true;
   bool compute_chunk_proof = true;
+  bool core_only_diagnostic = false;
+  bool allow_fallback_diarization = false;
+  bool force_single_speaker = false;
 };
 
 struct InterlaceCreateResult {
