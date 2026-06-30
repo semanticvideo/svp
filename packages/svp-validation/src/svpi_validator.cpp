@@ -5,6 +5,7 @@
 #include "svp/package/package_layout.hpp"
 #include "svp/package/package_probe.hpp"
 #include "svp/package/media_binding.hpp"
+#include "svp/package/svpi_media_policy.hpp"
 #include "svp/validation/code_registry.hpp"
 
 #include <nlohmann/json.hpp>
@@ -356,10 +357,15 @@ void add_svpi_forbidden_media_findings(ValidationReport& report,
                                        const ValidationCodeRegistry& registry,
                                        const svp::package::PackageLayout& layout) {
   for (const auto& entry : layout.entries) {
-    if (entry.rfind("media/original/", 0) == 0) {
+    const auto reason = svp::package::classify_svpi_entry(entry);
+    if (reason == svp::package::SvpiForbiddenMediaReason::primary_media) {
       add_finding(report, make_finding(registry, kCodeSvpiForbiddenPrimaryMedia,
                                        "/" + entry,
                                        "SVPI must not contain media/original/ entries."));
+    } else if (reason == svp::package::SvpiForbiddenMediaReason::replayable_derivative) {
+      add_finding(report, make_finding(registry, kCodeSvpiForbiddenReplayableMediaDerivative,
+                                       "/" + entry,
+                                       "SVPI must not contain replayable or intelligible source-derived audio, video, or muxed media derivatives."));
     }
   }
 }

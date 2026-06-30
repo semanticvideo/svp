@@ -83,6 +83,7 @@ inline constexpr std::string_view kTempCodeMissingEmbeddingsEntry =
 inline constexpr std::string_view kCodeSvpiWrongMimetype = "ERR_SVPI_WRONG_MIMETYPE";
 inline constexpr std::string_view kCodeSvpiMissingMediaBinding = "ERR_SVPI_MISSING_MEDIA_BINDING";
 inline constexpr std::string_view kCodeSvpiForbiddenPrimaryMedia = "ERR_SVPI_FORBIDDEN_PRIMARY_MEDIA";
+inline constexpr std::string_view kCodeSvpiForbiddenReplayableMediaDerivative = "ERR_SVPI_FORBIDDEN_REPLAYABLE_MEDIA_DERIVATIVE";
 inline constexpr std::string_view kCodeSvpiWrongManifestFormat = "ERR_SVPI_WRONG_MANIFEST_FORMAT";
 inline constexpr std::string_view kCodeSvpiMissingProvenance = "ERR_SVPI_MISSING_PROVENANCE";
 inline constexpr std::string_view kCodeSvpiMissingIndex = "ERR_SVPI_MISSING_INDEX";
