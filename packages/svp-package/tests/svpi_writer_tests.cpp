@@ -863,6 +863,160 @@ void test_svpi_validator_allows_waveform_and_absence() {
   std::filesystem::remove_all(root);
 }
 
+void test_svpi_writer_excludes_replayable_audio_under_unknown_path() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-svpi-unknown-path-audio-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir);
+
+  write_text(staging_dir / "evidence" / "audio_clip.wav", "fake wav under evidence");
+  write_text(staging_dir / "extensions" / "foo" / "original_audio.flac", "fake flac under extensions");
+  write_text(staging_dir / "media" / "derived" / "proxy_with_audio.mp4", "fake mp4 under media/derived");
+
+  write_jsonl(staging_dir / "provenance" / "processors.jsonl", {
+    {{"id", "processor_0001"}, {"version", "0.1"}}
+  });
+  write_jsonl(staging_dir / "provenance" / "interlace_events.jsonl", {
+    {{"event_id", "event_0001"}, {"event_type", "svpi_created"},
+     {"utc", make_utc_timestamp()}}
+  });
+
+  const auto manifest = make_svpi_manifest("svpi_test_unknown_path_audio");
+  CHECK(svp::package::write_index_foundation(staging_dir, manifest));
+  auto binding = make_minimal_media_binding("");
+
+  const auto package_path = root / "output.svpi";
+  CHECK(svp::package::write_svpi_package(package_path, staging_dir, manifest, binding));
+
+  auto layout_result = svp::package::read_package_layout(package_path);
+  CHECK(layout_result.has_value());
+  const auto& layout = layout_result.value();
+
+  CHECK(!layout.has_entry("evidence/audio_clip.wav"));
+  CHECK(!layout.has_entry("extensions/foo/original_audio.flac"));
+  CHECK(!layout.has_entry("media/derived/proxy_with_audio.mp4"));
+
+  std::filesystem::remove_all(root);
+}
+
+void test_svpi_validator_rejects_replayable_audio_under_unknown_path() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-svpi-reject-unknown-path-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto package_path = create_valid_svpi(root);
+
+  {
+    int err = 0;
+    zip_t* archive = zip_open(package_path.string().c_str(), 0, &err);
+    CHECK(archive != nullptr);
+    add_file_to_zip(archive, "evidence/audio_clip.wav", "fake wav under evidence");
+    add_file_to_zip(archive, "extensions/foo/original_audio.flac", "fake flac under extensions");
+    CHECK(zip_close(archive) == 0);
+  }
+
+  auto opts = make_validator_options();
+  auto report = svp::validation::validate_svpi_package(package_path, opts);
+  CHECK(report.status == svp::validation::ValidationStatus::invalid);
+  int derivative_count = 0;
+  for (const auto& err : report.errors) {
+    if (err.code == std::string{svp::validation::kCodeSvpiForbiddenReplayableMediaDerivative}) {
+      derivative_count++;
+    }
+  }
+  CHECK(derivative_count == 2);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_svpi_validator_rejects_video_under_unknown_path() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-svpi-reject-unknown-video-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto package_path = create_valid_svpi(root);
+
+  {
+    int err = 0;
+    zip_t* archive = zip_open(package_path.string().c_str(), 0, &err);
+    CHECK(archive != nullptr);
+    add_file_to_zip(archive, "media/derived/proxy_video.mp4", "fake mp4");
+    CHECK(zip_close(archive) == 0);
+  }
+
+  auto opts = make_validator_options();
+  auto report = svp::validation::validate_svpi_package(package_path, opts);
+  CHECK(report.status == svp::validation::ValidationStatus::invalid);
+  bool found_derivative = false;
+  for (const auto& err : report.errors) {
+    if (err.code == std::string{svp::validation::kCodeSvpiForbiddenReplayableMediaDerivative}) {
+      found_derivative = true;
+    }
+  }
+  CHECK(found_derivative);
+
+  std::filesystem::remove_all(root);
+}
+
+void test_svpi_writer_preserves_ocr_crops_and_transcript() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-svpi-preserve-crops-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto staging_dir = root / "staging";
+  std::filesystem::create_directories(staging_dir);
+
+  write_text(staging_dir / "text" / "evidence_crops" / "crop_000001.jpg", "fake jpg crop");
+  write_jsonl(staging_dir / "transcript" / "words.jsonl", {
+    {{"word_id", "word_000000"}, {"text", "hello"}, {"start_us", 0}, {"end_us", 500000}}
+  });
+  write_jsonl(staging_dir / "transcript" / "speakers.jsonl", {
+    {{"speaker_id", "speaker_0001"}, {"label", "Speaker 1"}}
+  });
+
+  write_jsonl(staging_dir / "provenance" / "processors.jsonl", {
+    {{"id", "processor_0001"}, {"version", "0.1"}}
+  });
+  write_jsonl(staging_dir / "provenance" / "interlace_events.jsonl", {
+    {{"event_id", "event_0001"}, {"event_type", "svpi_created"},
+     {"utc", make_utc_timestamp()}}
+  });
+
+  const auto manifest = make_svpi_manifest("svpi_test_preserve_crops");
+  CHECK(svp::package::write_index_foundation(staging_dir, manifest));
+  auto binding = make_minimal_media_binding("");
+
+  const auto package_path = root / "output.svpi";
+  CHECK(svp::package::write_svpi_package(package_path, staging_dir, manifest, binding));
+
+  auto layout_result = svp::package::read_package_layout(package_path);
+  CHECK(layout_result.has_value());
+  const auto& layout = layout_result.value();
+
+  CHECK(layout.has_entry("text/evidence_crops/crop_000001.jpg"));
+  CHECK(layout.has_entry("transcript/words.jsonl"));
+  CHECK(layout.has_entry("transcript/speakers.jsonl"));
+
+  auto opts = make_validator_options();
+  auto report = svp::validation::validate_svpi_package(package_path, opts);
+  bool found_forbidden = false;
+  for (const auto& err : report.errors) {
+    if (err.code == std::string{svp::validation::kCodeSvpiForbiddenReplayableMediaDerivative} ||
+        err.code == std::string{svp::validation::kCodeSvpiForbiddenPrimaryMedia}) {
+      found_forbidden = true;
+    }
+  }
+  CHECK(!found_forbidden);
+
+  std::filesystem::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
@@ -885,6 +1039,10 @@ int main() {
   test_svpi_validator_rejects_original_stream_flac();
   test_svpi_validator_rejects_analysis_wav();
   test_svpi_validator_allows_waveform_and_absence();
+  test_svpi_writer_excludes_replayable_audio_under_unknown_path();
+  test_svpi_validator_rejects_replayable_audio_under_unknown_path();
+  test_svpi_validator_rejects_video_under_unknown_path();
+  test_svpi_writer_preserves_ocr_crops_and_transcript();
 
   std::cout << "All SVPI tests passed.\n";
   return 0;
