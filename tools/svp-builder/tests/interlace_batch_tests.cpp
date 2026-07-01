@@ -1,5 +1,6 @@
 #include "svp/builder/interlace.hpp"
 #include "svp/builder/interlace_batch.hpp"
+#include "svp/builder/build_progress.hpp"
 
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
@@ -23,8 +24,10 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -883,6 +886,140 @@ void test_batch_create_out_dir_visible() {
   std::cout << "  test_batch_create_out_dir_visible passed\n";
 }
 
+// --- Progress event tests ---
+
+class CapturingProgressSink : public svp::builder::BuildProgressSink {
+ public:
+  void emit(const svp::builder::ProgressEvent& event) override {
+    events.push_back(event);
+  }
+
+  std::vector<svp::builder::ProgressEvent> events;
+};
+
+bool has_event(const std::vector<svp::builder::ProgressEvent>& events,
+               svp::builder::ProgressEventKind kind,
+               svp::builder::ProgressStageId stage) {
+  for (const auto& e : events) {
+    if (e.kind == kind && e.stage_id == stage) return true;
+  }
+  return false;
+}
+
+int count_events(const std::vector<svp::builder::ProgressEvent>& events,
+                 svp::builder::ProgressEventKind kind,
+                 svp::builder::ProgressStageId stage) {
+  int count = 0;
+  for (const auto& e : events) {
+    if (e.kind == kind && e.stage_id == stage) ++count;
+  }
+  return count;
+}
+
+void test_batch_create_emits_progress_events() {
+  const auto root = make_test_dir("svp_batch_progress_create");
+  const auto src = root / "src";
+  std::filesystem::create_directories(src);
+  const auto media1 = src / "clip1.mp4";
+  const auto media2 = src / "clip2.mp4";
+  create_mock_source_media(media1, 256);
+  create_mock_source_media(media2, 256);
+
+  auto sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::BatchCreateOptions opts;
+  opts.source_dir = src.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.visibility = svp::builder::SidecarVisibility::visible;
+  opts.core_only_diagnostic = true;
+  opts.progress_sink = sink;
+
+  auto result = svp::builder::interlace_create_batch(opts);
+  CHECK(result.created_count == 2);
+  CHECK(!sink->events.empty());
+
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_started,
+                  svp::builder::ProgressStageId::batch_scan));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_completed,
+                  svp::builder::ProgressStageId::batch_scan));
+
+  CHECK(count_events(sink->events, svp::builder::ProgressEventKind::stage_started,
+                     svp::builder::ProgressStageId::batch_item) == 2);
+  CHECK(count_events(sink->events, svp::builder::ProgressEventKind::stage_completed,
+                     svp::builder::ProgressStageId::batch_item) == 2);
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_create_emits_progress_events passed\n";
+}
+
+void test_batch_validate_emits_progress_events() {
+  const auto root = make_test_dir("svp_batch_progress_validate");
+  const auto src = root / "src";
+  std::filesystem::create_directories(src);
+  const auto media1 = src / "clip1.mp4";
+  create_mock_source_media(media1, 256);
+  const auto svpi1 = src / "clip1.svpi";
+  CHECK(build_minimal_svpi(svpi1, media1, true));
+
+  auto sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::BatchValidateOptions opts;
+  opts.source_dir = src.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.progress_sink = sink;
+
+  auto result = svp::builder::interlace_validate_batch(opts);
+  CHECK(!sink->events.empty());
+
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_started,
+                  svp::builder::ProgressStageId::batch_scan));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_completed,
+                  svp::builder::ProgressStageId::batch_scan));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_started,
+                  svp::builder::ProgressStageId::batch_item));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_completed,
+                  svp::builder::ProgressStageId::batch_item));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_validate_emits_progress_events passed\n";
+}
+
+void test_complete_identity_emits_progress_events() {
+  const auto root = make_test_dir("svp_batch_progress_identity");
+  const auto src = root / "src";
+  std::filesystem::create_directories(src);
+  const auto media1 = src / "clip1.mov";
+  create_mock_source_media(media1, 512);
+
+  svp::builder::BatchCreateOptions create_opts;
+  create_opts.source_dir = src.string();
+  create_opts.ffprobe_path = "/usr/bin/true";
+  create_opts.no_blake3 = true;
+
+  auto create_result = svp::builder::interlace_create_batch(create_opts);
+  CHECK(create_result.created_count == 1);
+
+  auto sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::CompleteIdentityOptions opts;
+  opts.svpi_path = (src / "clip1.svpi").string();
+  opts.media_path = media1.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.progress_sink = sink;
+
+  auto result = svp::builder::interlace_complete_identity(opts);
+  CHECK(result.success);
+  CHECK(!sink->events.empty());
+
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_started,
+                  svp::builder::ProgressStageId::identity));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_completed,
+                  svp::builder::ProgressStageId::identity));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_complete_identity_emits_progress_events passed\n";
+}
+
 int main() {
   std::cout << "Running SVPI Phase 3 batch/scale tests...\n";
 
@@ -914,6 +1051,10 @@ int main() {
   test_validate_batch_managed_dir();
   test_complete_identity_batch_managed_dir();
   test_batch_create_out_dir_visible();
+
+  test_batch_create_emits_progress_events();
+  test_batch_validate_emits_progress_events();
+  test_complete_identity_emits_progress_events();
 
   std::cout << "All SVPI Phase 3 batch/scale tests passed!\n";
   return 0;

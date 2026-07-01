@@ -3,6 +3,7 @@
 #include "svp/builder/interlace.hpp"
 
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -38,6 +39,7 @@ struct BatchCreateOptions {
   bool core_only_diagnostic = false;
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
+  std::shared_ptr<BuildProgressSink> progress_sink;
 };
 
 enum class BatchFileStatus {
@@ -109,6 +111,7 @@ struct BatchValidateOptions {
   bool recursive = false;
   std::string ffprobe_path = "ffprobe";
   std::string validation_codes_path = "spec/registries/validation-codes.json";
+  std::shared_ptr<BuildProgressSink> progress_sink;
 };
 
 enum class BatchValidationState {
@@ -146,6 +149,7 @@ struct CompleteIdentityOptions {
   std::string media_path;
   std::string ffprobe_path = "ffprobe";
   std::string validation_codes_path = "spec/registries/validation-codes.json";
+  std::shared_ptr<BuildProgressSink> progress_sink;
 };
 
 struct CompleteIdentityResult {
@@ -164,6 +168,7 @@ struct CompleteIdentityBatchOptions {
   bool recursive = false;
   std::string ffprobe_path = "ffprobe";
   std::string validation_codes_path = "spec/registries/validation-codes.json";
+  std::shared_ptr<BuildProgressSink> progress_sink;
 };
 
 struct CompleteIdentityBatchResult {

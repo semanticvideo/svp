@@ -1,5 +1,6 @@
 #include "svp/builder/interlace.hpp"
 #include "svp/builder/build_pipeline.hpp"
+#include "svp/builder/build_progress.hpp"
 
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
@@ -113,10 +114,13 @@ InterlaceCreateResult write_svpi_from_staging(
     const std::string& blake3_state,
     const std::filesystem::path& staging_dir,
     const nlohmann::json& sections,
-    const std::string& provenance_notes) {
+    const std::string& provenance_notes,
+    BuildProgressSink& sink) {
   InterlaceCreateResult result;
   result.svpi_path = options.output_path;
   result.blake3_state = blake3_state;
+
+  sink.emit(make_stage_started(ProgressStageId::svpi_write));
 
   const std::filesystem::path source_path(options.source_path);
 
@@ -160,13 +164,24 @@ InterlaceCreateResult write_svpi_from_staging(
 
   if (!result.success) {
     result.error_message = "failed to write SVPI package";
+    sink.emit(make_stage_failed(ProgressStageId::svpi_write, result.error_message));
     return result;
   }
 
+  sink.emit(make_artifact_written(ProgressStageId::svpi_write, options.output_path));
+  sink.emit(make_stage_completed(ProgressStageId::svpi_write));
+
+  sink.emit(make_stage_started(ProgressStageId::validate));
   svp::validation::SvpiValidatorOptions validator_opts;
   validator_opts.validation_codes_path = "spec/registries/validation-codes.json";
   auto report = svp::validation::validate_svpi_package(options.output_path, validator_opts);
   result.binding_state = svp::validation::to_string(report.status);
+
+  if (svp::validation::exit_code(report) == 0) {
+    sink.emit(make_stage_completed(ProgressStageId::validate));
+  } else {
+    sink.emit(make_stage_failed(ProgressStageId::validate, "SVPI validation reported issues"));
+  }
 
   return result;
 }
@@ -176,10 +191,13 @@ InterlaceCreateResult write_core_only_svpi(
     const svp::package::MediaBindingDocument& binding_doc,
     const std::string& blake3_state,
     const std::string& section_state,
-    const std::string& notes) {
+    const std::string& notes,
+    BuildProgressSink& sink) {
   InterlaceCreateResult result;
   result.svpi_path = options.output_path;
   result.blake3_state = blake3_state;
+
+  sink.emit(make_stage_started(ProgressStageId::svpi_write));
 
   const std::filesystem::path source_path(options.source_path);
 
@@ -235,13 +253,24 @@ InterlaceCreateResult write_core_only_svpi(
 
   if (!result.success) {
     result.error_message = "failed to write SVPI package";
+    sink.emit(make_stage_failed(ProgressStageId::svpi_write, result.error_message));
     return result;
   }
 
+  sink.emit(make_artifact_written(ProgressStageId::svpi_write, options.output_path));
+  sink.emit(make_stage_completed(ProgressStageId::svpi_write));
+
+  sink.emit(make_stage_started(ProgressStageId::validate));
   svp::validation::SvpiValidatorOptions validator_opts;
   validator_opts.validation_codes_path = "spec/registries/validation-codes.json";
   auto report = svp::validation::validate_svpi_package(options.output_path, validator_opts);
   result.binding_state = svp::validation::to_string(report.status);
+
+  if (svp::validation::exit_code(report) == 0) {
+    sink.emit(make_stage_completed(ProgressStageId::validate));
+  } else {
+    sink.emit(make_stage_failed(ProgressStageId::validate, "SVPI validation reported issues"));
+  }
 
   return result;
 }
@@ -252,12 +281,18 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
   InterlaceCreateResult result;
   result.svpi_path = options.output_path;
 
+  std::shared_ptr<BuildProgressSink> sink = options.progress_sink;
+  if (!sink) {
+    sink = default_progress_sink();
+  }
+
   const std::filesystem::path source_path(options.source_path);
   if (!std::filesystem::exists(source_path)) {
     result.error_message = "source media file does not exist: " + options.source_path;
     return result;
   }
 
+  sink->emit(make_stage_started(ProgressStageId::media_binding));
   svp::package::MediaBindingFactoryOptions binding_opts;
   binding_opts.ffprobe_path = options.ffprobe_path;
   binding_opts.compute_full_blake3 = options.compute_full_blake3;
@@ -266,12 +301,14 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
   auto binding_doc = svp::package::create_media_binding(source_path, binding_opts);
   result.blake3_state = svp::package::to_string(
       binding_doc.bindings[0].identity.blake3_state);
+  sink->emit(make_stage_completed(ProgressStageId::media_binding));
 
   if (options.core_only_diagnostic) {
     return write_core_only_svpi(
         options, binding_doc, result.blake3_state,
         "not_generated",
-        "SVPI sidecar created in core-only diagnostic mode (semantic pipeline skipped)");
+        "SVPI sidecar created in core-only diagnostic mode (semantic pipeline skipped)",
+        *sink);
   }
 
   std::filesystem::path staging_dir;
@@ -298,6 +335,7 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
   pipeline_opts.sherpa_lib_path = options.sherpa_lib_path;
   pipeline_opts.allow_fallback_diarization = options.allow_fallback_diarization;
   pipeline_opts.force_single_speaker = options.force_single_speaker;
+  pipeline_opts.progress_sink = sink;
 
   BuildPipeline pipeline;
   auto pipeline_result = pipeline.run(pipeline_opts);
@@ -324,7 +362,8 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
     return write_core_only_svpi(
         options, binding_doc, result.blake3_state,
         "blocked",
-        "SVPI sidecar created with core-only content (semantic pipeline failed, sections marked blocked)");
+        "SVPI sidecar created with core-only content (semantic pipeline failed, sections marked blocked)",
+        *sink);
   }
 
   std::string provenance_notes =
@@ -334,7 +373,7 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
 
   return write_svpi_from_staging(
       options, binding_doc, result.blake3_state,
-      staging_dir, sections, provenance_notes);
+      staging_dir, sections, provenance_notes, *sink);
 }
 
 }  // namespace svp::builder

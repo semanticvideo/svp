@@ -1,4 +1,5 @@
 #include "svp/builder/interlace.hpp"
+#include "svp/builder/build_progress.hpp"
 
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
@@ -83,6 +84,11 @@ InterlaceRecombineResult interlace_recombine(
   InterlaceRecombineResult result;
   result.svp_path = options.output_path;
 
+  std::shared_ptr<BuildProgressSink> sink = options.progress_sink;
+  if (!sink) {
+    sink = default_progress_sink();
+  }
+
   const std::filesystem::path svpi_path(options.svpi_path);
   const std::filesystem::path media_path(options.media_path);
 
@@ -95,6 +101,7 @@ InterlaceRecombineResult interlace_recombine(
     return result;
   }
 
+  sink->emit(make_stage_started(ProgressStageId::validate, "SVPI structure"));
   svp::validation::SvpiValidatorOptions svpi_validator_opts;
   svpi_validator_opts.validation_codes_path = options.validation_codes_path;
   auto svpi_report = svp::validation::validate_svpi_package(svpi_path, svpi_validator_opts);
@@ -103,9 +110,12 @@ InterlaceRecombineResult interlace_recombine(
     for (const auto& err : svpi_report.errors) {
       result.error_message += "\n  " + err.code + ": " + err.message;
     }
+    sink->emit(make_stage_failed(ProgressStageId::validate, "SVPI structure validation failed"));
     return result;
   }
+  sink->emit(make_stage_completed(ProgressStageId::validate, "SVPI structure"));
 
+  sink->emit(make_stage_started(ProgressStageId::media_binding, "binding verification"));
   auto binding_entry = svp::package::read_package_entry(svpi_path, "media_binding.json");
   if (!binding_entry.has_value()) {
     result.error_message = "could not read media_binding.json from SVPI";
@@ -127,8 +137,12 @@ InterlaceRecombineResult interlace_recombine(
     for (const auto& check : result.binding_failing_checks) {
       result.error_message += "\n  " + check;
     }
+    sink->emit(make_stage_failed(ProgressStageId::media_binding, result.binding_state_label));
     return result;
   }
+  sink->emit(make_stage_completed(ProgressStageId::media_binding, "binding verified"));
+
+  sink->emit(make_stage_started(ProgressStageId::recombine));
 
   auto manifest_entry = svp::package::read_package_entry(svpi_path, "manifest.json");
   if (!manifest_entry.has_value()) {
@@ -269,13 +283,24 @@ InterlaceRecombineResult interlace_recombine(
 
   if (!result.success) {
     result.error_message = "failed to write recombined SVP package";
+    sink->emit(make_stage_failed(ProgressStageId::recombine, result.error_message));
     return result;
   }
 
+  sink->emit(make_artifact_written(ProgressStageId::recombine, options.output_path));
+  sink->emit(make_stage_completed(ProgressStageId::recombine));
+
+  sink->emit(make_stage_started(ProgressStageId::validate, "SVP validation"));
   svp::validation::ValidatorOptions validator_opts;
   validator_opts.validation_codes_path = options.validation_codes_path;
   result.validation_report =
       svp::validation::validate_package(options.output_path, validator_opts);
+
+  if (svp::validation::exit_code(result.validation_report) == 0) {
+    sink->emit(make_stage_completed(ProgressStageId::validate, "SVP validation"));
+  } else {
+    sink->emit(make_stage_failed(ProgressStageId::validate, "SVP validation reported issues"));
+  }
 
   return result;
 }

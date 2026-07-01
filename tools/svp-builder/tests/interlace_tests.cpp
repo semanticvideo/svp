@@ -1,4 +1,5 @@
 #include "svp/builder/interlace.hpp"
+#include "svp/builder/build_progress.hpp"
 
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
@@ -19,8 +20,10 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -876,6 +879,170 @@ void test_extract_preserves_existing_provenance_events() {
 
 }  // namespace
 
+// --- Progress event tests ---
+
+namespace {
+
+class CapturingProgressSink : public svp::builder::BuildProgressSink {
+ public:
+  void emit(const svp::builder::ProgressEvent& event) override {
+    events.push_back(event);
+  }
+
+  std::vector<svp::builder::ProgressEvent> events;
+};
+
+bool has_event(const std::vector<svp::builder::ProgressEvent>& events,
+               svp::builder::ProgressEventKind kind,
+               svp::builder::ProgressStageId stage) {
+  for (const auto& e : events) {
+    if (e.kind == kind && e.stage_id == stage) return true;
+  }
+  return false;
+}
+
+void test_interlace_create_emits_progress_events() {
+  const auto root = make_test_dir("svp_interlace_progress_create");
+  const auto source_path = root / "source.mp4";
+  create_mock_source_media(source_path, 512);
+  const auto svpi_path = root / "output.svpi";
+
+  auto sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::InterlaceCreateOptions opts;
+  opts.source_path = source_path.string();
+  opts.output_path = svpi_path.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.core_only_diagnostic = true;
+  opts.progress_sink = sink;
+
+  auto result = svp::builder::interlace_create(opts);
+  CHECK(result.success);
+  CHECK(!sink->events.empty());
+
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_started,
+                  svp::builder::ProgressStageId::media_binding));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_completed,
+                  svp::builder::ProgressStageId::media_binding));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_started,
+                  svp::builder::ProgressStageId::svpi_write));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_completed,
+                  svp::builder::ProgressStageId::svpi_write));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_started,
+                  svp::builder::ProgressStageId::validate));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::artifact_written,
+                  svp::builder::ProgressStageId::svpi_write));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_interlace_create_emits_progress_events passed\n";
+}
+
+void test_interlace_validate_emits_progress_events() {
+  const auto root = make_test_dir("svp_interlace_progress_validate");
+  const auto source_path = root / "source.mp4";
+  create_mock_source_media(source_path, 512);
+  const auto svpi_path = root / "output.svpi";
+
+  CHECK(build_minimal_svpi(svpi_path, source_path, true));
+
+  auto sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::InterlaceValidateOptions opts;
+  opts.svpi_path = svpi_path.string();
+  opts.media_path = source_path.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.progress_sink = sink;
+
+  auto result = svp::builder::interlace_validate(opts);
+  CHECK(result.structure_valid);
+  CHECK(!sink->events.empty());
+
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_started,
+                  svp::builder::ProgressStageId::validate));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_completed,
+                  svp::builder::ProgressStageId::validate));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_completed,
+                  svp::builder::ProgressStageId::media_binding));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_interlace_validate_emits_progress_events passed\n";
+}
+
+void test_interlace_extract_emits_progress_events() {
+  const auto root = make_test_dir("svp_interlace_progress_extract");
+  const auto source_path = root / "source.mp4";
+  create_mock_source_media(source_path, 512);
+  const auto svp_path = root / "test.svp";
+  const auto out_dir = root / "extracted";
+
+  CHECK(build_minimal_svp(svp_path, source_path));
+
+  auto sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::InterlaceExtractOptions opts;
+  opts.svp_path = svp_path.string();
+  opts.out_dir = out_dir.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.progress_sink = sink;
+
+  auto result = svp::builder::interlace_extract(opts);
+  CHECK(result.success);
+  CHECK(!sink->events.empty());
+
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_started,
+                  svp::builder::ProgressStageId::extract));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_completed,
+                  svp::builder::ProgressStageId::extract));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::artifact_written,
+                  svp::builder::ProgressStageId::extract));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_interlace_extract_emits_progress_events passed\n";
+}
+
+void test_interlace_recombine_emits_progress_events() {
+  const auto root = make_test_dir("svp_interlace_progress_recombine");
+  const auto source_path = root / "source.mp4";
+  create_mock_source_media(source_path, 512);
+  const auto svpi_path = root / "test.svpi";
+  const auto svp_out = root / "recombined.svp";
+
+  CHECK(build_minimal_svpi(svpi_path, source_path, true));
+
+  auto sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::InterlaceRecombineOptions opts;
+  opts.media_path = source_path.string();
+  opts.svpi_path = svpi_path.string();
+  opts.output_path = svp_out.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.progress_sink = sink;
+
+  auto result = svp::builder::interlace_recombine(opts);
+  CHECK(result.success);
+  CHECK(!sink->events.empty());
+
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_started,
+                  svp::builder::ProgressStageId::validate));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_completed,
+                  svp::builder::ProgressStageId::validate));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_started,
+                  svp::builder::ProgressStageId::media_binding));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_completed,
+                  svp::builder::ProgressStageId::media_binding));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_started,
+                  svp::builder::ProgressStageId::recombine));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_completed,
+                  svp::builder::ProgressStageId::recombine));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::artifact_written,
+                  svp::builder::ProgressStageId::recombine));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_interlace_recombine_emits_progress_events passed\n";
+}
+
+}  // namespace
+
 int main() {
   std::cout << "Running SVPI Phase 2 interlace tests...\n";
 
@@ -898,6 +1065,11 @@ int main() {
   test_binding_verification_includes_container_and_streams();
   test_validator_rejects_binding_without_chunk_hashes();
   test_extract_preserves_existing_provenance_events();
+
+  test_interlace_create_emits_progress_events();
+  test_interlace_validate_emits_progress_events();
+  test_interlace_extract_emits_progress_events();
+  test_interlace_recombine_emits_progress_events();
 
   std::cout << "All SVPI Phase 2 interlace tests passed!\n";
   return 0;
