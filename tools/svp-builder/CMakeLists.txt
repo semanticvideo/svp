@@ -53,9 +53,20 @@ target_link_libraries(svp-builder-lib
 
 add_executable(svp-builder
   src/main.cpp
+  src/cli/cli_register.cpp
+  src/cli/cli_progress.cpp
+  src/cli/probe_command.cpp
+  src/cli/build_command.cpp
+  src/cli/interlace_commands.cpp
+  src/cli/interlace_output.cpp
+  src/cli/main_dispatch.cpp
 )
 
 target_compile_features(svp-builder PRIVATE cxx_std_20)
+
+target_include_directories(svp-builder PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
 
 target_link_libraries(svp-builder
   PRIVATE
