@@ -653,6 +653,167 @@ void test_quiet_produces_no_stdout() {
   std::filesystem::remove_all(tmp_dir);
 }
 
+void test_noise_regression_forbidden_strings_absent() {
+  // Render a full set of events through plain mode and verify
+  // no forbidden noise strings appear in the output.
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::plain, oss, false);
+
+  const svp::builder::ProgressEvent events[] = {
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::media_probe, "probing"),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::media_probe),
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::audio_extract, "extracting"),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::audio_extract),
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::asr, "transcribing"),
+      svp::builder::make_stage_progress(
+          svp::builder::ProgressStageId::asr, 1, 3, "chunks"),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::asr),
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::diarization),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::diarization),
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::color, "sampling"),
+      svp::builder::make_stage_progress(
+          svp::builder::ProgressStageId::color, 5, 15, "frames"),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::color),
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::ocr, "detecting"),
+      svp::builder::make_stage_progress(
+          svp::builder::ProgressStageId::ocr, 10, 34, "items"),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::ocr),
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::depth),
+      svp::builder::make_stage_progress(
+          svp::builder::ProgressStageId::depth, 3, 5, "items"),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::depth),
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::text_embeddings),
+      svp::builder::make_stage_progress(
+          svp::builder::ProgressStageId::text_embeddings, 10, 23, "items"),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::text_embeddings),
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::visual_tracking),
+      svp::builder::make_stage_progress(
+          svp::builder::ProgressStageId::visual_tracking, 1, 1, "items"),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::visual_tracking),
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::entities),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::entities),
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::relationships),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::relationships),
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::index),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::index),
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::package_write),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::package_write),
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::validate),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::validate),
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::validation_report),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::validation_report),
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::repackage),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::repackage),
+      svp::builder::make_artifact_written(
+          svp::builder::ProgressStageId::package_write,
+          "out/video.svp", "package"),
+  };
+
+  for (const auto& event : events) {
+    sink->emit(event);
+  }
+
+  const std::string output = oss.str();
+
+  // Forbidden strings must not appear
+  const std::string forbidden[] = {
+      "Schema error",
+      "Trying to register schema",
+      "ffmpeg version",
+      "Input #0",
+      "Output #0",
+      "Wrote:",
+      "Validation: PASSED",
+      "+ Package Write:",
+      "[stage_started]",
+      "[stage_progress]",
+      "[stage_completed]",
+      "OpenCV(",
+      "onnxruntime",
+  };
+
+  for (const auto& s : forbidden) {
+    assert(output.find(s) == std::string::npos);
+  }
+
+  // Required stage labels must appear
+  assert(output.find("Media Probe") != std::string::npos);
+  assert(output.find("Audio Extraction") != std::string::npos);
+  assert(output.find("ASR") != std::string::npos);
+  assert(output.find("Diarization") != std::string::npos);
+  assert(output.find("Color Observations") != std::string::npos);
+  assert(output.find("OCR") != std::string::npos);
+  assert(output.find("Depth") != std::string::npos);
+  assert(output.find("Text Embeddings") != std::string::npos);
+  assert(output.find("Visual Tracking") != std::string::npos);
+  assert(output.find("Entities") != std::string::npos);
+  assert(output.find("Relationships") != std::string::npos);
+  assert(output.find("Index") != std::string::npos);
+  assert(output.find("Package Write") != std::string::npos);
+  assert(output.find("Validation Report") != std::string::npos);
+  assert(output.find("Repackage") != std::string::npos);
+  assert(output.find("Validation") != std::string::npos);
+}
+
+void test_json_progress_preserves_all_event_types() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::json, oss, false);
+
+  sink->emit(svp::builder::make_stage_started(
+      svp::builder::ProgressStageId::ocr, "detecting"));
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::ocr, 10, 34, "items"));
+  sink->emit(svp::builder::make_stage_completed(
+      svp::builder::ProgressStageId::ocr));
+  sink->emit(svp::builder::make_artifact_written(
+      svp::builder::ProgressStageId::package_write,
+      "out/video.svp", "package"));
+
+  const std::string output = oss.str();
+
+  // JSON mode must preserve artifact_written (suppressed in human modes)
+  assert(output.find("\"artifact_written\"") != std::string::npos);
+  assert(output.find("\"stage_started\"") != std::string::npos);
+  assert(output.find("\"stage_progress\"") != std::string::npos);
+  assert(output.find("\"stage_completed\"") != std::string::npos);
+  assert(output.find("\"ocr\"") != std::string::npos);
+  assert(output.find("\"items\"") != std::string::npos);
+}
+
 }  // namespace
 
 int main() {
@@ -680,6 +841,8 @@ int main() {
   test_plain_renderer_no_noise_categories();
   test_json_sink_no_noise_categories();
   test_quiet_produces_no_stdout();
+  test_noise_regression_forbidden_strings_absent();
+  test_json_progress_preserves_all_event_types();
 
   return 0;
 }

@@ -81,17 +81,6 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     package_result.json_output_path = options.output_path;
     if (stage_plan.run_package_skeleton) {
       package_result = run_package_skeleton_stage(context);
-      if (package_result.package_written) {
-        emit_stage_completed(context, ProgressStageId::package_write);
-
-        if (package_result.validator_passes) {
-          emit_stage_completed(context, ProgressStageId::validate);
-        } else {
-          emit_stage_failed(context, ProgressStageId::validate);
-        }
-      } else {
-        emit_stage_failed(context, ProgressStageId::package_write);
-      }
     }
 
     output["builder_command"] = {
