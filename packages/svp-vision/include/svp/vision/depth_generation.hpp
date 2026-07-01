@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -19,10 +20,8 @@ struct DepthGenerationOptions {
   std::string execution_provider = "cpu";
   std::uint32_t raster_width = 0;
   std::uint32_t raster_height = 0;
-  // Real decoded canonical frames from the source media.
-  // When non-empty and decoding_succeeded is true, depth generation may
-  // run ONNX inference on these frames and write real depth blocks.
   DecodedCanonicalFrames frame_input;
+  std::function<void(std::size_t current, std::size_t total)> on_progress;
 };
 
 struct DepthBlockEntry {

@@ -80,22 +80,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     PackageSkeletonStageResult package_result;
     package_result.json_output_path = options.output_path;
     if (stage_plan.run_package_skeleton) {
-      emit_stage_started(context, ProgressStageId::package_write);
       package_result = run_package_skeleton_stage(context);
-      if (package_result.package_written) {
-        emit_artifact_written(context, ProgressStageId::package_write,
-                              package_result.package_path);
-        emit_stage_completed(context, ProgressStageId::package_write);
-
-        emit_stage_started(context, ProgressStageId::validate);
-        if (package_result.validator_passes) {
-          emit_stage_completed(context, ProgressStageId::validate);
-        } else {
-          emit_stage_failed(context, ProgressStageId::validate);
-        }
-      } else {
-        emit_stage_failed(context, ProgressStageId::package_write);
-      }
     }
 
     output["builder_command"] = {
@@ -126,19 +111,8 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
                           package_result.json_output_path,
                           "builder foundation JSON");
 
-    if (!options.quiet) {
-      std::cout << "Wrote: " << package_result.json_output_path << "\n";
-      if (stage_plan.run_package_skeleton && package_result.package_written) {
-        if (package_result.validator_passes) {
-          std::cout << "Validation: PASSED\n";
-        } else {
-          std::cout << "Validation: FAILED (exit "
-                    << package_result.validator_exit_code << ")\n";
-        }
-      }
-      if (options.verbose) {
-        print_build_progress(context, package_result);
-      }
+    if (options.verbose) {
+      print_build_progress(context, package_result);
     }
 
     if (stage_plan.run_package_skeleton && package_result.package_written &&

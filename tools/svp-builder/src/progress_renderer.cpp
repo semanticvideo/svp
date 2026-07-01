@@ -84,10 +84,12 @@ class PlainProgressSink : public BuildProgressSink {
   explicit PlainProgressSink(std::ostream& stream) : stream_(stream) {}
 
   void emit(const ProgressEvent& event) override {
+    if (event.kind == ProgressEventKind::artifact_written) {
+      return;
+    }
     stream_ << format_stage_line(event);
     if (!event.message.empty() &&
-        event.kind != ProgressEventKind::warning &&
-        event.kind != ProgressEventKind::artifact_written) {
+        event.kind != ProgressEventKind::warning) {
       stream_ << "  " << event.message;
     }
     stream_ << '\n';
@@ -155,8 +157,7 @@ class TtyProgressSink : public BuildProgressSink {
       if (use_color_) stream_ << "\033[0m";
       stream_ << '\n';
     } else if (event.kind == ProgressEventKind::artifact_written) {
-      stream_ << '\r' << clear_line() << '\r';
-      stream_ << "  + " << label << ": " << event.artifact_path.string() << '\n';
+      return;
     }
   }
 

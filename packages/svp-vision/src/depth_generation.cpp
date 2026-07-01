@@ -306,6 +306,11 @@ DepthGenerationResult generate_depth_blocks(
 
   std::vector<nlohmann::json> index_entries;
 
+  const std::size_t total_frames = options.frame_input.frames.size();
+  if (options.on_progress) {
+    options.on_progress(0, total_frames);
+  }
+
   std::ofstream block_out(depth_blocks_tmp_path, std::ios::binary);
   if (!block_out) {
     result.blocker = "Failed to open depth blocks temp file: " +
@@ -457,6 +462,10 @@ DepthGenerationResult generate_depth_blocks(
         {"start_us", entry.start_us},
         {"end_us", entry.end_us}
     });
+
+    if (options.on_progress) {
+      options.on_progress(frame_idx + 1, total_frames);
+    }
   }
 
   block_out.close();

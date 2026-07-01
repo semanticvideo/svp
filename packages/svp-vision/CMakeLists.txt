@@ -268,4 +268,20 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-vision-visual-entity-tracker-tests
            COMMAND svp-vision-visual-entity-tracker-tests)
+
+  add_executable(svp-vision-progress-callback-tests
+    tests/progress_callback_tests.cpp
+  )
+
+  target_compile_features(svp-vision-progress-callback-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-progress-callback-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-progress-callback-tests
+           COMMAND svp-vision-progress-callback-tests)
 endif()

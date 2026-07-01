@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -18,6 +19,7 @@ struct EmbeddingGenerationOptions {
   std::string vision_model_id = "model_nomic_embed_vision_v1_5";
   std::string execution_provider = "cpu";
   std::uint32_t embedding_dim = 768;
+  std::function<void(std::size_t current, std::size_t total)> on_progress;
 };
 
 struct EmbeddingEntry {

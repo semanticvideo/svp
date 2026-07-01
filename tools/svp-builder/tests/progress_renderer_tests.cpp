@@ -67,7 +67,6 @@ void test_plain_sink_emits_deterministic_lines() {
   const std::string output = oss.str();
   assert(output == "Media Probe  [working]  probing\n"
                    "Media Probe  [################################] 100%\n"
-                   "Package Write  wrote out/video.svp\n"
                    "Diarization  WARNING: fallback used\n"
                    "Validation  FAILED  validator exit 1\n");
 }
@@ -309,6 +308,61 @@ void test_plain_sink_fraction_only_with_unit_no_crash() {
   assert(output.find("/0") == std::string::npos);
 }
 
+void test_new_stage_ids_have_labels() {
+  assert(svp::builder::progress_stage_id(
+      svp::builder::ProgressStageId::text_embeddings) == "text_embeddings");
+  assert(svp::builder::progress_stage_label(
+      svp::builder::ProgressStageId::text_embeddings) == "Text Embeddings");
+  assert(svp::builder::progress_stage_id(
+      svp::builder::ProgressStageId::visual_tracking) == "visual_tracking");
+  assert(svp::builder::progress_stage_label(
+      svp::builder::ProgressStageId::visual_tracking) == "Visual Tracking");
+  assert(svp::builder::progress_stage_id(
+      svp::builder::ProgressStageId::visual_embeddings) == "visual_embeddings");
+  assert(svp::builder::progress_stage_label(
+      svp::builder::ProgressStageId::visual_embeddings) == "Visual Embeddings");
+  assert(svp::builder::progress_stage_id(
+      svp::builder::ProgressStageId::validation_report) == "validation_report");
+  assert(svp::builder::progress_stage_label(
+      svp::builder::ProgressStageId::validation_report) == "Validation Report");
+  assert(svp::builder::progress_stage_id(
+      svp::builder::ProgressStageId::repackage) == "repackage");
+  assert(svp::builder::progress_stage_label(
+      svp::builder::ProgressStageId::repackage) == "Repackage");
+}
+
+void test_artifact_written_suppressed_in_plain() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::plain, oss, false);
+  sink->emit(svp::builder::make_artifact_written(
+      svp::builder::ProgressStageId::package_write,
+      "out/video.svp", "package"));
+  assert(oss.str().empty());
+}
+
+void test_artifact_written_suppressed_in_tty() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::auto_, oss, true);
+  sink->emit(svp::builder::make_artifact_written(
+      svp::builder::ProgressStageId::package_write,
+      "out/video.svp", "package"));
+  assert(oss.str().empty());
+}
+
+void test_artifact_written_preserved_in_json() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::json, oss, false);
+  sink->emit(svp::builder::make_artifact_written(
+      svp::builder::ProgressStageId::package_write,
+      "out/video.svp", "package"));
+  const std::string output = oss.str();
+  assert(output.find("\"artifact_written\"") != std::string::npos);
+  assert(output.find("\"out/video.svp\"") != std::string::npos);
+}
+
 }  // namespace
 
 int main() {
@@ -331,6 +385,10 @@ int main() {
   test_make_stage_progress_fraction();
   test_make_stage_progress_zero_total();
   test_plain_sink_fraction_only_with_unit_no_crash();
+  test_new_stage_ids_have_labels();
+  test_artifact_written_suppressed_in_plain();
+  test_artifact_written_suppressed_in_tty();
+  test_artifact_written_preserved_in_json();
 
   return 0;
 }
