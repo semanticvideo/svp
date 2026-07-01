@@ -114,7 +114,10 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     }
 
     write_json_file(package_result.json_output_path, output);
-    emit_artifact_written(context, ProgressStageId::package_write,
+    emit_artifact_written(context,
+                          stage_plan.run_package_skeleton
+                              ? ProgressStageId::package_write
+                              : ProgressStageId::media_probe,
                           package_result.json_output_path,
                           "builder foundation JSON");
     std::cout << "Wrote builder foundation JSON: "

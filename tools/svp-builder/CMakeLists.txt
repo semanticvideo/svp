@@ -73,6 +73,7 @@ if(BUILD_TESTING)
   )
 
   target_compile_features(svp-builder-pipeline-tests PRIVATE cxx_std_20)
+  target_compile_options(svp-builder-pipeline-tests PRIVATE -UNDEBUG)
   target_compile_features(svp-interlace-tests PRIVATE cxx_std_20)
   target_compile_features(svp-interlace-batch-tests PRIVATE cxx_std_20)
 
