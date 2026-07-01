@@ -1,4 +1,5 @@
 #include "svp/builder/build_pipeline.hpp"
+#include "svp/builder/build_progress.hpp"
 
 #include "build_pipeline_internal.hpp"
 #include "svp/audio/sherpa_diarization.hpp"
@@ -8,21 +9,30 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <string>
 
 namespace svp::builder {
 
 BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) const {
+  std::shared_ptr<BuildProgressSink> sink = options.progress_sink;
+  if (!sink) {
+    sink = default_progress_sink();
+  }
+
   try {
     const std::string stop_after_name(build_stage_name(options.stop_after));
     const BuildStageExecutionPlan stage_plan =
         execution_plan_for_stage(options.stop_after);
+
+    sink->emit(make_stage_started(ProgressStageId::media_probe));
     const svp::media::MediaIngestPlan plan =
         svp::media::build_media_ingest_plan(
             options.source_path,
             load_or_run_probe(options.source_path, options.probe_json_path,
                               options.ffprobe_path));
     nlohmann::json output = svp::media::media_ingest_plan_to_json(plan);
+    sink->emit(make_stage_completed(ProgressStageId::media_probe));
 
     const std::filesystem::path staging_dir =
         options.staging_dir.empty()
@@ -35,27 +45,52 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     }
 
     BuildPipelineContext context{options, stage_plan, plan, staging_dir,
-                                 model_runtime_available, output};
+                                 model_runtime_available, output,
+                                 svp::vision::FrameCatalog{}, *sink};
 
     if (stage_plan.run_audio) {
+      emit_stage_started(context, ProgressStageId::audio_extract);
       if (const std::optional<int> audio_exit = run_audio_stage(context)) {
+        emit_stage_failed(context, ProgressStageId::audio_extract);
         return {.exit_code = *audio_exit};
       }
+      emit_stage_completed(context, ProgressStageId::audio_extract);
     }
     if (stage_plan.run_vision_plan) {
+      emit_stage_started(context, ProgressStageId::vision_plan);
       run_vision_plan_stage(context);
+      emit_stage_completed(context, ProgressStageId::vision_plan);
     }
     if (stage_plan.run_foundation_color) {
+      emit_stage_started(context, ProgressStageId::color);
       run_foundation_color_stage(context);
+      emit_stage_completed(context, ProgressStageId::color);
     }
     if (stage_plan.run_foundation_ocr) {
+      emit_stage_started(context, ProgressStageId::ocr);
       run_foundation_ocr_stage(context);
+      emit_stage_completed(context, ProgressStageId::ocr);
     }
 
     PackageSkeletonStageResult package_result;
     package_result.json_output_path = options.output_path;
     if (stage_plan.run_package_skeleton) {
+      emit_stage_started(context, ProgressStageId::package_write);
       package_result = run_package_skeleton_stage(context);
+      if (package_result.package_written) {
+        emit_artifact_written(context, ProgressStageId::package_write,
+                              package_result.package_path);
+        emit_stage_completed(context, ProgressStageId::package_write);
+
+        emit_stage_started(context, ProgressStageId::validate);
+        if (package_result.validator_passes) {
+          emit_stage_completed(context, ProgressStageId::validate);
+        } else {
+          emit_stage_failed(context, ProgressStageId::validate);
+        }
+      } else {
+        emit_stage_failed(context, ProgressStageId::package_write);
+      }
     }
 
     output["builder_command"] = {
@@ -79,6 +114,12 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     }
 
     write_json_file(package_result.json_output_path, output);
+    emit_artifact_written(context,
+                          stage_plan.run_package_skeleton
+                              ? ProgressStageId::package_write
+                              : ProgressStageId::media_probe,
+                          package_result.json_output_path,
+                          "builder foundation JSON");
     std::cout << "Wrote builder foundation JSON: "
               << package_result.json_output_path << "\n";
     print_build_progress(context, package_result);

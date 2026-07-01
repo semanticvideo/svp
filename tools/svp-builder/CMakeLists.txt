@@ -7,6 +7,7 @@ add_library(svp-builder-lib
   src/build_pipeline.cpp
   src/build_pipeline_io.cpp
   src/build_progress.cpp
+  src/build_progress_catalog.cpp
   src/build_stage_metadata.cpp
   src/foundation_color_stage.cpp
   src/foundation_ocr_stage.cpp
@@ -72,6 +73,7 @@ if(BUILD_TESTING)
   )
 
   target_compile_features(svp-builder-pipeline-tests PRIVATE cxx_std_20)
+  target_compile_options(svp-builder-pipeline-tests PRIVATE -UNDEBUG)
   target_compile_features(svp-interlace-tests PRIVATE cxx_std_20)
   target_compile_features(svp-interlace-batch-tests PRIVATE cxx_std_20)
 
