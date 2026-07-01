@@ -1,6 +1,7 @@
 #include "svp/builder/build_pipeline.hpp"
 #include "svp/builder/interlace.hpp"
 #include "svp/builder/interlace_batch.hpp"
+#include "svp/builder/progress_renderer.hpp"
 #include "svp/core/version.hpp"
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/validation/report_json.hpp"
@@ -11,6 +12,7 @@
 #include <iostream>
 #include <optional>
 #include <string>
+#include <unistd.h>
 
 namespace {
 
@@ -68,6 +70,9 @@ int main(int argc, char** argv) {
   std::string build_sherpa_lib_path;
   bool build_allow_fallback_diarization = false;
   bool build_force_single_speaker = false;
+  std::string build_progress_mode = "auto";
+  bool build_quiet = false;
+  bool build_verbose = false;
 
   auto* build = app.add_subcommand(
       "build", "Write an honest builder foundation JSON artifact");
@@ -94,6 +99,13 @@ int main(int argc, char** argv) {
   build->add_flag("--force-single-speaker", build_force_single_speaker,
                   "Skip Sherpa diarization entirely and emit one speaker segment. "
                   "Use when you know the clip contains only one speaker.");
+  build->add_option("--progress", build_progress_mode,
+                    "Progress output mode: auto, plain, json, none")
+      ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
+  build->add_flag("--quiet", build_quiet,
+                  "Suppress progress output; print only final success/failure");
+  build->add_flag("--verbose", build_verbose,
+                  "Include detailed diagnostics and full validation findings");
 
   // --- interlace subcommand ---
   auto* interlace = app.add_subcommand(
@@ -709,6 +721,31 @@ int main(int argc, char** argv) {
         return 2;
       }
 
+      auto progress_opt = build->get_option("--progress");
+      const bool progress_explicitly_set =
+          progress_opt && progress_opt->count() > 0;
+
+      std::optional<svp::builder::ProgressMode> resolved_mode;
+      if (build_quiet) {
+        if (progress_explicitly_set && build_progress_mode == "json") {
+          resolved_mode = svp::builder::ProgressMode::json;
+        } else {
+          resolved_mode = svp::builder::ProgressMode::none;
+        }
+      } else {
+        resolved_mode = svp::builder::parse_progress_mode(build_progress_mode);
+      }
+
+      if (!resolved_mode) {
+        std::cerr << "svp-builder: invalid --progress value: "
+                  << build_progress_mode << "\n";
+        return 2;
+      }
+
+      const bool stderr_is_tty = isatty(fileno(stderr)) != 0;
+      auto progress_sink = svp::builder::make_progress_sink(
+          *resolved_mode, std::cerr, stderr_is_tty);
+
       svp::builder::BuildPipelineOptions options;
       options.source_path = build_source_path;
       options.probe_json_path = build_probe_json_path;
@@ -721,6 +758,7 @@ int main(int argc, char** argv) {
       options.sherpa_lib_path = build_sherpa_lib_path;
       options.allow_fallback_diarization = build_allow_fallback_diarization;
       options.force_single_speaker = build_force_single_speaker;
+      options.progress_sink = progress_sink;
 
       const svp::builder::BuildPipelineResult result =
           svp::builder::BuildPipeline{}.run(options);
