@@ -564,6 +564,97 @@ void test_plain_renderer_no_ffmpeg_noise_strings() {
   assert(output.find("Schema error") == std::string::npos);
 }
 
+void test_plain_renderer_no_noise_categories() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::plain, oss, false);
+
+  sink->emit(svp::builder::make_stage_started(
+      svp::builder::ProgressStageId::media_probe, "probing"));
+  sink->emit(svp::builder::make_stage_completed(
+      svp::builder::ProgressStageId::media_probe));
+  sink->emit(svp::builder::make_stage_started(
+      svp::builder::ProgressStageId::asr, "transcribing"));
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::asr, 1, 3, "chunks"));
+  sink->emit(svp::builder::make_stage_completed(
+      svp::builder::ProgressStageId::asr));
+  sink->emit(svp::builder::make_stage_started(
+      svp::builder::ProgressStageId::color, "sampling"));
+  sink->emit(svp::builder::make_stage_completed(
+      svp::builder::ProgressStageId::color));
+
+  const std::string output = oss.str();
+
+  assert(output.find("Schema error") == std::string::npos);
+  assert(output.find("Trying to register schema") == std::string::npos);
+  assert(output.find("Debug (cpuinfo)") == std::string::npos);
+  assert(output.find("Note (cpuinfo)") == std::string::npos);
+  assert(output.find("ParallelBackendRegistry") == std::string::npos);
+  assert(output.find("OpenCV(") == std::string::npos);
+  assert(output.find("Input #0") == std::string::npos);
+  assert(output.find("Stream mapping:") == std::string::npos);
+  assert(output.find("[stage_started]") == std::string::npos);
+  assert(output.find("[stage_completed]") == std::string::npos);
+  assert(output.find("[stage_progress]") == std::string::npos);
+}
+
+void test_json_sink_no_noise_categories() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::json, oss, false);
+
+  sink->emit(svp::builder::make_stage_started(
+      svp::builder::ProgressStageId::asr, "transcribing"));
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::asr, 1, 3, "chunks"));
+  sink->emit(svp::builder::make_stage_completed(
+      svp::builder::ProgressStageId::asr));
+
+  const std::string output = oss.str();
+
+  assert(output.find("Schema error") == std::string::npos);
+  assert(output.find("Trying to register schema") == std::string::npos);
+  assert(output.find("Debug (cpuinfo)") == std::string::npos);
+  assert(output.find("Note (cpuinfo)") == std::string::npos);
+  assert(output.find("ParallelBackendRegistry") == std::string::npos);
+  assert(output.find("OpenCV(") == std::string::npos);
+  assert(output.find("Input #0") == std::string::npos);
+  assert(output.find("Stream mapping:") == std::string::npos);
+  assert(output.find("[stage_started]") == std::string::npos);
+}
+
+void test_quiet_produces_no_stdout() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_quiet_stdout_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path probe_path = write_minimal_probe_json(tmp_dir);
+  const std::filesystem::path output_path = tmp_dir / "output.json";
+
+  svp::builder::BuildPipelineOptions options;
+  options.source_path = "test_video.mp4";
+  options.probe_json_path = probe_path.string();
+  options.output_path = output_path;
+  options.stop_after = svp::builder::BuildStage::media_ingest;
+  options.quiet = true;
+
+  std::ostringstream captured_stdout;
+  std::streambuf* old_cout = std::cout.rdbuf();
+  std::cout.rdbuf(captured_stdout.rdbuf());
+
+  svp::builder::BuildPipeline pipeline;
+  const svp::builder::BuildPipelineResult result = pipeline.run(options);
+
+  std::cout.rdbuf(old_cout);
+
+  assert(result.exit_code == 0);
+  assert(captured_stdout.str().empty());
+  assert(std::filesystem::exists(output_path));
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
 }  // namespace
 
 int main() {
@@ -588,6 +679,9 @@ int main() {
   test_pipeline_verbose_emits_events();
   test_plain_renderer_no_raw_event_names();
   test_plain_renderer_no_ffmpeg_noise_strings();
+  test_plain_renderer_no_noise_categories();
+  test_json_sink_no_noise_categories();
+  test_quiet_produces_no_stdout();
 
   return 0;
 }

@@ -6,6 +6,7 @@
 #include "svp/audio/whisper_model.hpp"
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/models/runtime.hpp"
+#include "svp/vision/noise_suppression.hpp"
 
 #include <exception>
 #include <filesystem>
@@ -42,6 +43,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     const bool model_runtime_available = svp::models::OnnxSession::is_available();
     svp::models::set_onnx_verbose(options.verbose);
     svp::audio::set_whisper_verbose(options.verbose);
+    svp::vision::set_opencv_verbose(options.verbose);
 
     if (!options.sherpa_lib_path.empty()) {
       svp::audio::set_sherpa_lib_path(options.sherpa_lib_path);

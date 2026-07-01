@@ -1,4 +1,5 @@
 #include "svp/vision/visual_entity_tracker.hpp"
+#include "svp/vision/noise_suppression.hpp"
 
 #include "svp/models/manifest.hpp"
 #include "svp/models/runtime.hpp"
@@ -13,15 +14,46 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <fcntl.h>
 #include <fstream>
 #include <iomanip>
 #include <numeric>
 #include <optional>
 #include <set>
 #include <sstream>
+#include <unistd.h>
 
 namespace svp::vision {
 namespace {
+
+class StderrSuppressor {
+ public:
+  StderrSuppressor() : suppressed_(false) {
+    fflush(stderr);
+    saved_stderr_ = dup(STDERR_FILENO);
+    const int devnull = open("/dev/null", O_WRONLY);
+    if (devnull >= 0) {
+      dup2(devnull, STDERR_FILENO);
+      close(devnull);
+      suppressed_ = true;
+    }
+  }
+
+  ~StderrSuppressor() {
+    if (suppressed_) {
+      fflush(stderr);
+      dup2(saved_stderr_, STDERR_FILENO);
+      close(saved_stderr_);
+    }
+  }
+
+  StderrSuppressor(const StderrSuppressor&) = delete;
+  StderrSuppressor& operator=(const StderrSuppressor&) = delete;
+
+ private:
+  bool suppressed_;
+  int saved_stderr_;
+};
 
 // ---------------------------------------------------------------------------
 // LEB128 encoding/decoding for unsigned integers.
@@ -473,12 +505,19 @@ cv::Mat refine_mask_grabcut(
     const cv::Mat& color_frame,
     const cv::Rect& bbox,
     int iterations) {
+  if (color_frame.empty() || bbox.width < 2 || bbox.height < 2 ||
+      bbox.x < 0 || bbox.y < 0 ||
+      bbox.x + bbox.width > color_frame.cols ||
+      bbox.y + bbox.height > color_frame.rows) {
+    cv::Mat fallback = cv::Mat::zeros(color_frame.size(), CV_8UC1);
+    cv::rectangle(fallback, bbox, 1, cv::FILLED);
+    return fallback;
+  }
+
   cv::Mat mask = cv::Mat::zeros(color_frame.size(), CV_8UC1);
   cv::Mat bg_model, fg_model;
 
-  // Set probable foreground region from bbox
   cv::rectangle(mask, bbox, cv::GC_PR_FGD, cv::FILLED);
-  // Set definite foreground in center of bbox
   int cx = bbox.x + bbox.width / 4;
   int cy = bbox.y + bbox.height / 4;
   int cw = bbox.width / 2;
@@ -491,9 +530,12 @@ cv::Mat refine_mask_grabcut(
 
   cv::Mat bgd_model, fgd_model;
   try {
+    std::optional<StderrSuppressor> suppressor;
+    if (!svp::vision::opencv_verbose()) {
+      suppressor.emplace();
+    }
     cv::grabCut(color_frame, mask, bbox, bgd_model, fgd_model, iterations, cv::GC_INIT_WITH_RECT);
   } catch (...) {
-    // GrabCut can fail on degenerate inputs; fall back to bbox mask
     mask = cv::Mat::zeros(color_frame.size(), CV_8UC1);
     cv::rectangle(mask, bbox, 1, cv::FILLED);
     return mask;

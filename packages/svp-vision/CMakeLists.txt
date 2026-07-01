@@ -22,6 +22,7 @@ add_library(svp-vision
   src/text_tokenizer.cpp
   src/visual_entity_tracker.cpp
   src/mask_writer.cpp
+  src/noise_suppression.cpp
 )
 
 add_library(svp::vision ALIAS svp-vision)

@@ -6,7 +6,10 @@
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <fcntl.h>
+#include <optional>
 #include <stdexcept>
+#include <unistd.h>
 
 #if defined(SVP_ONNX_RUNTIME_AVAILABLE)
 #include <onnxruntime_cxx_api.h>
@@ -21,6 +24,42 @@ namespace svp::models {
 
 namespace {
 std::atomic<bool> g_onnx_verbose{false};
+
+class StdoutStderrSuppressor {
+ public:
+  StdoutStderrSuppressor() : suppressed_(false) {
+    fflush(stdout);
+    fflush(stderr);
+    saved_stdout_ = dup(STDOUT_FILENO);
+    saved_stderr_ = dup(STDERR_FILENO);
+    const int devnull = open("/dev/null", O_WRONLY);
+    if (devnull >= 0) {
+      dup2(devnull, STDOUT_FILENO);
+      dup2(devnull, STDERR_FILENO);
+      close(devnull);
+      suppressed_ = true;
+    }
+  }
+
+  ~StdoutStderrSuppressor() {
+    if (suppressed_) {
+      fflush(stdout);
+      fflush(stderr);
+      dup2(saved_stdout_, STDOUT_FILENO);
+      dup2(saved_stderr_, STDERR_FILENO);
+      close(saved_stdout_);
+      close(saved_stderr_);
+    }
+  }
+
+  StdoutStderrSuppressor(const StdoutStderrSuppressor&) = delete;
+  StdoutStderrSuppressor& operator=(const StdoutStderrSuppressor&) = delete;
+
+ private:
+  bool suppressed_;
+  int saved_stdout_;
+  int saved_stderr_;
+};
 }
 
 void set_onnx_verbose(bool verbose) {
@@ -31,6 +70,11 @@ Ort::Env& shared_onnx_env() {
   const auto level = g_onnx_verbose.load(std::memory_order_relaxed)
       ? ORT_LOGGING_LEVEL_WARNING
       : ORT_LOGGING_LEVEL_FATAL;
+  const bool suppress = !g_onnx_verbose.load(std::memory_order_relaxed);
+  std::optional<StdoutStderrSuppressor> suppressor;
+  if (suppress) {
+    suppressor.emplace();
+  }
   static Ort::Env env(level, "svp-models");
   return env;
 }
@@ -111,9 +155,16 @@ OnnxSession OnnxSession::load(const ModelBundleManifest& manifest,
   }
 #endif
 
-  result.impl_->session = Ort::Session(*result.impl_->env,
-                                       model_file_path.string().c_str(),
-                                       session_options);
+  const bool suppress = !g_onnx_verbose.load(std::memory_order_relaxed);
+  {
+    std::optional<StdoutStderrSuppressor> suppressor;
+    if (suppress) {
+      suppressor.emplace();
+    }
+    result.impl_->session = Ort::Session(*result.impl_->env,
+                                         model_file_path.string().c_str(),
+                                         session_options);
+  }
 
   Ort::AllocatorWithDefaultOptions allocator;
 
