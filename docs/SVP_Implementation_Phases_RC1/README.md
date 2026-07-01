@@ -18,6 +18,13 @@ docs/SVP_Implementation_Phases_RC2_Update/
 
 The RC2 pause gate has been satisfied. Continue using the RC2 deltas as the active contract for validator, builder, index/query, package, and inspection work.
 
+SVPI sidecar/interlace support has also landed after the original first-video
+milestone. Current interlace workflows can create `.svpi` sidecars from source
+media, extract source media plus SVPI from a full `.svp`, recombine source media
+plus SVPI into `.svp`, and process folders of media/SVPI pairs. SVPI must remain
+a semantic sidecar: no `media/original/` and no replayable source-derived audio
+or video may be packaged in the sidecar.
+
 ## What this package contains
 
 ```text
@@ -71,3 +78,5 @@ The current milestone is completion and hardening:
 - Add mask-based spatial relationships such as overlaps, contains, and occludes.
 - Tighten validator coverage for diarization fallback, relationships, model identity, visual entity artifacts, and package hygiene.
 - Improve OCR spacing/evidence verification, ASR confidence/alignment, scene/timeline quality, and model-bundle conformance.
+- Harden SVPI media-binding, no-replayable-media enforcement, recombination
+  equivalence, and folder-scale sidecar workflows.

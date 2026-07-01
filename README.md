@@ -21,9 +21,10 @@ The philosophy is simple:
 ## Current Status
 
 SVP v1.0 RC2 is the active implementation target. This repository now contains
-the spec, validator, package writer, query/inspection tools, and a real builder
-path that can produce validator-clean `.svp` packages from local sample media
-when the required native tools and model cache are available.
+the spec, validator, package writer, query/inspection tools, SVPI sidecar
+support, and a real builder path that can produce validator-clean `.svp`
+packages from local sample media when the required native tools and model cache
+are available.
 
 Recent real-video proof paths include:
 
@@ -36,24 +37,25 @@ Recent real-video proof paths include:
 | `speakers.MOV` | Real sherpa-onnx diarization with two speakers when runtime and model bundles are available. |
 
 The known current gap is no longer basic package validity. The active work is
-completing remaining semantic layers and hardening quality, query traversal,
-entities/tracks, masks/regions, model-bundle checks, and validator coverage.
+completion and hardening: semantic quality, query traversal, deterministic
+entity and relationship behavior, model-bundle checks, package hygiene, and
+validator coverage.
 
 ## What This Repository Contains
 
 | Path | Purpose |
 | --- | --- |
 | `spec/` | SVP v1.0 RC1/RC2 specs, schemas, registries, review notes, and companion specs. |
-| `docs/` | Implementation plans, roadmap notes, glossary, OCR baseline notes, and orchestration plan. |
+| `docs/` | Implementation plans, SVPI draft spec, roadmap notes, glossary, OCR baseline notes, and orchestration plan. |
 | `packages/svp-core/` | Core shared types and helpers. |
 | `packages/svp-media/` | Media probing, canonical timing, and source media planning. |
 | `packages/svp-audio/` | Audio extraction, Whisper ASR, transcript writing, speaker records, and diarization. |
 | `packages/svp-vision/` | OCR, color observations, evidence crops, depth, embeddings, and timeline-related vision staging. |
 | `packages/svp-models/` | Model manifest verification and ONNX Runtime session handling. |
-| `packages/svp-package/` | Package writing, timeline artifacts, relationship/provenance writing, and validation output storage. |
+| `packages/svp-package/` | SVP/SVPI package writing, timeline artifacts, relationship/provenance writing, media binding, SVPI media policy, and validation output storage. |
 | `packages/svp-query/` | Read/query helpers used by inspector tooling. |
 | `packages/svp-validation/` | Validator library and validation-code handling. |
-| `tools/svp-builder/` | Reference CLI for building SVP package artifacts from source media. |
+| `tools/svp-builder/` | Reference CLI for building SVP packages and SVPI sidecars from source media. |
 | `tools/svp-validator/` | CLI for validating `.svp` packages. |
 | `tools/svp-inspector/` | CLI for inspecting and querying package contents. |
 | `tools/svp-models-tool/` | Model-bundle verification utility. |
@@ -82,9 +84,43 @@ Current real builder output may include these layer families:
 | Index | SQLite/index manifest outputs |
 | Provenance | processor records and stored validation output |
 
-Some layers are still intentionally incomplete. In particular,
-`entities/entities.jsonl` and `entities/entity_tracks.jsonl` are the next major
-structural gap for real packages.
+Current real builder output may include transcript, OCR/text, color, timeline,
+entities, spatial/depth, embeddings, relationship, index, provenance, and
+stored validation artifacts when the relevant local tools and model cache are
+available.
+
+## SVPI Sidecars
+
+SVPI stands for Semantic Video Package Interlace. An `.svpi` file is a
+media-bound semantic sidecar: it stores SVP-compatible observations, indexes,
+provenance, validation metadata, and media identity binding without embedding
+the primary source media.
+
+```text
+SVP  = packaged source media + semantic observations
+SVPI = media-bound semantic observations + no packaged primary media
+```
+
+SVPI is useful when a workflow wants semantic understanding beside existing
+media libraries without rewriting or copying the media file into an `.svp`
+container first. A valid SVPI can be inspected and searched without the source
+media present, but recombination into a full `.svp` requires a candidate source
+media file that verifies against `media_binding.json`.
+
+The important storage rule is strict:
+
+- SVPI MUST NOT contain `media/original/`.
+- SVPI MUST NOT contain replayable source-derived audio/video/muxed media,
+  including extracted audio streams, proxy video, or analysis WAV/FLAC files.
+- SVPI MAY contain non-replayable evidence and observations such as OCR crops,
+  readable still evidence, waveform envelopes, transcript words, speaker
+  segments, audio absence, stream hashes, chunk hashes, and provenance.
+
+The SVPI draft spec lives at:
+
+```text
+docs/svpi/SVPI_v0.1_Draft_Specification.md
+```
 
 ## Architecture
 
@@ -98,7 +134,9 @@ flowchart TD
     Audio --> Models["svp-models"]
     Vision --> Models
     Package --> SVP[".svp package"]
+    Package --> SVPI[".svpi sidecar"]
     SVP --> Validator["svp-validator"]
+    SVPI --> Interlace["svp-builder interlace"]
     SVP --> Inspector["svp-inspector"]
     Inspector --> Query["svp-query"]
 ```
@@ -199,6 +237,61 @@ foundation-ocr
 package-skeleton
 ```
 
+## Create and Use SVPI Sidecars
+
+Create a semantic `.svpi` sidecar from source media:
+
+```bash
+./build/tools/svp-builder/svp-builder interlace create \
+  /path/to/video.mov \
+  --out /path/to/video.svpi \
+  --model-cache /Users/domesposito/Projects/svp-model-cache \
+  --ffmpeg /opt/homebrew/bin/ffmpeg \
+  --ffprobe /opt/homebrew/bin/ffprobe \
+  --sherpa-lib /path/to/libsherpa-onnx-c-api.dylib
+```
+
+Inspect and validate the sidecar:
+
+```bash
+./build/tools/svp-builder/svp-builder interlace inspect /path/to/video.svpi
+
+./build/tools/svp-builder/svp-builder interlace validate \
+  /path/to/video.svpi \
+  --media /path/to/video.mov
+```
+
+Extract source media and an `.svpi` sidecar from an existing `.svp` package:
+
+```bash
+./build/tools/svp-builder/svp-builder interlace extract \
+  /path/to/video.svp \
+  --out-dir /path/to/extracted
+```
+
+That command writes both the embedded source media and a matching `.svpi`.
+
+Recombine source media plus SVPI into a full `.svp`:
+
+```bash
+./build/tools/svp-builder/svp-builder interlace recombine \
+  /path/to/video.mov \
+  /path/to/video.svpi \
+  --out /path/to/recombined.svp
+```
+
+Batch workflows are also available:
+
+```bash
+./build/tools/svp-builder/svp-builder interlace create-batch /path/to/media-dir --recursive
+./build/tools/svp-builder/svp-builder interlace scan /path/to/media-dir --recursive
+./build/tools/svp-builder/svp-builder interlace validate-batch /path/to/media-dir --recursive
+./build/tools/svp-builder/svp-builder interlace complete-identity-batch /path/to/media-dir --recursive
+```
+
+Sidecar naming modes for `create-batch` are `visible`, `hidden`, and
+`managed-dir`.
+
 ## Validate and Inspect
 
 Validate a package:
@@ -218,6 +311,10 @@ Print a concise package summary:
 ```bash
 ./build/tools/svp-inspector/svp-inspector inspect build/local-intro/intro.svp
 ```
+
+`svp-inspector` can also inspect/query `.svpi` packages for the stored semantic
+records. Use `svp-builder interlace validate --media` when you specifically
+need binding verification against source media.
 
 List package layers:
 
@@ -262,13 +359,13 @@ than fake observations.
 Current work should remain narrow, reviewable, and validator-backed. The next
 important lanes are:
 
-1. Entity and entity-track artifacts.
-2. Relationship traversal queries over package graph output.
-3. Mask and spatial-region foundations.
+1. Deterministic entity and entity-track quality.
+2. Relationship traversal and graph-health hardening over package output.
+3. Mask, spatial-region, and spatial-relationship foundations.
 4. Timeline/scene quality hardening beyond sampled-frame interval evidence.
-5. Transcript, vision, and embedding quality improvements.
+5. Transcript, OCR, color, vision, and embedding quality improvements.
 6. Strict validator coverage for speaker, diarization, relationship, entity,
-   model-bundle, and package-hygiene rules.
+   model-bundle, SVPI, and package-hygiene rules.
 
 Do not replace validator-backed package work with hand-assembled output. A
 builder claim is complete only when the generated package is inspectable and

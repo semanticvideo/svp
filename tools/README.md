@@ -1,17 +1,19 @@
 # SVP Tools
 
-The tools should be built in this order:
+This folder contains the reference CLIs for validating, inspecting, building,
+querying, and interlacing SVP-family artifacts.
+
+Historically the tools were built in this order:
 
 1. svp-validator
 2. svp-reader
 3. svp-inspector
 4. svp-builder
 
-Do not start with the builder.
+The validator remains the spine of the project. Builder output is not complete
+until it is inspectable and validator-clean for the target artifact type.
 
 ## svp-validator
-
-First priority.
 
 Validates package structure, schemas, binary blocks, hashes, SQLite logical row streams, validation code usage, and equivalence behavior.
 
@@ -66,4 +68,104 @@ svp-inspector query <pkg.svp> --mode relationships [--class support|semantic|unk
 
 ## svp-builder
 
-Processes source media into SVP packages. This comes last.
+Processes source media into SVP packages and SVPI sidecars.
+
+### Build `.svp`
+
+```
+svp-builder build <source-media> --out <package.svp> [options]
+```
+
+Common options:
+
+| Option | Description |
+|--------|-------------|
+| `--staging-dir <dir>` | Use a specific staging directory |
+| `--model-cache <dir>` | Use local SVP model cache |
+| `--ffmpeg <path>` | FFmpeg executable |
+| `--ffprobe <path>` | ffprobe executable |
+| `--sherpa-lib <path>` | sherpa-onnx C API library for diarization |
+| `--stop-after <stage>` | Stop after `media-ingest`, `audio`, `vision-plan`, `foundation-color`, `foundation-ocr`, or `package-skeleton` |
+| `--allow-fallback-diarization` | Allow explicit fallback when sherpa-onnx is unavailable |
+| `--force-single-speaker` | Intentionally skip diarization and declare one speaker |
+
+### SVPI interlace commands
+
+SVPI is the sidecar/interlace format for semantic observations bound to source
+media. It keeps the original media outside the sidecar while preserving
+semantic records, indexes, provenance, and media identity binding.
+
+```
+svp-builder interlace create <source-media> --out <sidecar.svpi> [options]
+```
+
+Creates a semantic `.svpi` sidecar. By default this runs the semantic build
+pipeline and writes the generated observations into the sidecar. Use
+`--core-only-diagnostic` only when intentionally creating a diagnostic
+core-only sidecar.
+
+```
+svp-builder interlace inspect <sidecar.svpi> [--json]
+```
+
+Shows SVPI manifest, binding, identity, index/provenance presence, section
+states, and recombination readiness.
+
+```
+svp-builder interlace validate <sidecar.svpi> [--media <source-media>] [--json]
+```
+
+Validates SVPI structure. When `--media` is supplied, also verifies that the
+candidate media satisfies the sidecar's media binding.
+
+```
+svp-builder interlace extract <package.svp> --out-dir <dir>
+```
+
+Extracts both the embedded source media and a matching `.svpi` sidecar from a
+full `.svp` package.
+
+```
+svp-builder interlace recombine <source-media> <sidecar.svpi> --out <package.svp>
+```
+
+Verifies binding and recombines source media plus SVPI observations into a full
+`.svp` package.
+
+```
+svp-builder interlace create-batch <media-dir> [--recursive] [--sidecar-visibility visible|hidden|managed-dir]
+svp-builder interlace scan <media-dir> [--recursive] [--json]
+svp-builder interlace validate-batch <media-dir> [--recursive] [--json]
+svp-builder interlace complete-identity <sidecar.svpi> --media <source-media>
+svp-builder interlace complete-identity-batch <media-dir> [--recursive] [--json]
+```
+
+Batch create skips already-valid bound sidecars by default. Use
+`--replace-mismatched` only when intentionally replacing sidecars that fail
+binding verification.
+
+### SVPI media hygiene
+
+SVPI sidecars must not contain primary media or replayable source-derived media.
+The writer filters forbidden entries and the validator rejects bad sidecars.
+
+Forbidden examples:
+
+```
+media/original/
+media/audio/original_stream_000.flac
+media/audio/analysis_mono_16k.wav
+evidence/audio_clip.wav
+media/derived/proxy_video.mp4
+```
+
+Allowed examples:
+
+```
+media/audio/waveform.jsonl
+media/audio/audio_absence.json
+transcript/words.jsonl
+transcript/speaker_segments.jsonl
+text/evidence_crops/*.jpg
+media_binding.json
+```

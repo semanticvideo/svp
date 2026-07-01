@@ -4,6 +4,12 @@ This folder will contain small `.svp` packages used to test validators, readers,
 
 Fixtures should be tiny, deterministic, and purpose-built.
 
+Current fixtures are `.svp` packages unless a fixture folder explicitly says otherwise.
+Future `.svpi` sidecar fixtures should prove the interlace contract separately:
+no `media/original/`, no replayable source-derived audio/video/muxed media,
+allowed OCR crops and other bounded evidence, valid `media_binding.json`, and
+recombination back into a full `.svp` package.
+
 ## phase-04-ocr-color
 
 Generated RC2 OCR/color fixture packages for the current validator. See
