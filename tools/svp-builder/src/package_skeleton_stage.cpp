@@ -118,6 +118,8 @@ PackageSkeletonStageResult run_package_skeleton_stage(
     // Generate SQLite index foundation and manifest
     if (!svp::package::write_index_foundation(context.staging_dir, manifest_json)) {
       std::cerr << "Warning: failed to write SQLite index foundation.\n";
+      emit_warning(context, ProgressStageId::index,
+                   "Failed to write SQLite index foundation.");
     }
 
     // First package write (without validation report)

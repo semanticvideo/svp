@@ -80,14 +80,16 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
       if (package_result.package_written) {
         emit_artifact_written(context, ProgressStageId::package_write,
                               package_result.package_path);
-      }
-      emit_stage_completed(context, ProgressStageId::package_write);
+        emit_stage_completed(context, ProgressStageId::package_write);
 
-      emit_stage_started(context, ProgressStageId::validate);
-      if (package_result.validator_passes) {
-        emit_stage_completed(context, ProgressStageId::validate);
+        emit_stage_started(context, ProgressStageId::validate);
+        if (package_result.validator_passes) {
+          emit_stage_completed(context, ProgressStageId::validate);
+        } else {
+          emit_stage_failed(context, ProgressStageId::validate);
+        }
       } else {
-        emit_stage_failed(context, ProgressStageId::validate);
+        emit_stage_failed(context, ProgressStageId::package_write);
       }
     }
 

@@ -306,6 +306,17 @@ void test_pipeline_with_capturing_sink_emits_ordered_events() {
   }
   assert(found_artifact);
 
+  bool found_package_write = false;
+  bool found_validate = false;
+  for (const auto& event : events) {
+    if (event.stage_id == svp::builder::ProgressStageId::package_write)
+      found_package_write = true;
+    if (event.stage_id == svp::builder::ProgressStageId::validate)
+      found_validate = true;
+  }
+  assert(!found_package_write);
+  assert(!found_validate);
+
   std::filesystem::remove_all(tmp_dir);
 }
 
@@ -331,6 +342,81 @@ void test_pipeline_with_default_sink_preserves_behavior() {
   std::filesystem::remove_all(tmp_dir);
 }
 
+void test_pipeline_package_write_failure_emits_stage_failed_no_validate() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_progress_pkg_fail";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path probe_path = write_minimal_probe_json(tmp_dir);
+  const std::filesystem::path staging_dir = tmp_dir / "staging";
+
+  const std::filesystem::path pkg_blocker = tmp_dir / "output.svp";
+  std::filesystem::create_directories(pkg_blocker);
+
+  const std::filesystem::path output_path = tmp_dir / "output.json";
+
+  auto capturing_sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::BuildPipelineOptions options;
+  options.source_path = "test_video.mp4";
+  options.probe_json_path = probe_path.string();
+  options.output_path = output_path;
+  options.staging_dir = staging_dir;
+  options.stop_after = svp::builder::BuildStage::package_skeleton;
+  options.force_single_speaker = true;
+  options.allow_fallback_diarization = true;
+  options.progress_sink = capturing_sink;
+
+  svp::builder::BuildPipeline pipeline;
+  const svp::builder::BuildPipelineResult result = pipeline.run(options);
+
+  bool found_pkg_started = false;
+  bool found_pkg_failed = false;
+  bool found_pkg_completed = false;
+  bool found_validate = false;
+  for (const auto& event : capturing_sink->events) {
+    if (event.stage_id == svp::builder::ProgressStageId::package_write) {
+      if (event.kind == svp::builder::ProgressEventKind::stage_started)
+        found_pkg_started = true;
+      if (event.kind == svp::builder::ProgressEventKind::stage_failed)
+        found_pkg_failed = true;
+      if (event.kind == svp::builder::ProgressEventKind::stage_completed)
+        found_pkg_completed = true;
+    }
+    if (event.stage_id == svp::builder::ProgressStageId::validate)
+      found_validate = true;
+  }
+
+  assert(found_pkg_started);
+  assert(found_pkg_failed);
+  assert(!found_pkg_completed);
+  assert(!found_validate);
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
+void test_warning_event_factory_for_diarization_and_index() {
+  const svp::builder::ProgressEvent diarization_warning =
+      svp::builder::make_warning(
+          svp::builder::ProgressStageId::diarization,
+          "Fallback diarization active; sherpa-onnx not available.");
+  assert(diarization_warning.kind == svp::builder::ProgressEventKind::warning);
+  assert(diarization_warning.stage_id ==
+         svp::builder::ProgressStageId::diarization);
+  assert(diarization_warning.message ==
+         "Fallback diarization active; sherpa-onnx not available.");
+
+  const svp::builder::ProgressEvent index_warning =
+      svp::builder::make_warning(
+          svp::builder::ProgressStageId::index,
+          "Failed to write SQLite index foundation.");
+  assert(index_warning.kind == svp::builder::ProgressEventKind::warning);
+  assert(index_warning.stage_id ==
+         svp::builder::ProgressStageId::index);
+  assert(index_warning.message ==
+         "Failed to write SQLite index foundation.");
+}
+
 }  // namespace
 
 int main() {
@@ -347,6 +433,8 @@ int main() {
   test_default_progress_sink_returns_null();
   test_pipeline_with_capturing_sink_emits_ordered_events();
   test_pipeline_with_default_sink_preserves_behavior();
+  test_pipeline_package_write_failure_emits_stage_failed_no_validate();
+  test_warning_event_factory_for_diarization_and_index();
 
   return 0;
 }

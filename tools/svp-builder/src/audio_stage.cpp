@@ -151,6 +151,9 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
     std::cerr << "  WARNING: --allow-fallback-diarization is active. "
               << "sherpa-onnx is not available. "
               << "Speaker data will be FABRICATED FALLBACK, not real.\n";
+    emit_warning(context, ProgressStageId::diarization,
+                 "Fallback diarization active; sherpa-onnx not available. "
+                 "Speaker data is fabricated fallback, not real.");
   }
 
   diar_boundary = svp::audio::execute_diarization_boundary(
