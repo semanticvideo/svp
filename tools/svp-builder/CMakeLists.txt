@@ -12,6 +12,7 @@ add_library(svp-builder-lib
   src/foundation_color_stage.cpp
   src/foundation_ocr_stage.cpp
   src/package_skeleton_stage.cpp
+  src/progress_renderer.cpp
   src/vision_plan_stage.cpp
   src/interlace_create.cpp
   src/interlace_validate.cpp
@@ -64,6 +65,10 @@ if(BUILD_TESTING)
     tests/build_pipeline_tests.cpp
   )
 
+  add_executable(svp-builder-progress-renderer-tests
+    tests/progress_renderer_tests.cpp
+  )
+
   add_executable(svp-interlace-tests
     tests/interlace_tests.cpp
   )
@@ -74,10 +79,17 @@ if(BUILD_TESTING)
 
   target_compile_features(svp-builder-pipeline-tests PRIVATE cxx_std_20)
   target_compile_options(svp-builder-pipeline-tests PRIVATE -UNDEBUG)
+  target_compile_features(svp-builder-progress-renderer-tests PRIVATE cxx_std_20)
+  target_compile_options(svp-builder-progress-renderer-tests PRIVATE -UNDEBUG)
   target_compile_features(svp-interlace-tests PRIVATE cxx_std_20)
   target_compile_features(svp-interlace-batch-tests PRIVATE cxx_std_20)
 
   target_link_libraries(svp-builder-pipeline-tests
+    PRIVATE
+      svp::builder
+  )
+
+  target_link_libraries(svp-builder-progress-renderer-tests
     PRIVATE
       svp::builder
   )
@@ -100,6 +112,7 @@ if(BUILD_TESTING)
   )
 
   add_test(NAME svp-builder-pipeline-tests COMMAND svp-builder-pipeline-tests)
+  add_test(NAME svp-builder-progress-renderer-tests COMMAND svp-builder-progress-renderer-tests)
   add_test(NAME svp-interlace-tests COMMAND svp-interlace-tests
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   add_test(NAME svp-interlace-batch-tests COMMAND svp-interlace-batch-tests
