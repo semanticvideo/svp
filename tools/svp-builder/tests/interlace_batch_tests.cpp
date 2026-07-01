@@ -1020,6 +1020,89 @@ void test_complete_identity_emits_progress_events() {
   std::cout << "  test_complete_identity_emits_progress_events passed\n";
 }
 
+void test_validate_batch_invalid_structure_emits_batch_item_failed() {
+  const auto root = make_test_dir("svp_batch_progress_invalid");
+  const auto src = root / "src";
+  std::filesystem::create_directories(src);
+
+  // Write garbage bytes as an SVPI — structure validation will fail.
+  const auto bad_svpi = src / "corrupt.svpi";
+  {
+    std::ofstream out(bad_svpi, std::ios::binary);
+    out << "not a valid svpi package";
+  }
+
+  // Also create a valid SVPI alongside it.
+  const auto media2 = src / "good.mov";
+  create_mock_source_media(media2, 256);
+  CHECK(build_minimal_svpi(src / "good.svpi", media2, true));
+
+  auto sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::BatchValidateOptions opts;
+  opts.source_dir = src.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.progress_sink = sink;
+
+  auto result = svp::builder::interlace_validate_batch(opts);
+  CHECK(!sink->events.empty());
+
+  // Every batch_item started must have a terminal completed or failed event.
+  int started = count_events(sink->events,
+      svp::builder::ProgressEventKind::stage_started,
+      svp::builder::ProgressStageId::batch_item);
+  int completed = count_events(sink->events,
+      svp::builder::ProgressEventKind::stage_completed,
+      svp::builder::ProgressStageId::batch_item);
+  int failed = count_events(sink->events,
+      svp::builder::ProgressEventKind::stage_failed,
+      svp::builder::ProgressStageId::batch_item);
+
+  CHECK(started == 2);
+  CHECK(completed + failed == started);
+  CHECK(failed >= 1);
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_validate_batch_invalid_structure_emits_batch_item_failed passed\n";
+}
+
+void test_complete_identity_batch_unpaired_svpi_emits_batch_item_failed() {
+  const auto root = make_test_dir("svp_batch_progress_unpaired");
+  const auto src = root / "src";
+  std::filesystem::create_directories(src);
+
+  // Create a valid SVPI but no matching media file.
+  const auto media_temp = root / "temp_media.mov";
+  create_mock_source_media(media_temp, 256);
+  CHECK(build_minimal_svpi(src / "orphan.svpi", media_temp, false));
+  // Remove the temp media so no candidate is found.
+  std::filesystem::remove(media_temp);
+
+  auto sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::CompleteIdentityBatchOptions opts;
+  opts.source_dir = src.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.progress_sink = sink;
+
+  auto result = svp::builder::interlace_complete_identity_batch(opts);
+  CHECK(!sink->events.empty());
+
+  // The batch_item for orphan.svpi must have a terminal failed event.
+  int started = count_events(sink->events,
+      svp::builder::ProgressEventKind::stage_started,
+      svp::builder::ProgressStageId::batch_item);
+  int failed = count_events(sink->events,
+      svp::builder::ProgressEventKind::stage_failed,
+      svp::builder::ProgressStageId::batch_item);
+
+  CHECK(started == 1);
+  CHECK(failed == 1);
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_complete_identity_batch_unpaired_svpi_emits_batch_item_failed passed\n";
+}
+
 int main() {
   std::cout << "Running SVPI Phase 3 batch/scale tests...\n";
 
@@ -1055,6 +1138,8 @@ int main() {
   test_batch_create_emits_progress_events();
   test_batch_validate_emits_progress_events();
   test_complete_identity_emits_progress_events();
+  test_validate_batch_invalid_structure_emits_batch_item_failed();
+  test_complete_identity_batch_unpaired_svpi_emits_batch_item_failed();
 
   std::cout << "All SVPI Phase 3 batch/scale tests passed!\n";
   return 0;

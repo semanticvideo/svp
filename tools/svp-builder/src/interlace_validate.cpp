@@ -43,10 +43,13 @@ InterlaceValidateResult interlace_validate(const InterlaceValidateOptions& optio
   if (!options.media_path.empty()) {
     result.binding_attempted = true;
 
+    sink->emit(make_stage_started(ProgressStageId::media_binding, "binding verification"));
+
     auto layout_result = svp::package::read_package_layout(options.svpi_path);
     if (!layout_result.has_value()) {
       result.binding_state_label = "unavailable";
       result.binding_failing_checks.push_back("could not read SVPI layout");
+      sink->emit(make_stage_failed(ProgressStageId::media_binding, "could not read SVPI layout"));
       return result;
     }
 
@@ -54,6 +57,7 @@ InterlaceValidateResult interlace_validate(const InterlaceValidateOptions& optio
     if (!layout.has_entry("media_binding.json")) {
       result.binding_state_label = "unavailable";
       result.binding_failing_checks.push_back("media_binding.json not found in SVPI");
+      sink->emit(make_stage_failed(ProgressStageId::media_binding, "media_binding.json not found in SVPI"));
       return result;
     }
 
@@ -62,6 +66,7 @@ InterlaceValidateResult interlace_validate(const InterlaceValidateOptions& optio
     if (!binding_entry.has_value()) {
       result.binding_state_label = "unavailable";
       result.binding_failing_checks.push_back("could not read media_binding.json");
+      sink->emit(make_stage_failed(ProgressStageId::media_binding, "could not read media_binding.json"));
       return result;
     }
 

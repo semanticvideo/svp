@@ -544,6 +544,8 @@ BatchValidateResult interlace_validate_batch(const BatchValidateOptions& options
       }
       result.invalid_structure_count++;
       result.results.push_back(std::move(file_result));
+      sink->emit(make_stage_failed(ProgressStageId::batch_item,
+          svpi_path.filename().string() + ": invalid structure"));
       continue;
     }
 
@@ -553,6 +555,8 @@ BatchValidateResult interlace_validate_batch(const BatchValidateOptions& options
       file_result.errors.push_back("could not read media_binding.json");
       result.invalid_structure_count++;
       result.results.push_back(std::move(file_result));
+      sink->emit(make_stage_failed(ProgressStageId::batch_item,
+          svpi_path.filename().string() + ": could not read media_binding.json"));
       continue;
     }
 
@@ -897,6 +901,8 @@ CompleteIdentityBatchResult interlace_complete_identity_batch(
       r.error_message = "no candidate media found for " + svpi_path.filename().string();
       result.results.push_back(std::move(r));
       result.failed_count++;
+      sink->emit(make_stage_failed(ProgressStageId::batch_item,
+          svpi_path.filename().string() + ": no candidate media found"));
       continue;
     }
 
