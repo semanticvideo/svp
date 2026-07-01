@@ -1,5 +1,6 @@
 #include "svp/builder/interlace.hpp"
 #include "svp/builder/interlace_batch.hpp"
+#include "svp/builder/build_progress.hpp"
 
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
@@ -113,7 +114,8 @@ bool create_single_svpi(
     bool allow_fallback_diarization,
     bool force_single_speaker,
     std::string& error_message,
-    std::string& blake3_state_out) {
+    std::string& blake3_state_out,
+    const std::shared_ptr<BuildProgressSink>& progress_sink) {
 
   svp::builder::InterlaceCreateOptions opts;
   opts.source_path = source_path.string();
@@ -127,6 +129,7 @@ bool create_single_svpi(
   opts.core_only_diagnostic = core_only_diagnostic;
   opts.allow_fallback_diarization = allow_fallback_diarization;
   opts.force_single_speaker = force_single_speaker;
+  opts.progress_sink = progress_sink;
 
   auto result = svp::builder::interlace_create(opts);
   blake3_state_out = result.blake3_state;
@@ -310,6 +313,11 @@ std::string_view batch_file_status_label(BatchFileStatus s) noexcept {
 BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
   BatchCreateResult result;
 
+  std::shared_ptr<BuildProgressSink> sink = options.progress_sink;
+  if (!sink) {
+    sink = default_progress_sink();
+  }
+
   const std::filesystem::path source_dir(options.source_dir);
   if (!std::filesystem::exists(source_dir) || !std::filesystem::is_directory(source_dir)) {
     BatchFileResult r;
@@ -333,9 +341,15 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
     std::filesystem::create_directories(out_dir / ".svpi");
   }
 
+  sink->emit(make_stage_started(ProgressStageId::batch_scan, options.source_dir));
   auto media_files = discover_media_files(source_dir, options.recursive);
+  sink->emit(make_stage_completed(ProgressStageId::batch_scan,
+      std::to_string(media_files.size()) + " media files found"));
 
   for (const auto& media_path : media_files) {
+    sink->emit(make_stage_started(ProgressStageId::batch_item,
+        media_path.filename().string()));
+
     BatchFileResult file_result;
     file_result.source_filename = media_path.filename().string();
     file_result.source_relative_path =
@@ -368,7 +382,7 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
                   options.core_only_diagnostic,
                   options.allow_fallback_diarization,
                   options.force_single_speaker,
-                  create_err, blake3_state)) {
+                  create_err, blake3_state, sink)) {
             file_result.status = BatchFileStatus::replaced;
             file_result.blake3_state = blake3_state;
             result.replaced_count++;
@@ -394,7 +408,7 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
               options.core_only_diagnostic,
               options.allow_fallback_diarization,
               options.force_single_speaker,
-              create_err, blake3_state)) {
+              create_err, blake3_state, sink)) {
         file_result.status = BatchFileStatus::created;
         file_result.blake3_state = blake3_state;
         result.created_count++;
@@ -406,6 +420,8 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
     }
 
     result.results.push_back(std::move(file_result));
+    sink->emit(make_stage_completed(ProgressStageId::batch_item,
+        media_path.filename().string()));
   }
 
   return result;
@@ -492,14 +508,25 @@ ScanResult interlace_scan(const ScanOptions& options) {
 BatchValidateResult interlace_validate_batch(const BatchValidateOptions& options) {
   BatchValidateResult result;
 
+  std::shared_ptr<BuildProgressSink> sink = options.progress_sink;
+  if (!sink) {
+    sink = default_progress_sink();
+  }
+
   const std::filesystem::path source_dir(options.source_dir);
   if (!std::filesystem::exists(source_dir) || !std::filesystem::is_directory(source_dir)) {
     return result;
   }
 
+  sink->emit(make_stage_started(ProgressStageId::batch_scan, options.source_dir));
   auto svpi_files = discover_svpi_files(source_dir, options.recursive);
+  sink->emit(make_stage_completed(ProgressStageId::batch_scan,
+      std::to_string(svpi_files.size()) + " SVPI files found"));
 
   for (const auto& svpi_path : svpi_files) {
+    sink->emit(make_stage_started(ProgressStageId::batch_item,
+        svpi_path.filename().string()));
+
     BatchValidateFileResult file_result;
     file_result.svpi_path = svpi_path;
     file_result.svpi_filename = svpi_path.filename().string();
@@ -517,6 +544,8 @@ BatchValidateResult interlace_validate_batch(const BatchValidateOptions& options
       }
       result.invalid_structure_count++;
       result.results.push_back(std::move(file_result));
+      sink->emit(make_stage_failed(ProgressStageId::batch_item,
+          svpi_path.filename().string() + ": invalid structure"));
       continue;
     }
 
@@ -526,6 +555,8 @@ BatchValidateResult interlace_validate_batch(const BatchValidateOptions& options
       file_result.errors.push_back("could not read media_binding.json");
       result.invalid_structure_count++;
       result.results.push_back(std::move(file_result));
+      sink->emit(make_stage_failed(ProgressStageId::batch_item,
+          svpi_path.filename().string() + ": could not read media_binding.json"));
       continue;
     }
 
@@ -566,6 +597,8 @@ BatchValidateResult interlace_validate_batch(const BatchValidateOptions& options
     }
 
     result.results.push_back(std::move(file_result));
+    sink->emit(make_stage_completed(ProgressStageId::batch_item,
+        svpi_path.filename().string()));
   }
 
   return result;
@@ -574,15 +607,25 @@ BatchValidateResult interlace_validate_batch(const BatchValidateOptions& options
 CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions& options) {
   CompleteIdentityResult result;
 
+  std::shared_ptr<BuildProgressSink> sink = options.progress_sink;
+  if (!sink) {
+    sink = default_progress_sink();
+  }
+
+  sink->emit(make_stage_started(ProgressStageId::identity,
+      std::filesystem::path(options.svpi_path).filename().string()));
+
   const std::filesystem::path svpi_path(options.svpi_path);
   const std::filesystem::path media_path(options.media_path);
 
   if (!std::filesystem::exists(svpi_path)) {
     result.error_message = "SVPI file does not exist: " + options.svpi_path;
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
   if (!std::filesystem::exists(media_path)) {
     result.error_message = "media file does not exist: " + options.media_path;
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
 
@@ -591,18 +634,21 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
   auto report = svp::validation::validate_svpi_package(svpi_path, vopts);
   if (svp::validation::exit_code(report) != 0) {
     result.error_message = "SVPI structure validation failed";
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
 
   auto binding_entry = svp::package::read_package_entry(svpi_path, "media_binding.json");
   if (!binding_entry.has_value()) {
     result.error_message = "could not read media_binding.json";
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
 
   auto binding_doc = svp::package::parse_media_binding_json(binding_entry.value());
   if (binding_doc.bindings.empty()) {
     result.error_message = "no bindings in media_binding.json";
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
 
@@ -623,6 +669,7 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
       if (!size_ok) {
         result.error_message =
             "media binding verification failed: size_bytes mismatch";
+        sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
         return result;
       }
       svp::package::MediaBindingFactoryOptions probe_opts;
@@ -640,12 +687,14 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
       if (cand.duration_us > 0 && existing.duration_us > 0 &&
           cand.duration_us != existing.duration_us) {
         result.error_message = "media binding verification failed: duration_us mismatch";
+        sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
         return result;
       }
       if (!cand.container_format.empty() && cand.container_format != "unknown" &&
           !existing.container_format.empty() && existing.container_format != "unknown" &&
           cand.container_format != existing.container_format) {
         result.error_message = "media binding verification failed: container_format mismatch";
+        sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
         return result;
       }
       if (existing.identity.chunk_proof.has_value() &&
@@ -654,26 +703,31 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
         const auto& actual = *cand.identity.chunk_proof;
         if (actual.chunk_count != expected.chunk_count) {
           result.error_message = "media binding verification failed: chunk_proof chunk_count mismatch";
+          sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
           return result;
         }
         if (actual.last_chunk_hash != expected.last_chunk_hash) {
           result.error_message = "media binding verification failed: chunk_proof last_chunk_hash mismatch";
+          sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
           return result;
         }
         if (actual.last_chunk_size != expected.last_chunk_size) {
           result.error_message = "media binding verification failed: chunk_proof last_chunk_size mismatch";
+          sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
           return result;
         }
       }
     } else if (verification.state != svp::package::BindingVerificationState::verified) {
       result.error_message =
           "media binding verification failed: " + verification.state_label;
+      sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
       return result;
     }
   } else {
     if (verification.state != svp::package::BindingVerificationState::verified) {
       result.error_message =
           "media binding verification failed: " + verification.state_label;
+      sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
       return result;
     }
   }
@@ -682,6 +736,7 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
     result.new_state = result.previous_state;
     result.blake3_hash = binding_doc.bindings[0].identity.blake3_hash;
     result.success = true;
+    sink->emit(make_stage_completed(ProgressStageId::identity, "already present"));
     return result;
   }
 
@@ -704,11 +759,13 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
   auto manifest_entry = svp::package::read_package_entry(svpi_path, "manifest.json");
   if (!manifest_entry.has_value()) {
     result.error_message = "could not read manifest.json";
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
   auto manifest = nlohmann::json::parse(manifest_entry.value(), nullptr, false);
   if (manifest.is_discarded() || !manifest.is_object()) {
     result.error_message = "manifest.json is not valid JSON";
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
 
@@ -723,6 +780,7 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
   zip_t* src_archive = zip_open(svpi_path.string().c_str(), ZIP_RDONLY, &zip_error);
   if (!src_archive) {
     result.error_message = "could not open SVPI as ZIP";
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
 
@@ -797,6 +855,7 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
   auto manifest_copy = manifest;
   if (!svp::package::write_index_foundation(staging_dir, manifest_copy)) {
     result.error_message = "failed to rebuild index foundation";
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
 
@@ -805,11 +864,14 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
 
   if (!success) {
     result.error_message = "failed to rewrite SVPI package";
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
 
   result.success = true;
   result.rebuilt = true;
+  sink->emit(make_artifact_written(ProgressStageId::identity, svpi_path.string()));
+  sink->emit(make_stage_completed(ProgressStageId::identity, "blake3 completed"));
   return result;
 }
 
@@ -817,14 +879,25 @@ CompleteIdentityBatchResult interlace_complete_identity_batch(
     const CompleteIdentityBatchOptions& options) {
   CompleteIdentityBatchResult result;
 
+  std::shared_ptr<BuildProgressSink> sink = options.progress_sink;
+  if (!sink) {
+    sink = default_progress_sink();
+  }
+
   const std::filesystem::path source_dir(options.source_dir);
   if (!std::filesystem::exists(source_dir) || !std::filesystem::is_directory(source_dir)) {
     return result;
   }
 
+  sink->emit(make_stage_started(ProgressStageId::batch_scan, options.source_dir));
   auto svpi_files = discover_svpi_files(source_dir, options.recursive);
+  sink->emit(make_stage_completed(ProgressStageId::batch_scan,
+      std::to_string(svpi_files.size()) + " SVPI files found"));
 
   for (const auto& svpi_path : svpi_files) {
+    sink->emit(make_stage_started(ProgressStageId::batch_item,
+        svpi_path.filename().string()));
+
     result.svpi_filenames.push_back(svpi_path.filename().string());
 
     std::string stem = sidecar_stem(svpi_path);
@@ -843,6 +916,8 @@ CompleteIdentityBatchResult interlace_complete_identity_batch(
       r.error_message = "no candidate media found for " + svpi_path.filename().string();
       result.results.push_back(std::move(r));
       result.failed_count++;
+      sink->emit(make_stage_failed(ProgressStageId::batch_item,
+          svpi_path.filename().string() + ": no candidate media found"));
       continue;
     }
 
@@ -851,6 +926,7 @@ CompleteIdentityBatchResult interlace_complete_identity_batch(
     opts.media_path = found_media.string();
     opts.ffprobe_path = options.ffprobe_path;
     opts.validation_codes_path = options.validation_codes_path;
+    opts.progress_sink = sink;
 
     auto r = interlace_complete_identity(opts);
     if (r.success) {
@@ -863,6 +939,8 @@ CompleteIdentityBatchResult interlace_complete_identity_batch(
       result.failed_count++;
     }
     result.results.push_back(std::move(r));
+    sink->emit(make_stage_completed(ProgressStageId::batch_item,
+        svpi_path.filename().string()));
   }
 
   return result;

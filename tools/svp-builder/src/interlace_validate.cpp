@@ -1,4 +1,5 @@
 #include "svp/builder/interlace.hpp"
+#include "svp/builder/build_progress.hpp"
 
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
@@ -17,6 +18,13 @@ namespace svp::builder {
 InterlaceValidateResult interlace_validate(const InterlaceValidateOptions& options) {
   InterlaceValidateResult result;
 
+  std::shared_ptr<BuildProgressSink> sink = options.progress_sink;
+  if (!sink) {
+    sink = default_progress_sink();
+  }
+
+  sink->emit(make_stage_started(ProgressStageId::validate, "SVPI structure"));
+
   svp::validation::SvpiValidatorOptions validator_opts;
   validator_opts.validation_codes_path = options.validation_codes_path;
 
@@ -26,13 +34,22 @@ InterlaceValidateResult interlace_validate(const InterlaceValidateOptions& optio
   result.structure_valid =
       (svp::validation::exit_code(result.validation_report) == 0);
 
+  if (result.structure_valid) {
+    sink->emit(make_stage_completed(ProgressStageId::validate, "SVPI structure"));
+  } else {
+    sink->emit(make_stage_failed(ProgressStageId::validate, "SVPI structure validation failed"));
+  }
+
   if (!options.media_path.empty()) {
     result.binding_attempted = true;
+
+    sink->emit(make_stage_started(ProgressStageId::media_binding, "binding verification"));
 
     auto layout_result = svp::package::read_package_layout(options.svpi_path);
     if (!layout_result.has_value()) {
       result.binding_state_label = "unavailable";
       result.binding_failing_checks.push_back("could not read SVPI layout");
+      sink->emit(make_stage_failed(ProgressStageId::media_binding, "could not read SVPI layout"));
       return result;
     }
 
@@ -40,6 +57,7 @@ InterlaceValidateResult interlace_validate(const InterlaceValidateOptions& optio
     if (!layout.has_entry("media_binding.json")) {
       result.binding_state_label = "unavailable";
       result.binding_failing_checks.push_back("media_binding.json not found in SVPI");
+      sink->emit(make_stage_failed(ProgressStageId::media_binding, "media_binding.json not found in SVPI"));
       return result;
     }
 
@@ -48,6 +66,7 @@ InterlaceValidateResult interlace_validate(const InterlaceValidateOptions& optio
     if (!binding_entry.has_value()) {
       result.binding_state_label = "unavailable";
       result.binding_failing_checks.push_back("could not read media_binding.json");
+      sink->emit(make_stage_failed(ProgressStageId::media_binding, "could not read media_binding.json"));
       return result;
     }
 
@@ -60,6 +79,12 @@ InterlaceValidateResult interlace_validate(const InterlaceValidateOptions& optio
     result.binding_failing_checks = verification.failing_checks;
     result.binding_verified =
         (verification.state == svp::package::BindingVerificationState::verified);
+
+    if (result.binding_verified) {
+      sink->emit(make_stage_completed(ProgressStageId::media_binding, "binding verified"));
+    } else {
+      sink->emit(make_stage_failed(ProgressStageId::media_binding, result.binding_state_label));
+    }
   }
 
   return result;

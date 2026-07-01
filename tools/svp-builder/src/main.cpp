@@ -124,6 +124,8 @@ int main(int argc, char** argv) {
   bool ic_core_only = false;
   bool ic_allow_fallback = false;
   bool ic_force_single = false;
+  std::string ic_progress_mode = "auto";
+  bool ic_quiet = false;
 
   auto* ic_create = interlace->add_subcommand(
       "create", "Create a .svpi sidecar from source media");
@@ -142,6 +144,11 @@ int main(int argc, char** argv) {
       "Allow fallback diarization when sherpa-onnx is unavailable");
   ic_create->add_flag("--force-single-speaker", ic_force_single,
       "Force single-speaker diarization");
+  ic_create->add_option("--progress", ic_progress_mode,
+      "Progress output mode: auto, plain, json, none")
+      ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
+  ic_create->add_flag("--quiet", ic_quiet,
+      "Suppress progress output; print only final success/failure");
 
   // interlace validate
   std::string iv_svpi;
@@ -149,6 +156,8 @@ int main(int argc, char** argv) {
   std::string iv_ffprobe = "ffprobe";
   std::string iv_codes = "spec/registries/validation-codes.json";
   bool iv_json = false;
+  std::string iv_progress_mode = "auto";
+  bool iv_quiet = false;
 
   auto* iv_validate = interlace->add_subcommand(
       "validate", "Validate a .svpi sidecar (structure and optional binding)");
@@ -157,6 +166,11 @@ int main(int argc, char** argv) {
   iv_validate->add_option("--ffprobe", iv_ffprobe, "ffprobe executable path");
   iv_validate->add_option("--validation-codes", iv_codes, "Validation codes registry path");
   iv_validate->add_flag("--json", iv_json, "Emit JSON output");
+  iv_validate->add_option("--progress", iv_progress_mode,
+      "Progress output mode: auto, plain, json, none")
+      ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
+  iv_validate->add_flag("--quiet", iv_quiet,
+      "Suppress progress output; print only final success/failure");
 
   // interlace inspect
   std::string ii_svpi;
@@ -172,6 +186,8 @@ int main(int argc, char** argv) {
   std::string ie_out_dir;
   std::string ie_ffprobe = "ffprobe";
   std::string ie_codes = "spec/registries/validation-codes.json";
+  std::string ie_progress_mode = "auto";
+  bool ie_quiet = false;
 
   auto* ie_extract = interlace->add_subcommand(
       "extract", "Extract source media and .svpi from a .svp package");
@@ -179,6 +195,11 @@ int main(int argc, char** argv) {
   ie_extract->add_option("--out-dir", ie_out_dir, "Output directory")->required();
   ie_extract->add_option("--ffprobe", ie_ffprobe, "ffprobe executable path");
   ie_extract->add_option("--validation-codes", ie_codes, "Validation codes registry path");
+  ie_extract->add_option("--progress", ie_progress_mode,
+      "Progress output mode: auto, plain, json, none")
+      ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
+  ie_extract->add_flag("--quiet", ie_quiet,
+      "Suppress progress output; print only final success/failure");
 
   // interlace recombine
   std::string ir_media;
@@ -187,6 +208,8 @@ int main(int argc, char** argv) {
   std::string ir_staging;
   std::string ir_ffprobe = "ffprobe";
   std::string ir_codes = "spec/registries/validation-codes.json";
+  std::string ir_progress_mode = "auto";
+  bool ir_quiet = false;
 
   auto* ir_recombine = interlace->add_subcommand(
       "recombine", "Recombine source media + .svpi into a .svp package");
@@ -196,6 +219,11 @@ int main(int argc, char** argv) {
   ir_recombine->add_option("--staging-dir", ir_staging, "Staging directory");
   ir_recombine->add_option("--ffprobe", ir_ffprobe, "ffprobe executable path");
   ir_recombine->add_option("--validation-codes", ir_codes, "Validation codes registry path");
+  ir_recombine->add_option("--progress", ir_progress_mode,
+      "Progress output mode: auto, plain, json, none")
+      ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
+  ir_recombine->add_flag("--quiet", ir_quiet,
+      "Suppress progress output; print only final success/failure");
 
   // interlace create-batch
   std::string cb_source_dir;
@@ -213,6 +241,8 @@ int main(int argc, char** argv) {
   bool cb_core_only = false;
   bool cb_allow_fallback = false;
   bool cb_force_single = false;
+  std::string cb_progress_mode = "auto";
+  bool cb_quiet = false;
 
   auto* cb_create_batch = interlace->add_subcommand(
       "create-batch", "Create .svpi sidecars for all supported videos in a directory");
@@ -237,6 +267,11 @@ int main(int argc, char** argv) {
       "Allow fallback diarization when sherpa-onnx is unavailable");
   cb_create_batch->add_flag("--force-single-speaker", cb_force_single,
       "Force single-speaker diarization");
+  cb_create_batch->add_option("--progress", cb_progress_mode,
+      "Progress output mode: auto, plain, json, none")
+      ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
+  cb_create_batch->add_flag("--quiet", cb_quiet,
+      "Suppress progress output; print only final success/failure");
 
   // interlace scan
   std::string sc_source_dir;
@@ -259,6 +294,8 @@ int main(int argc, char** argv) {
   bool vb_json = false;
   std::string vb_ffprobe = "ffprobe";
   std::string vb_codes = "spec/registries/validation-codes.json";
+  std::string vb_progress_mode = "auto";
+  bool vb_quiet = false;
 
   auto* vb_validate_batch = interlace->add_subcommand(
       "validate-batch", "Validate all .svpi files in a directory");
@@ -267,12 +304,19 @@ int main(int argc, char** argv) {
   vb_validate_batch->add_flag("--json", vb_json, "Emit JSON output");
   vb_validate_batch->add_option("--ffprobe", vb_ffprobe, "ffprobe executable path");
   vb_validate_batch->add_option("--validation-codes", vb_codes, "Validation codes registry path");
+  vb_validate_batch->add_option("--progress", vb_progress_mode,
+      "Progress output mode: auto, plain, json, none")
+      ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
+  vb_validate_batch->add_flag("--quiet", vb_quiet,
+      "Suppress progress output; print only final success/failure");
 
   // interlace complete-identity
   std::string ci_svpi;
   std::string ci_media;
   std::string ci_ffprobe = "ffprobe";
   std::string ci_codes = "spec/registries/validation-codes.json";
+  std::string ci_progress_mode = "auto";
+  bool ci_quiet = false;
 
   auto* ci_complete = interlace->add_subcommand(
       "complete-identity", "Complete pending full-file BLAKE3 identity for an SVPI");
@@ -280,6 +324,11 @@ int main(int argc, char** argv) {
   ci_complete->add_option("--media", ci_media, "Source media file")->required();
   ci_complete->add_option("--ffprobe", ci_ffprobe, "ffprobe executable path");
   ci_complete->add_option("--validation-codes", ci_codes, "Validation codes registry path");
+  ci_complete->add_option("--progress", ci_progress_mode,
+      "Progress output mode: auto, plain, json, none")
+      ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
+  ci_complete->add_flag("--quiet", ci_quiet,
+      "Suppress progress output; print only final success/failure");
 
   // interlace complete-identity-batch
   std::string cib_source_dir;
@@ -287,6 +336,8 @@ int main(int argc, char** argv) {
   bool cib_json = false;
   std::string cib_ffprobe = "ffprobe";
   std::string cib_codes = "spec/registries/validation-codes.json";
+  std::string cib_progress_mode = "auto";
+  bool cib_quiet = false;
 
   auto* cib_complete_batch = interlace->add_subcommand(
       "complete-identity-batch", "Complete pending BLAKE3 identity for all SVPI files in a directory");
@@ -295,11 +346,48 @@ int main(int argc, char** argv) {
   cib_complete_batch->add_flag("--json", cib_json, "Emit JSON output");
   cib_complete_batch->add_option("--ffprobe", cib_ffprobe, "ffprobe executable path");
   cib_complete_batch->add_option("--validation-codes", cib_codes, "Validation codes registry path");
+  cib_complete_batch->add_option("--progress", cib_progress_mode,
+      "Progress output mode: auto, plain, json, none")
+      ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
+  cib_complete_batch->add_flag("--quiet", cib_quiet,
+      "Suppress progress output; print only final success/failure");
 
   CLI11_PARSE(app, argc, argv);
 
   try {
+    auto resolve_interlace_sink = [](const std::string& mode_str,
+                                     bool quiet,
+                                     CLI::App* subcmd)
+        -> std::shared_ptr<svp::builder::BuildProgressSink> {
+      auto progress_opt = subcmd->get_option("--progress");
+      const bool progress_explicitly_set =
+          progress_opt && progress_opt->count() > 0;
+
+      std::optional<svp::builder::ProgressMode> resolved_mode;
+      if (quiet) {
+        if (progress_explicitly_set && mode_str == "json") {
+          resolved_mode = svp::builder::ProgressMode::json;
+        } else {
+          resolved_mode = svp::builder::ProgressMode::none;
+        }
+      } else {
+        resolved_mode = svp::builder::parse_progress_mode(mode_str);
+      }
+
+      if (!resolved_mode) {
+        std::cerr << "svp-builder: invalid --progress value: " << mode_str << "\n";
+        return nullptr;
+      }
+
+      const bool stderr_is_tty = isatty(fileno(stderr)) != 0;
+      return svp::builder::make_progress_sink(
+          *resolved_mode, std::cerr, stderr_is_tty);
+    };
+
     if (*ic_create) {
+      auto sink = resolve_interlace_sink(ic_progress_mode, ic_quiet, ic_create);
+      if (!sink) return 2;
+
       svp::builder::InterlaceCreateOptions opts;
       opts.source_path = ic_source;
       opts.output_path = ic_out;
@@ -313,6 +401,7 @@ int main(int argc, char** argv) {
       opts.core_only_diagnostic = ic_core_only;
       opts.allow_fallback_diarization = ic_allow_fallback;
       opts.force_single_speaker = ic_force_single;
+      opts.progress_sink = sink;
 
       auto result = svp::builder::interlace_create(opts);
       if (!result.success) {
@@ -326,11 +415,15 @@ int main(int argc, char** argv) {
     }
 
     if (*iv_validate) {
+      auto sink = resolve_interlace_sink(iv_progress_mode, iv_quiet, iv_validate);
+      if (!sink) return 2;
+
       svp::builder::InterlaceValidateOptions opts;
       opts.svpi_path = iv_svpi;
       opts.media_path = iv_media;
       opts.ffprobe_path = iv_ffprobe;
       opts.validation_codes_path = iv_codes;
+      opts.progress_sink = sink;
 
       auto result = svp::builder::interlace_validate(opts);
 
@@ -437,11 +530,15 @@ int main(int argc, char** argv) {
     }
 
     if (*ie_extract) {
+      auto sink = resolve_interlace_sink(ie_progress_mode, ie_quiet, ie_extract);
+      if (!sink) return 2;
+
       svp::builder::InterlaceExtractOptions opts;
       opts.svp_path = ie_svp;
       opts.out_dir = ie_out_dir;
       opts.ffprobe_path = ie_ffprobe;
       opts.validation_codes_path = ie_codes;
+      opts.progress_sink = sink;
 
       auto result = svp::builder::interlace_extract(opts);
       if (!result.success) {
@@ -454,6 +551,9 @@ int main(int argc, char** argv) {
     }
 
     if (*ir_recombine) {
+      auto sink = resolve_interlace_sink(ir_progress_mode, ir_quiet, ir_recombine);
+      if (!sink) return 2;
+
       svp::builder::InterlaceRecombineOptions opts;
       opts.media_path = ir_media;
       opts.svpi_path = ir_svpi;
@@ -461,6 +561,7 @@ int main(int argc, char** argv) {
       opts.staging_dir = ir_staging;
       opts.ffprobe_path = ir_ffprobe;
       opts.validation_codes_path = ir_codes;
+      opts.progress_sink = sink;
 
       auto result = svp::builder::interlace_recombine(opts);
       if (!result.success) {
@@ -502,6 +603,7 @@ int main(int argc, char** argv) {
       opts.core_only_diagnostic = cb_core_only;
       opts.allow_fallback_diarization = cb_allow_fallback;
       opts.force_single_speaker = cb_force_single;
+      opts.progress_sink = resolve_interlace_sink(cb_progress_mode, cb_quiet, cb_create_batch);
 
       auto result = svp::builder::interlace_create_batch(opts);
 
@@ -600,11 +702,15 @@ int main(int argc, char** argv) {
     }
 
     if (*vb_validate_batch) {
+      auto sink = resolve_interlace_sink(vb_progress_mode, vb_quiet, vb_validate_batch);
+      if (!sink) return 2;
+
       svp::builder::BatchValidateOptions opts;
       opts.source_dir = vb_source_dir;
       opts.recursive = vb_recursive;
       opts.ffprobe_path = vb_ffprobe;
       opts.validation_codes_path = vb_codes;
+      opts.progress_sink = sink;
 
       auto result = svp::builder::interlace_validate_batch(opts);
 
@@ -645,11 +751,15 @@ int main(int argc, char** argv) {
     }
 
     if (*ci_complete) {
+      auto sink = resolve_interlace_sink(ci_progress_mode, ci_quiet, ci_complete);
+      if (!sink) return 2;
+
       svp::builder::CompleteIdentityOptions opts;
       opts.svpi_path = ci_svpi;
       opts.media_path = ci_media;
       opts.ffprobe_path = ci_ffprobe;
       opts.validation_codes_path = ci_codes;
+      opts.progress_sink = sink;
 
       auto result = svp::builder::interlace_complete_identity(opts);
       if (!result.success) {
@@ -667,11 +777,15 @@ int main(int argc, char** argv) {
     }
 
     if (*cib_complete_batch) {
+      auto sink = resolve_interlace_sink(cib_progress_mode, cib_quiet, cib_complete_batch);
+      if (!sink) return 2;
+
       svp::builder::CompleteIdentityBatchOptions opts;
       opts.source_dir = cib_source_dir;
       opts.recursive = cib_recursive;
       opts.ffprobe_path = cib_ffprobe;
       opts.validation_codes_path = cib_codes;
+      opts.progress_sink = sink;
 
       auto result = svp::builder::interlace_complete_identity_batch(opts);
 

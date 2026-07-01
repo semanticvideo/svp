@@ -1,10 +1,12 @@
 #pragma once
 
+#include "svp/builder/build_progress.hpp"
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
 #include "svp/validation/report.hpp"
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -24,6 +26,7 @@ struct InterlaceCreateOptions {
   bool core_only_diagnostic = false;
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
+  std::shared_ptr<BuildProgressSink> progress_sink;
 };
 
 struct InterlaceCreateResult {
@@ -42,6 +45,7 @@ struct InterlaceValidateOptions {
   std::string media_path;
   std::string ffprobe_path = "ffprobe";
   std::string validation_codes_path = "spec/registries/validation-codes.json";
+  std::shared_ptr<BuildProgressSink> progress_sink;
 };
 
 struct InterlaceValidateResult {
@@ -96,6 +100,7 @@ struct InterlaceExtractOptions {
   std::string out_dir;
   std::string validation_codes_path = "spec/registries/validation-codes.json";
   std::string ffprobe_path = "ffprobe";
+  std::shared_ptr<BuildProgressSink> progress_sink;
 };
 
 struct InterlaceExtractResult {
@@ -116,6 +121,7 @@ struct InterlaceRecombineOptions {
   std::string staging_dir;
   std::string ffprobe_path = "ffprobe";
   std::string validation_codes_path = "spec/registries/validation-codes.json";
+  std::shared_ptr<BuildProgressSink> progress_sink;
 };
 
 struct InterlaceRecombineResult {

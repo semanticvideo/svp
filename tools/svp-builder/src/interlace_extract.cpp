@@ -1,4 +1,5 @@
 #include "svp/builder/interlace.hpp"
+#include "svp/builder/build_progress.hpp"
 
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
@@ -99,6 +100,13 @@ std::vector<std::string> find_media_original_entries(zip_t* archive) {
 
 InterlaceExtractResult interlace_extract(const InterlaceExtractOptions& options) {
   InterlaceExtractResult result;
+
+  std::shared_ptr<BuildProgressSink> sink = options.progress_sink;
+  if (!sink) {
+    sink = default_progress_sink();
+  }
+
+  sink->emit(make_stage_started(ProgressStageId::extract));
 
   const std::filesystem::path svp_path(options.svp_path);
   if (!std::filesystem::exists(svp_path)) {
@@ -284,8 +292,15 @@ InterlaceExtractResult interlace_extract(const InterlaceExtractOptions& options)
 
   if (!result.success) {
     result.error_message = "failed to write extracted SVPI package";
+    sink->emit(make_stage_failed(ProgressStageId::extract, result.error_message));
     return result;
   }
+
+  sink->emit(make_artifact_written(
+      ProgressStageId::extract, result.extracted_media_path, "extracted media"));
+  sink->emit(make_artifact_written(
+      ProgressStageId::extract, result.extracted_svpi_path, "extracted SVPI"));
+  sink->emit(make_stage_completed(ProgressStageId::extract));
 
   return result;
 }
