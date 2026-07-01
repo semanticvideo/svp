@@ -1,6 +1,7 @@
 #include "svp/vision/pp_ocr.hpp"
 
 #include "svp/core/hash_string.hpp"
+#include "svp/core/memory_diagnostics.hpp"
 #include "svp/models/hash.hpp"
 #include "svp/models/manifest.hpp"
 #include "svp/models/runtime.hpp"
@@ -621,9 +622,20 @@ PpOcrFrameResult run_pp_ocr_on_frame(
       det_output.data(), pred_h, pred_w,
       ratio, options.det_thresh, options.det_box_thresh,
       options.det_unclip_ratio);
+  svp::core::check_memory_limit("ocr.ppocr.detector.after_postprocess", {
+      {"frame_id", frame.frame_id},
+      {"frame_width", std::to_string(frame.width)},
+      {"frame_height", std::to_string(frame.height)},
+      {"det_input_width", std::to_string(det_input.width)},
+      {"det_input_height", std::to_string(det_input.height)},
+      {"det_output_elements", std::to_string(det_output.size())},
+      {"box_count", std::to_string(boxes.size())}
+  });
 
   // Phase 2: Recognition
+  std::size_t recognized_attempts = 0;
   for (const auto& box : boxes) {
+    ++recognized_attempts;
     auto rec_input = preprocess_recognition(
         frame, box, options.rec_image_height, options.rec_max_width);
     if (rec_input.data.empty()) continue;
@@ -706,6 +718,12 @@ PpOcrFrameResult run_pp_ocr_on_frame(
       result.detections.push_back(std::move(det));
     }
   }
+  svp::core::check_memory_limit("ocr.ppocr.frame.complete", {
+      {"frame_id", frame.frame_id},
+      {"box_count", std::to_string(boxes.size())},
+      {"recognition_attempts", std::to_string(recognized_attempts)},
+      {"detection_count", std::to_string(result.detections.size())}
+  });
 
   return result;
 }

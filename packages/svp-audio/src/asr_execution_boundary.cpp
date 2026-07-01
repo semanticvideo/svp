@@ -2,6 +2,7 @@
 #include "svp/audio/transcript_records.hpp"
 #include "svp/audio/whisper_mel.hpp"
 #include "svp/audio/whisper_model.hpp"
+#include "svp/core/memory_diagnostics.hpp"
 #include "svp/models/manifest.hpp"
 #include "svp/models/runtime.hpp"
 
@@ -246,9 +247,24 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
 
     std::vector<std::vector<AsrWord>> chunk_words;
     chunk_words.reserve(boundary.chunk_plan.chunks.size());
+    svp::core::check_memory_limit("asr.boundary.begin", {
+        {"chunk_count", std::to_string(boundary.chunk_plan.chunks.size())},
+        {"input_wav", input_wav.string()},
+        {"model_dir", model_dir.string()}
+    });
 
     for (std::size_t i = 0; i < boundary.chunk_plan.chunks.size(); ++i) {
       const AsrChunkPlan& chunk = boundary.chunk_plan.chunks[i];
+      if (i == 0 || ((i + 1) % 10) == 0 ||
+          i + 1 == boundary.chunk_plan.chunks.size()) {
+        svp::core::check_memory_limit("asr.chunk.begin", {
+            {"index", std::to_string(i)},
+            {"chunk_id", chunk.chunk_id},
+            {"total", std::to_string(boundary.chunk_plan.chunks.size())},
+            {"start_us", std::to_string(chunk.source_start_us)},
+            {"end_us", std::to_string(chunk.source_end_us)}
+        });
+      }
 
       if (on_chunk_progress) {
         on_chunk_progress(i, boundary.chunk_plan.chunks.size());
@@ -261,6 +277,15 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
       const WhisperInferenceResult whisper_result =
           run_whisper_inference(chunk_wav, model_dir, chunk.chunk_id,
                                  0, chunk.source_end_us - chunk.source_start_us);
+      if (i == 0 || ((i + 1) % 10) == 0 ||
+          i + 1 == boundary.chunk_plan.chunks.size()) {
+        svp::core::check_memory_limit("asr.chunk.after_inference", {
+            {"index", std::to_string(i)},
+            {"chunk_id", chunk.chunk_id},
+            {"ran", whisper_result.ran ? "true" : "false"},
+            {"word_count", std::to_string(whisper_result.all_words.size())}
+        });
+      }
 
       if (!whisper_result.ran) {
         for (const std::string& blocker : whisper_result.blockers) {
@@ -281,6 +306,10 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
       }
       chunk_words.push_back(std::move(words));
     }
+    svp::core::check_memory_limit("asr.boundary.after_chunks", {
+        {"chunk_count", std::to_string(boundary.chunk_plan.chunks.size())},
+        {"chunk_word_vectors", std::to_string(chunk_words.size())}
+    });
 
     if (on_chunk_progress) {
       on_chunk_progress(boundary.chunk_plan.chunks.size(),
@@ -305,6 +334,10 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
     boundary.reconciled_word_count = boundary.reconciled_words.size();
     boundary.speaker_count = 1;
     boundary.asr_status = AsrStatus::ran;
+    svp::core::check_memory_limit("asr.boundary.complete", {
+        {"raw_word_count", std::to_string(boundary.raw_word_count)},
+        {"reconciled_word_count", std::to_string(boundary.reconciled_word_count)}
+    });
   } catch (const std::exception& error) {
     boundary.asr_status = AsrStatus::blocked;
     boundary.blockers.push_back(std::string("ASR execution blocked: ") + error.what());

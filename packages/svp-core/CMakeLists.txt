@@ -1,6 +1,7 @@
 add_library(svp-core
   src/hash_string.cpp
   src/id.cpp
+  src/memory_diagnostics.cpp
   src/path.cpp
   src/timestamp.cpp
   src/version.cpp
@@ -14,4 +15,3 @@ target_include_directories(svp-core
 )
 
 target_compile_features(svp-core PUBLIC cxx_std_20)
-
