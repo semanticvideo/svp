@@ -30,7 +30,8 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
   nlohmann::json audio_json = svp::audio::audio_stage_plan_to_json(audio_plan);
   const svp::audio::AudioExtractionRun extraction_run =
       svp::audio::execute_audio_extraction_plan(audio_plan.extraction_plan,
-                                                context.staging_dir);
+                                                context.staging_dir,
+                                                !context.options.verbose);
   nlohmann::json extraction_run_json =
       svp::audio::audio_extraction_run_to_json(extraction_run);
   const svp::audio::VadExecutionBoundary vad_boundary =
@@ -104,7 +105,16 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
           asr_model_verified);
 
   const svp::audio::AsrExecutionBoundary executed_asr_boundary =
-      svp::audio::execute_asr_boundary(asr_boundary, context.staging_dir, model_cache_root);
+      svp::audio::execute_asr_boundary(
+          asr_boundary, context.staging_dir, model_cache_root,
+          [&context](std::size_t current, std::size_t total) {
+            if (total > 0) {
+              emit_stage_progress(context, ProgressStageId::asr,
+                                  static_cast<std::uint64_t>(current),
+                                  static_cast<std::uint64_t>(total),
+                                  "chunks");
+            }
+          });
 
   // Diarization boundary: check for diarization model in cache.
   // If unavailable, honest fallback one-speaker segment is produced.

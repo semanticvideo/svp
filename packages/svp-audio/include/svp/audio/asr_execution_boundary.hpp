@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <nlohmann/json_fwd.hpp>
 #include <string>
 #include <vector>
@@ -67,10 +68,14 @@ struct AsrExecutionBoundary {
     bool model_available,
     bool model_verified);
 
+using AsrChunkProgressCallback =
+    std::function<void(std::size_t current, std::size_t total)>;
+
 [[nodiscard]] AsrExecutionBoundary execute_asr_boundary(
     AsrExecutionBoundary boundary,
     const std::filesystem::path& staging_root,
-    const std::filesystem::path& model_cache_root);
+    const std::filesystem::path& model_cache_root,
+    AsrChunkProgressCallback on_chunk_progress = {});
 
 [[nodiscard]] nlohmann::json asr_execution_boundary_to_json(
     const AsrExecutionBoundary& boundary);

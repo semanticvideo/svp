@@ -36,6 +36,9 @@ void emit_warning(BuildPipelineContext& context, ProgressStageId stage,
 void emit_artifact_written(BuildPipelineContext& context, ProgressStageId stage,
                            std::filesystem::path artifact_path,
                            std::string message = "");
+void emit_stage_progress(BuildPipelineContext& context, ProgressStageId stage,
+                         std::uint64_t current, std::uint64_t total,
+                         std::string unit, std::string message = "");
 
 struct PackageSkeletonStageResult {
   bool package_written = false;

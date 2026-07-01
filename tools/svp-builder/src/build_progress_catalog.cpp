@@ -76,6 +76,8 @@ std::string_view progress_event_kind_name(ProgressEventKind kind) {
       return "stage_completed";
     case ProgressEventKind::stage_failed:
       return "stage_failed";
+    case ProgressEventKind::stage_progress:
+      return "stage_progress";
     case ProgressEventKind::warning:
       return "warning";
     case ProgressEventKind::artifact_written:
@@ -111,6 +113,20 @@ ProgressEvent make_artifact_written(ProgressStageId stage,
                                     std::string message) {
   return {ProgressEventKind::artifact_written, stage, std::move(message),
           std::move(artifact_path)};
+}
+
+ProgressEvent make_stage_progress(ProgressStageId stage,
+                                  std::uint64_t current,
+                                  std::uint64_t total,
+                                  std::string unit,
+                                  std::string message) {
+  ProgressEvent event{ProgressEventKind::stage_progress, stage,
+                      std::move(message), {}, current, total, {},
+                      std::move(unit)};
+  if (total > 0) {
+    event.fraction = static_cast<double>(current) / static_cast<double>(total);
+  }
+  return event;
 }
 
 }  // namespace svp::builder

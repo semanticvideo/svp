@@ -1,10 +1,13 @@
 #include "svp/builder/build_pipeline.hpp"
 #include "svp/builder/build_progress.hpp"
+#include "svp/builder/progress_renderer.hpp"
 
 #include <cassert>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -206,6 +209,9 @@ void test_event_kind_names() {
   assert(svp::builder::progress_event_kind_name(
              svp::builder::ProgressEventKind::stage_failed) == "stage_failed");
   assert(svp::builder::progress_event_kind_name(
+             svp::builder::ProgressEventKind::stage_progress) ==
+             "stage_progress");
+  assert(svp::builder::progress_event_kind_name(
              svp::builder::ProgressEventKind::warning) == "warning");
   assert(svp::builder::progress_event_kind_name(
              svp::builder::ProgressEventKind::artifact_written) ==
@@ -244,6 +250,19 @@ void test_make_event_helpers() {
   assert(artifact.kind == svp::builder::ProgressEventKind::artifact_written);
   assert(artifact.artifact_path == std::filesystem::path("out/video.svp"));
   assert(artifact.message == "package");
+
+  const svp::builder::ProgressEvent progress =
+      svp::builder::make_stage_progress(
+          svp::builder::ProgressStageId::asr, 3, 10, "chunks");
+  assert(progress.kind == svp::builder::ProgressEventKind::stage_progress);
+  assert(progress.stage_id == svp::builder::ProgressStageId::asr);
+  assert(progress.current.has_value());
+  assert(progress.total.has_value());
+  assert(progress.fraction.has_value());
+  assert(*progress.current == 3);
+  assert(*progress.total == 10);
+  assert(*progress.fraction == 0.3);
+  assert(progress.unit == "chunks");
 }
 
 void test_null_sink_is_no_op() {
@@ -417,6 +436,225 @@ void test_warning_event_factory_for_diarization_and_index() {
          "Failed to write SQLite index foundation.");
 }
 
+void test_stage_progress_event_has_progress_fields() {
+  const svp::builder::ProgressEvent event =
+      svp::builder::make_stage_progress(
+          svp::builder::ProgressStageId::color, 7, 15, "frames", "sampling");
+  assert(event.kind == svp::builder::ProgressEventKind::stage_progress);
+  assert(event.current.has_value());
+  assert(event.total.has_value());
+  assert(event.fraction.has_value());
+  assert(*event.current == 7);
+  assert(*event.total == 15);
+  assert(event.unit == "frames");
+  assert(event.message == "sampling");
+}
+
+void test_stage_progress_zero_total_no_fraction() {
+  const svp::builder::ProgressEvent event =
+      svp::builder::make_stage_progress(
+          svp::builder::ProgressStageId::asr, 0, 0, "chunks");
+  assert(event.current.has_value());
+  assert(event.total.has_value());
+  assert(!event.fraction.has_value());
+}
+
+void test_pipeline_quiet_suppresses_summary() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_quiet_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path probe_path = write_minimal_probe_json(tmp_dir);
+  const std::filesystem::path output_path = tmp_dir / "output.json";
+
+  auto capturing_sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::BuildPipelineOptions options;
+  options.source_path = "test_video.mp4";
+  options.probe_json_path = probe_path.string();
+  options.output_path = output_path;
+  options.stop_after = svp::builder::BuildStage::media_ingest;
+  options.progress_sink = capturing_sink;
+  options.quiet = true;
+
+  std::ostringstream captured_stdout;
+  std::streambuf* old_cout = std::cout.rdbuf();
+  std::cout.rdbuf(captured_stdout.rdbuf());
+
+  svp::builder::BuildPipeline pipeline;
+  const svp::builder::BuildPipelineResult result = pipeline.run(options);
+
+  std::cout.rdbuf(old_cout);
+
+  assert(result.exit_code == 0);
+  assert(std::filesystem::exists(output_path));
+  assert(captured_stdout.str().empty());
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
+void test_pipeline_verbose_emits_events() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_verbose_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path probe_path = write_minimal_probe_json(tmp_dir);
+  const std::filesystem::path output_path = tmp_dir / "output.json";
+
+  auto capturing_sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::BuildPipelineOptions options;
+  options.source_path = "test_video.mp4";
+  options.probe_json_path = probe_path.string();
+  options.output_path = output_path;
+  options.stop_after = svp::builder::BuildStage::media_ingest;
+  options.progress_sink = capturing_sink;
+  options.verbose = true;
+
+  std::ostringstream captured_stdout;
+  std::streambuf* old_cout = std::cout.rdbuf();
+  std::cout.rdbuf(captured_stdout.rdbuf());
+
+  svp::builder::BuildPipeline pipeline;
+  const svp::builder::BuildPipelineResult result = pipeline.run(options);
+
+  std::cout.rdbuf(old_cout);
+
+  assert(result.exit_code == 0);
+  assert(!capturing_sink->events.empty());
+  const std::string stdout_str = captured_stdout.str();
+  assert(stdout_str.find("Wrote:") != std::string::npos);
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
+void test_plain_renderer_no_raw_event_names() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::plain, oss, false);
+
+  sink->emit(svp::builder::make_stage_started(
+      svp::builder::ProgressStageId::media_probe, "probing"));
+  sink->emit(svp::builder::make_stage_completed(
+      svp::builder::ProgressStageId::media_probe));
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::asr, 3, 10, "chunks"));
+
+  const std::string output = oss.str();
+  assert(output.find("[stage_started]") == std::string::npos);
+  assert(output.find("[stage_completed]") == std::string::npos);
+  assert(output.find("[stage_progress]") == std::string::npos);
+  assert(output.find("Media Probe") != std::string::npos);
+  assert(output.find("ASR") != std::string::npos);
+}
+
+void test_plain_renderer_no_ffmpeg_noise_strings() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::plain, oss, false);
+
+  sink->emit(svp::builder::make_stage_started(
+      svp::builder::ProgressStageId::audio_extract, "extracting"));
+  sink->emit(svp::builder::make_stage_completed(
+      svp::builder::ProgressStageId::audio_extract));
+
+  const std::string output = oss.str();
+  assert(output.find("Input #0") == std::string::npos);
+  assert(output.find("Stream mapping:") == std::string::npos);
+  assert(output.find("Schema error") == std::string::npos);
+}
+
+void test_plain_renderer_no_noise_categories() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::plain, oss, false);
+
+  sink->emit(svp::builder::make_stage_started(
+      svp::builder::ProgressStageId::media_probe, "probing"));
+  sink->emit(svp::builder::make_stage_completed(
+      svp::builder::ProgressStageId::media_probe));
+  sink->emit(svp::builder::make_stage_started(
+      svp::builder::ProgressStageId::asr, "transcribing"));
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::asr, 1, 3, "chunks"));
+  sink->emit(svp::builder::make_stage_completed(
+      svp::builder::ProgressStageId::asr));
+  sink->emit(svp::builder::make_stage_started(
+      svp::builder::ProgressStageId::color, "sampling"));
+  sink->emit(svp::builder::make_stage_completed(
+      svp::builder::ProgressStageId::color));
+
+  const std::string output = oss.str();
+
+  assert(output.find("Schema error") == std::string::npos);
+  assert(output.find("Trying to register schema") == std::string::npos);
+  assert(output.find("Debug (cpuinfo)") == std::string::npos);
+  assert(output.find("Note (cpuinfo)") == std::string::npos);
+  assert(output.find("ParallelBackendRegistry") == std::string::npos);
+  assert(output.find("OpenCV(") == std::string::npos);
+  assert(output.find("Input #0") == std::string::npos);
+  assert(output.find("Stream mapping:") == std::string::npos);
+  assert(output.find("[stage_started]") == std::string::npos);
+  assert(output.find("[stage_completed]") == std::string::npos);
+  assert(output.find("[stage_progress]") == std::string::npos);
+}
+
+void test_json_sink_no_noise_categories() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::json, oss, false);
+
+  sink->emit(svp::builder::make_stage_started(
+      svp::builder::ProgressStageId::asr, "transcribing"));
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::asr, 1, 3, "chunks"));
+  sink->emit(svp::builder::make_stage_completed(
+      svp::builder::ProgressStageId::asr));
+
+  const std::string output = oss.str();
+
+  assert(output.find("Schema error") == std::string::npos);
+  assert(output.find("Trying to register schema") == std::string::npos);
+  assert(output.find("Debug (cpuinfo)") == std::string::npos);
+  assert(output.find("Note (cpuinfo)") == std::string::npos);
+  assert(output.find("ParallelBackendRegistry") == std::string::npos);
+  assert(output.find("OpenCV(") == std::string::npos);
+  assert(output.find("Input #0") == std::string::npos);
+  assert(output.find("Stream mapping:") == std::string::npos);
+  assert(output.find("[stage_started]") == std::string::npos);
+}
+
+void test_quiet_produces_no_stdout() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_quiet_stdout_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path probe_path = write_minimal_probe_json(tmp_dir);
+  const std::filesystem::path output_path = tmp_dir / "output.json";
+
+  svp::builder::BuildPipelineOptions options;
+  options.source_path = "test_video.mp4";
+  options.probe_json_path = probe_path.string();
+  options.output_path = output_path;
+  options.stop_after = svp::builder::BuildStage::media_ingest;
+  options.quiet = true;
+
+  std::ostringstream captured_stdout;
+  std::streambuf* old_cout = std::cout.rdbuf();
+  std::cout.rdbuf(captured_stdout.rdbuf());
+
+  svp::builder::BuildPipeline pipeline;
+  const svp::builder::BuildPipelineResult result = pipeline.run(options);
+
+  std::cout.rdbuf(old_cout);
+
+  assert(result.exit_code == 0);
+  assert(captured_stdout.str().empty());
+  assert(std::filesystem::exists(output_path));
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
 }  // namespace
 
 int main() {
@@ -435,6 +673,15 @@ int main() {
   test_pipeline_with_default_sink_preserves_behavior();
   test_pipeline_package_write_failure_emits_stage_failed_no_validate();
   test_warning_event_factory_for_diarization_and_index();
+  test_stage_progress_event_has_progress_fields();
+  test_stage_progress_zero_total_no_fraction();
+  test_pipeline_quiet_suppresses_summary();
+  test_pipeline_verbose_emits_events();
+  test_plain_renderer_no_raw_event_names();
+  test_plain_renderer_no_ffmpeg_noise_strings();
+  test_plain_renderer_no_noise_categories();
+  test_json_sink_no_noise_categories();
+  test_quiet_produces_no_stdout();
 
   return 0;
 }

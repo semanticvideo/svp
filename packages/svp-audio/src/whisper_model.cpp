@@ -1,20 +1,39 @@
 #include "svp/audio/whisper_model.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <fcntl.h>
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <unistd.h>
 
 #if defined(SVP_AUDIO_ONNX_RUNTIME_AVAILABLE)
 #include <onnxruntime_cxx_api.h>
 #endif
 
 namespace svp::audio {
+
+#if defined(SVP_AUDIO_ONNX_RUNTIME_AVAILABLE)
+namespace {
+std::atomic<bool> g_whisper_verbose{false};
+}
+#endif
+
+void set_whisper_verbose(bool verbose) {
+#if defined(SVP_AUDIO_ONNX_RUNTIME_AVAILABLE)
+  g_whisper_verbose.store(verbose, std::memory_order_relaxed);
+#else
+  (void)verbose;
+#endif
+}
+
 namespace {
 
 #if defined(SVP_AUDIO_ONNX_RUNTIME_AVAILABLE)
@@ -22,6 +41,42 @@ namespace {
 constexpr int kSelfCacheDim = 448;
 constexpr int kVocabSize = 51864;
 constexpr int kMaxDecodeTokens = 224;
+
+class StdoutStderrSuppressor {
+ public:
+  StdoutStderrSuppressor() : suppressed_(false) {
+    fflush(stdout);
+    fflush(stderr);
+    saved_stdout_ = dup(STDOUT_FILENO);
+    saved_stderr_ = dup(STDERR_FILENO);
+    const int devnull = open("/dev/null", O_WRONLY);
+    if (devnull >= 0) {
+      dup2(devnull, STDOUT_FILENO);
+      dup2(devnull, STDERR_FILENO);
+      close(devnull);
+      suppressed_ = true;
+    }
+  }
+
+  ~StdoutStderrSuppressor() {
+    if (suppressed_) {
+      fflush(stdout);
+      fflush(stderr);
+      dup2(saved_stdout_, STDOUT_FILENO);
+      dup2(saved_stderr_, STDERR_FILENO);
+      close(saved_stdout_);
+      close(saved_stderr_);
+    }
+  }
+
+  StdoutStderrSuppressor(const StdoutStderrSuppressor&) = delete;
+  StdoutStderrSuppressor& operator=(const StdoutStderrSuppressor&) = delete;
+
+ private:
+  bool suppressed_;
+  int saved_stdout_;
+  int saved_stderr_;
+};
 
 struct WhisperModelDims {
   int n_cross_layers = 0;
@@ -41,7 +96,10 @@ struct WhisperSessions {
   WhisperModelDims dims;
 
   explicit WhisperSessions(const std::filesystem::path& model_dir) {
-    env = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "svp-whisper");
+    const auto log_level = g_whisper_verbose.load(std::memory_order_relaxed)
+        ? ORT_LOGGING_LEVEL_WARNING
+        : ORT_LOGGING_LEVEL_FATAL;
+    const bool suppress = !g_whisper_verbose.load(std::memory_order_relaxed);
 
     const std::filesystem::path encoder_path = model_dir / "encoder.int8.onnx";
     const std::filesystem::path decoder_path = model_dir / "decoder.int8.onnx";
@@ -55,8 +113,16 @@ struct WhisperSessions {
 
     Ort::SessionOptions opts;
     opts.SetIntraOpNumThreads(1);
-    encoder = std::make_unique<Ort::Session>(*env, encoder_path.string().c_str(), opts);
-    decoder = std::make_unique<Ort::Session>(*env, decoder_path.string().c_str(), opts);
+
+    {
+      std::optional<StdoutStderrSuppressor> suppressor;
+      if (suppress) {
+        suppressor.emplace();
+      }
+      env = std::make_unique<Ort::Env>(log_level, "svp-whisper");
+      encoder = std::make_unique<Ort::Session>(*env, encoder_path.string().c_str(), opts);
+      decoder = std::make_unique<Ort::Session>(*env, decoder_path.string().c_str(), opts);
+    }
 
     Ort::AllocatorWithDefaultOptions alloc;
 

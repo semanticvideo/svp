@@ -28,7 +28,15 @@ namespace svp::builder {
 void run_foundation_color_stage(BuildPipelineContext& context) {
   svp::vision::FoundationColorStagingArtifact color_artifact =
       svp::vision::build_real_frame_color_staging_artifact(
-          context.plan, context.options.ffmpeg_path, &context.frame_catalog);
+          context.plan, context.options.ffmpeg_path, &context.frame_catalog,
+          [&context](int current, int total) {
+            if (total > 0) {
+              emit_stage_progress(context, ProgressStageId::color,
+                                  static_cast<std::uint64_t>(current),
+                                  static_cast<std::uint64_t>(total),
+                                  "frames");
+            }
+          });
   write_foundation_color_staging_files(context.staging_dir, color_artifact);
 
   const svp::package::TimelineWriteSummary timeline_summary =

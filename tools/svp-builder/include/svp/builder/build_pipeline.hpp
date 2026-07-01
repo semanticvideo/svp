@@ -46,6 +46,8 @@ struct BuildPipelineOptions {
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
   std::shared_ptr<BuildProgressSink> progress_sink;
+  bool quiet = false;
+  bool verbose = false;
 };
 
 struct BuildPipelineResult {

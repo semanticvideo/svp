@@ -65,11 +65,11 @@ void test_plain_sink_emits_deterministic_lines() {
       svp::builder::ProgressStageId::validate, "validator exit 1"));
 
   const std::string output = oss.str();
-  assert(output == "[stage_started] media_probe: probing\n"
-                   "[stage_completed] media_probe\n"
-                   "[artifact_written] package_write: package out/video.svp\n"
-                   "[warning] diarization: fallback used\n"
-                   "[stage_failed] validate: validator exit 1\n");
+  assert(output == "Media Probe  [working]  probing\n"
+                   "Media Probe  [################################] 100%\n"
+                   "Package Write  wrote out/video.svp\n"
+                   "Diarization  WARNING: fallback used\n"
+                   "Validation  FAILED  validator exit 1\n");
 }
 
 void test_plain_sink_empty_message_no_colon() {
@@ -83,8 +83,8 @@ void test_plain_sink_empty_message_no_colon() {
       svp::builder::ProgressStageId::media_probe));
 
   const std::string output = oss.str();
-  assert(output == "[stage_started] media_probe\n"
-                   "[stage_completed] media_probe\n");
+  assert(output == "Media Probe  [working]\n"
+                   "Media Probe  [################################] 100%\n");
 }
 
 void test_json_sink_emits_valid_jsonl() {
@@ -171,12 +171,11 @@ void test_auto_mode_non_tty_uses_plain() {
       svp::builder::ProgressStageId::media_probe, "probing"));
 
   const std::string output = oss.str();
-  assert(output.find("[stage_started] media_probe: probing") !=
-         std::string::npos);
+  assert(output.find("Media Probe  [working]") != std::string::npos);
   assert(output.find('\r') == std::string::npos);
 }
 
-void test_auto_mode_tty_uses_plain_no_ansi() {
+void test_auto_mode_tty_uses_ansi_progress() {
   std::ostringstream oss;
   auto sink = svp::builder::make_progress_sink(
       svp::builder::ProgressMode::auto_, oss, true);
@@ -185,10 +184,9 @@ void test_auto_mode_tty_uses_plain_no_ansi() {
       svp::builder::ProgressStageId::media_probe, "probing"));
 
   const std::string output = oss.str();
-  assert(output.find("[stage_started] media_probe: probing") !=
-         std::string::npos);
-  assert(output.find('\r') == std::string::npos);
-  assert(output.find("\033[") == std::string::npos);
+  assert(output.find("Media Probe") != std::string::npos);
+  assert(output.find('\r') != std::string::npos);
+  assert(output.find("\033[2K") != std::string::npos);
 }
 
 void test_plain_and_auto_non_tty_produce_same_output() {
@@ -221,6 +219,96 @@ void test_plain_and_auto_non_tty_produce_same_output() {
   assert(plain_oss.str() == auto_oss.str());
 }
 
+void test_plain_sink_stage_progress() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::plain, oss, false);
+
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::asr, 3, 10, "chunks"));
+
+  const std::string output = oss.str();
+  assert(output.find("ASR") != std::string::npos);
+  assert(output.find("chunks") != std::string::npos);
+  assert(output.find("3/10") != std::string::npos);
+  assert(output.find("30%") != std::string::npos);
+  assert(output.find('#') != std::string::npos);
+  assert(output.find('-') != std::string::npos);
+}
+
+void test_json_sink_stage_progress_fields() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::json, oss, false);
+
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::asr, 3, 10, "chunks"));
+
+  const std::string output = oss.str();
+  assert(output.find("\"kind\"") != std::string::npos);
+  assert(output.find("\"stage_progress\"") != std::string::npos);
+  assert(output.find("\"current\"") != std::string::npos);
+  assert(output.find("\"total\"") != std::string::npos);
+  assert(output.find("\"fraction\"") != std::string::npos);
+  assert(output.find("\"unit\"") != std::string::npos);
+  assert(output.find("\"chunks\"") != std::string::npos);
+  assert(output.find("\"asr\"") != std::string::npos);
+}
+
+void test_tty_sink_stage_progress_has_carriage_return() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::auto_, oss, true);
+
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::color, 5, 15, "frames"));
+
+  const std::string output = oss.str();
+  assert(output.find('\r') != std::string::npos);
+  assert(output.find("Color Observations") != std::string::npos);
+  assert(output.find("frames") != std::string::npos);
+}
+
+void test_make_stage_progress_fraction() {
+  const auto event = svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::asr, 5, 20, "chunks");
+  assert(event.kind == svp::builder::ProgressEventKind::stage_progress);
+  assert(event.current.has_value());
+  assert(event.total.has_value());
+  assert(event.fraction.has_value());
+  assert(*event.current == 5);
+  assert(*event.total == 20);
+  assert(*event.fraction == 0.25);
+  assert(event.unit == "chunks");
+}
+
+void test_make_stage_progress_zero_total() {
+  const auto event = svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::asr, 0, 0, "chunks");
+  assert(event.current.has_value());
+  assert(event.total.has_value());
+  assert(!event.fraction.has_value());
+}
+
+void test_plain_sink_fraction_only_with_unit_no_crash() {
+  svp::builder::ProgressEvent event;
+  event.kind = svp::builder::ProgressEventKind::stage_progress;
+  event.stage_id = svp::builder::ProgressStageId::asr;
+  event.fraction = 0.5;
+  event.unit = "chunks";
+
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::plain, oss, false);
+  sink->emit(event);
+
+  const std::string output = oss.str();
+  assert(output.find("ASR") != std::string::npos);
+  assert(output.find("50%") != std::string::npos);
+  assert(output.find("chunks") == std::string::npos);
+  assert(output.find("/0") == std::string::npos);
+}
+
 }  // namespace
 
 int main() {
@@ -235,8 +323,14 @@ int main() {
   test_json_sink_omits_empty_message();
   test_json_sink_includes_artifact_path();
   test_auto_mode_non_tty_uses_plain();
-  test_auto_mode_tty_uses_plain_no_ansi();
+  test_auto_mode_tty_uses_ansi_progress();
   test_plain_and_auto_non_tty_produce_same_output();
+  test_plain_sink_stage_progress();
+  test_json_sink_stage_progress_fields();
+  test_tty_sink_stage_progress_has_carriage_return();
+  test_make_stage_progress_fraction();
+  test_make_stage_progress_zero_total();
+  test_plain_sink_fraction_only_with_unit_no_crash();
 
   return 0;
 }

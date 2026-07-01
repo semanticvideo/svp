@@ -2,6 +2,7 @@
 
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/vision/color_frame_sampling.hpp"
+#include "svp/vision/canonical_frame_input.hpp"
 #include "svp/vision/frame_catalog.hpp"
 
 #include <filesystem>
@@ -52,6 +53,7 @@ struct RealFrameSamplingResult {
 [[nodiscard]] RealFrameSamplingResult build_real_frame_color_sampling_input(
     const media::MediaIngestPlan& plan,
     const std::filesystem::path& ffmpeg_path,
-    FrameCatalog* frame_catalog = nullptr);
+    FrameCatalog* frame_catalog = nullptr,
+    FrameProgressCallback on_progress = {});
 
 }  // namespace svp::vision
