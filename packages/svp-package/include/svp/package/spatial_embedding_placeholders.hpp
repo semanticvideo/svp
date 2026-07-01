@@ -2,12 +2,16 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <nlohmann/json.hpp>
 
 namespace svp::media { struct MediaIngestPlan; }
 namespace svp::vision { class FrameCatalog; }
 
 namespace svp::package {
+
+using SpatialProgressCallback =
+    std::function<void(const char* stage, std::size_t current, std::size_t total)>;
 
 struct SpatialEmbeddingPlaceholderSummary {
   std::size_t depth_index_written = false;
@@ -67,7 +71,8 @@ struct SpatialEmbeddingPlaceholderSummary {
     const std::filesystem::path& model_cache_root = {},
     const svp::media::MediaIngestPlan* media_plan = nullptr,
     const std::filesystem::path& ffmpeg_path = {},
-    svp::vision::FrameCatalog* frame_catalog = nullptr);
+    svp::vision::FrameCatalog* frame_catalog = nullptr,
+    SpatialProgressCallback on_progress = {});
 
 [[nodiscard]] nlohmann::json spatial_embedding_placeholder_summary_to_json(
     const SpatialEmbeddingPlaceholderSummary& summary);

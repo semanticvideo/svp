@@ -162,7 +162,8 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     const std::filesystem::path& model_cache_root,
     const svp::media::MediaIngestPlan* media_plan,
     const std::filesystem::path& ffmpeg_path,
-    svp::vision::FrameCatalog* frame_catalog) {
+    svp::vision::FrameCatalog* frame_catalog,
+    SpatialProgressCallback on_progress) {
   SpatialEmbeddingPlaceholderSummary summary;
   summary.model_runtime_available = model_runtime_available;
 
@@ -231,6 +232,12 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     ocr_opts.crop_coverage_policy = "one_per_observation";
     ocr_opts.crop_min_jpeg_quality = 50;
     ocr_opts.frame_catalog = frame_catalog;
+    if (on_progress) {
+      ocr_opts.on_progress = [&on_progress](int current, int total) {
+        on_progress("ocr", static_cast<std::size_t>(current),
+                    static_cast<std::size_t>(total));
+      };
+    }
 
     svp::vision::OcrGenerationResult ocr_result;
     try {
@@ -262,7 +269,11 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     depth_opts.raster_width = raster_w;
     depth_opts.raster_height = raster_h;
     depth_opts.frame_input = decoded_frames;
-
+    if (on_progress) {
+      depth_opts.on_progress = [&on_progress](std::size_t current, std::size_t total) {
+        on_progress("depth", current, total);
+      };
+    }
     svp::vision::DepthGenerationResult depth_result;
     try {
       depth_result = svp::vision::generate_depth_blocks(
@@ -287,6 +298,11 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
 
     svp::vision::EmbeddingGenerationOptions emb_opts;
     emb_opts.model_cache_root = model_cache_root;
+    if (on_progress) {
+      emb_opts.on_progress = [&on_progress](std::size_t current, std::size_t total) {
+        on_progress("text_embeddings", current, total);
+      };
+    }
 
     svp::vision::EmbeddingGenerationResult emb_result;
     try {
@@ -321,6 +337,14 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
       svp::vision::VisualEntityTrackerOptions tracker_opts;
       tracker_opts.embedding_model_id = "model_nomic_embed_vision_v1_5";
       tracker_opts.execution_provider = "cpu";
+      if (on_progress) {
+        tracker_opts.on_tracking_progress = [&on_progress](std::size_t current, std::size_t total) {
+          on_progress("visual_tracking", current, total);
+        };
+        tracker_opts.on_visual_embedding_progress = [&on_progress](std::size_t current, std::size_t total) {
+          on_progress("visual_embeddings", current, total);
+        };
+      }
 
       // Read shot boundaries from timeline
       std::vector<std::pair<std::string, std::int64_t>> shot_boundaries;
@@ -449,6 +473,12 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
   }
 
   ocr_opts.frame_catalog = frame_catalog;
+  if (on_progress) {
+    ocr_opts.on_progress = [&on_progress](int current, int total) {
+      on_progress("ocr", static_cast<std::size_t>(current),
+                  static_cast<std::size_t>(total));
+    };
+  }
 
   svp::vision::OcrGenerationResult ocr_result;
   try {

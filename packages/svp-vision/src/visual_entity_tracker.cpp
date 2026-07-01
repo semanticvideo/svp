@@ -1053,8 +1053,13 @@ EntityTrackResult run_visual_entity_tracker(
   int next_entity_idx = 0;
   int next_track_idx = 0;
   int total_region_count = 0;
+  std::size_t visual_embedding_count = 0;
 
   // Process keyframe pairs
+  const std::size_t total_keyframe_pairs = keyframes.frame_indices.size() - 1;
+  if (options.on_tracking_progress) {
+    options.on_tracking_progress(0, total_keyframe_pairs);
+  }
   for (std::size_t k = 0; k + 1 < keyframes.frame_indices.size(); ++k) {
     int idx_prev = keyframes.frame_indices[k];
     int idx_next = keyframes.frame_indices[k + 1];
@@ -1292,8 +1297,11 @@ EntityTrackResult run_visual_entity_tracker(
               l2_normalize(region_embedding);
             }
           } catch (...) {
-            // Embedding inference failed; continue without
           }
+        }
+        ++visual_embedding_count;
+        if (options.on_visual_embedding_progress) {
+          options.on_visual_embedding_progress(visual_embedding_count, 0);
         }
       }
 
@@ -1443,6 +1451,10 @@ EntityTrackResult run_visual_entity_tracker(
       if (track.last_frame_idx < idx_next) {
         track.kalman.mark_lost();
       }
+    }
+
+    if (options.on_tracking_progress) {
+      options.on_tracking_progress(k + 1, total_keyframe_pairs);
     }
   }
 

@@ -76,6 +76,35 @@ PackageSkeletonStageResult run_package_skeleton_stage(
     // Write honest spatial/embedding placeholder entries
     // This also runs real OCR generation on decoded frames before
     // embedding generation so text_observations.jsonl is populated.
+    auto spatial_progress = [&context](const char* stage,
+                                        std::size_t current,
+                                        std::size_t total) {
+      ProgressStageId stage_id = ProgressStageId::ocr;
+      if (std::string(stage) == "ocr") {
+        stage_id = ProgressStageId::ocr;
+      } else if (std::string(stage) == "depth") {
+        stage_id = ProgressStageId::depth;
+      } else if (std::string(stage) == "text_embeddings") {
+        stage_id = ProgressStageId::text_embeddings;
+      } else if (std::string(stage) == "visual_tracking") {
+        stage_id = ProgressStageId::visual_tracking;
+      } else if (std::string(stage) == "visual_embeddings") {
+        stage_id = ProgressStageId::visual_embeddings;
+      }
+      if (current == 0) {
+        emit_stage_started(context, stage_id);
+      }
+      if (total > 0) {
+        emit_stage_progress(context, stage_id,
+                            static_cast<std::uint64_t>(current),
+                            static_cast<std::uint64_t>(total), "items");
+      }
+      if (current > 0 && current >= total) {
+        emit_stage_completed(context, stage_id);
+      }
+    };
+
+    emit_stage_started(context, ProgressStageId::ocr);
     const svp::package::SpatialEmbeddingPlaceholderSummary placeholder_summary =
         svp::package::write_spatial_and_embedding_placeholders(
             context.staging_dir, context.model_runtime_available,
@@ -85,7 +114,14 @@ PackageSkeletonStageResult run_package_skeleton_stage(
                 : std::filesystem::path(context.options.model_cache_dir),
             &context.plan,
             context.options.ffmpeg_path,
-            &context.frame_catalog);
+            &context.frame_catalog,
+            spatial_progress);
+    // Emit completed for any spatial stages that didn't get a final callback
+    emit_stage_completed(context, ProgressStageId::ocr);
+    emit_stage_completed(context, ProgressStageId::depth);
+    emit_stage_completed(context, ProgressStageId::text_embeddings);
+    emit_stage_completed(context, ProgressStageId::visual_tracking);
+    emit_stage_completed(context, ProgressStageId::visual_embeddings);
     context.output["spatial_embedding_placeholders"] =
         svp::package::spatial_embedding_placeholder_summary_to_json(
             placeholder_summary);
@@ -101,28 +137,35 @@ PackageSkeletonStageResult run_package_skeleton_stage(
 
     // Write entity and entity-track artifacts after OCR text regions
     // and observations exist, so entities have real evidence.
+    emit_stage_started(context, ProgressStageId::entities);
     const svp::package::EntityWriteSummary entity_summary =
         svp::package::write_entity_artifacts(context.staging_dir);
+    emit_stage_completed(context, ProgressStageId::entities);
     context.output["entity_artifacts"] =
         svp::package::entity_write_summary_to_json(entity_summary);
 
     // Write relationships and provenance after all source artifacts exist
     // (OCR text observations, evidence crops, depth, embeddings, entities, etc.)
     // so the relationship graph has no dangling references.
+    emit_stage_started(context, ProgressStageId::relationships);
     const svp::package::RelationshipProvenanceWriteSummary relationship_summary =
         svp::package::write_relationships_and_provenance(context.staging_dir);
+    emit_stage_completed(context, ProgressStageId::relationships);
     context.output["package_relationships_provenance"] =
         svp::package::relationship_provenance_write_summary_to_json(
             relationship_summary);
 
     // Generate SQLite index foundation and manifest
+    emit_stage_started(context, ProgressStageId::index);
     if (!svp::package::write_index_foundation(context.staging_dir, manifest_json)) {
       std::cerr << "Warning: failed to write SQLite index foundation.\n";
       emit_warning(context, ProgressStageId::index,
                    "Failed to write SQLite index foundation.");
     }
+    emit_stage_completed(context, ProgressStageId::index);
 
     // First package write (without validation report)
+    emit_stage_started(context, ProgressStageId::package_write);
     result.package_written =
         svp::package::write_package_skeleton(result.package_path,
                                              context.staging_dir,
@@ -134,32 +177,40 @@ PackageSkeletonStageResult run_package_skeleton_stage(
       validator_opts.validation_codes_path = "spec/registries/validation-codes.json";
 
       // Run validator on first package
+      emit_stage_started(context, ProgressStageId::validate);
       auto first_report =
           svp::validation::validate_package(result.package_path, validator_opts);
       result.validation_report_json = first_report;
+      emit_stage_completed(context, ProgressStageId::validate);
 
       // Store validation report in staging for second package write
+      emit_stage_started(context, ProgressStageId::validation_report);
       result.validation_report_stored = svp::package::write_validation_report_to_staging(
           context.staging_dir, result.validation_report_json);
+      emit_stage_completed(context, ProgressStageId::validation_report);
 
       if (result.validation_report_stored) {
         // Re-package with validation report included
+        emit_stage_started(context, ProgressStageId::repackage);
         result.package_written =
             svp::package::write_package_skeleton(result.package_path,
                                                  context.staging_dir,
                                                  context.options.source_path,
                                                  manifest_json);
+        emit_stage_completed(context, ProgressStageId::repackage);
       } else {
         result.package_written = false;
       }
 
       if (result.package_written) {
         // Run validator on final package
+        emit_stage_started(context, ProgressStageId::validate);
         auto final_report =
             svp::validation::validate_package(result.package_path, validator_opts);
         result.validator_exit_code = svp::validation::exit_code(final_report);
         result.validator_passes = (result.validator_exit_code == 0);
         result.validation_report_json = final_report;
+        emit_stage_completed(context, ProgressStageId::validate);
       }
     }
     return result;

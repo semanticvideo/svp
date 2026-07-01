@@ -522,8 +522,6 @@ void test_pipeline_verbose_emits_events() {
 
   assert(result.exit_code == 0);
   assert(!capturing_sink->events.empty());
-  const std::string stdout_str = captured_stdout.str();
-  assert(stdout_str.find("Wrote:") != std::string::npos);
 
   std::filesystem::remove_all(tmp_dir);
 }

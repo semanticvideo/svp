@@ -314,6 +314,11 @@ EmbeddingGenerationResult generate_embedding_blocks(
 
   std::vector<nlohmann::json> index_entries;
 
+  const std::size_t total_text_inputs = text_inputs.size();
+  if (options.on_progress) {
+    options.on_progress(0, total_text_inputs);
+  }
+
   for (const auto& text_input : text_inputs) {
     TokenizedText tokenized = tokenizer.tokenize(text_input.text, 512);
 
@@ -487,6 +492,10 @@ EmbeddingGenerationResult generate_embedding_blocks(
         {"payload_blake3", entry.payload_blake3},
         {"block_blake3", entry.block_blake3}
     });
+
+    if (options.on_progress) {
+      options.on_progress(result.entries.size(), total_text_inputs);
+    }
   }
 
   if (result.entries.empty()) {

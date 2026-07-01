@@ -104,6 +104,7 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
           asr_model_available,
           asr_model_verified);
 
+  emit_stage_started(context, ProgressStageId::asr);
   const svp::audio::AsrExecutionBoundary executed_asr_boundary =
       svp::audio::execute_asr_boundary(
           asr_boundary, context.staging_dir, model_cache_root,
@@ -115,6 +116,7 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
                                   "chunks");
             }
           });
+  emit_stage_completed(context, ProgressStageId::asr);
 
   // Diarization boundary: check for diarization model in cache.
   // If unavailable, honest fallback one-speaker segment is produced.
@@ -166,10 +168,12 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
                  "Speaker data is fabricated fallback, not real.");
   }
 
+  emit_stage_started(context, ProgressStageId::diarization);
   diar_boundary = svp::audio::execute_diarization_boundary(
       std::move(diar_boundary), context.staging_dir, model_cache_root,
       context.options.allow_fallback_diarization,
       context.options.force_single_speaker);
+  emit_stage_completed(context, ProgressStageId::diarization);
 
   if (context.stage_plan.run_audio &&
       diar_boundary.diarization_status == svp::audio::DiarizationStatus::unavailable &&

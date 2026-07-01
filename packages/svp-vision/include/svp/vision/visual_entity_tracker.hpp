@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -119,6 +120,10 @@ struct VisualEntityTrackerOptions {
   int depth_edge_threshold = 2000;
   // IoU threshold for merging depth and motion candidates
   double candidate_merge_iou_threshold = 0.3;
+
+  // Progress callbacks for visual tracking and visual embedding inference
+  std::function<void(std::size_t current, std::size_t total)> on_tracking_progress;
+  std::function<void(std::size_t current, std::size_t total)> on_visual_embedding_progress;
 };
 
 struct TrackedRegion {
