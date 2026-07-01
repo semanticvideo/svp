@@ -7,6 +7,7 @@
 #include "svp/vision/ocr_temporal_sampling.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -38,6 +39,7 @@ struct OcrGenerationOptions {
   int crop_min_jpeg_quality = 50;
   OcrSamplingConfig sampling_config;
   FrameCatalog* frame_catalog = nullptr;
+  FrameProgressCallback on_progress;
 };
 
 struct OcrGenerationResult {

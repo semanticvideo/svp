@@ -50,6 +50,14 @@ void run_foundation_ocr_stage(BuildPipelineContext& context) {
   ocr_opts.generate_evidence_crops = true;
   ocr_opts.crop_coverage_policy = "one_per_observation";
   ocr_opts.crop_min_jpeg_quality = 50;
+  ocr_opts.on_progress = [&context](int current, int total) {
+    if (total > 0) {
+      emit_stage_progress(context, ProgressStageId::ocr,
+                          static_cast<std::uint64_t>(current),
+                          static_cast<std::uint64_t>(total),
+                          "frames");
+    }
+  };
 
   svp::vision::OcrGenerationResult ocr_result =
       svp::vision::generate_ocr_observations(

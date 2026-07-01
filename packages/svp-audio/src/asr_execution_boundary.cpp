@@ -222,7 +222,8 @@ AsrExecutionBoundary build_asr_execution_boundary(const AsrChunkPlanResult& chun
 
 AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
                                           const std::filesystem::path& staging_root,
-                                          const std::filesystem::path& model_cache_root) {
+                                          const std::filesystem::path& model_cache_root,
+                                          AsrChunkProgressCallback on_chunk_progress) {
   if (!boundary.blockers.empty()) {
     boundary.asr_status = AsrStatus::blocked;
     boundary.transcript_written = false;
@@ -248,6 +249,10 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
 
     for (std::size_t i = 0; i < boundary.chunk_plan.chunks.size(); ++i) {
       const AsrChunkPlan& chunk = boundary.chunk_plan.chunks[i];
+
+      if (on_chunk_progress) {
+        on_chunk_progress(i, boundary.chunk_plan.chunks.size());
+      }
 
       const std::filesystem::path chunk_wav =
           slice_wav_to_temp(input_wav, chunk.source_start_us,
@@ -275,6 +280,11 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
         words.push_back(adjusted);
       }
       chunk_words.push_back(std::move(words));
+    }
+
+    if (on_chunk_progress) {
+      on_chunk_progress(boundary.chunk_plan.chunks.size(),
+                        boundary.chunk_plan.chunks.size());
     }
 
     if (!boundary.blockers.empty()) {

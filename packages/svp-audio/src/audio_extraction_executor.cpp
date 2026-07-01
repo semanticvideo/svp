@@ -3,6 +3,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -60,7 +61,8 @@ std::vector<std::string> rewrite_output_ref_arguments(
   return rewritten;
 }
 
-int run_process(const std::vector<std::string>& arguments) {
+int run_process(const std::vector<std::string>& arguments,
+                 bool suppress_stderr) {
   std::vector<char*> argv;
   argv.reserve(arguments.size() + 1);
   for (const std::string& argument : arguments) {
@@ -74,6 +76,13 @@ int run_process(const std::vector<std::string>& arguments) {
   }
 
   if (pid == 0) {
+    if (suppress_stderr) {
+      const int devnull = open("/dev/null", O_WRONLY);
+      if (devnull >= 0) {
+        dup2(devnull, STDERR_FILENO);
+        close(devnull);
+      }
+    }
     execvp(argv[0], argv.data());
     _exit(127);
   }
@@ -100,7 +109,8 @@ int run_process(const std::vector<std::string>& arguments) {
 AudioExtractionCommandRun execute_command(const std::string& task_id,
                                           const std::string& output_ref,
                                           const std::vector<std::string>& arguments,
-                                          const std::filesystem::path& staging_root) {
+                                          const std::filesystem::path& staging_root,
+                                          bool suppress_stderr) {
   AudioExtractionCommandRun run;
   run.task_id = task_id;
   run.output_ref = output_ref;
@@ -129,7 +139,7 @@ AudioExtractionCommandRun execute_command(const std::string& task_id,
 
   run.command_safe = true;
   std::filesystem::create_directories(run.staged_output_path.parent_path());
-  const int exit_code = run_process(run.arguments);
+  const int exit_code = run_process(run.arguments, suppress_stderr);
   run.command_executed = true;
   run.exit_code = exit_code;
   run.success = exit_code == 0 && std::filesystem::exists(run.staged_output_path);
@@ -376,14 +386,15 @@ AudioDerivedArtifactRun stage_waveform_artifact(const AudioExtractionPlan& plan,
 }  // namespace
 
 AudioExtractionRun execute_audio_extraction_plan(const AudioExtractionPlan& plan,
-                                                 const std::filesystem::path& staging_root) {
+                                                 const std::filesystem::path& staging_root,
+                                                 bool suppress_stderr) {
   AudioExtractionRun run;
   run.staging_root = staging_root;
   std::filesystem::create_directories(staging_root);
 
   for (const AudioExtractionCommandPlan& command : plan.original_streams) {
     AudioExtractionCommandRun command_run =
-        execute_command(command.task_id, command.output_ref, command.arguments, staging_root);
+        execute_command(command.task_id, command.output_ref, command.arguments, staging_root, suppress_stderr);
     run.extraction_run = run.extraction_run || command_run.command_executed;
     if (!command_run.success && !command_run.skipped_reason.empty()) {
       run.blockers.push_back(command.task_id + ": " + command_run.skipped_reason);
@@ -394,7 +405,8 @@ AudioExtractionRun execute_audio_extraction_plan(const AudioExtractionPlan& plan
   run.analysis_audio = execute_command(plan.analysis_audio.task_id,
                                        plan.analysis_audio.output_ref,
                                        plan.analysis_audio.arguments,
-                                       staging_root);
+                                       staging_root,
+                                       suppress_stderr);
   run.extraction_run = run.extraction_run || run.analysis_audio.command_executed;
   if (!run.analysis_audio.success && !run.analysis_audio.skipped_reason.empty()) {
     run.blockers.push_back(plan.analysis_audio.task_id + ": " +

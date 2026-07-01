@@ -11,6 +11,8 @@
 
 namespace svp::models {
 
+void set_onnx_verbose(bool verbose);
+
 struct OnnxSessionOptions {
   std::string execution_provider = "cpu";
   int intra_op_num_threads = 0;
