@@ -19,7 +19,12 @@ add_library(svp-builder-lib
   src/interlace_inspect.cpp
   src/interlace_extract.cpp
   src/interlace_recombine.cpp
-  src/interlace_batch.cpp
+  src/interlace_batch_discovery.cpp
+  src/interlace_batch_sidecar.cpp
+  src/interlace_batch_create.cpp
+  src/interlace_batch_scan.cpp
+  src/interlace_batch_validate.cpp
+  src/interlace_identity.cpp
 )
 
 add_library(svp::builder ALIAS svp-builder-lib)
@@ -27,6 +32,8 @@ add_library(svp::builder ALIAS svp-builder-lib)
 target_include_directories(svp-builder-lib
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 target_compile_features(svp-builder-lib PUBLIC cxx_std_20)
