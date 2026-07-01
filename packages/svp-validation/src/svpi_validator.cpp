@@ -365,7 +365,7 @@ void add_svpi_forbidden_media_findings(ValidationReport& report,
     } else if (reason == svp::package::SvpiForbiddenMediaReason::replayable_derivative) {
       add_finding(report, make_finding(registry, kCodeSvpiForbiddenReplayableMediaDerivative,
                                        "/" + entry,
-                                       "SVPI must not contain replayable or intelligible source-derived audio, video, or muxed media derivatives."));
+                                       "SVPI must not contain replayable source-derived audio, video, or muxed media derivatives."));
     }
   }
 }

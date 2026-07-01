@@ -58,7 +58,7 @@ The key words `MUST`, `MUST NOT`, `REQUIRED`, `SHOULD`, `SHOULD NOT`, `MAY`, and
 
 `primary media bytes` means the full bytes of the source media file. An SVPI v0.1 MUST NOT contain these as a replacement for the source media.
 
-`replayable source media derivative` means a source-derived audio, video, or muxed media file that can substantially replay the source presentation or any intelligible source stream. Examples include extracted original audio streams, transcoded audio streams, analysis WAV/FLAC files, proxy videos, and preview files with intelligible synchronized audio.
+`replayable source media derivative` means a source-derived audio, video, or muxed media file that can substantially replay the source presentation or a source audio/video stream. Examples include extracted original audio streams, transcoded audio streams, analysis WAV/FLAC files, proxy videos, and preview files with synchronized audio.
 
 `media binding` means the set of required and optional identity fields used to verify that a candidate media file is the source media for a given SVPI.
 
@@ -294,7 +294,7 @@ media/original/
 
 A validator MUST fail an SVPI if it appears to contain a complete primary media file under `media/original/`.
 
-An SVPI v0.1 package MUST NOT contain replayable source media derivatives. In particular, SVPI MUST NOT include extracted or transcoded source audio that can be decoded into intelligible playback. The following entries are forbidden in SVPI:
+An SVPI v0.1 package MUST NOT contain replayable source media derivatives. In particular, SVPI MUST NOT include extracted or transcoded source audio that can be decoded into source-audio playback. The following entries are forbidden in SVPI:
 
 ```text
 media/audio/original_stream_*.flac
@@ -302,7 +302,7 @@ media/audio/original_stream_*
 media/audio/analysis_mono_16k.wav
 ```
 
-The prohibition applies by semantics, not only by filename. A writer MUST NOT evade it by placing replayable or intelligible source-derived audio under `media/derived/`, `evidence/`, `extensions/`, or any other path. A validator MUST fail an SVPI that contains source-derived audio/video/muxed media assets whose content can substantially replay the source or an intelligible source stream.
+The prohibition applies by semantics, not only by filename. A writer MUST NOT evade it by placing replayable source-derived audio/video/muxed media under `media/derived/`, `evidence/`, `extensions/`, or any other path. A validator MUST fail an SVPI that contains source-derived audio/video/muxed media assets whose content can substantially replay the source presentation or a source media stream.
 
 SVPI may still carry non-replayable audio observations and proofs, including transcript records, word timestamps, speaker segments, audio absence records, waveform envelope summaries, stream metadata, stream hashes, chunk hashes, and provenance.
 
@@ -317,9 +317,9 @@ text/evidence_crops/
 evidence/
 ```
 
-Evidence artifacts MUST include provenance and references back to source media time ranges or regions. Evidence artifacts MUST NOT be accepted as proof that the sidecar has the primary media bytes. Evidence artifacts MUST NOT contain replayable or intelligible source-derived audio, video, or muxed media.
+Evidence artifacts MUST include provenance and references back to source media time ranges or regions. Evidence artifacts MUST NOT be accepted as proof that the sidecar has the primary media bytes. Evidence artifacts MUST NOT contain replayable source-derived audio, video, or muxed media. Readable still evidence such as OCR crops is allowed when it is bounded, provenance-linked evidence rather than a replayable media stream.
 
-`media/audio/waveform.jsonl` MAY be present only when it stores a compact envelope or feature summary that is not sufficient to reconstruct intelligible audio. It MUST NOT contain PCM samples, encoded audio payloads, spectrogram payloads intended for playback reconstruction, or enough dense signal data to serve as a replayable proxy for the source audio.
+`media/audio/waveform.jsonl` MAY be present only when it stores a compact envelope or feature summary that is not sufficient to reconstruct source audio. It MUST NOT contain PCM samples, encoded audio payloads, spectrogram payloads intended for playback reconstruction, or enough dense signal data to serve as a replayable proxy for the source audio.
 
 ### 8.5 Index Files
 
@@ -899,7 +899,7 @@ Structure validation MUST check:
 9. Valid JSON and JSONL syntax for required records.
 10. No invalid paths, duplicate paths, or traversal paths.
 11. No forbidden primary media under `media/original/`.
-12. No forbidden replayable source media derivatives, including extracted original audio streams or intelligible analysis audio.
+12. No forbidden replayable source media derivatives, including extracted original audio streams or replayable analysis audio.
 13. Manifest `format` equals `svpi`.
 14. Manifest version support.
 15. Media binding schema support.

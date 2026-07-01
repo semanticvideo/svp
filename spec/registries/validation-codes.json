@@ -550,7 +550,7 @@
       "affects_core_status": true,
       "status_effect": "invalid",
       "section": "svpi-8.3",
-      "description": "SVPI must not contain replayable or intelligible source-derived audio, video, or muxed media derivatives such as extracted original audio streams or analysis WAV/FLAC files.",
+      "description": "SVPI must not contain replayable source-derived audio, video, or muxed media derivatives such as extracted original audio streams, proxy video, or analysis WAV/FLAC files.",
       "introduced": "svpi-0.1"
     },
     {
