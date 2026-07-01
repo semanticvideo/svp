@@ -1,0 +1,248 @@
+#include "svp/builder/interlace.hpp"
+#include "svp/builder/interlace_batch.hpp"
+#include "svp/builder/build_progress.hpp"
+#include "interlace_batch_internal.hpp"
+
+#include "svp/package/media_binding.hpp"
+#include "svp/package/media_binding_factory.hpp"
+#include "svp/package/package_layout.hpp"
+#include "svp/validation/svpi_validator.hpp"
+#include "svp/validation/report_json.hpp"
+
+#include <nlohmann/json.hpp>
+
+#include <filesystem>
+#include <memory>
+#include <string>
+
+namespace svp::builder {
+
+namespace {
+
+nlohmann::json make_svpi_manifest(
+    const std::string& source_filename,
+    const svp::package::MediaBindingDocument& binding_doc) {
+  nlohmann::json sections = nlohmann::json::object();
+  sections["transcript"] = {{"state", "not_generated"}};
+  sections["timeline"] = {{"state", "not_generated"}};
+  sections["text"] = {{"state", "not_generated"}};
+  sections["colors"] = {{"state", "not_generated"}};
+  sections["entities"] = {{"state", "not_generated"}};
+  sections["spatial"] = {{"state", "not_generated"}};
+  sections["relationships"] = {{"state", "not_generated"}};
+  sections["embeddings"] = {{"state", "not_generated"}};
+
+  std::string package_id =
+      "svpi_" + std::filesystem::path(source_filename).stem().string() + "_pkg";
+
+  return {
+    {"format", "svpi"},
+    {"svpi_version", std::string{svp::package::kSvpiVersion}},
+    {"svp_version", "1.0-rc.2"},
+    {"package_id", package_id},
+    {"created_utc", make_utc_timestamp()},
+    {"media_binding_ref", "media_binding.json"},
+    {"primary_media_binding_id", binding_doc.primary_binding_id},
+    {"timebase", {
+      {"unit", "microseconds"},
+      {"origin", "primary_presentation_start"},
+      {"source_timebase_mode", "exact_rational"},
+      {"rounding", "round_half_to_even"}
+    }},
+    {"sections", sections}
+  };
+}
+
+bool create_single_svpi(
+    const std::filesystem::path& source_path,
+    const std::filesystem::path& svpi_output_path,
+    const std::string& ffprobe_path,
+    const std::string& ffmpeg_path,
+    bool compute_full_blake3,
+    const std::string& staging_dir_override,
+    const std::string& model_cache_dir,
+    const std::string& sherpa_lib_path,
+    bool core_only_diagnostic,
+    bool allow_fallback_diarization,
+    bool force_single_speaker,
+    std::string& error_message,
+    std::string& blake3_state_out,
+    const std::shared_ptr<BuildProgressSink>& progress_sink) {
+
+  svp::builder::InterlaceCreateOptions opts;
+  opts.source_path = source_path.string();
+  opts.output_path = svpi_output_path.string();
+  opts.ffprobe_path = ffprobe_path;
+  opts.ffmpeg_path = ffmpeg_path;
+  opts.compute_full_blake3 = compute_full_blake3;
+  opts.staging_dir = staging_dir_override;
+  opts.model_cache_dir = model_cache_dir;
+  opts.sherpa_lib_path = sherpa_lib_path;
+  opts.core_only_diagnostic = core_only_diagnostic;
+  opts.allow_fallback_diarization = allow_fallback_diarization;
+  opts.force_single_speaker = force_single_speaker;
+  opts.progress_sink = progress_sink;
+
+  auto result = svp::builder::interlace_create(opts);
+  blake3_state_out = result.blake3_state;
+  if (!result.success) {
+    error_message = result.error_message;
+    return false;
+  }
+  return true;
+}
+
+bool check_svpi_valid_and_bound(
+    const std::filesystem::path& svpi_path,
+    const std::filesystem::path& media_path,
+    const std::string& validation_codes_path,
+    std::string& error_message) {
+
+  svp::validation::SvpiValidatorOptions vopts;
+  vopts.validation_codes_path = validation_codes_path;
+  auto report = svp::validation::validate_svpi_package(svpi_path, vopts);
+  if (svp::validation::exit_code(report) != 0) {
+    error_message = "SVPI structure validation failed";
+    for (const auto& err : report.errors) {
+      error_message += "\n  " + err.code + ": " + err.message;
+    }
+    return false;
+  }
+
+  auto binding_entry = svp::package::read_package_entry(svpi_path, "media_binding.json");
+  if (!binding_entry.has_value()) {
+    error_message = "could not read media_binding.json";
+    return false;
+  }
+
+  auto binding_doc = svp::package::parse_media_binding_json(binding_entry.value());
+  auto verification = svp::package::verify_media_binding(media_path, binding_doc);
+
+  if (verification.state != svp::package::BindingVerificationState::verified) {
+    error_message = "binding mismatch: " + verification.state_label;
+    return false;
+  }
+
+  return true;
+}
+
+}  // namespace
+
+BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
+  BatchCreateResult result;
+
+  std::shared_ptr<BuildProgressSink> sink = options.progress_sink;
+  if (!sink) {
+    sink = default_progress_sink();
+  }
+
+  const std::filesystem::path source_dir(options.source_dir);
+  if (!std::filesystem::exists(source_dir) || !std::filesystem::is_directory(source_dir)) {
+    BatchFileResult r;
+    r.status = BatchFileStatus::failed;
+    r.error_message = "source directory does not exist: " + options.source_dir;
+    result.results.push_back(std::move(r));
+    result.failed_count = 1;
+    return result;
+  }
+
+  const std::filesystem::path out_dir =
+      options.out_dir.empty() || options.out_dir == "same-as-source"
+          ? source_dir
+          : std::filesystem::path(options.out_dir);
+
+  if (!std::filesystem::exists(out_dir)) {
+    std::filesystem::create_directories(out_dir);
+  }
+
+  if (options.visibility == SidecarVisibility::managed_dir) {
+    std::filesystem::create_directories(out_dir / ".svpi");
+  }
+
+  sink->emit(make_stage_started(ProgressStageId::batch_scan, options.source_dir));
+  auto media_files = discover_media_files(source_dir, options.recursive);
+  sink->emit(make_stage_completed(ProgressStageId::batch_scan,
+      std::to_string(media_files.size()) + " media files found"));
+
+  for (const auto& media_path : media_files) {
+    sink->emit(make_stage_started(ProgressStageId::batch_item,
+        media_path.filename().string()));
+
+    BatchFileResult file_result;
+    file_result.source_filename = media_path.filename().string();
+    file_result.source_relative_path =
+        std::filesystem::relative(media_path, source_dir).string();
+
+    const bool use_out_dir =
+        !options.out_dir.empty() && options.out_dir != "same-as-source";
+    const auto local_out_dir =
+        use_out_dir ? out_dir : media_path.parent_path();
+
+    file_result.svpi_path = resolve_sidecar_path(
+        media_path, options.visibility, local_out_dir);
+
+    if (std::filesystem::exists(file_result.svpi_path)) {
+      std::string err;
+      if (check_svpi_valid_and_bound(
+              file_result.svpi_path, media_path,
+              "spec/registries/validation-codes.json", err)) {
+        file_result.status = BatchFileStatus::already_valid;
+        result.already_valid_count++;
+      } else {
+        if (options.replace_mismatched) {
+          std::string blake3_state;
+          std::string create_err;
+          if (create_single_svpi(
+                  media_path, file_result.svpi_path,
+                  options.ffprobe_path, options.ffmpeg_path,
+                  !options.no_blake3, options.staging_dir,
+                  options.model_cache_dir, options.sherpa_lib_path,
+                  options.core_only_diagnostic,
+                  options.allow_fallback_diarization,
+                  options.force_single_speaker,
+                  create_err, blake3_state, sink)) {
+            file_result.status = BatchFileStatus::replaced;
+            file_result.blake3_state = blake3_state;
+            result.replaced_count++;
+          } else {
+            file_result.status = BatchFileStatus::failed;
+            file_result.error_message = create_err;
+            result.failed_count++;
+          }
+        } else {
+          file_result.status = BatchFileStatus::binding_mismatch;
+          file_result.error_message = err;
+          result.mismatch_count++;
+        }
+      }
+    } else {
+      std::string blake3_state;
+      std::string create_err;
+      if (create_single_svpi(
+              media_path, file_result.svpi_path,
+              options.ffprobe_path, options.ffmpeg_path,
+              !options.no_blake3, options.staging_dir,
+              options.model_cache_dir, options.sherpa_lib_path,
+              options.core_only_diagnostic,
+              options.allow_fallback_diarization,
+              options.force_single_speaker,
+              create_err, blake3_state, sink)) {
+        file_result.status = BatchFileStatus::created;
+        file_result.blake3_state = blake3_state;
+        result.created_count++;
+      } else {
+        file_result.status = BatchFileStatus::failed;
+        file_result.error_message = create_err;
+        result.failed_count++;
+      }
+    }
+
+    result.results.push_back(std::move(file_result));
+    sink->emit(make_stage_completed(ProgressStageId::batch_item,
+        media_path.filename().string()));
+  }
+
+  return result;
+}
+
+}  // namespace svp::builder
