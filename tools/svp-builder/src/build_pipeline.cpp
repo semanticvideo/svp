@@ -3,6 +3,7 @@
 
 #include "build_pipeline_internal.hpp"
 #include "svp/audio/sherpa_diarization.hpp"
+#include "svp/audio/whisper_model.hpp"
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/models/runtime.hpp"
 
@@ -39,6 +40,8 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
             ? default_staging_dir_for_output(options.output_path)
             : options.staging_dir;
     const bool model_runtime_available = svp::models::OnnxSession::is_available();
+    svp::models::set_onnx_verbose(options.verbose);
+    svp::audio::set_whisper_verbose(options.verbose);
 
     if (!options.sherpa_lib_path.empty()) {
       svp::audio::set_sherpa_lib_path(options.sherpa_lib_path);
@@ -120,9 +123,21 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
                               : ProgressStageId::media_probe,
                           package_result.json_output_path,
                           "builder foundation JSON");
-    std::cout << "Wrote builder foundation JSON: "
-              << package_result.json_output_path << "\n";
-    print_build_progress(context, package_result);
+
+    if (!options.quiet) {
+      std::cout << "Wrote: " << package_result.json_output_path << "\n";
+      if (stage_plan.run_package_skeleton && package_result.package_written) {
+        if (package_result.validator_passes) {
+          std::cout << "Validation: PASSED\n";
+        } else {
+          std::cout << "Validation: FAILED (exit "
+                    << package_result.validator_exit_code << ")\n";
+        }
+      }
+      if (options.verbose) {
+        print_build_progress(context, package_result);
+      }
+    }
 
     if (stage_plan.run_package_skeleton && package_result.package_written &&
         !package_result.validator_passes) {

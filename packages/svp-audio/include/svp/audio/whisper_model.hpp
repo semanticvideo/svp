@@ -10,6 +10,8 @@
 
 namespace svp::audio {
 
+void set_whisper_verbose(bool verbose);
+
 struct WhisperSegment {
   std::string text;
   std::int64_t start_us = 0;

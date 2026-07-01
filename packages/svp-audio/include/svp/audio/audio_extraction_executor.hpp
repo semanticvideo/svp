@@ -49,7 +49,8 @@ struct AudioExtractionRun {
 
 [[nodiscard]] AudioExtractionRun execute_audio_extraction_plan(
     const AudioExtractionPlan& plan,
-    const std::filesystem::path& staging_root);
+    const std::filesystem::path& staging_root,
+    bool suppress_stderr = true);
 
 [[nodiscard]] nlohmann::json audio_extraction_run_to_json(
     const AudioExtractionRun& run);

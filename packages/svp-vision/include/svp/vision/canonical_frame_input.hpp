@@ -11,6 +11,9 @@
 
 namespace svp::vision {
 
+using FrameProgressCallback =
+    std::function<void(int current, int total)>;
+
 // Result of decoding real canonical RGB frames from source media.
 //
 // This is the shared frame-decoding module used by both the color pipeline
@@ -68,7 +71,8 @@ struct DecodedCanonicalFrames {
     int target_height,
     int max_frames,
     FrameCatalog* frame_catalog = nullptr,
-    const std::string& purpose = "canonical");
+    const std::string& purpose = "canonical",
+    FrameProgressCallback on_progress = {});
 
 // Extract the media duration in microseconds from the MediaIngestPlan.
 // Returns 0 if the duration cannot be determined.
@@ -84,7 +88,8 @@ struct DecodedCanonicalFrames {
     int target_height,
     const std::vector<std::int64_t>& timestamps_us,
     FrameCatalog* frame_catalog = nullptr,
-    const std::string& purpose = "canonical");
+    const std::string& purpose = "canonical",
+    FrameProgressCallback on_progress = {});
 
 // Decode frames at explicit timestamps and invoke on_frame for each decoded
 // frame without retaining decoded pixel buffers after the callback returns.

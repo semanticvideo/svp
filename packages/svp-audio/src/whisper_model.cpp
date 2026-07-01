@@ -1,6 +1,7 @@
 #include "svp/audio/whisper_model.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -15,6 +16,21 @@
 #endif
 
 namespace svp::audio {
+
+#if defined(SVP_AUDIO_ONNX_RUNTIME_AVAILABLE)
+namespace {
+std::atomic<bool> g_whisper_verbose{false};
+}
+#endif
+
+void set_whisper_verbose(bool verbose) {
+#if defined(SVP_AUDIO_ONNX_RUNTIME_AVAILABLE)
+  g_whisper_verbose.store(verbose, std::memory_order_relaxed);
+#else
+  (void)verbose;
+#endif
+}
+
 namespace {
 
 #if defined(SVP_AUDIO_ONNX_RUNTIME_AVAILABLE)
@@ -41,7 +57,10 @@ struct WhisperSessions {
   WhisperModelDims dims;
 
   explicit WhisperSessions(const std::filesystem::path& model_dir) {
-    env = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "svp-whisper");
+    const auto log_level = g_whisper_verbose.load(std::memory_order_relaxed)
+        ? ORT_LOGGING_LEVEL_WARNING
+        : ORT_LOGGING_LEVEL_FATAL;
+    env = std::make_unique<Ort::Env>(log_level, "svp-whisper");
 
     const std::filesystem::path encoder_path = model_dir / "encoder.int8.onnx";
     const std::filesystem::path decoder_path = model_dir / "decoder.int8.onnx";

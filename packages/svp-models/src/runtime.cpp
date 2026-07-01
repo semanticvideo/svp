@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <stdexcept>
 
@@ -18,8 +19,19 @@ namespace svp::models {
 
 #if defined(SVP_ONNX_RUNTIME_AVAILABLE)
 
+namespace {
+std::atomic<bool> g_onnx_verbose{false};
+}
+
+void set_onnx_verbose(bool verbose) {
+  g_onnx_verbose.store(verbose, std::memory_order_relaxed);
+}
+
 Ort::Env& shared_onnx_env() {
-  static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "svp-models");
+  const auto level = g_onnx_verbose.load(std::memory_order_relaxed)
+      ? ORT_LOGGING_LEVEL_WARNING
+      : ORT_LOGGING_LEVEL_FATAL;
+  static Ort::Env env(level, "svp-models");
   return env;
 }
 
@@ -461,6 +473,8 @@ OnnxSession::run_raw_with_shape(
 }
 
 #else
+
+void set_onnx_verbose(bool) {}
 
 struct OnnxSession::Impl {};
 

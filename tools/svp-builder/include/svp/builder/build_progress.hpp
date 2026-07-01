@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -42,6 +44,7 @@ enum class ProgressEventKind {
   stage_started,
   stage_completed,
   stage_failed,
+  stage_progress,
   warning,
   artifact_written,
 };
@@ -53,6 +56,10 @@ struct ProgressEvent {
   ProgressStageId stage_id;
   std::string message;
   std::filesystem::path artifact_path;
+  std::optional<std::uint64_t> current;
+  std::optional<std::uint64_t> total;
+  std::optional<double> fraction;
+  std::string unit;
 };
 
 class BuildProgressSink {
@@ -78,5 +85,11 @@ ProgressEvent make_warning(ProgressStageId stage, std::string message);
 ProgressEvent make_artifact_written(ProgressStageId stage,
                                     std::filesystem::path artifact_path,
                                     std::string message = "");
+
+ProgressEvent make_stage_progress(ProgressStageId stage,
+                                  std::uint64_t current,
+                                  std::uint64_t total,
+                                  std::string unit,
+                                  std::string message = "");
 
 }  // namespace svp::builder

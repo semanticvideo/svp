@@ -502,6 +502,12 @@ OcrGenerationResult generate_ocr_observations(
   auto process_ocr_frame = [&](const ColorRasterFrame& frame,
                                std::size_t frame_idx) {
     ++processed_frame_count;
+    if (options.on_progress) {
+      const int total = use_streamed_high_res_frames
+          ? static_cast<int>(result.temporal_sampling.timestamps_us.size())
+          : static_cast<int>(frame_input.frames.size());
+      options.on_progress(processed_frame_count, total);
+    }
     if (processed_frame_width == 0 && processed_frame_height == 0) {
       processed_frame_width = frame.width;
       processed_frame_height = frame.height;

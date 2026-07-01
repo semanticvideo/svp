@@ -193,7 +193,8 @@ DecodedCanonicalFrames decode_frames_at_resolution(
     int target_height,
     int max_frames,
     FrameCatalog* frame_catalog,
-    const std::string& purpose) {
+    const std::string& purpose,
+    FrameProgressCallback on_progress) {
   DecodedCanonicalFrames result;
 
   if (!ffmpeg_is_available(ffmpeg_path)) {
@@ -226,7 +227,7 @@ DecodedCanonicalFrames decode_frames_at_resolution(
       deterministic_seek_timestamps_us(duration_us, frame_count);
 
   return decode_frames_at_timestamps(plan, ffmpeg_path, width, height, timestamps,
-                                      frame_catalog, purpose);
+                                      frame_catalog, purpose, on_progress);
 }
 
 DecodedCanonicalFrames decode_frames_at_timestamps(
@@ -236,7 +237,8 @@ DecodedCanonicalFrames decode_frames_at_timestamps(
     int target_height,
     const std::vector<std::int64_t>& timestamps_us,
     FrameCatalog* frame_catalog,
-    const std::string& purpose) {
+    const std::string& purpose,
+    FrameProgressCallback on_progress) {
   DecodedCanonicalFrames result;
 
   if (!ffmpeg_is_available(ffmpeg_path)) {
@@ -257,6 +259,9 @@ DecodedCanonicalFrames decode_frames_at_timestamps(
   result.frames_attempted = static_cast<int>(timestamps_us.size());
 
   for (int i = 0; i < static_cast<int>(timestamps_us.size()); ++i) {
+    if (on_progress) {
+      on_progress(i, static_cast<int>(timestamps_us.size()));
+    }
     std::string decode_error;
     std::vector<Srgb8Pixel> pixels = decode_frame_at(ffmpeg_path,
                                                       plan.source_path,
@@ -297,6 +302,11 @@ DecodedCanonicalFrames decode_frames_at_timestamps(
     };
     frame.frame_index = fidx;
     result.frames.push_back(std::move(frame));
+  }
+
+  if (on_progress) {
+    on_progress(static_cast<int>(timestamps_us.size()),
+                static_cast<int>(timestamps_us.size()));
   }
 
   result.frames_decoded = static_cast<int>(result.frames.size());

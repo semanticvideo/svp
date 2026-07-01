@@ -37,6 +37,14 @@ void emit_artifact_written(BuildPipelineContext& context, ProgressStageId stage,
                                       std::move(message)));
 }
 
+void emit_stage_progress(BuildPipelineContext& context, ProgressStageId stage,
+                         std::uint64_t current, std::uint64_t total,
+                         std::string unit, std::string message) {
+  emit_progress(context, make_stage_progress(stage, current, total,
+                                             std::move(unit),
+                                             std::move(message)));
+}
+
 void print_build_progress(const BuildPipelineContext& context,
                           const PackageSkeletonStageResult& package_result) {
   if (context.options.stop_after == BuildStage::audio) {

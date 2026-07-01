@@ -246,11 +246,13 @@ nlohmann::json foundation_color_staging_artifact_to_json(
 FoundationColorStagingArtifact build_real_frame_color_staging_artifact(
     const media::MediaIngestPlan& plan,
     const std::filesystem::path& ffmpeg_path,
-    FrameCatalog* frame_catalog) {
+    FrameCatalog* frame_catalog,
+    FrameProgressCallback on_progress) {
   constexpr const char* provenance_id = "processor_color_quantizer_0001";
 
   const RealFrameSamplingResult sampling_result =
-      build_real_frame_color_sampling_input(plan, ffmpeg_path, frame_catalog);
+      build_real_frame_color_sampling_input(plan, ffmpeg_path, frame_catalog,
+                                            on_progress);
 
   FoundationColorStagingArtifact artifact;
   artifact.sampling_input = sampling_result.input;
