@@ -634,18 +634,21 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
   auto report = svp::validation::validate_svpi_package(svpi_path, vopts);
   if (svp::validation::exit_code(report) != 0) {
     result.error_message = "SVPI structure validation failed";
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
 
   auto binding_entry = svp::package::read_package_entry(svpi_path, "media_binding.json");
   if (!binding_entry.has_value()) {
     result.error_message = "could not read media_binding.json";
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
 
   auto binding_doc = svp::package::parse_media_binding_json(binding_entry.value());
   if (binding_doc.bindings.empty()) {
     result.error_message = "no bindings in media_binding.json";
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
 
@@ -666,6 +669,7 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
       if (!size_ok) {
         result.error_message =
             "media binding verification failed: size_bytes mismatch";
+        sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
         return result;
       }
       svp::package::MediaBindingFactoryOptions probe_opts;
@@ -683,12 +687,14 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
       if (cand.duration_us > 0 && existing.duration_us > 0 &&
           cand.duration_us != existing.duration_us) {
         result.error_message = "media binding verification failed: duration_us mismatch";
+        sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
         return result;
       }
       if (!cand.container_format.empty() && cand.container_format != "unknown" &&
           !existing.container_format.empty() && existing.container_format != "unknown" &&
           cand.container_format != existing.container_format) {
         result.error_message = "media binding verification failed: container_format mismatch";
+        sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
         return result;
       }
       if (existing.identity.chunk_proof.has_value() &&
@@ -697,26 +703,31 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
         const auto& actual = *cand.identity.chunk_proof;
         if (actual.chunk_count != expected.chunk_count) {
           result.error_message = "media binding verification failed: chunk_proof chunk_count mismatch";
+          sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
           return result;
         }
         if (actual.last_chunk_hash != expected.last_chunk_hash) {
           result.error_message = "media binding verification failed: chunk_proof last_chunk_hash mismatch";
+          sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
           return result;
         }
         if (actual.last_chunk_size != expected.last_chunk_size) {
           result.error_message = "media binding verification failed: chunk_proof last_chunk_size mismatch";
+          sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
           return result;
         }
       }
     } else if (verification.state != svp::package::BindingVerificationState::verified) {
       result.error_message =
           "media binding verification failed: " + verification.state_label;
+      sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
       return result;
     }
   } else {
     if (verification.state != svp::package::BindingVerificationState::verified) {
       result.error_message =
           "media binding verification failed: " + verification.state_label;
+      sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
       return result;
     }
   }
@@ -748,11 +759,13 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
   auto manifest_entry = svp::package::read_package_entry(svpi_path, "manifest.json");
   if (!manifest_entry.has_value()) {
     result.error_message = "could not read manifest.json";
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
   auto manifest = nlohmann::json::parse(manifest_entry.value(), nullptr, false);
   if (manifest.is_discarded() || !manifest.is_object()) {
     result.error_message = "manifest.json is not valid JSON";
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
 
@@ -767,6 +780,7 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
   zip_t* src_archive = zip_open(svpi_path.string().c_str(), ZIP_RDONLY, &zip_error);
   if (!src_archive) {
     result.error_message = "could not open SVPI as ZIP";
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
 
@@ -841,6 +855,7 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
   auto manifest_copy = manifest;
   if (!svp::package::write_index_foundation(staging_dir, manifest_copy)) {
     result.error_message = "failed to rebuild index foundation";
+    sink->emit(make_stage_failed(ProgressStageId::identity, result.error_message));
     return result;
   }
 

@@ -1103,6 +1103,54 @@ void test_complete_identity_batch_unpaired_svpi_emits_batch_item_failed() {
   std::cout << "  test_complete_identity_batch_unpaired_svpi_emits_batch_item_failed passed\n";
 }
 
+void test_complete_identity_mismatch_emits_terminal_identity_failed() {
+  auto root = make_test_dir("svp-phase3-complete-mismatch-progress");
+  auto dir = root / "videos";
+  std::filesystem::create_directories(dir);
+
+  auto media1 = dir / "clip.mov";
+  create_mock_source_media(media1, 512);
+
+  svp::builder::BatchCreateOptions create_opts;
+  create_opts.source_dir = dir.string();
+  create_opts.ffprobe_path = "/usr/bin/true";
+  create_opts.no_blake3 = true;
+  auto create_result = svp::builder::interlace_create_batch(create_opts);
+  CHECK(create_result.created_count == 1);
+
+  auto media2 = dir / "wrong.mov";
+  create_mock_source_media(media2, 256);
+
+  auto sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::CompleteIdentityOptions opts;
+  opts.svpi_path = (dir / "clip.svpi").string();
+  opts.media_path = media2.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.progress_sink = sink;
+
+  auto result = svp::builder::interlace_complete_identity(opts);
+  CHECK(!result.success);
+  CHECK(!result.error_message.empty());
+
+  int started = count_events(sink->events,
+      svp::builder::ProgressEventKind::stage_started,
+      svp::builder::ProgressStageId::identity);
+  int failed = count_events(sink->events,
+      svp::builder::ProgressEventKind::stage_failed,
+      svp::builder::ProgressStageId::identity);
+  int completed = count_events(sink->events,
+      svp::builder::ProgressEventKind::stage_completed,
+      svp::builder::ProgressStageId::identity);
+
+  CHECK(started == 1);
+  CHECK(failed == 1);
+  CHECK(completed == 0);
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_complete_identity_mismatch_emits_terminal_identity_failed passed\n";
+}
+
 int main() {
   std::cout << "Running SVPI Phase 3 batch/scale tests...\n";
 
@@ -1140,6 +1188,7 @@ int main() {
   test_complete_identity_emits_progress_events();
   test_validate_batch_invalid_structure_emits_batch_item_failed();
   test_complete_identity_batch_unpaired_svpi_emits_batch_item_failed();
+  test_complete_identity_mismatch_emits_terminal_identity_failed();
 
   std::cout << "All SVPI Phase 3 batch/scale tests passed!\n";
   return 0;
