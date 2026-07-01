@@ -1,6 +1,9 @@
 #pragma once
 
+#include "svp/builder/build_progress.hpp"
+
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -42,6 +45,7 @@ struct BuildPipelineOptions {
   std::string sherpa_lib_path;
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
+  std::shared_ptr<BuildProgressSink> progress_sink;
 };
 
 struct BuildPipelineResult {

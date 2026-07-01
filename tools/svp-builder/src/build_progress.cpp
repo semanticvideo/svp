@@ -5,6 +5,38 @@
 
 namespace svp::builder {
 
+void emit_progress(BuildPipelineContext& context, const ProgressEvent& event) {
+  context.progress_sink.emit(event);
+}
+
+void emit_stage_started(BuildPipelineContext& context, ProgressStageId stage,
+                        std::string message) {
+  emit_progress(context, make_stage_started(stage, std::move(message)));
+}
+
+void emit_stage_completed(BuildPipelineContext& context, ProgressStageId stage,
+                          std::string message) {
+  emit_progress(context, make_stage_completed(stage, std::move(message)));
+}
+
+void emit_stage_failed(BuildPipelineContext& context, ProgressStageId stage,
+                       std::string message) {
+  emit_progress(context, make_stage_failed(stage, std::move(message)));
+}
+
+void emit_warning(BuildPipelineContext& context, ProgressStageId stage,
+                  std::string message) {
+  emit_progress(context, make_warning(stage, std::move(message)));
+}
+
+void emit_artifact_written(BuildPipelineContext& context, ProgressStageId stage,
+                           std::filesystem::path artifact_path,
+                           std::string message) {
+  emit_progress(context,
+                make_artifact_written(stage, std::move(artifact_path),
+                                      std::move(message)));
+}
+
 void print_build_progress(const BuildPipelineContext& context,
                           const PackageSkeletonStageResult& package_result) {
   if (context.options.stop_after == BuildStage::audio) {

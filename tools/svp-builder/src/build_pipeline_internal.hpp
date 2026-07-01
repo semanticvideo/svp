@@ -1,12 +1,14 @@
 #pragma once
 
 #include "svp/builder/build_pipeline.hpp"
+#include "svp/builder/build_progress.hpp"
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/vision/frame_catalog.hpp"
 
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
+#include <memory>
 #include <optional>
 
 namespace svp::builder {
@@ -19,7 +21,21 @@ struct BuildPipelineContext {
   bool model_runtime_available = false;
   nlohmann::json& output;
   svp::vision::FrameCatalog frame_catalog;
+  BuildProgressSink& progress_sink;
 };
+
+void emit_progress(BuildPipelineContext& context, const ProgressEvent& event);
+void emit_stage_started(BuildPipelineContext& context, ProgressStageId stage,
+                        std::string message = "");
+void emit_stage_completed(BuildPipelineContext& context, ProgressStageId stage,
+                          std::string message = "");
+void emit_stage_failed(BuildPipelineContext& context, ProgressStageId stage,
+                       std::string message = "");
+void emit_warning(BuildPipelineContext& context, ProgressStageId stage,
+                  std::string message);
+void emit_artifact_written(BuildPipelineContext& context, ProgressStageId stage,
+                           std::filesystem::path artifact_path,
+                           std::string message = "");
 
 struct PackageSkeletonStageResult {
   bool package_written = false;
