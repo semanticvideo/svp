@@ -14,7 +14,13 @@ add_library(svp-audio
   src/audio_extraction_plan.cpp
   src/audio_stage_plan.cpp
   src/diarization_boundary.cpp
-  src/sherpa_diarization.cpp
+  src/sherpa_diarization/api.cpp
+  src/sherpa_diarization/embeddings.cpp
+  src/sherpa_diarization/reconciliation.cpp
+  src/sherpa_diarization/runner.cpp
+  src/sherpa_diarization/wav_reader.cpp
+  src/sherpa_diarization/windowing.cpp
+  src/sherpa_diarization/word_refinement.cpp
   src/transcript_records.cpp
   src/transcript_writer.cpp
   src/vad_execution_boundary.cpp
