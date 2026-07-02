@@ -4,6 +4,8 @@
 #include "svp/core/memory_diagnostics.hpp"
 
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -14,6 +16,22 @@
 #if defined(__APPLE__)
 #include <unistd.h>
 #endif
+
+namespace {
+
+std::uint64_t diarize_memory_limit_bytes() {
+  const char* value = std::getenv("SVP_BUILDER_MEMORY_LIMIT_MB");
+  if (value != nullptr && *value != '\0') {
+    char* end = nullptr;
+    const unsigned long long mb = std::strtoull(value, &end, 10);
+    if (end != value && mb > 0) {
+      return static_cast<std::uint64_t>(mb) * 1024ULL * 1024ULL;
+    }
+  }
+  return 5ULL * 1024ULL * 1024ULL * 1024ULL;
+}
+
+}  // namespace
 
 int run_diarize_command(const DiarizeCliOptions& options) {
   namespace fs = std::filesystem;
@@ -44,7 +62,7 @@ int run_diarize_command(const DiarizeCliOptions& options) {
   const fs::path diag_dir = fs::current_path() / "build" / "diagnostics";
   const fs::path diag_path = diag_dir / diag_name.str();
 
-  svp::core::configure_memory_diagnostics(diag_path, 5ULL * 1024 * 1024 * 1024);
+  svp::core::configure_memory_diagnostics(diag_path, diarize_memory_limit_bytes());
 
   if (!svp::audio::is_sherpa_diarization_available()) {
     std::cerr << "svp-builder diarize: sherpa-onnx not available\n";
