@@ -23,6 +23,9 @@ add_library(svp-vision
   src/ocr_generation/staging_io.cpp
   src/ocr_generation.cpp
   src/ocr_temporal_sampling.cpp
+  src/pp_ocr/detection.cpp
+  src/pp_ocr/model_bundles.cpp
+  src/pp_ocr/recognition.cpp
   src/pp_ocr.cpp
   src/real_frame_color_sampling.cpp
   src/scene_segmentation.cpp
