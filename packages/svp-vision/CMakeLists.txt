@@ -14,6 +14,13 @@ add_library(svp-vision
   src/foundation_color_staging.cpp
   src/foundation_ocr_staging.cpp
   src/observation_pipeline_plan.cpp
+  src/ocr_generation/common.cpp
+  src/ocr_generation/crop_hardening.cpp
+  src/ocr_generation/numeric_parser.cpp
+  src/ocr_generation/reconciliation.cpp
+  src/ocr_generation/record_emission.cpp
+  src/ocr_generation/result_json.cpp
+  src/ocr_generation/staging_io.cpp
   src/ocr_generation.cpp
   src/ocr_temporal_sampling.cpp
   src/pp_ocr.cpp
