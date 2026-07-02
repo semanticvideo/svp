@@ -57,6 +57,7 @@ add_executable(svp-builder
   src/cli/cli_progress.cpp
   src/cli/probe_command.cpp
   src/cli/build_command.cpp
+  src/cli/diarize_command.cpp
   src/cli/interlace_commands.cpp
   src/cli/interlace_output.cpp
   src/cli/main_dispatch.cpp
@@ -72,6 +73,7 @@ target_link_libraries(svp-builder
   PRIVATE
     CLI11::CLI11
     svp::builder
+    svp::audio
     svp::core
     svp::media
     svp::package

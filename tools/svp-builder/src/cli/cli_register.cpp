@@ -50,6 +50,19 @@ void register_cli(CLI::App& app, CliContext& context) {
                   "Include detailed diagnostics and full validation findings");
   context.build_subcommand = build;
 
+  // --- diarize subcommand (diagnostic) ---
+  auto* diarize = app.add_subcommand(
+      "diarize", "Run Sherpa diarization on a WAV file without ASR (diagnostic)");
+  diarize->add_option("wav", context.diarize_opts.wav_path,
+                      "Path to 16kHz mono PCM WAV")->required();
+  diarize->add_option("--model-dir", context.diarize_opts.model_dir,
+                      "Sherpa diarization model directory")->required();
+  diarize->add_option("--sherpa-lib", context.diarize_opts.sherpa_lib_path,
+                      "Explicit path to libsherpa-onnx-c-api.dylib");
+  diarize->add_option("--segments-jsonl", context.diarize_opts.segments_jsonl_path,
+                      "Write diarization segments as JSONL for diagnostics");
+  context.diarize_subcommand = diarize;
+
   // --- interlace subcommand ---
   auto* interlace = app.add_subcommand(
       "interlace", "SVPI sidecar operations: create, validate, inspect, extract, recombine");
