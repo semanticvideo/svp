@@ -204,6 +204,10 @@ SherpaDiarizationResult run_sherpa_diarization(
       for (const auto& [local_speaker, segments] : chunk_speakers) {
         const float first_start_sec = segments.front().start_sec;
         const float last_end_sec = segments.back().end_sec;
+        float speech_sec = 0.0f;
+        for (const auto& seg : segments) {
+          speech_sec += std::max(0.0f, seg.end_sec - seg.start_sec);
+        }
         int32_t global_speaker = -1;
         auto known = window_local_to_global.find(local_speaker);
         if (known != window_local_to_global.end() &&
@@ -220,11 +224,21 @@ SherpaDiarizationResult run_sherpa_diarization(
                 api, extractor, embedding_dim, window_samples,
                 win.process_start, segments);
           }
+          const bool embedding_signal = has_embedding_signal(embedding);
           speaker_observations.push_back(
               {global_speaker, first_start_sec, std::move(embedding)});
           window_local_to_global[local_speaker] =
               {global_speaker, last_end_sec};
           ++window_speaker_groups;
+          svp::core::trace_memory_event("diarization.speaker_observation.new", {
+              {"window_index", std::to_string(wi)},
+              {"local_speaker", std::to_string(local_speaker)},
+              {"observation_id", std::to_string(global_speaker)},
+              {"first_start_sec", std::to_string(first_start_sec)},
+              {"last_end_sec", std::to_string(last_end_sec)},
+              {"speech_sec", std::to_string(speech_sec)},
+              {"embedding_signal", embedding_signal ? "true" : "false"}
+          });
         }
         chunk_observation_ids.push_back(global_speaker);
 
@@ -309,6 +323,7 @@ SherpaDiarizationResult run_sherpa_diarization(
                                : final_speakers.size());
   stitch_dominant_non_overlapping_tracks(
       result.segments, result.final_speaker_count, speaker_observations.size());
+  collapse_single_dominant_track(result.segments, result.final_speaker_count);
   result.reconciliation_method =
       "windowed_sherpa_5min_5s_feed_overlap_2s; "
       "bounded_10s_speaker_observations_global_gap_or_floor_reconciliation";

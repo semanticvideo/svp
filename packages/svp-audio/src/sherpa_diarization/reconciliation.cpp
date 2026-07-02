@@ -35,7 +35,7 @@ std::map<int32_t, int32_t> cluster_speaker_observations(
     return true;
   };
 
-  auto average_similarity = [&](const std::vector<std::size_t>& a,
+  auto cluster_similarity = [&](const std::vector<std::size_t>& a,
                                 const std::vector<std::size_t>& b) {
     if (!clusters_can_merge(a, b)) return -2.0f;
     float total = 0.0f;
@@ -52,6 +52,35 @@ std::map<int32_t, int32_t> cluster_speaker_observations(
     return count == 0 ? -2.0f : total / static_cast<float>(count);
   };
 
+  std::vector<std::tuple<float, int32_t, int32_t>> observation_pairs;
+  for (std::size_t i = 0; i < observations.size(); ++i) {
+    if (!has_embedding_signal(observations[i].embedding)) continue;
+    for (std::size_t j = i + 1; j < observations.size(); ++j) {
+      if (!has_embedding_signal(observations[j].embedding)) continue;
+      observation_pairs.push_back({
+          cosine_similarity(observations[i].embedding, observations[j].embedding),
+          observations[i].observation_id,
+          observations[j].observation_id});
+    }
+  }
+  std::sort(observation_pairs.begin(), observation_pairs.end(),
+            [](const auto& a, const auto& b) {
+              return std::get<0>(a) > std::get<0>(b);
+            });
+  std::string top_pairs;
+  const std::size_t pair_count =
+      std::min<std::size_t>(observation_pairs.size(), 16);
+  for (std::size_t i = 0; i < pair_count; ++i) {
+    if (i > 0) top_pairs += ";";
+    top_pairs += "sim=" + std::to_string(std::get<0>(observation_pairs[i])) +
+                 ",a=" + std::to_string(std::get<1>(observation_pairs[i])) +
+                 ",b=" + std::to_string(std::get<2>(observation_pairs[i]));
+  }
+  svp::core::trace_memory_event("diarization.global_reconciliation.pairs", {
+      {"observation_count", std::to_string(observations.size())},
+      {"top_pairs", top_pairs}
+  });
+
   struct MergeStep {
     std::vector<std::vector<std::size_t>> clusters_after;
     float similarity = -2.0f;
@@ -64,7 +93,7 @@ std::map<int32_t, int32_t> cluster_speaker_observations(
     std::size_t best_b = 0;
     for (std::size_t i = 0; i < clusters.size(); ++i) {
       for (std::size_t j = i + 1; j < clusters.size(); ++j) {
-        const float similarity = average_similarity(clusters[i], clusters[j]);
+        const float similarity = cluster_similarity(clusters[i], clusters[j]);
         if (similarity > best_similarity) {
           best_similarity = similarity;
           best_a = i;
@@ -240,6 +269,49 @@ void stitch_dominant_non_overlapping_tracks(
       {"merged_speaker", std::to_string(merge)},
       {"combined_share", std::to_string(combined_share)},
       {"overlap_share", std::to_string(overlap_share)},
+      {"final_speaker_count", std::to_string(final_speaker_count)}
+  });
+}
+
+void collapse_single_dominant_track(std::vector<SherpaDiarizationSegment>& segments,
+                                    int32_t& final_speaker_count) {
+  if (final_speaker_count <= 1 || segments.empty()) return;
+
+  std::vector<SpeakerTrackStats> stats(static_cast<std::size_t>(final_speaker_count));
+  std::int64_t total_speech_us = 0;
+  for (const auto& seg : segments) {
+    if (seg.speaker_id < 0 || seg.speaker_id >= final_speaker_count) continue;
+    auto& st = stats[static_cast<std::size_t>(seg.speaker_id)];
+    const std::int64_t dur_us = static_cast<std::int64_t>(
+        std::max(0.0f, seg.end_sec - seg.start_sec) * 1000000.0f);
+    st.speech_us += dur_us;
+    total_speech_us += dur_us;
+    st.seen = true;
+  }
+  if (total_speech_us <= 0) return;
+
+  int32_t dominant_speaker = -1;
+  std::int64_t dominant_speech_us = 0;
+  for (int32_t sid = 0; sid < final_speaker_count; ++sid) {
+    const auto& st = stats[static_cast<std::size_t>(sid)];
+    if (st.seen && st.speech_us > dominant_speech_us) {
+      dominant_speaker = sid;
+      dominant_speech_us = st.speech_us;
+    }
+  }
+  if (dominant_speaker < 0) return;
+
+  const float dominant_share =
+      static_cast<float>(dominant_speech_us) / static_cast<float>(total_speech_us);
+  if (dominant_share < kSingleDominantCollapseSpeechShare) return;
+
+  for (auto& seg : segments) {
+    seg.speaker_id = 0;
+  }
+  final_speaker_count = 1;
+  svp::core::trace_memory_event("diarization.single_dominant_collapse", {
+      {"dominant_speaker", std::to_string(dominant_speaker)},
+      {"dominant_share", std::to_string(dominant_share)},
       {"final_speaker_count", std::to_string(final_speaker_count)}
   });
 }

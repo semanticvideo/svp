@@ -19,10 +19,11 @@ inline constexpr float kSameSpeakerSimilarityThreshold = 0.60f;
 inline constexpr float kGlobalSpeakerObservationMinGap = 0.10f;
 inline constexpr float kGlobalSpeakerObservationFloorSimilarity = 0.14f;
 inline constexpr int32_t kDominantStitchMinFinalSpeakers = 8;
-inline constexpr std::size_t kDominantStitchMinObservations = 32;
+inline constexpr std::size_t kDominantStitchMinObservations = 8;
 inline constexpr float kDominantStitchCombinedSpeechShare = 0.70f;
 inline constexpr float kDominantStitchMinTrackSpeechShare = 0.15f;
 inline constexpr float kDominantStitchMaxOverlapShare = 0.01f;
+inline constexpr float kSingleDominantCollapseSpeechShare = 0.95f;
 inline constexpr float kSherpaLocalClusteringThreshold = 0.90f;
 inline constexpr int64_t kDiarizationWindowSamples =
     static_cast<int64_t>(kDiarizationSampleRate) * 300;
@@ -180,6 +181,8 @@ void stitch_dominant_non_overlapping_tracks(
     std::vector<SherpaDiarizationSegment>& segments,
     int32_t& final_speaker_count,
     std::size_t observation_count);
+void collapse_single_dominant_track(std::vector<SherpaDiarizationSegment>& segments,
+                                    int32_t& final_speaker_count);
 
 bool ends_utterance(const std::string& text);
 
