@@ -134,10 +134,9 @@ struct EvidenceCropOptions {
   std::int64_t target_crop_bytes_per_observation = 10 * 1024;
 
   // Coverage policy for evidence crops.
-  // "one_per_observation" (default): scales max_total_crops to match the
-  //   number of text observations, ensuring at least one crop per accepted
-  //   observation when byte budget allows.  If byte budget is tight, JPEG
-  //   quality is reduced to fit more crops.
+  // "one_per_observation" (default): scales max_total_crops and the effective
+  //   byte budget to ensure one crop per accepted observation unless crop
+  //   extraction itself fails.
   // "fixed_cap": uses max_total_crops as a hard cap (legacy behavior).
   std::string crop_coverage_policy = "one_per_observation";
 

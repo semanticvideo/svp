@@ -8,16 +8,21 @@
 #include "svp/vision/pp_ocr.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <climits>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <map>
+#include <optional>
 #include <regex>
 #include <sstream>
 #include <string>
+#include <sys/wait.h>
 #include <vector>
 
 namespace svp::vision {
@@ -44,6 +49,71 @@ std::string trim(const std::string& s) {
   if (start == std::string::npos) return "";
   std::size_t end = s.find_last_not_of(" \t\r\n");
   return s.substr(start, end - start + 1);
+}
+
+std::string shell_quote(const std::filesystem::path& path) {
+  std::string quoted = "'";
+  for (const char c : path.string()) {
+    if (c == '\'') {
+      quoted += "'\\''";
+    } else {
+      quoted += c;
+    }
+  }
+  quoted += "'";
+  return quoted;
+}
+
+std::optional<ColorRasterFrame> decode_crop_image_with_ffmpeg(
+    const std::filesystem::path& ffmpeg_path,
+    const std::filesystem::path& image_path,
+    int width,
+    int height,
+    const std::string& frame_id,
+    std::int64_t timestamp_us) {
+  if (width <= 0 || height <= 0 || !std::filesystem::exists(image_path)) {
+    return std::nullopt;
+  }
+
+  const std::string cmd =
+      shell_quote(ffmpeg_path) +
+      " -v error"
+      " -i " + shell_quote(image_path) +
+      " -vf scale=" + std::to_string(width) + ":" + std::to_string(height) +
+      " -vframes 1"
+      " -f rawvideo"
+      " -pix_fmt rgb24"
+      " pipe:1"
+      " 2>/dev/null";
+
+  FILE* pipe = popen(cmd.c_str(), "r");
+  if (pipe == nullptr) {
+    return std::nullopt;
+  }
+
+  const std::size_t expected_bytes =
+      static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3;
+  std::vector<std::uint8_t> raw_bytes(expected_bytes);
+  const std::size_t bytes_read = std::fread(raw_bytes.data(), 1, expected_bytes, pipe);
+  const int status = pclose(pipe);
+
+  if (bytes_read != expected_bytes ||
+      !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    return std::nullopt;
+  }
+
+  ColorRasterFrame frame;
+  frame.frame_id = frame_id;
+  frame.frame_index = 0;
+  frame.timestamp_us = timestamp_us;
+  frame.width = width;
+  frame.height = height;
+  frame.keyframe = false;
+  frame.pixels.reserve(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+  for (std::size_t i = 0; i < raw_bytes.size(); i += 3) {
+    frame.pixels.push_back({raw_bytes[i], raw_bytes[i + 1], raw_bytes[i + 2]});
+  }
+  return frame;
 }
 
 std::string lower(const std::string& s) {
@@ -87,6 +157,18 @@ std::string alphanumeric_key(const std::string& text) {
     }
   }
   return key;
+}
+
+bool roi_text_is_better(const std::string& current_text,
+                        const std::string& roi_text) {
+  const std::string current_key = alphanumeric_key(normalize_text(current_text));
+  const std::string roi_key = alphanumeric_key(normalize_text(roi_text));
+  if (roi_key.size() < 3) return false;
+  if (current_key.empty()) return true;
+  if (roi_key == current_key) return false;
+  if (roi_key.size() <= current_key.size() + 2) return false;
+  if (current_key.size() <= 3) return true;
+  return roi_key.find(current_key) != std::string::npos;
 }
 
 // --- Numeric parsing ---
@@ -828,6 +910,9 @@ OcrGenerationResult generate_ocr_observations(
   result.text_observation_count = static_cast<std::int64_t>(result.text_observations.size());
   result.numeric_value_count = static_cast<std::int64_t>(result.numeric_values.size());
 
+  int roi_improvement_count = 0;
+  int roi_verified_crop_count = 0;
+
   // Phase 4: Generate evidence crops
   if (options.generate_evidence_crops &&
       options.media_plan != nullptr &&
@@ -907,12 +992,80 @@ OcrGenerationResult generate_ocr_observations(
     result.crop_coverage_status = crop_result.crop_coverage_status;
     result.roi_hardening_run = true;
 
-    // Evidence crops are extracted and written to evidence_crops.jsonl with
-    // evidence_quality="unverified" because PP-OCR re-read on saved crops is
-    // not implemented. We do NOT attach evidence_crop_refs to observations
-    // because unverified crops must not appear as supporting evidence.
-    // The crop records retain text_observation_id for traceability, but
-    // observations do not claim crop support.
+    std::map<std::string, std::size_t> observation_index_by_id;
+    for (std::size_t i = 0; i < result.text_observations.size(); ++i) {
+      observation_index_by_id[result.text_observations[i].text_observation_id] = i;
+    }
+
+    for (auto& crop : result.evidence_crops) {
+      auto obs_it = observation_index_by_id.find(crop.text_observation_id);
+      if (obs_it == observation_index_by_id.end()) {
+        crop.evidence_quality = "weak";
+        crop.evidence_quality_reason = "Linked text observation was not found";
+        continue;
+      }
+
+      auto& obs = result.text_observations[obs_it->second];
+      if (std::find(obs.evidence_crop_refs.begin(),
+                    obs.evidence_crop_refs.end(),
+                    crop.crop_id) == obs.evidence_crop_refs.end()) {
+        obs.evidence_crop_refs.push_back(crop.crop_id);
+      }
+
+      const int crop_width = crop.crop_bbox_right - crop.crop_bbox_left;
+      const int crop_height = crop.crop_bbox_bottom - crop.crop_bbox_top;
+      const std::filesystem::path crop_path = staging_dir / crop.crop_file_path;
+      std::optional<ColorRasterFrame> crop_frame =
+          decode_crop_image_with_ffmpeg(
+              options.ffmpeg_path,
+              crop_path,
+              crop_width,
+              crop_height,
+              crop.source_frame_id,
+              crop.source_timestamp_us);
+      if (!crop_frame.has_value()) {
+        crop.evidence_quality = "unsupported";
+        crop.evidence_quality_reason = "Crop image could not be decoded for ROI OCR verification";
+        continue;
+      }
+
+      const PpOcrDetection roi_detection =
+          run_pp_ocr_recognition_on_crop(pp_ocr_session, pp_ocr_opts, *crop_frame);
+      if (roi_detection.text.empty()) {
+        crop.evidence_quality = "weak";
+        crop.evidence_quality_reason = "Crop was decoded but ROI OCR produced no text";
+        continue;
+      }
+
+      crop.roi_ocr_text = roi_detection.text;
+      crop.roi_ocr_confidence = roi_detection.score;
+      crop.roi_ocr_word_count =
+          alphanumeric_key(normalize_text(roi_detection.text)).empty() ? 0 : 1;
+
+      if (roi_text_is_better(obs.raw_text, roi_detection.text)) {
+        obs.raw_text = roi_detection.text;
+        obs.normalized_text = normalize_text(roi_detection.text);
+        obs.confidence = std::max(obs.confidence, roi_detection.score);
+        if (obs.language.has_value()) {
+          (*obs.language)["confidence"] = obs.confidence;
+        }
+        ++roi_improvement_count;
+      }
+
+      crop.evidence_quality = "strong";
+      crop.evidence_quality_reason =
+          "Crop was decoded and PP-OCR ROI re-read produced text for the linked observation";
+      ++roi_verified_crop_count;
+    }
+
+    {
+      std::ofstream out(staging_dir / "text" / "evidence_crops.jsonl");
+      if (out) {
+        for (const auto& crop : result.evidence_crops) {
+          out << evidence_crop_to_json(crop).dump() << "\n";
+        }
+      }
+    }
   }
 
   // Build text absence record
@@ -954,7 +1107,10 @@ OcrGenerationResult generate_ocr_observations(
       "produced " +
           std::to_string(result.text_observation_count) +
           " reconciled text observation(s) from " +
-          std::to_string(all_detections.size()) + " per-frame detection(s)");
+          std::to_string(all_detections.size()) + " per-frame detection(s); "
+      "ROI crop re-read verified " + std::to_string(roi_verified_crop_count) +
+          " crop(s) and improved " + std::to_string(roi_improvement_count) +
+          " observation(s)");
   recognizer_proc["model_refs"] = detector_model_refs;
   recognizer_proc["diagnostics"] = frame_diagnostics;
   recognizer_proc["limitations"] = nlohmann::json::array({
@@ -962,6 +1118,11 @@ OcrGenerationResult generate_ocr_observations(
       "softmax probabilities are near-zero and should not be used as a quality signal.",
       "Space characters are not emitted by the ONNX CTC decoder; multi-word text runs together."
   });
+  recognizer_proc["roi_hardening"] = {
+      {"run", result.roi_hardening_run},
+      {"verified_crop_count", roi_verified_crop_count},
+      {"improved_observation_count", roi_improvement_count},
+  };
   result.processors.push_back(recognizer_proc);
 
   result.processors.push_back(make_ocr_processor_provenance(

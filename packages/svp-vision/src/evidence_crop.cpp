@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <sys/wait.h>
@@ -280,12 +281,7 @@ EvidenceCropResult generate_evidence_crops_internal(
   std::int64_t effective_byte_budget = options.max_total_crop_bytes;
   if (options.crop_coverage_policy == "one_per_observation") {
     effective_max_crops = std::max(options.max_total_crops, inputs.size());
-    if (options.target_crop_bytes_per_observation > 0) {
-      const std::int64_t scaled_budget =
-          options.target_crop_bytes_per_observation *
-          static_cast<std::int64_t>(inputs.size());
-      effective_byte_budget = std::max(effective_byte_budget, scaled_budget);
-    }
+    effective_byte_budget = std::numeric_limits<std::int64_t>::max();
   }
   result.effective_max_total_crops = effective_max_crops;
   result.effective_max_total_crop_bytes = effective_byte_budget;

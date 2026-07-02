@@ -417,6 +417,45 @@ void test_observation_region_crop_linkage() {
   std::cout << "test_observation_region_crop_linkage: passed\n";
 }
 
+// Test that a generated crop remains reconstructable from its text observation
+// even when ROI OCR cannot re-read text from the crop.
+void test_weak_roi_crop_still_links_to_observation() {
+  std::vector<svp::vision::TextObservationRecord> observations(1);
+  observations[0].text_observation_id = "text_obs_000001";
+  observations[0].text_region_id = "text_region_000001";
+
+  svp::vision::EvidenceCropRecord crop;
+  crop.crop_id = "crop_000001";
+  crop.text_observation_id = "text_obs_000001";
+  crop.text_region_id = "text_region_000001";
+
+  std::unordered_map<std::string, std::size_t> observation_index_by_id;
+  observation_index_by_id[observations[0].text_observation_id] = 0;
+
+  auto obs_it = observation_index_by_id.find(crop.text_observation_id);
+  require(obs_it != observation_index_by_id.end(),
+      "crop should resolve its linked text observation");
+
+  auto& obs = observations[obs_it->second];
+  if (std::find(obs.evidence_crop_refs.begin(),
+                obs.evidence_crop_refs.end(),
+                crop.crop_id) == obs.evidence_crop_refs.end()) {
+    obs.evidence_crop_refs.push_back(crop.crop_id);
+  }
+
+  crop.evidence_quality = "weak";
+  crop.evidence_quality_reason = "Crop was decoded but ROI OCR produced no text";
+
+  require(observations[0].evidence_crop_refs.size() == 1,
+      "weak ROI crop should still be linked from the observation");
+  require(observations[0].evidence_crop_refs[0] == "crop_000001",
+      "weak ROI crop should preserve the generated crop id");
+  require(crop.evidence_quality == "weak",
+      "crop quality should still report weak ROI verification");
+
+  std::cout << "test_weak_roi_crop_still_links_to_observation: passed\n";
+}
+
 // --- Evidence crop coverage policy tests ---
 
 // Test that the one_per_observation policy scales max_total_crops
@@ -588,6 +627,7 @@ int main() {
   test_ocr_source_frame_dimensions_rotation_270();
   test_crop_metadata_coordinate_space();
   test_observation_region_crop_linkage();
+  test_weak_roi_crop_still_links_to_observation();
   test_one_per_observation_scales_crop_cap();
   test_fixed_cap_preserves_crop_cap();
   test_crop_result_json_coverage_fields();

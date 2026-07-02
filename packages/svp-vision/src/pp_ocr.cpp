@@ -728,6 +728,86 @@ PpOcrFrameResult run_pp_ocr_on_frame(
   return result;
 }
 
+PpOcrDetection run_pp_ocr_recognition_on_crop(
+    const PpOcrSession& session,
+    const PpOcrOptions& options,
+    const ColorRasterFrame& crop) {
+  PpOcrDetection result;
+  if (!session.available || crop.pixels.empty() ||
+      crop.width <= 0 || crop.height <= 0) {
+    return result;
+  }
+
+  const DetBox full_crop_box{0, 0, crop.width, crop.height};
+  auto rec_input = preprocess_recognition(
+      crop, full_crop_box, options.rec_image_height, options.rec_max_width);
+  if (rec_input.data.empty()) return result;
+
+  std::vector<std::int64_t> rec_shape = {1, 3, rec_input.height, rec_input.width};
+  std::vector<float> rec_output;
+  std::vector<std::int64_t> rec_output_shape;
+  try {
+    auto [rdata, rshape] = session.impl_->rec_session.run_raw_with_shape(
+        session.impl_->rec_input_name,
+        rec_input.data.data(),
+        rec_input.data.size(),
+        rec_shape);
+    rec_output = std::move(rdata);
+    rec_output_shape = std::move(rshape);
+  } catch (const std::exception&) {
+    return result;
+  }
+
+  if (rec_output.empty()) return result;
+
+  int rec_num_classes = static_cast<int>(session.impl_->char_dict.size()) + 1;
+  int rec_timesteps = static_cast<int>(rec_output.size()) / rec_num_classes;
+  if (rec_output_shape.size() >= 3) {
+    auto sh_t = rec_output_shape[rec_output_shape.size() - 2];
+    auto sh_c = rec_output_shape[rec_output_shape.size() - 1];
+    if (sh_t > 0 && sh_c > 0) {
+      rec_timesteps = static_cast<int>(sh_t);
+      rec_num_classes = static_cast<int>(sh_c);
+    }
+  }
+  if (rec_timesteps <= 0 || rec_num_classes <= 0) return result;
+
+  result.text = ctc_decode(
+      rec_output.data(), rec_timesteps, rec_num_classes,
+      session.impl_->char_dict);
+  if (result.text.empty()) return result;
+
+  double conf = 0.0;
+  int non_blank_count = 0;
+  for (int t = 0; t < rec_timesteps; ++t) {
+    const float* row = rec_output.data() + t * rec_num_classes;
+    int max_idx = 0;
+    float max_val = row[0];
+    for (int c = 1; c < rec_num_classes; ++c) {
+      if (row[c] > max_val) {
+        max_val = row[c];
+        max_idx = c;
+      }
+    }
+    if (max_idx != 0) {
+      float sum_exp = 0.0f;
+      for (int c = 0; c < rec_num_classes; ++c) {
+        sum_exp += std::exp(row[c] - max_val);
+      }
+      conf += 1.0f / sum_exp;
+      ++non_blank_count;
+    }
+  }
+  if (non_blank_count > 0) conf /= non_blank_count;
+
+  result.score = conf;
+  result.bbox_left = 0;
+  result.bbox_top = 0;
+  result.bbox_right = crop.width;
+  result.bbox_bottom = crop.height;
+  return result;
+}
+
 nlohmann::json pp_ocr_model_info_to_json(const PpOcrModelInfo& info) {
   return {
     {"det_model_id", info.det_model_id},
