@@ -1,5 +1,7 @@
 #include "svp/package/package_writer.hpp"
 
+#include "svp/core/memory_diagnostics.hpp"
+
 #include <zip.h>
 
 #include <algorithm>
@@ -68,6 +70,11 @@ bool write_package_skeleton(
   try {
     std::filesystem::create_directories(package_path.parent_path());
     std::filesystem::path temp_path = package_path.string() + ".tmp";
+    svp::core::check_memory_limit("package.write.begin", {
+        {"package_path", package_path.string()},
+        {"staging_dir", staging_dir.string()},
+        {"source_path", source_path.string()}
+    });
 
     // 1. Prepare contents that need to be kept alive for the buffer sources
     std::string mimetype_content = "application/vnd.svp+zip";
@@ -157,6 +164,10 @@ bool write_package_skeleton(
       files_to_add[dest_path] = source_path;
       add_ancestors(dest_path, dirs_to_add);
     }
+    svp::core::check_memory_limit("package.write.entries_gathered", {
+        {"file_count", std::to_string(files_to_add.size())},
+        {"dir_count", std::to_string(dirs_to_add.size())}
+    });
 
     // Create operations list
     struct ZipEntryOp {
@@ -187,6 +198,10 @@ bool write_package_skeleton(
       if (op.is_directory) {
         zip_dir_add(archive, op.name.c_str(), 0);
       } else if (op.is_manifest) {
+        svp::core::check_memory_limit("package.write.add_manifest", {
+            {"entry", op.name},
+            {"bytes", std::to_string(manifest_content.size())}
+        });
         zip_source_t* manifest_source = zip_source_buffer(archive, manifest_content.data(), manifest_content.size(), 0);
         if (!manifest_source) {
           throw std::runtime_error("failed to create zip source for manifest.json");
@@ -197,6 +212,16 @@ bool write_package_skeleton(
           throw std::runtime_error("failed to add manifest.json to zip");
         }
       } else {
+        const std::uintmax_t file_size =
+            std::filesystem::exists(op.source_path)
+                ? std::filesystem::file_size(op.source_path)
+                : 0;
+        svp::core::check_memory_limit("package.write.add_file.begin", {
+            {"entry", op.name},
+            {"source_path", op.source_path.string()},
+            {"bytes", std::to_string(file_size)},
+            {"store", should_store_uncompressed(op.name) ? "true" : "false"}
+        });
         zip_source_t* file_source = zip_source_file(archive, op.source_path.string().c_str(), 0, 0);
         if (!file_source) {
           throw std::runtime_error("failed to create zip source for staged file: " + op.source_path.string());
@@ -211,21 +236,39 @@ bool write_package_skeleton(
             throw std::runtime_error("failed to set compression for " + op.name);
           }
         }
+        svp::core::check_memory_limit("package.write.add_file.end", {
+            {"entry", op.name},
+            {"bytes", std::to_string(file_size)}
+        });
       }
     }
 
     // 6. Close zip successfully
+    svp::core::check_memory_limit("package.write.zip_close.begin", {
+        {"package_path", package_path.string()},
+        {"temp_path", temp_path.string()}
+    });
     if (zip_close(archive) < 0) {
       throw std::runtime_error("failed to close zip file");
     }
     guard.archive = nullptr;
+    svp::core::check_memory_limit("package.write.zip_close.end", {
+        {"package_path", package_path.string()},
+        {"temp_path", temp_path.string()}
+    });
 
     // 7. Atomic rename
     std::filesystem::rename(temp_path, package_path);
     guard.success = true;
+    svp::core::check_memory_limit("package.write.complete", {
+        {"package_path", package_path.string()}
+    });
     return true;
 
   } catch (const std::exception& error) {
+    svp::core::trace_memory_event("package.write.exception", {
+        {"error", error.what()}
+    });
     std::cerr << "write_package_skeleton error: " << error.what() << "\n";
     return false;
   }

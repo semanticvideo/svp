@@ -4,6 +4,7 @@
 #include "build_pipeline_internal.hpp"
 #include "svp/audio/sherpa_diarization.hpp"
 #include "svp/audio/whisper_model.hpp"
+#include "svp/core/memory_diagnostics.hpp"
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/models/runtime.hpp"
 #include "svp/vision/noise_suppression.hpp"
@@ -12,7 +13,12 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
+
+#if defined(__APPLE__)
+#include <unistd.h>
+#endif
 
 namespace svp::builder {
 
@@ -23,6 +29,21 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
   }
 
   try {
+    std::ostringstream diag_name;
+    diag_name << "svp-builder-memory";
+#if defined(__APPLE__)
+    diag_name << "-" << static_cast<long long>(getpid());
+#endif
+    diag_name << ".jsonl";
+    svp::core::configure_memory_diagnostics_from_environment(
+        std::filesystem::current_path() / "build" / "diagnostics" /
+        diag_name.str());
+    svp::core::check_memory_limit("builder.run.start", {
+        {"source", options.source_path},
+        {"output", options.output_path.string()},
+        {"staging_dir", options.staging_dir.string()}
+    });
+
     const std::string stop_after_name(build_stage_name(options.stop_after));
     const BuildStageExecutionPlan stage_plan =
         execution_plan_for_stage(options.stop_after);
@@ -117,10 +138,15 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
 
     if (stage_plan.run_package_skeleton && package_result.package_written &&
         !package_result.validator_passes) {
+      svp::core::check_memory_limit("builder.run.complete.validator_failed");
       return {.exit_code = package_result.validator_exit_code};
     }
+    svp::core::check_memory_limit("builder.run.complete");
     return {.exit_code = 0};
   } catch (const std::exception& error) {
+    svp::core::trace_memory_event("builder.run.exception", {
+        {"error", error.what()}
+    });
     std::cerr << "svp-builder: " << error.what() << "\n";
     return {.exit_code = 1};
   }

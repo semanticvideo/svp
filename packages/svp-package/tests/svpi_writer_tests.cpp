@@ -8,6 +8,7 @@
 #include "svp/validation/code_registry.hpp"
 
 #include <nlohmann/json.hpp>
+#include <sqlite3.h>
 #include <zip.h>
 
 #include <cstdlib>
@@ -29,6 +30,8 @@ namespace {
       std::abort();                                                          \
     }                                                                        \
   } while (0)
+
+constexpr int kLargeReaderRegressionBlobBytes = 33 * 1024 * 1024;
 
 std::string make_utc_timestamp() {
   const auto now = std::chrono::system_clock::now();
@@ -113,6 +116,63 @@ void add_file_to_zip(zip_t* archive, const std::string& name,
   CHECK(idx >= 0);
 }
 
+void create_large_valid_sqlite(const std::filesystem::path& path) {
+  sqlite3* raw_db = nullptr;
+  CHECK(sqlite3_open(path.string().c_str(), &raw_db) == SQLITE_OK);
+  CHECK(raw_db != nullptr);
+
+  char* error = nullptr;
+  const std::string sql =
+      "CREATE TABLE padding(id INTEGER PRIMARY KEY, data BLOB);"
+      "INSERT INTO padding(data) VALUES (zeroblob(" +
+      std::to_string(kLargeReaderRegressionBlobBytes) + "));";
+  const int status = sqlite3_exec(raw_db, sql.c_str(), nullptr, nullptr, &error);
+  if (status != SQLITE_OK) {
+    if (error != nullptr) {
+      std::cerr << error << "\n";
+      sqlite3_free(error);
+    }
+    sqlite3_close(raw_db);
+    CHECK(false);
+  }
+  CHECK(sqlite3_close(raw_db) == SQLITE_OK);
+  CHECK(std::filesystem::file_size(path) >
+        static_cast<std::uintmax_t>(kLargeReaderRegressionBlobBytes));
+}
+
+void replace_zip_entry_with_file(const std::filesystem::path& package_path,
+                                 const std::string& entry_name,
+                                 const std::filesystem::path& replacement_path) {
+  const std::filesystem::path temp_path = package_path.parent_path() / "temp.svpi";
+  int err = 0;
+  zip_t* src = zip_open(package_path.string().c_str(), ZIP_RDONLY, &err);
+  CHECK(src != nullptr);
+  zip_t* dst = zip_open(temp_path.string().c_str(), ZIP_CREATE | ZIP_TRUNCATE, &err);
+  CHECK(dst != nullptr);
+
+  const auto count = zip_get_num_entries(src, 0);
+  for (zip_int64_t i = 0; i < count; ++i) {
+    zip_stat_t st;
+    zip_stat_init(&st);
+    zip_stat_index(src, static_cast<zip_uint64_t>(i), 0, &st);
+    const std::string name(st.name);
+    if (name == entry_name) {
+      zip_source_t* source =
+          zip_source_file(dst, replacement_path.string().c_str(), 0, -1);
+      CHECK(source != nullptr);
+      CHECK(zip_file_add(dst, entry_name.c_str(), source, ZIP_FL_OVERWRITE) >= 0);
+      continue;
+    }
+    zip_source_t* source = zip_source_zip(dst, src, static_cast<zip_uint64_t>(i), 0, 0, -1);
+    CHECK(source != nullptr);
+    CHECK(zip_file_add(dst, name.c_str(), source, ZIP_FL_OVERWRITE) >= 0);
+  }
+
+  CHECK(zip_close(dst) == 0);
+  zip_discard(src);
+  std::filesystem::rename(temp_path, package_path);
+}
+
 std::filesystem::path create_valid_svpi(
     const std::filesystem::path& root,
     const std::string& package_id = "svpi_test_pkg_0001") {
@@ -183,6 +243,32 @@ void test_valid_minimal_svpi_passes_validation() {
   auto manifest = nlohmann::json::parse(manifest_data.value());
   CHECK(manifest["format"] == "svpi");
   CHECK(manifest["svpi_version"] == "0.1");
+
+  auto opts = make_validator_options();
+  auto report = svp::validation::validate_svpi_package(package_path, opts);
+  CHECK(report.status == svp::validation::ValidationStatus::valid ||
+        report.status == svp::validation::ValidationStatus::valid_with_warnings);
+  CHECK(report.errors.empty());
+
+  std::filesystem::remove_all(root);
+}
+
+void test_svpi_large_index_sqlite_passes_validation() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-svpi-large-sqlite-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  const auto package_path = create_valid_svpi(root);
+  const auto large_sqlite_path = root / "large-index.sqlite";
+  create_large_valid_sqlite(large_sqlite_path);
+  replace_zip_entry_with_file(package_path, "index/index.sqlite", large_sqlite_path);
+
+  const auto large_entry =
+      svp::package::read_package_entry(package_path, "index/index.sqlite");
+  CHECK(large_entry.has_value());
+  CHECK(large_entry.value().size() >
+        static_cast<std::size_t>(kLargeReaderRegressionBlobBytes));
 
   auto opts = make_validator_options();
   auto report = svp::validation::validate_svpi_package(package_path, opts);
@@ -1097,6 +1183,7 @@ void test_svpi_validator_rejects_uppercase_replayable_extensions() {
 int main() {
   test_svpi_probe_detects_svpi_extension();
   test_valid_minimal_svpi_passes_validation();
+  test_svpi_large_index_sqlite_passes_validation();
   test_svpi_with_media_original_fails_validation();
   test_svpi_missing_index_sqlite_fails_validation();
   test_svpi_missing_index_manifest_fails_validation();

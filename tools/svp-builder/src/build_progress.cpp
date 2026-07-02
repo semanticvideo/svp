@@ -1,5 +1,7 @@
 #include "build_pipeline_internal.hpp"
 
+#include "svp/core/memory_diagnostics.hpp"
+
 #include <iostream>
 #include <string>
 
@@ -11,16 +13,31 @@ void emit_progress(BuildPipelineContext& context, const ProgressEvent& event) {
 
 void emit_stage_started(BuildPipelineContext& context, ProgressStageId stage,
                         std::string message) {
+  svp::core::check_memory_limit("stage.start", {
+      {"stage", std::string(progress_stage_id(stage))},
+      {"label", std::string(progress_stage_label(stage))},
+      {"message", message}
+  });
   emit_progress(context, make_stage_started(stage, std::move(message)));
 }
 
 void emit_stage_completed(BuildPipelineContext& context, ProgressStageId stage,
                           std::string message) {
+  svp::core::check_memory_limit("stage.complete", {
+      {"stage", std::string(progress_stage_id(stage))},
+      {"label", std::string(progress_stage_label(stage))},
+      {"message", message}
+  });
   emit_progress(context, make_stage_completed(stage, std::move(message)));
 }
 
 void emit_stage_failed(BuildPipelineContext& context, ProgressStageId stage,
                        std::string message) {
+  svp::core::check_memory_limit("stage.failed", {
+      {"stage", std::string(progress_stage_id(stage))},
+      {"label", std::string(progress_stage_label(stage))},
+      {"message", message}
+  });
   emit_progress(context, make_stage_failed(stage, std::move(message)));
 }
 
@@ -40,6 +57,18 @@ void emit_artifact_written(BuildPipelineContext& context, ProgressStageId stage,
 void emit_stage_progress(BuildPipelineContext& context, ProgressStageId stage,
                          std::uint64_t current, std::uint64_t total,
                          std::string unit, std::string message) {
+  const bool should_sample =
+      current == 0 || current == total || (current % 10) == 0;
+  if (should_sample) {
+    svp::core::check_memory_limit("stage.progress", {
+        {"stage", std::string(progress_stage_id(stage))},
+        {"label", std::string(progress_stage_label(stage))},
+        {"current", std::to_string(current)},
+        {"total", std::to_string(total)},
+        {"unit", unit},
+        {"message", message}
+    });
+  }
   emit_progress(context, make_stage_progress(stage, current, total,
                                              std::move(unit),
                                              std::move(message)));

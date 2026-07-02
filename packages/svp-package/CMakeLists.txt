@@ -83,6 +83,7 @@ if(BUILD_TESTING)
     PRIVATE
       svp::package
       svp::validation
+      SQLite::SQLite3
   )
 
   target_link_libraries(svp-relationship-type-policy-tests

@@ -1,5 +1,6 @@
 #include "svp/models/runtime.hpp"
 
+#include "svp/core/memory_diagnostics.hpp"
 #include "svp/models/error.hpp"
 
 #include <algorithm>
@@ -157,6 +158,11 @@ OnnxSession OnnxSession::load(const ModelBundleManifest& manifest,
 
   const bool suppress = !g_onnx_verbose.load(std::memory_order_relaxed);
   {
+    svp::core::check_memory_limit("onnx.session.load.begin", {
+        {"model_id", manifest.model_id},
+        {"model_path", model_file_path.string()},
+        {"execution_provider", options.execution_provider}
+    });
     std::optional<StdoutStderrSuppressor> suppressor;
     if (suppress) {
       suppressor.emplace();
@@ -164,6 +170,11 @@ OnnxSession OnnxSession::load(const ModelBundleManifest& manifest,
     result.impl_->session = Ort::Session(*result.impl_->env,
                                          model_file_path.string().c_str(),
                                          session_options);
+    svp::core::check_memory_limit("onnx.session.load.end", {
+        {"model_id", manifest.model_id},
+        {"model_path", model_file_path.string()},
+        {"execution_provider", options.execution_provider}
+    });
   }
 
   Ort::AllocatorWithDefaultOptions allocator;
@@ -265,6 +276,13 @@ std::vector<float> OnnxSession::run_depth(
   auto& output_tensor = output_tensors[0];
   auto type_info = output_tensor.GetTensorTypeAndShapeInfo();
   auto element_count = type_info.GetElementCount();
+  svp::core::check_memory_limit("onnx.run_depth.end", {
+      {"model_id", impl_->model_id_value},
+      {"input_count", std::to_string(input_count)},
+      {"width", std::to_string(width)},
+      {"height", std::to_string(height)},
+      {"output_elements", std::to_string(element_count)}
+  });
 
   const float* output_data = output_tensor.GetTensorData<float>();
   return std::vector<float>(output_data, output_data + element_count);
@@ -309,6 +327,11 @@ std::vector<float> OnnxSession::run_embedding(
   auto& output_tensor = output_tensors[0];
   auto type_info = output_tensor.GetTensorTypeAndShapeInfo();
   auto element_count = type_info.GetElementCount();
+  svp::core::check_memory_limit("onnx.run_embedding.end", {
+      {"model_id", impl_->model_id_value},
+      {"input_count", std::to_string(input_count)},
+      {"output_elements", std::to_string(element_count)}
+  });
 
   const float* output_data = output_tensor.GetTensorData<float>();
   return std::vector<float>(output_data, output_data + element_count);
@@ -369,6 +392,12 @@ TextEmbeddingOutput OnnxSession::run_text_embedding(
   auto type_info = output_tensor.GetTensorTypeAndShapeInfo();
   auto element_count = type_info.GetElementCount();
   auto output_shape = type_info.GetShape();
+  svp::core::check_memory_limit("onnx.run_text_embedding.end", {
+      {"model_id", impl_->model_id_value},
+      {"batch_size", std::to_string(batch_size)},
+      {"seq_len", std::to_string(seq_len)},
+      {"output_elements", std::to_string(element_count)}
+  });
 
   const float* output_data = output_tensor.GetTensorData<float>();
 
@@ -417,6 +446,13 @@ std::vector<float> OnnxSession::run_visual_embedding(
   auto type_info = output_tensor.GetTensorTypeAndShapeInfo();
   auto output_shape = type_info.GetShape();
   auto element_count = type_info.GetElementCount();
+  svp::core::check_memory_limit("onnx.run_visual_embedding.end", {
+      {"model_id", impl_->model_id_value},
+      {"input_count", std::to_string(input_count)},
+      {"width", std::to_string(width)},
+      {"height", std::to_string(height)},
+      {"output_elements", std::to_string(element_count)}
+  });
 
   const float* output_data = output_tensor.GetTensorData<float>();
 
@@ -477,6 +513,12 @@ std::vector<float> OnnxSession::run_raw(
   auto& output_tensor = output_tensors[0];
   auto type_info = output_tensor.GetTensorTypeAndShapeInfo();
   auto element_count = type_info.GetElementCount();
+  svp::core::check_memory_limit("onnx.run_raw.end", {
+      {"model_id", impl_->model_id_value},
+      {"input_name", input_name},
+      {"input_count", std::to_string(input_count)},
+      {"output_elements", std::to_string(element_count)}
+  });
 
   const float* output_data = output_tensor.GetTensorData<float>();
   return std::vector<float>(output_data, output_data + element_count);
@@ -517,6 +559,12 @@ OnnxSession::run_raw_with_shape(
   auto type_info = output_tensor.GetTensorTypeAndShapeInfo();
   auto element_count = type_info.GetElementCount();
   auto output_shape = type_info.GetShape();
+  svp::core::check_memory_limit("onnx.run_raw_with_shape.end", {
+      {"model_id", impl_->model_id_value},
+      {"input_name", input_name},
+      {"input_count", std::to_string(input_count)},
+      {"output_elements", std::to_string(element_count)}
+  });
 
   const float* output_data = output_tensor.GetTensorData<float>();
   return {std::vector<float>(output_data, output_data + element_count),

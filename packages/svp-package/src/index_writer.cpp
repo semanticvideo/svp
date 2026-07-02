@@ -1,6 +1,7 @@
 #include "svp/package/index_writer.hpp"
 #include "svp/package/index_logical_rows.hpp"
 #include "svp/package/relationship_type_policy.hpp"
+#include "svp/core/memory_diagnostics.hpp"
 
 #include <blake3.h>
 #include <sqlite3.h>
@@ -187,8 +188,17 @@ const std::vector<std::string> kIndexTables = {
 };
 
 std::vector<nlohmann::json> read_jsonl(const std::filesystem::path& path) {
+  svp::core::check_memory_limit("index.read_jsonl.begin", {
+      {"path", path.string()},
+      {"exists", std::filesystem::exists(path) ? "true" : "false"}
+  });
   std::vector<nlohmann::json> records;
   if (!std::filesystem::exists(path)) {
+    svp::core::check_memory_limit("index.read_jsonl.end", {
+        {"path", path.string()},
+        {"records", "0"},
+        {"missing", "true"}
+    });
     return records;
   }
   std::ifstream file(path);
@@ -204,6 +214,10 @@ std::vector<nlohmann::json> read_jsonl(const std::filesystem::path& path) {
       // Ignore parse errors to keep loading other records
     }
   }
+  svp::core::check_memory_limit("index.read_jsonl.end", {
+      {"path", path.string()},
+      {"records", std::to_string(records.size())}
+  });
   return records;
 }
 
@@ -279,6 +293,9 @@ bool write_index_foundation(
     const std::filesystem::path& staging_dir,
     const nlohmann::json& manifest_json) {
   try {
+    svp::core::check_memory_limit("index.write.begin", {
+        {"staging_dir", staging_dir.string()}
+    });
     const std::filesystem::path index_dir = staging_dir / "index";
     std::filesystem::create_directories(index_dir);
     const std::filesystem::path sqlite_path = index_dir / "index.sqlite";
@@ -295,6 +312,9 @@ bool write_index_foundation(
       return false;
     }
     std::unique_ptr<sqlite3, SqliteDeleter> db{raw_db};
+    svp::core::check_memory_limit("index.sqlite.opened", {
+        {"sqlite_path", sqlite_path.string()}
+    });
 
     // Create tables
     for (const auto& sql : kIndexTables) {
@@ -735,9 +755,16 @@ bool write_index_foundation(
     };
 
     const LogicalRowStreamSummary stream = compute_logical_row_stream_summary(*db, table_names);
+    svp::core::check_memory_limit("index.logical_rows.complete", {
+        {"table_count", std::to_string(stream.table_count)},
+        {"row_count", std::to_string(stream.row_count)}
+    });
 
     // Close SQLite file cleanly so file blake3 matches final bytes
     db.reset();
+    svp::core::check_memory_limit("index.sqlite.closed", {
+        {"sqlite_path", sqlite_path.string()}
+    });
 
     // Compute file hashes
     const std::string sqlite_file_blake3 = blake3_hex_for_file(sqlite_path);
@@ -769,9 +796,16 @@ bool write_index_foundation(
     }
     manifest_out << index_manifest_json.dump(2) << "\n";
 
+    svp::core::check_memory_limit("index.write.complete", {
+        {"sqlite_path", sqlite_path.string()},
+        {"row_count", std::to_string(stream.row_count)}
+    });
     return true;
 
   } catch (const std::exception& error) {
+    svp::core::trace_memory_event("index.write.exception", {
+        {"error", error.what()}
+    });
     std::cerr << "write_index_foundation error: " << error.what() << "\n";
     return false;
   }

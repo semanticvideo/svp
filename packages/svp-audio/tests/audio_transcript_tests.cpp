@@ -15,6 +15,7 @@
 #include <cassert>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -22,6 +23,7 @@
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -2186,6 +2188,52 @@ void test_reconcile_clusters_still_works_after_lib_discovery() {
   assert(result.cluster_to_final[1] == 1);
 }
 
+void test_real_sherpa_diarization_speaker_count_fixtures_when_enabled() {
+  const char* model_dir_env = std::getenv("SVP_SHERPA_DIARIZATION_MODEL_DIR");
+  if (!model_dir_env || std::string(model_dir_env).empty()) {
+    return;
+  }
+
+  if (!svp::audio::is_sherpa_diarization_available()) {
+    throw std::runtime_error("SVP_SHERPA_DIARIZATION_MODEL_DIR is set but sherpa-onnx is unavailable");
+  }
+
+  const std::filesystem::path fixture_root =
+      std::filesystem::path(SVP_REPO_ROOT) / "fixtures/audio/sherpa-diarization";
+  const std::vector<std::pair<std::string, int32_t>> cases = {
+      {"one-speaker.wav", 1},
+      {"two-speaker.wav", 2},
+      {"similar-timbre-two-speaker.wav", 2},
+      {"three-speaker.wav", 3},
+      {"four-speaker.wav", 4},
+  };
+
+  for (const auto& [filename, expected_speakers] : cases) {
+    const std::filesystem::path fixture = fixture_root / filename;
+    if (!std::filesystem::exists(fixture)) {
+      throw std::runtime_error("missing Sherpa diarization fixture: " +
+                               fixture.string());
+    }
+
+    const svp::audio::SherpaDiarizationResult result =
+        svp::audio::run_sherpa_diarization(fixture, model_dir_env);
+    if (!result.ran) {
+      throw std::runtime_error("Sherpa diarization did not run for fixture: " +
+                               fixture.string());
+    }
+    if (result.final_speaker_count != expected_speakers) {
+      throw std::runtime_error(
+          "unexpected speaker count for " + filename + ": got " +
+          std::to_string(result.final_speaker_count) + ", expected " +
+          std::to_string(expected_speakers));
+    }
+    if (result.segments.empty()) {
+      throw std::runtime_error("Sherpa diarization produced no segments for fixture: " +
+                               fixture.string());
+    }
+  }
+}
+
 int main() {
   test_word_serialization_uses_canonical_time_strings();
   test_zero_duration_span_is_rejected_for_core_span_records();
@@ -2254,6 +2302,7 @@ int main() {
   test_transcript_confidence_provenance_is_decoder_token_softmax_mean();
 
   // Sherpa library discovery tests
+  test_real_sherpa_diarization_speaker_count_fixtures_when_enabled();
   test_set_sherpa_lib_path_with_invalid_path_leaves_unavailable();
   test_multi_candidate_search_does_not_crash_when_no_candidate_exists();
   test_reconcile_clusters_still_works_after_lib_discovery();

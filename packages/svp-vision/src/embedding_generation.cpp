@@ -1,5 +1,6 @@
 #include "svp/vision/embedding_generation.hpp"
 
+#include "svp/core/memory_diagnostics.hpp"
 #include "svp/models/cache.hpp"
 #include "svp/models/manifest.hpp"
 #include "svp/models/runtime.hpp"
@@ -244,6 +245,9 @@ EmbeddingGenerationResult generate_embedding_blocks(
   }
 
   auto text_inputs = load_text_observations_from_staging(staging_dir);
+  svp::core::check_memory_limit("text_embedding.inputs_loaded", {
+      {"text_input_count", std::to_string(text_inputs.size())}
+  });
   if (text_inputs.empty()) {
     result.blocker = "No real source-derived text observations found in "
         "staging (text/text_observations.jsonl); embedding generation is "
@@ -319,7 +323,17 @@ EmbeddingGenerationResult generate_embedding_blocks(
     options.on_progress(0, total_text_inputs);
   }
 
-  for (const auto& text_input : text_inputs) {
+  for (std::size_t input_index = 0; input_index < text_inputs.size(); ++input_index) {
+    const auto& text_input = text_inputs[input_index];
+    if (input_index == 0 || ((input_index + 1) % 25) == 0 ||
+        input_index + 1 == text_inputs.size()) {
+      svp::core::check_memory_limit("text_embedding.item.begin", {
+          {"index", std::to_string(input_index)},
+          {"total", std::to_string(text_inputs.size())},
+          {"text_id", text_input.id},
+          {"text_size", std::to_string(text_input.text.size())}
+      });
+    }
     TokenizedText tokenized = tokenizer.tokenize(text_input.text, 512);
 
     svp::models::TextEmbeddingOutput embedding_output;
@@ -495,6 +509,15 @@ EmbeddingGenerationResult generate_embedding_blocks(
 
     if (options.on_progress) {
       options.on_progress(result.entries.size(), total_text_inputs);
+    }
+    if (input_index == 0 || ((input_index + 1) % 25) == 0 ||
+        input_index + 1 == text_inputs.size()) {
+      svp::core::check_memory_limit("text_embedding.item.complete", {
+          {"index", std::to_string(input_index)},
+          {"total", std::to_string(text_inputs.size())},
+          {"entries", std::to_string(result.entries.size())},
+          {"index_entries", std::to_string(index_entries.size())}
+      });
     }
   }
 

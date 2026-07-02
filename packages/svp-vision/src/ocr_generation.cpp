@@ -1,5 +1,6 @@
 #include "svp/vision/ocr_generation.hpp"
 
+#include "svp/core/memory_diagnostics.hpp"
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/vision/evidence_crop.hpp"
 #include "svp/vision/foundation_ocr_staging.hpp"
@@ -389,6 +390,10 @@ OcrGenerationResult generate_ocr_observations(
   pp_ocr_opts.execution_provider = "cpu";
 
   PpOcrSession pp_ocr_session = create_pp_ocr_session(pp_ocr_opts);
+  svp::core::check_memory_limit("ocr.generation.session_created", {
+      {"available", pp_ocr_session.available ? "true" : "false"},
+      {"blocker", pp_ocr_session.blocker}
+  });
 
   result.ocr_available = pp_ocr_session.available;
   result.ocr_frame_input_available =
@@ -580,6 +585,11 @@ OcrGenerationResult generate_ocr_observations(
   };
 
   if (use_streamed_high_res_frames) {
+    svp::core::check_memory_limit("ocr.generation.streaming_begin", {
+        {"sample_count", std::to_string(result.temporal_sampling.timestamps_us.size())},
+        {"ocr_frame_width", std::to_string(options.ocr_frame_width)},
+        {"ocr_frame_height", std::to_string(options.ocr_frame_height)}
+    });
     streamed_frame_status = decode_frames_at_timestamps_streaming(
         *options.media_plan,
         options.ffmpeg_path,
@@ -604,6 +614,11 @@ OcrGenerationResult generate_ocr_observations(
       processed_frame_height = frame_input.frames[0].height;
     }
   }
+  svp::core::check_memory_limit("ocr.generation.after_frames", {
+      {"processed_frame_count", std::to_string(processed_frame_count)},
+      {"all_detections", std::to_string(all_detections.size())},
+      {"frame_diagnostics", std::to_string(frame_diagnostics.size())}
+  });
 
   if (!result.ocr_frame_input_available) {
     const DecodedCanonicalFrames& failed_frames =
@@ -718,6 +733,10 @@ OcrGenerationResult generate_ocr_observations(
 
   // Phase 2: Reconcile detections across frames
   auto reconciled = reconcile_detections(all_detections, processed_frame_count);
+  svp::core::check_memory_limit("ocr.generation.after_reconcile", {
+      {"all_detections", std::to_string(all_detections.size())},
+      {"reconciled", std::to_string(reconciled.size())}
+  });
   result.total_reconciled_observations = static_cast<std::int64_t>(reconciled.size());
   result.target_max_observations = options.target_max_observations;
 
