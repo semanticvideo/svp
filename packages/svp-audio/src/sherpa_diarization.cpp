@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <fstream>
@@ -14,6 +15,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "svp/core/memory_diagnostics.hpp"
+
 namespace svp::audio {
 namespace {
 
@@ -21,7 +24,38 @@ constexpr int32_t kDiarizationSampleRate = 16000;
 constexpr int32_t kMaxDiarizationChunkSamples = kDiarizationSampleRate * 5;
 constexpr std::int64_t kUtteranceGapThresholdUs = 750000;
 constexpr std::int64_t kUtterancePaddingUs = 150000;
-constexpr float kSameSpeakerSimilarityThreshold = 0.5f;
+// 3D-Speaker embeddings drift across long recordings and across independent
+// bounded Sherpa windows. A moderate same-speaker threshold keeps recurring
+// voices connected without relying on one full-media clustering pass.
+constexpr float kSameSpeakerSimilarityThreshold = 0.60f;
+// Final long-form reconciliation operates on bounded speaker-observation
+// embeddings, not audio. This lower threshold accounts for embedding drift
+// across independently processed windows while preserving fixture separation.
+constexpr float kGlobalSpeakerObservationMinGap = 0.10f;
+constexpr float kGlobalSpeakerObservationFloorSimilarity = 0.14f;
+// Dominant-track stitching is only for long-form fragmentation after global
+// reconciliation. It merges non-overlapping dominant tracks that together form
+// the bulk of speech, while avoiding small controlled fixture recordings.
+constexpr int32_t kDominantStitchMinFinalSpeakers = 8;
+constexpr std::size_t kDominantStitchMinObservations = 32;
+constexpr float kDominantStitchCombinedSpeechShare = 0.70f;
+constexpr float kDominantStitchMinTrackSpeechShare = 0.15f;
+constexpr float kDominantStitchMaxOverlapShare = 0.01f;
+// Ask Sherpa's local clustering to expose candidate speaker changes. A stricter
+// threshold is reconciled later by bounded embedding assignment, keeping memory
+// flat without forcing one large full-media clustering pass.
+constexpr float kSherpaLocalClusteringThreshold = 0.90f;
+constexpr int64_t kDiarizationWindowSamples =
+    static_cast<int64_t>(kDiarizationSampleRate) * 300;
+constexpr int64_t kDiarizationWindowOverlapSamples =
+    static_cast<int64_t>(kDiarizationSampleRate) * 2;
+constexpr float kMinClippedSegmentDuration = 0.1f;
+// Sherpa local speaker labels are stable only while the local stream remains
+// temporally continuous. After a real pause, recompute a bounded embedding
+// before reusing that local label.
+constexpr float kLocalSpeakerAssignmentMaxGapSec = 5.0f;
+constexpr int32_t kMaxSpeakerEmbeddingSamples = kDiarizationSampleRate * 10;
+constexpr int32_t kMinSpeakerEmbeddingSamples = kDiarizationSampleRate / 10;
 
 struct SherpaOnnxOfflineSpeakerDiarizationSegment {
   float start;
@@ -111,6 +145,12 @@ struct SherpaLibState {
   std::string explicit_path;
   std::string loaded_path;
   std::vector<std::string> attempted_paths;
+};
+
+struct PcmS16MonoWavInfo {
+  std::filesystem::path path;
+  std::streamoff data_offset = 0;
+  std::size_t sample_count = 0;
 };
 
 SherpaLibState& lib_state() {
@@ -326,6 +366,86 @@ std::vector<float> read_pcm_s16le_mono_wav_samples(const std::filesystem::path& 
   return samples;
 }
 
+PcmS16MonoWavInfo read_pcm_s16le_mono_wav_info(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  if (!input) throw std::runtime_error("unable to open WAV: " + path.string());
+
+  char riff[4];
+  input.read(riff, 4);
+  if (std::memcmp(riff, "RIFF", 4) != 0) throw std::runtime_error("WAV is not RIFF");
+
+  std::uint32_t file_size = 0;
+  input.read(reinterpret_cast<char*>(&file_size), 4);
+
+  char wave[4];
+  input.read(wave, 4);
+  if (std::memcmp(wave, "WAVE", 4) != 0) throw std::runtime_error("WAV is not WAVE");
+
+  bool fmt_seen = false, data_seen = false;
+  std::uint16_t audio_format = 0, channel_count = 0, bits_per_sample = 0;
+  std::uint32_t sample_rate = 0;
+  PcmS16MonoWavInfo info;
+  info.path = path;
+
+  while (input && !(fmt_seen && data_seen)) {
+    char chunk_id[4];
+    input.read(chunk_id, 4);
+    if (!input) break;
+
+    std::uint32_t chunk_size = 0;
+    input.read(reinterpret_cast<char*>(&chunk_size), 4);
+    if (!input) break;
+
+    if (std::memcmp(chunk_id, "fmt ", 4) == 0) {
+      input.read(reinterpret_cast<char*>(&audio_format), 2);
+      input.read(reinterpret_cast<char*>(&channel_count), 2);
+      input.read(reinterpret_cast<char*>(&sample_rate), 4);
+      input.seekg(6, std::ios::cur);
+      input.read(reinterpret_cast<char*>(&bits_per_sample), 2);
+      if (chunk_size > 16) input.seekg(chunk_size - 16, std::ios::cur);
+      fmt_seen = true;
+    } else if (std::memcmp(chunk_id, "data", 4) == 0) {
+      info.data_offset = input.tellg();
+      info.sample_count = static_cast<std::size_t>(chunk_size / 2);
+      input.seekg(chunk_size + (chunk_size % 2), std::ios::cur);
+      data_seen = true;
+    } else {
+      input.seekg(chunk_size + (chunk_size % 2), std::ios::cur);
+    }
+  }
+
+  if (!fmt_seen || !data_seen) throw std::runtime_error("WAV missing fmt or data");
+  if (audio_format != 1) throw std::runtime_error("WAV must be PCM");
+  if (channel_count != 1) throw std::runtime_error("WAV must be mono");
+  if (sample_rate != 16000) throw std::runtime_error("WAV must be 16kHz");
+  if (bits_per_sample != 16) throw std::runtime_error("WAV must be 16-bit");
+
+  return info;
+}
+
+std::vector<float> read_pcm_s16le_mono_wav_range(
+    const PcmS16MonoWavInfo& info,
+    std::size_t start_sample,
+    std::size_t end_sample) {
+  if (start_sample >= end_sample || start_sample >= info.sample_count) return {};
+  end_sample = std::min(end_sample, info.sample_count);
+
+  std::ifstream input(info.path, std::ios::binary);
+  if (!input) throw std::runtime_error("unable to open WAV: " + info.path.string());
+  input.seekg(info.data_offset + static_cast<std::streamoff>(start_sample * 2),
+              std::ios::beg);
+
+  std::vector<float> samples;
+  samples.reserve(end_sample - start_sample);
+  for (std::size_t i = start_sample; i < end_sample; ++i) {
+    std::int16_t raw = 0;
+    input.read(reinterpret_cast<char*>(&raw), 2);
+    if (!input) break;
+    samples.push_back(static_cast<float>(raw) / 32768.0f);
+  }
+  return samples;
+}
+
 float cosine_similarity(const std::vector<float>& a, const std::vector<float>& b) {
   float dot = 0.0f, norm_a = 0.0f, norm_b = 0.0f;
   for (std::size_t i = 0; i < a.size(); ++i) {
@@ -352,66 +472,450 @@ bool ends_utterance(const std::string& text) {
   return last == '.' || last == '?' || last == '!';
 }
 
-std::vector<float> compute_cluster_embedding(
+std::vector<float> compute_bounded_speaker_embedding(
     const SherpaDiarizationApi& api,
     const void* extractor,
     int32_t embedding_dim,
     const std::vector<float>& all_samples,
-    const std::vector<SherpaDiarizationSegment>& cluster_segments) {
+    std::size_t sample_base,
+    const std::vector<SherpaDiarizationSegment>& speaker_segments) {
 
-  std::vector<std::vector<float>> segment_embeddings;
-  std::vector<float> segment_durations;
+  std::vector<float> concatenated;
+  concatenated.reserve(static_cast<std::size_t>(kMaxSpeakerEmbeddingSamples));
 
-  for (const auto& seg : cluster_segments) {
-    int32_t start_sample = static_cast<int32_t>(seg.start_sec * 16000.0f);
-    int32_t end_sample = static_cast<int32_t>(seg.end_sec * 16000.0f);
-    if (start_sample < 0) start_sample = 0;
-    if (end_sample > static_cast<int32_t>(all_samples.size()))
-      end_sample = static_cast<int32_t>(all_samples.size());
+  for (const auto& seg : speaker_segments) {
+    std::int64_t absolute_start =
+        static_cast<std::int64_t>(seg.start_sec * 16000.0f);
+    std::int64_t absolute_end =
+        static_cast<std::int64_t>(seg.end_sec * 16000.0f);
+    if (absolute_start < static_cast<std::int64_t>(sample_base)) {
+      absolute_start = static_cast<std::int64_t>(sample_base);
+    }
+    const std::int64_t sample_limit =
+        static_cast<std::int64_t>(sample_base + all_samples.size());
+    if (absolute_end > sample_limit) absolute_end = sample_limit;
+    const std::int64_t relative_start =
+        absolute_start - static_cast<std::int64_t>(sample_base);
+    const std::int64_t relative_end =
+        absolute_end - static_cast<std::int64_t>(sample_base);
+    int32_t start_sample = static_cast<int32_t>(relative_start);
+    int32_t end_sample = static_cast<int32_t>(relative_end);
     int32_t num_samples = end_sample - start_sample;
     if (num_samples < 1600) continue;
 
-    const SherpaOnnxOnlineStream* stream = api.emb_create_stream(extractor);
-    if (!stream) continue;
-
-    api.stream_accept(stream, 16000, all_samples.data() + start_sample, num_samples);
-    api.stream_input_finished(stream);
-
-    std::vector<float> embedding;
-    if (api.emb_is_ready(extractor, stream)) {
-      const float* emb = api.emb_compute(extractor, stream);
-      if (emb) {
-        embedding.assign(emb, emb + embedding_dim);
-        api.emb_destroy_vec(emb);
+    if (static_cast<int32_t>(concatenated.size()) + num_samples >
+        kMaxSpeakerEmbeddingSamples) {
+      int32_t room = kMaxSpeakerEmbeddingSamples -
+                     static_cast<int32_t>(concatenated.size());
+      if (room > 0) {
+        concatenated.insert(concatenated.end(),
+                            all_samples.data() + start_sample,
+                            all_samples.data() + start_sample + room);
       }
+      break;
     }
-    api.stream_destroy(stream);
-
-    if (!embedding.empty()) {
-      normalize_embedding(embedding);
-      segment_embeddings.push_back(std::move(embedding));
-      segment_durations.push_back(static_cast<float>(num_samples));
-    }
+    concatenated.insert(concatenated.end(),
+                        all_samples.data() + start_sample,
+                        all_samples.data() + end_sample);
   }
 
-  if (segment_embeddings.empty()) {
+  if (concatenated.size() < static_cast<std::size_t>(kMinSpeakerEmbeddingSamples)) {
     return std::vector<float>(embedding_dim, 0.0f);
   }
 
-  std::vector<float> centroid(embedding_dim, 0.0f);
-  float total_duration = 0.0f;
-  for (std::size_t i = 0; i < segment_embeddings.size(); ++i) {
-    float dur = segment_durations[i];
-    for (int32_t d = 0; d < embedding_dim; ++d) {
-      centroid[d] += segment_embeddings[i][d] * dur;
+  const SherpaOnnxOnlineStream* stream = api.emb_create_stream(extractor);
+  if (!stream) {
+    return std::vector<float>(embedding_dim, 0.0f);
+  }
+
+  api.stream_accept(stream, 16000, concatenated.data(),
+                    static_cast<int32_t>(concatenated.size()));
+  api.stream_input_finished(stream);
+
+  std::vector<float> embedding;
+  if (api.emb_is_ready(extractor, stream)) {
+    const float* emb = api.emb_compute(extractor, stream);
+    if (emb) {
+      embedding.assign(emb, emb + embedding_dim);
+      api.emb_destroy_vec(emb);
     }
-    total_duration += dur;
   }
-  if (total_duration > 0.0f) {
-    for (int32_t d = 0; d < embedding_dim; ++d) centroid[d] /= total_duration;
+  api.stream_destroy(stream);
+
+  if (embedding.empty()) {
+    return std::vector<float>(embedding_dim, 0.0f);
   }
-  normalize_embedding(centroid);
-  return centroid;
+  normalize_embedding(embedding);
+  return embedding;
+}
+
+struct DiarizationWindowRange {
+  std::size_t accepted_start;
+  std::size_t accepted_end;
+  std::size_t process_start;
+  std::size_t process_end;
+};
+
+std::vector<DiarizationWindowRange> build_diarization_windows(
+    std::size_t sample_count) {
+  std::vector<DiarizationWindowRange> windows;
+  if (sample_count == 0) return windows;
+
+  const std::size_t window_size =
+      static_cast<std::size_t>(kDiarizationWindowSamples);
+  const std::size_t overlap =
+      static_cast<std::size_t>(kDiarizationWindowOverlapSamples);
+
+  std::size_t window_start = 0;
+  while (window_start < sample_count) {
+    std::size_t accepted_end =
+        std::min(window_start + window_size, sample_count);
+
+    std::size_t process_start =
+        (window_start == 0)
+            ? 0
+            : (window_start >= overlap ? window_start - overlap : 0);
+
+    bool is_final = (accepted_end >= sample_count);
+    std::size_t process_end =
+        is_final ? sample_count
+                 : std::min(accepted_end + overlap, sample_count);
+
+    windows.push_back(
+        {window_start, accepted_end, process_start, process_end});
+
+    if (is_final) break;
+    window_start = accepted_end;
+  }
+
+  return windows;
+}
+
+bool clip_segment_to_range(SherpaDiarizationSegment& seg,
+                           float accepted_start_sec,
+                           float accepted_end_sec) {
+  float clipped_start = std::max(seg.start_sec, accepted_start_sec);
+  float clipped_end = std::min(seg.end_sec, accepted_end_sec);
+  if (clipped_end - clipped_start < kMinClippedSegmentDuration) return false;
+  seg.start_sec = clipped_start;
+  seg.end_sec = clipped_end;
+  return true;
+}
+
+bool has_embedding_signal(const std::vector<float>& embedding) {
+  for (float value : embedding) {
+    if (std::abs(value) > 1e-6f) return true;
+  }
+  return false;
+}
+
+struct GlobalSpeakerTrack {
+  int32_t speaker_id = 0;
+  std::vector<float> centroid;
+  int32_t observation_count = 0;
+};
+
+struct LocalSpeakerAssignment {
+  int32_t global_speaker = -1;
+  float last_end_sec = 0.0f;
+};
+
+struct SpeakerObservation {
+  int32_t observation_id = 0;
+  float first_start_sec = 0.0f;
+  std::vector<float> embedding;
+};
+
+std::map<int32_t, int32_t> cluster_speaker_observations(
+    const std::vector<SpeakerObservation>& observations,
+    const std::set<std::pair<int32_t, int32_t>>& cannot_link_observations) {
+  std::map<int32_t, int32_t> observation_to_final;
+  if (observations.empty()) return observation_to_final;
+
+  std::vector<std::vector<std::size_t>> clusters;
+  clusters.reserve(observations.size());
+  for (std::size_t i = 0; i < observations.size(); ++i) {
+    clusters.push_back({i});
+  }
+
+  auto clusters_can_merge = [&](const std::vector<std::size_t>& a,
+                                const std::vector<std::size_t>& b) {
+    for (std::size_t ai : a) {
+      for (std::size_t bi : b) {
+        const auto cannot_link = std::minmax(observations[ai].observation_id,
+                                             observations[bi].observation_id);
+        if (cannot_link_observations.find(cannot_link) !=
+            cannot_link_observations.end()) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  auto average_similarity = [&](const std::vector<std::size_t>& a,
+                                const std::vector<std::size_t>& b) {
+    if (!clusters_can_merge(a, b)) return -2.0f;
+    float total = 0.0f;
+    std::size_t count = 0;
+    for (std::size_t ai : a) {
+      if (!has_embedding_signal(observations[ai].embedding)) continue;
+      for (std::size_t bi : b) {
+        if (!has_embedding_signal(observations[bi].embedding)) continue;
+        total += cosine_similarity(observations[ai].embedding,
+                                   observations[bi].embedding);
+        ++count;
+      }
+    }
+    return count == 0 ? -2.0f : total / static_cast<float>(count);
+  };
+
+  struct MergeStep {
+    std::vector<std::vector<std::size_t>> clusters_after;
+    float similarity = -2.0f;
+  };
+  std::vector<MergeStep> merge_steps;
+
+  while (clusters.size() > 1) {
+    float best_similarity = -2.0f;
+    std::size_t best_a = 0;
+    std::size_t best_b = 0;
+    for (std::size_t i = 0; i < clusters.size(); ++i) {
+      for (std::size_t j = i + 1; j < clusters.size(); ++j) {
+        const float similarity = average_similarity(clusters[i], clusters[j]);
+        if (similarity > best_similarity) {
+          best_similarity = similarity;
+          best_a = i;
+          best_b = j;
+        }
+      }
+    }
+    if (best_similarity < kGlobalSpeakerObservationFloorSimilarity) break;
+
+    clusters[best_a].insert(clusters[best_a].end(),
+                            clusters[best_b].begin(),
+                            clusters[best_b].end());
+    clusters.erase(clusters.begin() + static_cast<std::ptrdiff_t>(best_b));
+    merge_steps.push_back({clusters, best_similarity});
+  }
+
+  if (merge_steps.size() > 1) {
+    float largest_gap = 0.0f;
+    std::size_t selected_step = merge_steps.size() - 1;
+    std::vector<std::pair<float, std::size_t>> gap_candidates;
+    for (std::size_t i = 0; i + 1 < merge_steps.size(); ++i) {
+      const float gap = merge_steps[i].similarity - merge_steps[i + 1].similarity;
+      gap_candidates.push_back({gap, i});
+      if (gap > largest_gap) {
+        largest_gap = gap;
+        selected_step = i;
+      }
+    }
+    std::sort(gap_candidates.begin(), gap_candidates.end(),
+              [](const auto& a, const auto& b) {
+                return a.first > b.first;
+              });
+    std::string top_gaps;
+    const std::size_t gap_count = std::min<std::size_t>(gap_candidates.size(), 8);
+    for (std::size_t i = 0; i < gap_count; ++i) {
+      if (i > 0) top_gaps += ";";
+      const std::size_t step = gap_candidates[i].second;
+      top_gaps += "gap=" + std::to_string(gap_candidates[i].first) +
+                  ",clusters=" +
+                  std::to_string(merge_steps[step].clusters_after.size()) +
+                  ",sim=" + std::to_string(merge_steps[step].similarity);
+    }
+    const bool gap_cut_applied = largest_gap >= kGlobalSpeakerObservationMinGap;
+    svp::core::trace_memory_event("diarization.global_reconciliation.gaps", {
+        {"observation_count", std::to_string(observations.size())},
+        {"selected_gap", std::to_string(largest_gap)},
+        {"selected_clusters", std::to_string(merge_steps[selected_step].clusters_after.size())},
+        {"floor_clusters", std::to_string(clusters.size())},
+        {"gap_cut_applied", gap_cut_applied ? "true" : "false"},
+        {"top_gaps", top_gaps}
+    });
+    if (gap_cut_applied) {
+      clusters = merge_steps[selected_step].clusters_after;
+    }
+  }
+
+  std::sort(clusters.begin(), clusters.end(),
+            [&](const std::vector<std::size_t>& a,
+                const std::vector<std::size_t>& b) {
+              float a_start = observations[a.front()].first_start_sec;
+              float b_start = observations[b.front()].first_start_sec;
+              for (std::size_t idx : a) {
+                a_start = std::min(a_start, observations[idx].first_start_sec);
+              }
+              for (std::size_t idx : b) {
+                b_start = std::min(b_start, observations[idx].first_start_sec);
+              }
+              return a_start < b_start;
+            });
+
+  for (std::size_t final_id = 0; final_id < clusters.size(); ++final_id) {
+    for (std::size_t obs_index : clusters[final_id]) {
+      observation_to_final[observations[obs_index].observation_id] =
+          static_cast<int32_t>(final_id);
+    }
+  }
+  return observation_to_final;
+}
+
+struct SpeakerTrackStats {
+  std::int64_t speech_us = 0;
+  float first_start_sec = 0.0f;
+  float last_end_sec = 0.0f;
+  bool seen = false;
+};
+
+void stitch_dominant_non_overlapping_tracks(
+    std::vector<SherpaDiarizationSegment>& segments,
+    int32_t& final_speaker_count,
+    std::size_t observation_count) {
+  if (final_speaker_count < kDominantStitchMinFinalSpeakers ||
+      observation_count < kDominantStitchMinObservations ||
+      segments.empty()) {
+    return;
+  }
+
+  std::vector<SpeakerTrackStats> stats(static_cast<std::size_t>(final_speaker_count));
+  std::int64_t total_speech_us = 0;
+  for (const auto& seg : segments) {
+    if (seg.speaker_id < 0 || seg.speaker_id >= final_speaker_count) continue;
+    auto& st = stats[static_cast<std::size_t>(seg.speaker_id)];
+    const std::int64_t dur_us = static_cast<std::int64_t>(
+        std::max(0.0f, seg.end_sec - seg.start_sec) * 1000000.0f);
+    st.speech_us += dur_us;
+    total_speech_us += dur_us;
+    if (!st.seen) {
+      st.first_start_sec = seg.start_sec;
+      st.last_end_sec = seg.end_sec;
+      st.seen = true;
+    } else {
+      st.first_start_sec = std::min(st.first_start_sec, seg.start_sec);
+      st.last_end_sec = std::max(st.last_end_sec, seg.end_sec);
+    }
+  }
+  if (total_speech_us <= 0) return;
+
+  std::vector<int32_t> speakers;
+  for (int32_t sid = 0; sid < final_speaker_count; ++sid) {
+    if (stats[static_cast<std::size_t>(sid)].seen) speakers.push_back(sid);
+  }
+  std::sort(speakers.begin(), speakers.end(),
+            [&](int32_t a, int32_t b) {
+              return stats[static_cast<std::size_t>(a)].speech_us >
+                     stats[static_cast<std::size_t>(b)].speech_us;
+            });
+  if (speakers.size() < 2) return;
+
+  const int32_t a = speakers[0];
+  const int32_t b = speakers[1];
+  const auto& sa = stats[static_cast<std::size_t>(a)];
+  const auto& sb = stats[static_cast<std::size_t>(b)];
+  const float a_share =
+      static_cast<float>(sa.speech_us) / static_cast<float>(total_speech_us);
+  const float b_share =
+      static_cast<float>(sb.speech_us) / static_cast<float>(total_speech_us);
+  const float combined_share = a_share + b_share;
+  if (a_share < kDominantStitchMinTrackSpeechShare ||
+      b_share < kDominantStitchMinTrackSpeechShare ||
+      combined_share < kDominantStitchCombinedSpeechShare) {
+    return;
+  }
+
+  std::int64_t overlap_us = 0;
+  for (const auto& left : segments) {
+    if (left.speaker_id != a) continue;
+    for (const auto& right : segments) {
+      if (right.speaker_id != b) continue;
+      const float overlap_sec =
+          std::min(left.end_sec, right.end_sec) -
+          std::max(left.start_sec, right.start_sec);
+      if (overlap_sec > 0.0f) {
+        overlap_us += static_cast<std::int64_t>(overlap_sec * 1000000.0f);
+      }
+    }
+  }
+  const float overlap_share =
+      static_cast<float>(overlap_us) /
+      static_cast<float>(std::min(sa.speech_us, sb.speech_us));
+  if (overlap_share > kDominantStitchMaxOverlapShare) return;
+
+  const int32_t keep = std::min(a, b);
+  const int32_t merge = std::max(a, b);
+  for (auto& seg : segments) {
+    if (seg.speaker_id == merge) {
+      seg.speaker_id = keep;
+    } else if (seg.speaker_id > merge) {
+      --seg.speaker_id;
+    }
+  }
+  --final_speaker_count;
+  svp::core::trace_memory_event("diarization.dominant_track_stitch.merge", {
+      {"keep_speaker", std::to_string(keep)},
+      {"merged_speaker", std::to_string(merge)},
+      {"combined_share", std::to_string(combined_share)},
+      {"overlap_share", std::to_string(overlap_share)},
+      {"final_speaker_count", std::to_string(final_speaker_count)}
+  });
+}
+
+int32_t assign_global_speaker(
+    std::vector<GlobalSpeakerTrack>& tracks,
+    const std::vector<float>& embedding) {
+  if (!has_embedding_signal(embedding)) {
+    const int32_t speaker_id = static_cast<int32_t>(tracks.size());
+    svp::core::trace_memory_event("diarization.global_speaker.new_no_embedding", {
+        {"speaker_id", std::to_string(speaker_id)},
+        {"existing_track_count", std::to_string(tracks.size())}
+    });
+    tracks.push_back({speaker_id, embedding, 0});
+    return speaker_id;
+  }
+
+  float best_similarity = -2.0f;
+  int32_t best_speaker = -1;
+  for (const auto& track : tracks) {
+    if (track.observation_count == 0 || track.centroid.empty()) continue;
+    const float similarity = cosine_similarity(track.centroid, embedding);
+    if (similarity > best_similarity) {
+      best_similarity = similarity;
+      best_speaker = track.speaker_id;
+    }
+  }
+
+  if (best_speaker >= 0 &&
+      best_similarity >= kSameSpeakerSimilarityThreshold) {
+    svp::core::trace_memory_event("diarization.global_speaker.merge", {
+        {"best_speaker", std::to_string(best_speaker)},
+        {"best_similarity", std::to_string(best_similarity)},
+        {"threshold", std::to_string(kSameSpeakerSimilarityThreshold)},
+        {"track_count", std::to_string(tracks.size())}
+    });
+    auto& track = tracks[static_cast<std::size_t>(best_speaker)];
+    const float prior =
+        static_cast<float>(std::max(track.observation_count, 1));
+    for (std::size_t i = 0; i < track.centroid.size() && i < embedding.size(); ++i) {
+      track.centroid[i] =
+          (track.centroid[i] * prior + embedding[i]) / (prior + 1.0f);
+    }
+    normalize_embedding(track.centroid);
+    ++track.observation_count;
+    return best_speaker;
+  }
+
+  const int32_t speaker_id = static_cast<int32_t>(tracks.size());
+  svp::core::trace_memory_event("diarization.global_speaker.new", {
+      {"speaker_id", std::to_string(speaker_id)},
+      {"best_speaker", std::to_string(best_speaker)},
+      {"best_similarity", std::to_string(best_similarity)},
+      {"threshold", std::to_string(kSameSpeakerSimilarityThreshold)},
+      {"existing_track_count", std::to_string(tracks.size())}
+  });
+  tracks.push_back({speaker_id, embedding, 1});
+  return speaker_id;
 }
 
 }  // namespace
@@ -586,15 +1090,15 @@ SherpaDiarizationResult run_sherpa_diarization(
     return result;
   }
 
-  std::vector<float> samples;
+  PcmS16MonoWavInfo wav_info;
   try {
-    samples = read_pcm_s16le_mono_wav_samples(wav_path);
+    wav_info = read_pcm_s16le_mono_wav_info(wav_path);
   } catch (const std::exception& e) {
     result.blockers.push_back(std::string("failed to read WAV: ") + e.what());
     return result;
   }
 
-  if (samples.empty()) {
+  if (wav_info.sample_count == 0) {
     result.blockers.push_back("WAV has no audio samples");
     return result;
   }
@@ -613,87 +1117,14 @@ SherpaDiarizationResult run_sherpa_diarization(
   config.embedding.debug = 0;
   config.embedding.provider = "cpu";
   config.clustering.num_clusters = -1;
-  config.clustering.threshold = 0.5f;  // permissive — over-segment intentionally
+  config.clustering.threshold = kSherpaLocalClusteringThreshold;
   config.min_duration_on = 0.3f;
   config.min_duration_off = 0.5f;
 
-  const void* sd = api.create(&config);
-  if (!sd) {
-    result.blockers.push_back("sherpa-onnx failed to create diarization pipeline (config validation failed)");
-    return result;
-  }
-
-  std::vector<SherpaDiarizationSegment> preliminary_segments;
-  int32_t preliminary_speakers = 0;
-  int32_t speaker_id_base = 0;
-
-  for (std::size_t sample_offset = 0; sample_offset < samples.size();
-       sample_offset += static_cast<std::size_t>(kMaxDiarizationChunkSamples)) {
-    const std::size_t remaining = samples.size() - sample_offset;
-    const int32_t chunk_samples = static_cast<int32_t>(
-        std::min<std::size_t>(remaining, kMaxDiarizationChunkSamples));
-
-    const void* diar_result =
-        api.process(sd, samples.data() + sample_offset, chunk_samples);
-    if (!diar_result) {
-      result.blockers.push_back("sherpa-onnx diarization process returned null");
-      api.destroy(sd);
-      return result;
-    }
-
-    const int32_t chunk_speakers = api.get_num_speakers(diar_result);
-    const int32_t num_segments = api.get_num_segments(diar_result);
-    const float chunk_start_sec =
-        static_cast<float>(sample_offset) / static_cast<float>(kDiarizationSampleRate);
-
-    const SherpaOnnxOfflineSpeakerDiarizationSegment* seg_array =
-        reinterpret_cast<const SherpaOnnxOfflineSpeakerDiarizationSegment*>(
-            api.sort_by_start_time(diar_result));
-
-    int32_t max_chunk_speaker = -1;
-    for (int32_t i = 0; i < num_segments; ++i) {
-      SherpaDiarizationSegment seg;
-      seg.start_sec = chunk_start_sec + seg_array[i].start;
-      seg.end_sec = chunk_start_sec + seg_array[i].end;
-      seg.speaker_id = speaker_id_base + seg_array[i].speaker;
-      max_chunk_speaker = std::max(max_chunk_speaker, seg_array[i].speaker);
-      preliminary_segments.push_back(seg);
-    }
-
-    api.destroy_segment(seg_array);
-    api.destroy_result(diar_result);
-
-    speaker_id_base += std::max(chunk_speakers, max_chunk_speaker + 1);
-  }
-
-  api.destroy(sd);
-
-  preliminary_speakers = speaker_id_base;
-  result.preliminary_cluster_count = preliminary_speakers;
-  result.preliminary_segments = preliminary_segments;
-
-  if (preliminary_segments.empty()) {
-    result.ran = true;
-    result.segments.clear();
-    result.final_speaker_count = 0;
-    result.reconciliation_method = "no_speech_detected";
-    return result;
-  }
-
-  // ---- Stage 2: Embedding-based cluster reconciliation ----
   bool embedding_api_available = (api.emb_create && api.emb_destroy && api.emb_dim &&
                                    api.emb_create_stream && api.stream_accept &&
                                    api.stream_input_finished && api.emb_is_ready &&
                                    api.emb_compute && api.emb_destroy_vec && api.stream_destroy);
-
-  if (!embedding_api_available) {
-    result.segments = preliminary_segments;
-    result.final_speaker_count = preliminary_speakers;
-    result.reconciliation_method = "embedding_api_unavailable; preliminary clusters used without reconciliation";
-    result.blockers.push_back("sherpa-onnx embedding extractor C API not available");
-    result.ran = true;
-    return result;
-  }
 
   SherpaOnnxSpeakerEmbeddingExtractorConfig emb_config;
   std::memset(&emb_config, 0, sizeof(emb_config));
@@ -702,66 +1133,228 @@ SherpaDiarizationResult run_sherpa_diarization(
   emb_config.debug = 0;
   emb_config.provider = "cpu";
 
-  const void* extractor = api.emb_create(&emb_config);
-  if (!extractor) {
-    result.segments = preliminary_segments;
-    result.final_speaker_count = preliminary_speakers;
-    result.reconciliation_method = "embedding_extractor_creation_failed; preliminary clusters used";
-    result.blockers.push_back("failed to create speaker embedding extractor");
+  if (!embedding_api_available) {
+    result.blockers.push_back(
+        "sherpa-onnx embedding extractor C API not available; using window-local speakers");
+  }
+
+  const void* extractor = nullptr;
+  int32_t embedding_dim = 0;
+  if (embedding_api_available) {
+    extractor = api.emb_create(&emb_config);
+    if (extractor) {
+      embedding_dim = api.emb_dim(extractor);
+    } else {
+      result.blockers.push_back(
+          "sherpa-onnx failed to create speaker embedding extractor; using window-local speakers");
+    }
+  }
+
+  std::vector<SherpaDiarizationSegment> preliminary_segments;
+  std::vector<SpeakerObservation> speaker_observations;
+  std::set<std::pair<int32_t, int32_t>> cannot_link_observations;
+  int32_t preliminary_speakers = 0;
+
+  const auto windows = build_diarization_windows(wav_info.sample_count);
+  for (std::size_t wi = 0; wi < windows.size(); ++wi) {
+    const auto& win = windows[wi];
+    const float accepted_start_sec =
+        static_cast<float>(win.accepted_start) /
+        static_cast<float>(kDiarizationSampleRate);
+    const float accepted_end_sec =
+        static_cast<float>(win.accepted_end) /
+        static_cast<float>(kDiarizationSampleRate);
+
+    svp::core::trace_memory_event("diarization.window.start", {
+        {"window_index", std::to_string(wi)},
+        {"window_count", std::to_string(windows.size())},
+        {"accepted_start", std::to_string(win.accepted_start)},
+        {"accepted_end", std::to_string(win.accepted_end)},
+        {"process_start", std::to_string(win.process_start)},
+        {"process_end", std::to_string(win.process_end)},
+        {"speaker_observation_count", std::to_string(speaker_observations.size())}
+    });
+
+    const void* sd = api.create(&config);
+    if (!sd) {
+      result.blockers.push_back(
+          "sherpa-onnx failed to create diarization pipeline "
+          "(config validation failed) at window " + std::to_string(wi));
+          return result;
+    }
+
+    std::vector<float> window_samples;
+    try {
+      window_samples =
+          read_pcm_s16le_mono_wav_range(wav_info, win.process_start, win.process_end);
+    } catch (const std::exception& e) {
+      result.blockers.push_back(
+          std::string("failed to read WAV window: ") + e.what());
+      api.destroy(sd);
+      return result;
+    }
+    if (window_samples.empty()) {
+      api.destroy(sd);
+      continue;
+    }
+
+    int32_t window_speaker_groups = 0;
+    std::map<int32_t, LocalSpeakerAssignment> window_local_to_global;
+    for (std::size_t sample_offset = 0;
+         sample_offset < window_samples.size();
+         sample_offset += static_cast<std::size_t>(kMaxDiarizationChunkSamples)) {
+      const std::size_t remaining = window_samples.size() - sample_offset;
+      const int32_t chunk_samples = static_cast<int32_t>(
+          std::min<std::size_t>(remaining,
+              static_cast<std::size_t>(kMaxDiarizationChunkSamples)));
+
+      const void* diar_result =
+          api.process(sd, window_samples.data() + sample_offset, chunk_samples);
+      if (!diar_result) {
+        result.blockers.push_back(
+            "sherpa-onnx diarization process returned null at window " +
+            std::to_string(wi));
+        api.destroy(sd);
+        return result;
+      }
+
+      std::map<int32_t, std::vector<SherpaDiarizationSegment>> chunk_speakers;
+      const int32_t num_segments = api.get_num_segments(diar_result);
+      const float chunk_start_sec =
+          static_cast<float>(win.process_start + sample_offset) /
+          static_cast<float>(kDiarizationSampleRate);
+
+      const SherpaOnnxOfflineSpeakerDiarizationSegment* seg_array =
+          reinterpret_cast<const SherpaOnnxOfflineSpeakerDiarizationSegment*>(
+              api.sort_by_start_time(diar_result));
+
+      for (int32_t i = 0; i < num_segments; ++i) {
+        SherpaDiarizationSegment seg;
+        seg.start_sec = chunk_start_sec + seg_array[i].start;
+        seg.end_sec = chunk_start_sec + seg_array[i].end;
+        seg.speaker_id = seg_array[i].speaker;
+
+        if (clip_segment_to_range(seg, accepted_start_sec,
+                                  accepted_end_sec)) {
+          chunk_speakers[seg.speaker_id].push_back(seg);
+        }
+      }
+
+      api.destroy_segment(seg_array);
+      api.destroy_result(diar_result);
+
+      std::vector<int32_t> chunk_observation_ids;
+      for (const auto& [local_speaker, segments] : chunk_speakers) {
+        const float first_start_sec = segments.front().start_sec;
+        const float last_end_sec = segments.back().end_sec;
+        int32_t global_speaker = -1;
+        auto known = window_local_to_global.find(local_speaker);
+        if (known != window_local_to_global.end() &&
+            first_start_sec - known->second.last_end_sec <=
+                kLocalSpeakerAssignmentMaxGapSec) {
+          global_speaker = known->second.global_speaker;
+          known->second.last_end_sec =
+              std::max(known->second.last_end_sec, last_end_sec);
+        } else {
+          global_speaker = static_cast<int32_t>(speaker_observations.size());
+          std::vector<float> embedding;
+          if (extractor && embedding_dim > 0) {
+            embedding = compute_bounded_speaker_embedding(
+                api, extractor, embedding_dim, window_samples,
+                win.process_start, segments);
+          }
+          speaker_observations.push_back(
+              {global_speaker, first_start_sec, std::move(embedding)});
+          window_local_to_global[local_speaker] =
+              {global_speaker, last_end_sec};
+          ++window_speaker_groups;
+        }
+        chunk_observation_ids.push_back(global_speaker);
+
+        for (SherpaDiarizationSegment seg : segments) {
+          seg.speaker_id = global_speaker;
+          preliminary_segments.push_back(seg);
+        }
+
+        svp::core::check_memory_limit("diarization.window.speaker", {
+            {"window_index", std::to_string(wi)},
+            {"local_speaker", std::to_string(local_speaker)},
+            {"global_speaker", std::to_string(global_speaker)}
+        });
+      }
+      for (std::size_t i = 0; i < chunk_observation_ids.size(); ++i) {
+        for (std::size_t j = i + 1; j < chunk_observation_ids.size(); ++j) {
+          cannot_link_observations.insert(
+              std::minmax(chunk_observation_ids[i], chunk_observation_ids[j]));
+        }
+      }
+    }
+    api.destroy(sd);
+
+    svp::core::check_memory_limit("diarization.window.process_done", {
+        {"window_index", std::to_string(wi)},
+        {"window_speakers", std::to_string(window_speaker_groups)}
+    });
+
+    preliminary_speakers += window_speaker_groups;
+
+    svp::core::trace_memory_event("diarization.window.end", {
+        {"window_index", std::to_string(wi)},
+        {"window_speakers", std::to_string(window_speaker_groups)},
+        {"speaker_observation_count", std::to_string(speaker_observations.size())},
+        {"preliminary_segments", std::to_string(preliminary_segments.size())}
+    });
+  }
+
+  if (extractor) {
+    api.emb_destroy(extractor);
+  }
+
+  std::sort(preliminary_segments.begin(), preliminary_segments.end(),
+            [](const SherpaDiarizationSegment& a,
+               const SherpaDiarizationSegment& b) {
+              if (a.start_sec != b.start_sec) return a.start_sec < b.start_sec;
+              if (a.end_sec != b.end_sec) return a.end_sec < b.end_sec;
+              return a.speaker_id < b.speaker_id;
+            });
+
+  result.preliminary_cluster_count = preliminary_speakers;
+  result.preliminary_segments = preliminary_segments;
+
+  if (preliminary_segments.empty()) {
     result.ran = true;
+    result.segments.clear();
+    result.final_speaker_count = 0;
+    result.reconciliation_method =
+        "windowed_sherpa_5min_overlap_2s; no_speech_detected";
     return result;
   }
 
-  const int32_t embedding_dim = api.emb_dim(extractor);
-
-  std::map<int32_t, std::vector<SherpaDiarizationSegment>> cluster_segments;
-  for (const auto& seg : preliminary_segments) {
-    cluster_segments[seg.speaker_id].push_back(seg);
-  }
-
-  std::vector<std::vector<float>> centroids;
-  std::vector<int32_t> cluster_ids;
-  for (const auto& [cluster_id, segs] : cluster_segments) {
-    std::vector<float> centroid = compute_cluster_embedding(api, extractor, embedding_dim, samples, segs);
-    centroids.push_back(centroid);
-    cluster_ids.push_back(cluster_id);
-  }
-
-  api.emb_destroy(extractor);
-
-  int32_t num_clusters = static_cast<int32_t>(centroids.size());
-
-  // Build pairwise similarity matrix
-  result.pairwise_similarity_matrix.assign(num_clusters, std::vector<float>(num_clusters, 0.0f));
-  for (int32_t i = 0; i < num_clusters; ++i) {
-    result.pairwise_similarity_matrix[i][i] = 1.0f;
-    for (int32_t j = i + 1; j < num_clusters; ++j) {
-      float sim = cosine_similarity(centroids[i], centroids[j]);
-      result.pairwise_similarity_matrix[i][j] = sim;
-      result.pairwise_similarity_matrix[j][i] = sim;
+  const std::map<int32_t, int32_t> observation_to_final =
+      cluster_speaker_observations(speaker_observations,
+                                   cannot_link_observations);
+  result.segments.reserve(preliminary_segments.size());
+  for (SherpaDiarizationSegment seg : preliminary_segments) {
+    auto mapped = observation_to_final.find(seg.speaker_id);
+    if (mapped != observation_to_final.end()) {
+      seg.speaker_id = mapped->second;
     }
+    result.segments.push_back(seg);
   }
-
-  // Reconcile clusters using adaptive largest-gap separation
-  ReconciliationResult recon = reconcile_clusters(result.pairwise_similarity_matrix, cluster_ids);
-  result.merge_decisions = recon.merge_decisions;
-  result.reconciliation_method = recon.method_description;
-
-  // Remap segments
-  for (const auto& seg : preliminary_segments) {
-    SherpaDiarizationSegment final_seg = seg;
-    auto it = recon.cluster_to_final.find(seg.speaker_id);
-    if (it != recon.cluster_to_final.end()) {
-      final_seg.speaker_id = it->second;
-    }
-    result.segments.push_back(final_seg);
+  std::set<int32_t> final_speakers;
+  for (const auto& [observation_id, final_speaker] : observation_to_final) {
+    (void)observation_id;
+    final_speakers.insert(final_speaker);
   }
-
-  result.final_speaker_count = recon.final_speaker_count;
-
-  result.cluster_centroids = centroids;
-  result.cluster_ids_for_centroids = cluster_ids;
-  result.cluster_to_final = recon.cluster_to_final;
+  result.final_speaker_count =
+      static_cast<int32_t>(final_speakers.empty()
+                               ? speaker_observations.size()
+                               : final_speakers.size());
+  stitch_dominant_non_overlapping_tracks(
+      result.segments, result.final_speaker_count, speaker_observations.size());
+  result.reconciliation_method =
+      "windowed_sherpa_5min_5s_feed_overlap_2s; "
+      "bounded_10s_speaker_observations_global_gap_or_floor_reconciliation";
 
   result.ran = true;
   return result;
