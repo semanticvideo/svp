@@ -52,6 +52,11 @@ if(BUILD_TESTING)
 
   target_compile_features(svp-audio-tests PRIVATE cxx_std_20)
 
+  target_compile_definitions(svp-audio-tests
+    PRIVATE
+      SVP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
+  )
+
   target_link_libraries(svp-audio-tests
     PRIVATE
       svp::audio
