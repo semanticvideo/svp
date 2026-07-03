@@ -17,6 +17,8 @@ struct OnnxSessionOptions {
   std::string execution_provider = "cpu";
   int intra_op_num_threads = 0;
   int inter_op_num_threads = 0;
+  int graph_optimization_level = -1;
+  std::string execution_mode;
 };
 
 struct OnnxTensorInfo {

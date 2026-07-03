@@ -42,7 +42,12 @@ if(SVP_MODEL_ONNX_RUNTIME_AVAILABLE)
   find_path(SVP_COREML_PROVIDER_INCLUDE_DIR
     NAMES coreml_provider_factory.h
     HINTS ${SVP_ONNXRUNTIME_INCLUDE_DIR}
-    PATH_SUFFIXES core/providers/coreml onnxruntime/core/providers/coreml)
+    PATH_SUFFIXES . onnxruntime core/providers/coreml onnxruntime/core/providers/coreml)
+
+  find_library(SVP_ONNXRUNTIME_COREML_PROVIDER_LIBRARY
+    NAMES onnxruntime_providers_coreml)
+  find_library(SVP_COREML_PROTO_LIBRARY
+    NAMES coreml_proto)
 endif()
 
 add_library(svp-models
@@ -74,6 +79,12 @@ if(SVP_MODEL_ONNX_RUNTIME_AVAILABLE)
   if(SVP_COREML_PROVIDER_INCLUDE_DIR)
     target_compile_definitions(svp-models PRIVATE SVP_COREML_AVAILABLE=1)
     target_include_directories(svp-models PRIVATE ${SVP_COREML_PROVIDER_INCLUDE_DIR})
+    if(SVP_ONNXRUNTIME_COREML_PROVIDER_LIBRARY)
+      target_link_libraries(svp-models PRIVATE ${SVP_ONNXRUNTIME_COREML_PROVIDER_LIBRARY})
+    endif()
+    if(SVP_COREML_PROTO_LIBRARY)
+      target_link_libraries(svp-models PRIVATE ${SVP_COREML_PROTO_LIBRARY})
+    endif()
   endif()
 
   # Keep ONNX headers and runtime library from the same CMake package. Sherpa's

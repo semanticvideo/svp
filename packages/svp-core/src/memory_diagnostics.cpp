@@ -12,6 +12,7 @@
 
 #if defined(__APPLE__)
 #include <mach/mach.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #endif
 
@@ -25,6 +26,8 @@ bool g_configured = false;
 bool g_enabled = false;
 std::uint64_t g_peak_resident_bytes = 0;
 std::uint64_t g_peak_footprint_bytes = 0;
+const std::chrono::steady_clock::time_point g_start_time =
+    std::chrono::steady_clock::now();
 
 std::string json_escape(std::string_view value) {
   std::string out;
@@ -80,6 +83,12 @@ std::string bytes_to_string(std::uint64_t value) {
   return std::to_string(value);
 }
 
+std::uint64_t elapsed_ms_since_start() {
+  const auto elapsed = std::chrono::steady_clock::now() - g_start_time;
+  return static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
+}
+
 void write_event_locked(
     std::string_view scope,
     const std::vector<std::pair<std::string, std::string>>& fields,
@@ -102,11 +111,15 @@ void write_event_locked(
   out << ",\"thread\":\"" << json_escape(
       std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id()))) << "\"";
   out << ",\"scope\":\"" << json_escape(scope) << "\"";
+  out << ",\"elapsed_ms\":" << elapsed_ms_since_start();
   out << ",\"rss_bytes\":" << snapshot.resident_bytes;
   out << ",\"vm_bytes\":" << snapshot.virtual_bytes;
   out << ",\"footprint_bytes\":" << snapshot.physical_footprint_bytes;
   out << ",\"peak_rss_bytes\":" << g_peak_resident_bytes;
   out << ",\"peak_footprint_bytes\":" << g_peak_footprint_bytes;
+  out << ",\"user_cpu_ms\":" << snapshot.user_cpu_ms;
+  out << ",\"system_cpu_ms\":" << snapshot.system_cpu_ms;
+  out << ",\"total_cpu_ms\":" << snapshot.total_cpu_ms;
   out << ",\"limit_bytes\":" << g_limit_bytes;
   out << ",\"limit_exceeded\":" << (limit_exceeded ? "true" : "false");
   for (const auto& [key, value] : fields) {
@@ -148,7 +161,20 @@ MemorySnapshot current_memory_snapshot() {
                 reinterpret_cast<task_info_t>(&vm),
                 &vm_count) == KERN_SUCCESS) {
     snapshot.physical_footprint_bytes =
-        static_cast<std::uint64_t>(vm.phys_footprint);
+      static_cast<std::uint64_t>(vm.phys_footprint);
+  }
+
+  rusage usage{};
+  if (getrusage(RUSAGE_SELF, &usage) == 0) {
+    const auto user_ms =
+        static_cast<std::uint64_t>(usage.ru_utime.tv_sec) * 1000ull +
+        static_cast<std::uint64_t>(usage.ru_utime.tv_usec) / 1000ull;
+    const auto system_ms =
+        static_cast<std::uint64_t>(usage.ru_stime.tv_sec) * 1000ull +
+        static_cast<std::uint64_t>(usage.ru_stime.tv_usec) / 1000ull;
+    snapshot.user_cpu_ms = user_ms;
+    snapshot.system_cpu_ms = system_ms;
+    snapshot.total_cpu_ms = user_ms + system_ms;
   }
 #endif
   return snapshot;

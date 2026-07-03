@@ -27,6 +27,12 @@ struct PpOcrFrameResult {
   int frame_width = 0;
   int frame_height = 0;
   std::vector<PpOcrDetection> detections;
+  double preprocess_detection_ms = 0.0;
+  double detection_inference_ms = 0.0;
+  double detection_postprocess_ms = 0.0;
+  double recognition_total_ms = 0.0;
+  double frame_total_ms = 0.0;
+  std::size_t recognition_attempt_count = 0;
 };
 
 struct PpOcrModelInfo {
@@ -53,6 +59,12 @@ struct PpOcrOptions {
   int rec_image_height = 48;
   int rec_max_width = 3200;
   double min_text_score = 0.0;
+  int intra_op_num_threads = 0;
+  int inter_op_num_threads = 0;
+  int graph_optimization_level = -1;
+  std::string execution_mode;
+  int recognition_parallel_workers = 1;
+  int recognition_parallel_min_boxes = 16;
 };
 
 struct PpOcrSession {

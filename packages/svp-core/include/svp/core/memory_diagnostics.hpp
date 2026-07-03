@@ -14,6 +14,9 @@ struct MemorySnapshot {
   std::uint64_t resident_bytes = 0;
   std::uint64_t virtual_bytes = 0;
   std::uint64_t physical_footprint_bytes = 0;
+  std::uint64_t user_cpu_ms = 0;
+  std::uint64_t system_cpu_ms = 0;
+  std::uint64_t total_cpu_ms = 0;
 };
 
 MemorySnapshot current_memory_snapshot();
