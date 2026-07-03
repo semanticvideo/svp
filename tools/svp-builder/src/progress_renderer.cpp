@@ -21,6 +21,7 @@ bool no_color_env() {
 }
 
 constexpr int kBarWidth = 32;
+constexpr int kFallbackTerminalWidth = 80;
 
 std::string format_progress_bar(double fraction) {
   const int filled = static_cast<int>(fraction * kBarWidth);
@@ -151,11 +152,7 @@ class TtyProgressSink : public BuildProgressSink {
     } else if (event.kind == ProgressEventKind::stage_failed) {
       write_failed_row(label, event);
     } else if (event.kind == ProgressEventKind::warning) {
-      stream_ << '\r' << clear_line() << '\r';
-      if (use_color_) stream_ << "\033[33m";
-      stream_ << "  ! " << label << ": " << event.message;
-      if (use_color_) stream_ << "\033[0m";
-      stream_ << '\n';
+      write_warning_row(label, event);
     } else if (event.kind == ProgressEventKind::artifact_written) {
       return;
     }
@@ -164,53 +161,95 @@ class TtyProgressSink : public BuildProgressSink {
  private:
   static std::string clear_line() { return "\033[2K"; }
 
-  void write_started_row(std::string_view label, const ProgressEvent& event) {
-    stream_ << '\r' << clear_line() << '\r';
-    stream_ << "  " << label << "  [working]";
-    if (!event.message.empty()) stream_ << "  " << event.message;
+  static int terminal_width() {
+    winsize size{};
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) {
+      return static_cast<int>(size.ws_col);
+    }
+    return kFallbackTerminalWidth;
+  }
+
+  static std::size_t rendered_rows(const std::string& line) {
+    const int width = std::max(1, terminal_width());
+    if (line.empty()) return 1;
+    return (line.size() - 1) / static_cast<std::size_t>(width) + 1;
+  }
+
+  void clear_previous_rows() {
+    stream_ << '\r' << clear_line();
+    for (std::size_t row = 1; row < rendered_rows_; ++row) {
+      stream_ << "\033[1A" << '\r' << clear_line();
+    }
+    stream_ << '\r';
+  }
+
+  void write_row(const std::string& line, bool newline) {
+    clear_previous_rows();
+    stream_ << line;
+    rendered_rows_ = rendered_rows(line);
+    if (newline) {
+      stream_ << '\n';
+      rendered_rows_ = 0;
+    }
     stream_.flush();
+  }
+
+  void write_started_row(std::string_view label, const ProgressEvent& event) {
+    std::ostringstream row;
+    row << "  " << label << "  [working]";
+    if (!event.message.empty()) row << "  " << event.message;
+    write_row(row.str(), false);
   }
 
   void write_progress_row(std::string_view label, const ProgressEvent& event) {
-    stream_ << '\r' << clear_line() << '\r';
-    stream_ << "  " << label << "  ";
+    std::ostringstream row;
+    row << "  " << label << "  ";
     if (event.fraction) {
-      stream_ << format_progress_bar(*event.fraction) << ' '
-              << format_percent(*event.fraction);
+      row << format_progress_bar(*event.fraction) << ' '
+          << format_percent(*event.fraction);
     } else if (event.current && event.total && *event.total > 0) {
       const double frac =
           static_cast<double>(*event.current) / static_cast<double>(*event.total);
-      stream_ << format_progress_bar(frac) << ' ' << format_percent(frac);
+      row << format_progress_bar(frac) << ' ' << format_percent(frac);
     } else {
-      stream_ << "[working]";
+      row << "[working]";
     }
     if (!event.unit.empty() && event.current && event.total) {
-      stream_ << "  " << *event.current << '/' << *event.total << ' ' << event.unit;
+      row << "  " << *event.current << '/' << *event.total << ' ' << event.unit;
     }
-    if (!event.message.empty()) stream_ << "  " << event.message;
-    stream_.flush();
+    if (!event.message.empty()) row << "  " << event.message;
+    write_row(row.str(), false);
   }
 
   void write_completed_row(std::string_view label, const ProgressEvent& event) {
-    stream_ << '\r' << clear_line() << '\r';
-    if (use_color_) stream_ << "\033[32m";
-    stream_ << "  " << label << "  [################################] 100%";
-    if (use_color_) stream_ << "\033[0m";
-    if (!event.message.empty()) stream_ << "  " << event.message;
-    stream_ << '\n';
+    std::ostringstream row;
+    if (use_color_) row << "\033[32m";
+    row << "  " << label << "  [################################] 100%";
+    if (use_color_) row << "\033[0m";
+    if (!event.message.empty()) row << "  " << event.message;
+    write_row(row.str(), true);
   }
 
   void write_failed_row(std::string_view label, const ProgressEvent& event) {
-    stream_ << '\r' << clear_line() << '\r';
-    if (use_color_) stream_ << "\033[31m";
-    stream_ << "  " << label << "  FAILED";
-    if (use_color_) stream_ << "\033[0m";
-    if (!event.message.empty()) stream_ << "  " << event.message;
-    stream_ << '\n';
+    std::ostringstream row;
+    if (use_color_) row << "\033[31m";
+    row << "  " << label << "  FAILED";
+    if (use_color_) row << "\033[0m";
+    if (!event.message.empty()) row << "  " << event.message;
+    write_row(row.str(), true);
+  }
+
+  void write_warning_row(std::string_view label, const ProgressEvent& event) {
+    std::ostringstream row;
+    if (use_color_) row << "\033[33m";
+    row << "  ! " << label << ": " << event.message;
+    if (use_color_) row << "\033[0m";
+    write_row(row.str(), true);
   }
 
   std::ostream& stream_;
   bool use_color_;
+  std::size_t rendered_rows_ = 0;
 };
 
 }  // namespace

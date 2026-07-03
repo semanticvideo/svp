@@ -311,6 +311,33 @@ void test_tty_sink_stage_progress_has_carriage_return() {
   assert(output.find("frames") != std::string::npos);
 }
 
+void test_tty_sink_clears_wrapped_evidence_crop_progress() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::auto_, oss, true);
+  const std::string long_message =
+      "extracting evidence crops from a deliberately long terminal row that "
+      "must wrap so the TTY renderer proves it clears every physical row";
+
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::ocr_evidence_crops,
+      10,
+      100,
+      "steps",
+      long_message));
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::ocr_evidence_crops,
+      11,
+      100,
+      "steps",
+      long_message));
+
+  const std::string output = oss.str();
+  assert(output.find("\033[1A") != std::string::npos);
+  assert(output.find("OCR Evidence Crops") != std::string::npos);
+  assert(output.find('\n') == std::string::npos);
+}
+
 void test_make_stage_progress_fraction() {
   const auto event = svp::builder::make_stage_progress(
       svp::builder::ProgressStageId::asr, 5, 20, "chunks");
@@ -427,6 +454,7 @@ int main() {
   test_plain_sink_ocr_evidence_crop_stage_progress();
   test_json_sink_ocr_evidence_crop_stage_progress_fields();
   test_tty_sink_stage_progress_has_carriage_return();
+  test_tty_sink_clears_wrapped_evidence_crop_progress();
   test_make_stage_progress_fraction();
   test_make_stage_progress_zero_total();
   test_plain_sink_fraction_only_with_unit_no_crash();
