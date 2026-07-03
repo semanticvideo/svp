@@ -42,7 +42,7 @@ struct BuildPipelineOptions {
   std::filesystem::path staging_dir;
   std::filesystem::path model_cache_dir;
   BuildStage stop_after = BuildStage::media_ingest;
-  std::string ocr_performance_profile = "conservative";
+  std::string ocr_performance_profile = "background";
   std::string sherpa_lib_path;
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;

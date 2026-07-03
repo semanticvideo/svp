@@ -12,6 +12,8 @@
 namespace svp::builder {
 
 int recognition_workers_for_ocr_profile(const std::string& profile) {
+  if (profile == "serial") return 1;
+  if (profile == "background") return 2;
   if (profile == "fast") return 6;
   return 3;
 }

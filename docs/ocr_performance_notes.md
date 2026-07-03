@@ -334,8 +334,9 @@ Interpretation:
 Current recommendation:
 
 - Keep workers 6 as the foreground fast candidate.
-- Treat workers 3 as the current conservative/default candidate.
-- Treat workers 4 as a possible balanced candidate if workers 3 proves too slow on broader samples.
+- Treat workers 2 as the default background-safe candidate.
+- Treat workers 3 as a faster conservative one-off candidate.
+- Treat workers 4 as a possible future balanced candidate if workers 3 proves too slow on broader samples.
 - Do not use recognizer ONNX thread caps for production profiles unless later tests prove an output-identical configuration.
 - Add `timestamp_us` to OCR frame diagnostics so future heavy-window tests can be derived directly from diagnostics instead of reconstructing sample timestamps from the sampling contract.
 
@@ -343,7 +344,9 @@ Current recommendation:
 
 Change:
 
-- Added `svp-builder build --ocr-performance conservative|fast`.
+- Added `svp-builder build --ocr-performance serial|background|conservative|fast`.
+- `serial` maps to 1 OCR recognition worker.
+- `background` maps to 2 OCR recognition workers.
 - `conservative` maps to 3 OCR recognition workers.
 - `fast` maps to 6 OCR recognition workers.
 - The selected profile is recorded in builder output and OCR diagnostics.
@@ -373,10 +376,67 @@ Run roots:
 - `/Users/domesposito/Projects/svp/build/diagnostics/profile-gator-conservative-20260703-131157`
 - `/Users/domesposito/Projects/svp/build/diagnostics/profile-gator-fast-20260703-131313`
 
-Conclusion:
+Initial conclusion:
 
-- The two-profile approach is good.
+- The profile approach is good.
 - Conservative keeps the footprint lower and remains much faster than the original single-worker baseline.
 - Fast is meaningfully quicker when the user wants foreground speed.
 - Both profiles preserved OCR output identity on the validation windows.
 - Both profiles stayed below the 2 GB memory limit.
+
+## Four-Profile Model
+
+Profiles:
+
+| Profile | Recognition workers | Intended use |
+| --- | ---: | --- |
+| `serial` | 1 | Lowest concurrency and closest behavior to the original single-worker path. |
+| `background` | 2 | Default lower-footprint mode where OCR may share the machine with other pipeline stages. |
+| `conservative` | 3 | Faster bounded one-off profile: meaningful speedup while keeping memory and CPU reasonable. |
+| `fast` | 6 | Foreground speed profile for users who want the faster OCR pass and can spend more CPU. |
+
+Validation plan:
+
+- Validate `serial` and `background` on the known heavy windows for:
+  - `/Users/domesposito/Projects/samples/ultimate-2.mp4`
+  - `/Users/domesposito/Desktop/gator/new-gator.mp4`
+- OCR-only.
+- `--stop-after foundation-ocr`.
+- No ASR and no full build.
+- `SVP_BUILDER_MEMORY_LIMIT_MB=2048`.
+- Compare staged OCR outputs against the matching `conservative` control for the same video/window.
+
+Validation results:
+
+| File | Profile | Workers | OCR stage wall | Frame sum | Recognition sum | Avg OCR CPU | Peak RSS | Peak footprint | Output identity |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `ultimate-2.mp4` | serial | 1 | 161,936 ms | 46,712.11 ms | 45,894.82 ms | 352.85% | 815.83 MB | 799.95 MB | Byte-identical |
+| `ultimate-2.mp4` | background | 2 | 153,410 ms | 38,348.24 ms | 37,538.48 ms | 367.06% | 949.80 MB | 934.02 MB | Byte-identical |
+| `new-gator.mp4` | serial | 1 | 83,824 ms | 46,404.40 ms | 43,853.72 ms | 555.92% | 810.78 MB | 794.92 MB | Byte-identical |
+| `new-gator.mp4` | background | 2 | 77,289 ms | 39,877.84 ms | 37,297.11 ms | 601.58% | 931.03 MB | 915.27 MB | Byte-identical |
+
+Run roots:
+
+- `/Users/domesposito/Projects/svp/build/diagnostics/profile-ultimate-serial-20260703-145351`
+- `/Users/domesposito/Projects/svp/build/diagnostics/profile-ultimate-background-20260703-145634`
+- `/Users/domesposito/Projects/svp/build/diagnostics/profile-gator-serial-20260703-145908`
+- `/Users/domesposito/Projects/svp/build/diagnostics/profile-gator-background-20260703-150032`
+
+Validation comparison:
+
+- Compared each new run against the matching `conservative` control for:
+  - `text_observations.jsonl`
+  - `text_regions.jsonl`
+  - `numeric_values.jsonl`
+  - `evidence_crops.jsonl`
+  - `text_absence.json`
+  - `processors.jsonl`
+- All compared files were byte-identical.
+- All four runs stayed below the 2 GB memory diagnostics limit.
+
+Four-profile conclusion:
+
+- `serial` is the lowest-footprint option and remains available for maximal background friendliness.
+- `background` is the default low-impact practical option: it preserved behavior, stayed below 1 GB peak on both heavy windows, and improved speed versus `serial`.
+- `conservative` remains the faster bounded one-off profile.
+- `fast` remains the foreground speed profile.
