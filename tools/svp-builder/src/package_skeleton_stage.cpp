@@ -82,10 +82,16 @@ PackageSkeletonStageResult run_package_skeleton_stage(
     auto spatial_progress = [&context, &started_stages, &completed_stages](
                                         const char* stage,
                                         std::size_t current,
-                                        std::size_t total) {
+                                        std::size_t total,
+                                        const char* message) {
       ProgressStageId stage_id = ProgressStageId::ocr;
+      std::string unit = "items";
       if (std::string(stage) == "ocr") {
         stage_id = ProgressStageId::ocr;
+        unit = "frames";
+      } else if (std::string(stage) == "ocr_evidence_crops") {
+        stage_id = ProgressStageId::ocr_evidence_crops;
+        unit = "steps";
       } else if (std::string(stage) == "depth") {
         stage_id = ProgressStageId::depth;
       } else if (std::string(stage) == "text_embeddings") {
@@ -101,7 +107,8 @@ PackageSkeletonStageResult run_package_skeleton_stage(
       if (total > 0) {
         emit_stage_progress(context, stage_id,
                             static_cast<std::uint64_t>(current),
-                            static_cast<std::uint64_t>(total), "items");
+                            static_cast<std::uint64_t>(total), unit,
+                            message == nullptr ? "" : message);
       }
       if (current > 0 && current >= total && total > 0 &&
           completed_stages.insert(stage).second) {

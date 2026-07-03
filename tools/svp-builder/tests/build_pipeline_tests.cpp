@@ -198,6 +198,13 @@ void test_stage_catalog_ids_and_labels_from_one_source() {
 
   assert(svp::builder::progress_stage_id(
              svp::builder::ProgressStageId::validate) == "validate");
+
+  assert(svp::builder::progress_stage_id(
+             svp::builder::ProgressStageId::ocr_evidence_crops) ==
+         "ocr_evidence_crops");
+  assert(svp::builder::progress_stage_label(
+             svp::builder::ProgressStageId::ocr_evidence_crops) ==
+         "OCR Evidence Crops");
 }
 
 void test_event_kind_names() {
@@ -692,6 +699,12 @@ void test_noise_regression_forbidden_strings_absent() {
       svp::builder::make_stage_completed(
           svp::builder::ProgressStageId::ocr),
       svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::ocr_evidence_crops),
+      svp::builder::make_stage_progress(
+          svp::builder::ProgressStageId::ocr_evidence_crops, 10, 20, "steps"),
+      svp::builder::make_stage_completed(
+          svp::builder::ProgressStageId::ocr_evidence_crops),
+      svp::builder::make_stage_started(
           svp::builder::ProgressStageId::depth),
       svp::builder::make_stage_progress(
           svp::builder::ProgressStageId::depth, 3, 5, "items"),
@@ -776,6 +789,7 @@ void test_noise_regression_forbidden_strings_absent() {
   assert(output.find("Diarization") != std::string::npos);
   assert(output.find("Color Observations") != std::string::npos);
   assert(output.find("OCR") != std::string::npos);
+  assert(output.find("OCR Evidence Crops") != std::string::npos);
   assert(output.find("Depth") != std::string::npos);
   assert(output.find("Text Embeddings") != std::string::npos);
   assert(output.find("Visual Tracking") != std::string::npos);

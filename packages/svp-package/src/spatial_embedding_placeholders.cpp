@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -153,6 +154,44 @@ void append_processor_records(
   write_jsonl(processors_path, all_processors);
 }
 
+void attach_ocr_progress_callbacks(svp::vision::OcrGenerationOptions& ocr_opts,
+                                   const SpatialProgressCallback& on_progress) {
+  if (!on_progress) {
+    return;
+  }
+
+  auto evidence_observation_total = std::make_shared<std::size_t>(0);
+  ocr_opts.on_progress = [&on_progress](int current, int total) {
+    on_progress("ocr",
+                static_cast<std::size_t>(current),
+                static_cast<std::size_t>(total),
+                "");
+  };
+  ocr_opts.on_evidence_crop_progress =
+      [on_progress, evidence_observation_total](std::size_t current,
+                                                std::size_t total) {
+        if (total == 0) {
+          return;
+        }
+        *evidence_observation_total = total;
+        on_progress("ocr_evidence_crops",
+                    current,
+                    *evidence_observation_total * 2,
+                    "extracting evidence crops");
+      };
+  ocr_opts.on_evidence_roi_progress =
+      [on_progress, evidence_observation_total](std::size_t current,
+                                                std::size_t /*total*/) {
+        if (*evidence_observation_total == 0) {
+          return;
+        }
+        on_progress("ocr_evidence_crops",
+                    *evidence_observation_total + current,
+                    *evidence_observation_total * 2,
+                    "verifying evidence crops");
+      };
+}
+
 }  // namespace
 
 SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
@@ -232,12 +271,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     ocr_opts.crop_coverage_policy = "one_per_observation";
     ocr_opts.crop_min_jpeg_quality = 50;
     ocr_opts.frame_catalog = frame_catalog;
-    if (on_progress) {
-      ocr_opts.on_progress = [&on_progress](int current, int total) {
-        on_progress("ocr", static_cast<std::size_t>(current),
-                    static_cast<std::size_t>(total));
-      };
-    }
+    attach_ocr_progress_callbacks(ocr_opts, on_progress);
 
     svp::vision::OcrGenerationResult ocr_result;
     try {
@@ -271,7 +305,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     depth_opts.frame_input = decoded_frames;
     if (on_progress) {
       depth_opts.on_progress = [&on_progress](std::size_t current, std::size_t total) {
-        on_progress("depth", current, total);
+        on_progress("depth", current, total, "");
       };
     }
     svp::vision::DepthGenerationResult depth_result;
@@ -300,7 +334,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     emb_opts.model_cache_root = model_cache_root;
     if (on_progress) {
       emb_opts.on_progress = [&on_progress](std::size_t current, std::size_t total) {
-        on_progress("text_embeddings", current, total);
+        on_progress("text_embeddings", current, total, "");
       };
     }
 
@@ -339,10 +373,10 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
       tracker_opts.execution_provider = "cpu";
       if (on_progress) {
         tracker_opts.on_tracking_progress = [&on_progress](std::size_t current, std::size_t total) {
-          on_progress("visual_tracking", current, total);
+          on_progress("visual_tracking", current, total, "");
         };
         tracker_opts.on_visual_embedding_progress = [&on_progress](std::size_t current, std::size_t total) {
-          on_progress("visual_embeddings", current, total);
+          on_progress("visual_embeddings", current, total, "");
         };
       }
 
@@ -472,13 +506,11 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     }
   }
 
+  ocr_opts.generate_evidence_crops = (media_plan != nullptr);
+  ocr_opts.crop_coverage_policy = "one_per_observation";
+  ocr_opts.crop_min_jpeg_quality = 50;
   ocr_opts.frame_catalog = frame_catalog;
-  if (on_progress) {
-    ocr_opts.on_progress = [&on_progress](int current, int total) {
-      on_progress("ocr", static_cast<std::size_t>(current),
-                  static_cast<std::size_t>(total));
-    };
-  }
+  attach_ocr_progress_callbacks(ocr_opts, on_progress);
 
   svp::vision::OcrGenerationResult ocr_result;
   try {

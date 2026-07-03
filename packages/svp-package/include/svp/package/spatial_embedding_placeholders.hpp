@@ -11,7 +11,10 @@ namespace svp::vision { class FrameCatalog; }
 namespace svp::package {
 
 using SpatialProgressCallback =
-    std::function<void(const char* stage, std::size_t current, std::size_t total)>;
+    std::function<void(const char* stage,
+                       std::size_t current,
+                       std::size_t total,
+                       const char* message)>;
 
 struct SpatialEmbeddingPlaceholderSummary {
   std::size_t depth_index_written = false;

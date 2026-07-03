@@ -40,6 +40,8 @@ struct OcrGenerationOptions {
   OcrSamplingConfig sampling_config;
   FrameCatalog* frame_catalog = nullptr;
   FrameProgressCallback on_progress;
+  EvidenceCropProgressCallback on_evidence_crop_progress;
+  EvidenceCropProgressCallback on_evidence_roi_progress;
 };
 
 struct OcrGenerationResult {

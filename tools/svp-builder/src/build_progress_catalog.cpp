@@ -21,6 +21,7 @@ constexpr StageCatalogEntry stage_catalog[] = {
     {ProgressStageId::vision_plan, "vision_plan", "Vision Plan"},
     {ProgressStageId::color, "color", "Color Observations"},
     {ProgressStageId::ocr, "ocr", "OCR"},
+    {ProgressStageId::ocr_evidence_crops, "ocr_evidence_crops", "OCR Evidence Crops"},
     {ProgressStageId::depth, "depth", "Depth"},
     {ProgressStageId::embeddings, "embeddings", "Embeddings"},
     {ProgressStageId::text_embeddings, "text_embeddings", "Text Embeddings"},

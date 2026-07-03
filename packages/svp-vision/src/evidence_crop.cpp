@@ -313,6 +313,15 @@ EvidenceCropResult generate_evidence_crops_internal(
   // budget is tight to fit more crops.
   int current_jpeg_quality = options.jpeg_quality;
 
+  if (options.on_progress) {
+    options.on_progress(0, inputs.size());
+  }
+  auto report_input_processed = [&](std::size_t index) {
+    if (options.on_progress) {
+      options.on_progress(index + 1, inputs.size());
+    }
+  };
+
   for (std::size_t i = 0; i < inputs.size(); ++i) {
     const auto& input = inputs[i];
 
@@ -320,6 +329,7 @@ EvidenceCropResult generate_evidence_crops_internal(
       crops_skipped++;
       skipped_by_count++;
       result.roi_ocr_results[i].succeeded = false;
+      report_input_processed(i);
       continue;
     }
 
@@ -327,6 +337,7 @@ EvidenceCropResult generate_evidence_crops_internal(
       crops_skipped++;
       skipped_by_bytes++;
       result.roi_ocr_results[i].succeeded = false;
+      report_input_processed(i);
       continue;
     }
 
@@ -354,6 +365,7 @@ EvidenceCropResult generate_evidence_crops_internal(
       crops_skipped++;
       skipped_by_extraction++;
       result.roi_ocr_results[i].succeeded = false;
+      report_input_processed(i);
       continue;
     }
 
@@ -375,6 +387,7 @@ EvidenceCropResult generate_evidence_crops_internal(
       crops_skipped++;
       skipped_by_extraction++;
       result.roi_ocr_results[i].succeeded = false;
+      report_input_processed(i);
       continue;
     }
 
@@ -465,6 +478,7 @@ EvidenceCropResult generate_evidence_crops_internal(
 
               result.crops.push_back(std::move(crop));
               total_crops++;
+              report_input_processed(i);
               continue;
             }
           }
@@ -485,6 +499,7 @@ EvidenceCropResult generate_evidence_crops_internal(
             std::to_string(effective_byte_budget - total_bytes) +
             " bytes";
       }
+      report_input_processed(i);
       continue;
     }
 
@@ -551,6 +566,7 @@ EvidenceCropResult generate_evidence_crops_internal(
 
     result.crops.push_back(std::move(crop));
     total_crops++;
+    report_input_processed(i);
   }
 
   result.crop_count = static_cast<std::int64_t>(result.crops.size());
