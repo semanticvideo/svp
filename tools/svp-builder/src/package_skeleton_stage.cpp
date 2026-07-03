@@ -130,12 +130,14 @@ PackageSkeletonStageResult run_package_skeleton_stage(
     // Emit completed for stages that had started but no final callback
     // (e.g. visual embeddings with unknown total, or stages that ran
     // but never reached current >= total).
-    for (const auto& stage : {"ocr", "depth", "text_embeddings",
-                              "visual_tracking", "visual_embeddings"}) {
+    for (const auto& stage : {"ocr", "ocr_evidence_crops", "depth",
+                              "text_embeddings", "visual_tracking",
+                              "visual_embeddings"}) {
       if (started_stages.count(stage) &&
           completed_stages.insert(stage).second) {
         ProgressStageId sid = ProgressStageId::ocr;
-        if (std::string(stage) == "depth") sid = ProgressStageId::depth;
+        if (std::string(stage) == "ocr_evidence_crops") sid = ProgressStageId::ocr_evidence_crops;
+        else if (std::string(stage) == "depth") sid = ProgressStageId::depth;
         else if (std::string(stage) == "text_embeddings") sid = ProgressStageId::text_embeddings;
         else if (std::string(stage) == "visual_tracking") sid = ProgressStageId::visual_tracking;
         else if (std::string(stage) == "visual_embeddings") sid = ProgressStageId::visual_embeddings;

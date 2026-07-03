@@ -506,9 +506,6 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     }
   }
 
-  ocr_opts.generate_evidence_crops = (media_plan != nullptr);
-  ocr_opts.crop_coverage_policy = "one_per_observation";
-  ocr_opts.crop_min_jpeg_quality = 50;
   ocr_opts.frame_catalog = frame_catalog;
   attach_ocr_progress_callbacks(ocr_opts, on_progress);
 
