@@ -41,7 +41,7 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
 
   const bool stderr_is_tty = isatty(fileno(stderr)) != 0;
   auto progress_sink = svp::builder::make_progress_sink(
-      *resolved_mode, std::cerr, stderr_is_tty);
+      *resolved_mode, std::cerr, stderr_is_tty, fileno(stderr));
 
   svp::builder::BuildPipelineOptions pipeline_options;
   pipeline_options.source_path = options.source_path;

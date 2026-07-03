@@ -137,8 +137,10 @@ class JsonProgressSink : public BuildProgressSink {
 
 class TtyProgressSink : public BuildProgressSink {
  public:
-  explicit TtyProgressSink(std::ostream& stream)
-      : stream_(stream), use_color_(!no_color_env()) {}
+  explicit TtyProgressSink(std::ostream& stream, int terminal_fd)
+      : stream_(stream),
+        use_color_(!no_color_env()),
+        terminal_fd_(terminal_fd >= 0 ? terminal_fd : STDOUT_FILENO) {}
 
   void emit(const ProgressEvent& event) override {
     const std::string_view label = progress_stage_label(event.stage_id);
@@ -161,15 +163,15 @@ class TtyProgressSink : public BuildProgressSink {
  private:
   static std::string clear_line() { return "\033[2K"; }
 
-  static int terminal_width() {
+  int terminal_width() const {
     winsize size{};
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) {
+    if (ioctl(terminal_fd_, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) {
       return static_cast<int>(size.ws_col);
     }
     return kFallbackTerminalWidth;
   }
 
-  static std::size_t rendered_rows(const std::string& line) {
+  std::size_t rendered_rows(const std::string& line) const {
     const int width = std::max(1, terminal_width());
     if (line.empty()) return 1;
     return (line.size() - 1) / static_cast<std::size_t>(width) + 1;
@@ -249,6 +251,7 @@ class TtyProgressSink : public BuildProgressSink {
 
   std::ostream& stream_;
   bool use_color_;
+  int terminal_fd_;
   std::size_t rendered_rows_ = 0;
 };
 
@@ -277,7 +280,7 @@ std::string_view progress_mode_name(ProgressMode mode) {
 }
 
 std::shared_ptr<BuildProgressSink> make_progress_sink(
-    ProgressMode mode, std::ostream& stream, bool is_tty) {
+    ProgressMode mode, std::ostream& stream, bool is_tty, int terminal_fd) {
   switch (mode) {
     case ProgressMode::none:
       return std::make_shared<NullBuildProgressSink>();
@@ -287,7 +290,7 @@ std::shared_ptr<BuildProgressSink> make_progress_sink(
       return std::make_shared<JsonProgressSink>(stream);
     case ProgressMode::auto_:
       if (is_tty) {
-        return std::make_shared<TtyProgressSink>(stream);
+        return std::make_shared<TtyProgressSink>(stream, terminal_fd);
       }
       return std::make_shared<PlainProgressSink>(stream);
   }

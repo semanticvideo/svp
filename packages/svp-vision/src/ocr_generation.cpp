@@ -211,12 +211,14 @@ OcrGenerationResult generate_ocr_observations(
       "SVP_OCR_REC_ONNX_GRAPH_OPT_LEVEL", pp_ocr_opts.graph_optimization_level);
   pp_ocr_opts.rec_execution_mode = execution_mode_env_or_default(
       "SVP_OCR_REC_ONNX_EXECUTION_MODE", pp_ocr_opts.execution_mode);
-  pp_ocr_opts.recognition_parallel_workers = positive_env_int_or_default(
-      "SVP_OCR_RECOGNITION_PARALLEL_WORKERS",
-      pp_ocr_opts.recognition_parallel_workers);
-  pp_ocr_opts.recognition_parallel_min_boxes = positive_env_int_or_default(
-      "SVP_OCR_RECOGNITION_PARALLEL_MIN_BOXES",
-      pp_ocr_opts.recognition_parallel_min_boxes);
+  if (svp::core::memory_diagnostics_enabled()) {
+    pp_ocr_opts.recognition_parallel_workers = positive_env_int_or_default(
+        "SVP_OCR_RECOGNITION_PARALLEL_WORKERS",
+        pp_ocr_opts.recognition_parallel_workers);
+    pp_ocr_opts.recognition_parallel_min_boxes = positive_env_int_or_default(
+        "SVP_OCR_RECOGNITION_PARALLEL_MIN_BOXES",
+        pp_ocr_opts.recognition_parallel_min_boxes);
+  }
 
   PpOcrSession pp_ocr_session = create_pp_ocr_session(pp_ocr_opts);
   svp::core::check_memory_limit("ocr.generation.session_created", {
