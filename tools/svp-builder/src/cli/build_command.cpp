@@ -41,7 +41,7 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
 
   const bool stderr_is_tty = isatty(fileno(stderr)) != 0;
   auto progress_sink = svp::builder::make_progress_sink(
-      *resolved_mode, std::cerr, stderr_is_tty);
+      *resolved_mode, std::cerr, stderr_is_tty, fileno(stderr));
 
   svp::builder::BuildPipelineOptions pipeline_options;
   pipeline_options.source_path = options.source_path;
@@ -52,6 +52,7 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
   pipeline_options.staging_dir = options.staging_dir;
   pipeline_options.model_cache_dir = options.model_cache_dir;
   pipeline_options.stop_after = *parsed_stage;
+  pipeline_options.ocr_performance_profile = options.ocr_performance_profile;
   pipeline_options.sherpa_lib_path = options.sherpa_lib_path;
   pipeline_options.allow_fallback_diarization = options.allow_fallback_diarization;
   pipeline_options.force_single_speaker = options.force_single_speaker;

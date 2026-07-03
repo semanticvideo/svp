@@ -8,11 +8,15 @@
 #include "svp/models/runtime.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 
 namespace svp::vision {
@@ -29,6 +33,12 @@ using pp_ocr_internal::preprocess_detection;
 using pp_ocr_internal::preprocess_recognition;
 using pp_ocr_internal::recognition_confidence;
 using pp_ocr_internal::verify_file_hash;
+
+using SteadyClock = std::chrono::steady_clock;
+
+double elapsed_ms(SteadyClock::time_point start, SteadyClock::time_point end) {
+  return std::chrono::duration<double, std::milli>(end - start).count();
+}
 
 struct RecognitionShape {
   int timesteps = 0;
@@ -102,6 +112,44 @@ PpOcrDetection recognize_box(
   result.bbox_right = std::min(frame.width, box.right);
   result.bbox_bottom = std::min(frame.height, box.bottom);
   return result;
+}
+
+std::vector<PpOcrDetection> recognize_boxes_parallel(
+    const PpOcrSession& session,
+    const PpOcrOptions& options,
+    const ColorRasterFrame& frame,
+    const std::vector<DetBox>& boxes) {
+  std::vector<PpOcrDetection> results(boxes.size());
+  if (boxes.empty()) return results;
+
+  const int requested_workers = std::max(1, options.recognition_parallel_workers);
+  const int worker_count = std::min<int>(
+      requested_workers,
+      static_cast<int>(boxes.size()));
+  if (worker_count <= 1 ||
+      static_cast<int>(boxes.size()) < options.recognition_parallel_min_boxes) {
+    for (std::size_t i = 0; i < boxes.size(); ++i) {
+      results[i] = recognize_box(session, options, frame, boxes[i]);
+    }
+    return results;
+  }
+
+  std::atomic<std::size_t> next_index{0};
+  std::vector<std::thread> workers;
+  workers.reserve(static_cast<std::size_t>(worker_count));
+  for (int worker = 0; worker < worker_count; ++worker) {
+    workers.emplace_back([&]() {
+      while (true) {
+        const std::size_t index = next_index.fetch_add(1);
+        if (index >= boxes.size()) break;
+        results[index] = recognize_box(session, options, frame, boxes[index]);
+      }
+    });
+  }
+  for (auto& worker : workers) {
+    worker.join();
+  }
+  return results;
 }
 
 }  // namespace
@@ -179,12 +227,23 @@ PpOcrSession create_pp_ocr_session(const PpOcrOptions& options) {
       svp::core::HashString{svp::core::HashAlgorithm::blake3, ""}};
   det_manifest.files.push_back(det_file);
 
-  svp::models::OnnxSessionOptions sess_opts;
-  sess_opts.execution_provider = options.execution_provider;
+  svp::models::OnnxSessionOptions det_sess_opts;
+  det_sess_opts.execution_provider = options.execution_provider;
+  det_sess_opts.intra_op_num_threads = options.det_intra_op_num_threads;
+  det_sess_opts.inter_op_num_threads = options.det_inter_op_num_threads;
+  det_sess_opts.graph_optimization_level = options.det_graph_optimization_level;
+  det_sess_opts.execution_mode = options.det_execution_mode;
+
+  svp::models::OnnxSessionOptions rec_sess_opts;
+  rec_sess_opts.execution_provider = options.execution_provider;
+  rec_sess_opts.intra_op_num_threads = options.rec_intra_op_num_threads;
+  rec_sess_opts.inter_op_num_threads = options.rec_inter_op_num_threads;
+  rec_sess_opts.graph_optimization_level = options.rec_graph_optimization_level;
+  rec_sess_opts.execution_mode = options.rec_execution_mode;
 
   try {
     session.impl_->det_session = svp::models::OnnxSession::load(
-        det_manifest, bundles->det_bundle_dir, sess_opts);
+        det_manifest, bundles->det_bundle_dir, det_sess_opts);
   } catch (const std::exception& e) {
     session.blocker = std::string("Failed to load PP-OCR detector: ") + e.what();
     return session;
@@ -203,7 +262,7 @@ PpOcrSession create_pp_ocr_session(const PpOcrOptions& options) {
 
   try {
     session.impl_->rec_session = svp::models::OnnxSession::load(
-        rec_manifest, bundles->rec_bundle_dir, sess_opts);
+        rec_manifest, bundles->rec_bundle_dir, rec_sess_opts);
   } catch (const std::exception& e) {
     session.blocker = std::string("Failed to load PP-OCR recognizer: ") + e.what();
     return session;
@@ -238,6 +297,7 @@ PpOcrFrameResult run_pp_ocr_on_frame(
     const PpOcrSession& session,
     const PpOcrOptions& options,
     const ColorRasterFrame& frame) {
+  const auto frame_start = SteadyClock::now();
   PpOcrFrameResult result;
   result.frame_id = frame.frame_id;
   result.timestamp_us = frame.timestamp_us;
@@ -246,16 +306,20 @@ PpOcrFrameResult run_pp_ocr_on_frame(
 
   if (!session.available || frame.pixels.empty()) return result;
 
+  const auto preprocess_start = SteadyClock::now();
   DetInputImage det_input = preprocess_detection(frame, options.det_limit_side_len);
+  result.preprocess_detection_ms = elapsed_ms(preprocess_start, SteadyClock::now());
   std::vector<std::int64_t> det_shape = {1, 3, det_input.height, det_input.width};
   std::vector<float> det_output;
   std::vector<std::int64_t> det_output_shape;
   try {
+    const auto inference_start = SteadyClock::now();
     auto [data, shape] = session.impl_->det_session.run_raw_with_shape(
         session.impl_->det_input_name,
         det_input.data.data(),
         det_input.data.size(),
         det_shape);
+    result.detection_inference_ms = elapsed_ms(inference_start, SteadyClock::now());
     det_output = std::move(data);
     det_output_shape = std::move(shape);
   } catch (const std::exception&) {
@@ -284,6 +348,7 @@ PpOcrFrameResult run_pp_ocr_on_frame(
     }
   }
 
+  const auto postprocess_start = SteadyClock::now();
   const auto boxes = db_postprocess(
       det_output.data(),
       pred_h,
@@ -292,8 +357,10 @@ PpOcrFrameResult run_pp_ocr_on_frame(
       options.det_thresh,
       options.det_box_thresh,
       options.det_unclip_ratio);
+  result.detection_postprocess_ms = elapsed_ms(postprocess_start, SteadyClock::now());
   svp::core::check_memory_limit("ocr.ppocr.detector.after_postprocess", {
       {"frame_id", frame.frame_id},
+      {"timestamp_us", std::to_string(frame.timestamp_us)},
       {"frame_width", std::to_string(frame.width)},
       {"frame_height", std::to_string(frame.height)},
       {"det_input_width", std::to_string(det_input.width)},
@@ -303,18 +370,30 @@ PpOcrFrameResult run_pp_ocr_on_frame(
   });
 
   std::size_t recognized_attempts = 0;
-  for (const auto& box : boxes) {
-    ++recognized_attempts;
-    PpOcrDetection det = recognize_box(session, options, frame, box);
+  const auto recognition_start = SteadyClock::now();
+  auto recognized = recognize_boxes_parallel(session, options, frame, boxes);
+  recognized_attempts = boxes.size();
+  for (auto& det : recognized) {
     if (!det.text.empty() && det.score >= options.min_text_score) {
       result.detections.push_back(std::move(det));
     }
   }
+  result.recognition_total_ms = elapsed_ms(recognition_start, SteadyClock::now());
+  result.recognition_attempt_count = recognized_attempts;
+  result.frame_total_ms = elapsed_ms(frame_start, SteadyClock::now());
   svp::core::check_memory_limit("ocr.ppocr.frame.complete", {
       {"frame_id", frame.frame_id},
+      {"timestamp_us", std::to_string(frame.timestamp_us)},
       {"box_count", std::to_string(boxes.size())},
       {"recognition_attempts", std::to_string(recognized_attempts)},
-      {"detection_count", std::to_string(result.detections.size())}
+      {"detection_count", std::to_string(result.detections.size())},
+      {"preprocess_detection_ms", std::to_string(result.preprocess_detection_ms)},
+      {"detection_inference_ms", std::to_string(result.detection_inference_ms)},
+      {"detection_postprocess_ms", std::to_string(result.detection_postprocess_ms)},
+      {"recognition_total_ms", std::to_string(result.recognition_total_ms)},
+      {"frame_total_ms", std::to_string(result.frame_total_ms)},
+      {"recognition_parallel_workers", std::to_string(options.recognition_parallel_workers)},
+      {"recognition_parallel_min_boxes", std::to_string(options.recognition_parallel_min_boxes)}
   });
 
   return result;

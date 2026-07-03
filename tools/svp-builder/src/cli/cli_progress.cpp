@@ -34,5 +34,5 @@ std::shared_ptr<svp::builder::BuildProgressSink> resolve_cli_progress_sink(
 
   const bool stderr_is_tty = isatty(fileno(stderr)) != 0;
   return svp::builder::make_progress_sink(
-      *resolved_mode, std::cerr, stderr_is_tty);
+      *resolved_mode, std::cerr, stderr_is_tty, fileno(stderr));
 }

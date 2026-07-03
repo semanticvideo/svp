@@ -30,6 +30,9 @@ struct OcrGenerationOptions {
   const svp::media::MediaIngestPlan* media_plan = nullptr;
   int ocr_frame_width = 0;
   int ocr_frame_height = 0;
+  std::string performance_profile;
+  int recognition_parallel_workers = 1;
+  int recognition_parallel_min_boxes = 16;
   int canonical_raster_width = 0;
   int canonical_raster_height = 0;
   bool generate_evidence_crops = false;

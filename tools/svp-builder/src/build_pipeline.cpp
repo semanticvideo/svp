@@ -107,6 +107,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     output["builder_command"] = {
         {"command", "build"},
         {"stop_after", stop_after_name},
+        {"ocr_performance", options.ocr_performance_profile},
         {"valid_svp_package_written", package_result.validator_passes},
     };
 

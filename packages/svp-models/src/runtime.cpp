@@ -142,6 +142,30 @@ OnnxSession OnnxSession::load(const ModelBundleManifest& manifest,
   if (options.inter_op_num_threads > 0) {
     session_options.SetInterOpNumThreads(options.inter_op_num_threads);
   }
+  switch (options.graph_optimization_level) {
+    case 0:
+      session_options.SetGraphOptimizationLevel(ORT_DISABLE_ALL);
+      break;
+    case 1:
+      session_options.SetGraphOptimizationLevel(ORT_ENABLE_BASIC);
+      break;
+    case 2:
+      session_options.SetGraphOptimizationLevel(ORT_ENABLE_EXTENDED);
+      break;
+    case 3:
+      session_options.SetGraphOptimizationLevel(ORT_ENABLE_LAYOUT);
+      break;
+    case 99:
+      session_options.SetGraphOptimizationLevel(ORT_ENABLE_ALL);
+      break;
+    default:
+      break;
+  }
+  if (options.execution_mode == "parallel") {
+    session_options.SetExecutionMode(ORT_PARALLEL);
+  } else if (options.execution_mode == "sequential") {
+    session_options.SetExecutionMode(ORT_SEQUENTIAL);
+  }
 
 #if defined(SVP_COREML_AVAILABLE)
   if (options.execution_provider == "coreml") {

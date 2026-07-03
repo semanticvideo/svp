@@ -8,8 +8,11 @@
 #include "svp/vision/ocr_temporal_sampling.hpp"
 #include "svp/vision/pp_ocr.hpp"
 
+#include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -90,6 +93,73 @@ std::string frame_input_blocker(const DecodedCanonicalFrames& frames) {
   return "No decoded frames available for OCR";
 }
 
+int positive_env_int_or_default(const char* name, int fallback) {
+  const char* value = std::getenv(name);
+  if (value == nullptr || *value == '\0') return fallback;
+  char* end = nullptr;
+  const long parsed = std::strtol(value, &end, 10);
+  if (end == value || parsed <= 0) return fallback;
+  return static_cast<int>(parsed);
+}
+
+int graph_opt_env_or_default(const char* name, int fallback) {
+  const char* value = std::getenv(name);
+  if (value == nullptr || *value == '\0') return fallback;
+  if (std::string(value) == "disable") return 0;
+  if (std::string(value) == "basic") return 1;
+  if (std::string(value) == "extended") return 2;
+  if (std::string(value) == "layout") return 3;
+  if (std::string(value) == "all") return 99;
+  char* end = nullptr;
+  const long parsed = std::strtol(value, &end, 10);
+  if (end == value) return fallback;
+  return static_cast<int>(parsed);
+}
+
+std::string execution_mode_env_or_default(const char* name,
+                                          const std::string& fallback) {
+  const char* value = std::getenv(name);
+  if (value == nullptr || *value == '\0') return fallback;
+  const std::string parsed(value);
+  if (parsed == "parallel" || parsed == "sequential") return parsed;
+  return fallback;
+}
+
+std::string execution_provider_env_or_default(const char* name,
+                                              const std::string& fallback) {
+  const char* value = std::getenv(name);
+  if (value == nullptr || *value == '\0') return fallback;
+  const std::string parsed(value);
+  if (parsed == "cpu" || parsed == "coreml") return parsed;
+  return fallback;
+}
+
+std::optional<std::vector<std::int64_t>> env_timestamp_list_us(
+    const char* name) {
+  const char* value = std::getenv(name);
+  if (value == nullptr || *value == '\0') return std::nullopt;
+
+  std::vector<std::int64_t> timestamps;
+  const char* cursor = value;
+  while (*cursor != '\0') {
+    char* end = nullptr;
+    const long long parsed = std::strtoll(cursor, &end, 10);
+    if (end == cursor || parsed < 0) return std::nullopt;
+    timestamps.push_back(static_cast<std::int64_t>(parsed));
+    cursor = end;
+    if (*cursor == ',') {
+      ++cursor;
+    } else if (*cursor != '\0') {
+      return std::nullopt;
+    }
+  }
+  if (timestamps.empty()) return std::nullopt;
+  std::sort(timestamps.begin(), timestamps.end());
+  timestamps.erase(std::unique(timestamps.begin(), timestamps.end()),
+                   timestamps.end());
+  return timestamps;
+}
+
 }  // namespace
 
 OcrSourceFrameDimensions derive_ocr_source_frame_dimensions(
@@ -112,12 +182,64 @@ OcrGenerationResult generate_ocr_observations(
 
   PpOcrOptions pp_ocr_opts;
   pp_ocr_opts.model_cache_root = options.model_cache_root;
-  pp_ocr_opts.execution_provider = "cpu";
+  pp_ocr_opts.recognition_parallel_workers = options.recognition_parallel_workers;
+  pp_ocr_opts.recognition_parallel_min_boxes =
+      options.recognition_parallel_min_boxes;
+  pp_ocr_opts.execution_provider = execution_provider_env_or_default(
+      "SVP_OCR_EXECUTION_PROVIDER", pp_ocr_opts.execution_provider);
+  pp_ocr_opts.intra_op_num_threads = positive_env_int_or_default(
+      "SVP_OCR_ONNX_INTRA_OP_THREADS", pp_ocr_opts.intra_op_num_threads);
+  pp_ocr_opts.inter_op_num_threads = positive_env_int_or_default(
+      "SVP_OCR_ONNX_INTER_OP_THREADS", pp_ocr_opts.inter_op_num_threads);
+  pp_ocr_opts.graph_optimization_level = graph_opt_env_or_default(
+      "SVP_OCR_ONNX_GRAPH_OPT_LEVEL", pp_ocr_opts.graph_optimization_level);
+  pp_ocr_opts.execution_mode = execution_mode_env_or_default(
+      "SVP_OCR_ONNX_EXECUTION_MODE", pp_ocr_opts.execution_mode);
+  pp_ocr_opts.det_intra_op_num_threads = positive_env_int_or_default(
+      "SVP_OCR_DET_ONNX_INTRA_OP_THREADS", pp_ocr_opts.intra_op_num_threads);
+  pp_ocr_opts.det_inter_op_num_threads = positive_env_int_or_default(
+      "SVP_OCR_DET_ONNX_INTER_OP_THREADS", pp_ocr_opts.inter_op_num_threads);
+  pp_ocr_opts.det_graph_optimization_level = graph_opt_env_or_default(
+      "SVP_OCR_DET_ONNX_GRAPH_OPT_LEVEL", pp_ocr_opts.graph_optimization_level);
+  pp_ocr_opts.det_execution_mode = execution_mode_env_or_default(
+      "SVP_OCR_DET_ONNX_EXECUTION_MODE", pp_ocr_opts.execution_mode);
+  pp_ocr_opts.rec_intra_op_num_threads = positive_env_int_or_default(
+      "SVP_OCR_REC_ONNX_INTRA_OP_THREADS", pp_ocr_opts.intra_op_num_threads);
+  pp_ocr_opts.rec_inter_op_num_threads = positive_env_int_or_default(
+      "SVP_OCR_REC_ONNX_INTER_OP_THREADS", pp_ocr_opts.inter_op_num_threads);
+  pp_ocr_opts.rec_graph_optimization_level = graph_opt_env_or_default(
+      "SVP_OCR_REC_ONNX_GRAPH_OPT_LEVEL", pp_ocr_opts.graph_optimization_level);
+  pp_ocr_opts.rec_execution_mode = execution_mode_env_or_default(
+      "SVP_OCR_REC_ONNX_EXECUTION_MODE", pp_ocr_opts.execution_mode);
+  if (svp::core::memory_diagnostics_enabled()) {
+    pp_ocr_opts.recognition_parallel_workers = positive_env_int_or_default(
+        "SVP_OCR_RECOGNITION_PARALLEL_WORKERS",
+        pp_ocr_opts.recognition_parallel_workers);
+    pp_ocr_opts.recognition_parallel_min_boxes = positive_env_int_or_default(
+        "SVP_OCR_RECOGNITION_PARALLEL_MIN_BOXES",
+        pp_ocr_opts.recognition_parallel_min_boxes);
+  }
 
   PpOcrSession pp_ocr_session = create_pp_ocr_session(pp_ocr_opts);
   svp::core::check_memory_limit("ocr.generation.session_created", {
       {"available", pp_ocr_session.available ? "true" : "false"},
-      {"blocker", pp_ocr_session.blocker}
+      {"blocker", pp_ocr_session.blocker},
+      {"execution_provider", pp_ocr_opts.execution_provider},
+      {"intra_op_num_threads", std::to_string(pp_ocr_opts.intra_op_num_threads)},
+      {"inter_op_num_threads", std::to_string(pp_ocr_opts.inter_op_num_threads)},
+      {"graph_optimization_level", std::to_string(pp_ocr_opts.graph_optimization_level)},
+      {"execution_mode", pp_ocr_opts.execution_mode},
+      {"det_intra_op_num_threads", std::to_string(pp_ocr_opts.det_intra_op_num_threads)},
+      {"det_inter_op_num_threads", std::to_string(pp_ocr_opts.det_inter_op_num_threads)},
+      {"det_graph_optimization_level", std::to_string(pp_ocr_opts.det_graph_optimization_level)},
+      {"det_execution_mode", pp_ocr_opts.det_execution_mode},
+      {"rec_intra_op_num_threads", std::to_string(pp_ocr_opts.rec_intra_op_num_threads)},
+      {"rec_inter_op_num_threads", std::to_string(pp_ocr_opts.rec_inter_op_num_threads)},
+      {"rec_graph_optimization_level", std::to_string(pp_ocr_opts.rec_graph_optimization_level)},
+      {"rec_execution_mode", pp_ocr_opts.rec_execution_mode},
+      {"performance_profile", options.performance_profile},
+      {"recognition_parallel_workers", std::to_string(pp_ocr_opts.recognition_parallel_workers)},
+      {"recognition_parallel_min_boxes", std::to_string(pp_ocr_opts.recognition_parallel_min_boxes)}
   });
 
   result.ocr_available = pp_ocr_session.available;
@@ -141,6 +263,16 @@ OcrGenerationResult generate_ocr_observations(
         compute_media_duration_us(*options.media_plan);
     result.temporal_sampling =
         compute_ocr_temporal_timestamps(duration_us, options.sampling_config);
+    const auto diagnostic_timestamps =
+        env_timestamp_list_us("SVP_OCR_DIAG_TIMESTAMPS_US");
+    if (diagnostic_timestamps.has_value()) {
+      result.temporal_sampling.timestamps_us = *diagnostic_timestamps;
+      result.temporal_sampling.sample_count =
+          static_cast<int>(result.temporal_sampling.timestamps_us.size());
+      result.temporal_sampling.temporal_coverage_note =
+          "Diagnostic OCR timestamp override via SVP_OCR_DIAG_TIMESTAMPS_US; "
+          "not for production coverage claims.";
+    }
     if (!result.temporal_sampling.timestamps_us.empty()) {
       use_streamed_high_res_frames = true;
     } else {
@@ -251,6 +383,8 @@ OcrGenerationResult generate_ocr_observations(
   if (use_streamed_high_res_frames) {
     svp::core::check_memory_limit("ocr.generation.streaming_begin", {
         {"sample_count", std::to_string(result.temporal_sampling.timestamps_us.size())},
+        {"diagnostic_timestamp_override",
+         std::getenv("SVP_OCR_DIAG_TIMESTAMPS_US") != nullptr ? "true" : "false"},
         {"ocr_frame_width", std::to_string(options.ocr_frame_width)},
         {"ocr_frame_height", std::to_string(options.ocr_frame_height)}
     });

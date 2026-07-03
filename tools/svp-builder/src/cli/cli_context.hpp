@@ -37,6 +37,7 @@ struct BuildCliOptions {
   std::string staging_dir;
   std::string model_cache_dir;
   std::string stop_after = "media-ingest";
+  std::string ocr_performance_profile = "background";
   std::string sherpa_lib_path;
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
