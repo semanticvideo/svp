@@ -90,6 +90,8 @@ void emit_reconciled_records(
     const std::vector<ReconciledObservation>& reconciled,
     OcrGenerationResult& result);
 
+void refresh_numeric_values_from_observations(OcrGenerationResult& result);
+
 RoiHardeningSummary generate_and_harden_evidence_crops(
     const OcrGenerationOptions& options,
     const std::vector<ReconciledObservation>& reconciled,

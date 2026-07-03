@@ -263,6 +263,22 @@ if(BUILD_TESTING)
   add_test(NAME svp-vision-ocr-temporal-sampling-tests
            COMMAND svp-vision-ocr-temporal-sampling-tests)
 
+  add_executable(svp-vision-ocr-numeric-parser-tests
+    tests/ocr_numeric_parser_tests.cpp
+  )
+
+  target_compile_features(svp-vision-ocr-numeric-parser-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-ocr-numeric-parser-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-ocr-numeric-parser-tests
+           COMMAND svp-vision-ocr-numeric-parser-tests)
+
   add_executable(svp-vision-visual-entity-tracker-tests
     tests/visual_entity_tracker_tests.cpp
   )

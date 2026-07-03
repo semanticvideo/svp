@@ -22,6 +22,7 @@ using ocr_generation_internal::emit_reconciled_records;
 using ocr_generation_internal::generate_and_harden_evidence_crops;
 using ocr_generation_internal::make_ocr_processor_provenance;
 using ocr_generation_internal::reconcile_detections;
+using ocr_generation_internal::refresh_numeric_values_from_observations;
 using ocr_generation_internal::write_failure_stage_files;
 using ocr_generation_internal::write_success_stage_files;
 
@@ -349,6 +350,8 @@ OcrGenerationResult generate_ocr_observations(
           pp_ocr_opts,
           staging_dir,
           result);
+
+  refresh_numeric_values_from_observations(result);
 
   result.text_absence.schema_version = "svp-text-absence-v1";
   result.text_absence.ocr_required = true;

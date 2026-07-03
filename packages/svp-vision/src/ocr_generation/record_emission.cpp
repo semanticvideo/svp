@@ -101,4 +101,33 @@ void emit_reconciled_records(
   result.numeric_value_count = static_cast<std::int64_t>(result.numeric_values.size());
 }
 
+void refresh_numeric_values_from_observations(OcrGenerationResult& result) {
+  result.numeric_values.clear();
+
+  int numeric_counter = 0;
+  for (const auto& obs : result.text_observations) {
+    auto numbers = parse_numeric_values(obs.raw_text, obs.confidence);
+    for (const auto& num : numbers) {
+      ++numeric_counter;
+      NumericValueRecord nv;
+      nv.numeric_value_id = pad_id("numeric_value_", numeric_counter);
+      nv.text_observation_id = obs.text_observation_id;
+      nv.text_region_id = obs.text_region_id;
+      nv.raw_text = num.raw_text;
+      nv.normalized_text = num.normalized_text;
+      nv.number_kind = num.number_kind;
+      nv.numeric_value = num.numeric_value;
+      nv.unit = num.unit.empty()
+          ? std::optional<std::string>{}
+          : std::optional<std::string>{num.unit};
+      nv.confidence = num.confidence;
+      nv.parse_rule = "svp-number-parser-v1";
+      nv.provenance_id = "processor_numeric_parser_0001";
+      result.numeric_values.push_back(nv);
+    }
+  }
+
+  result.numeric_value_count = static_cast<std::int64_t>(result.numeric_values.size());
+}
+
 }  // namespace svp::vision::ocr_generation_internal
