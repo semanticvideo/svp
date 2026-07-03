@@ -1,5 +1,18 @@
 #include "cli_context.hpp"
 
+namespace {
+
+void add_pipeline_performance_options(
+    CLI::App& command,
+    svp::vision::InferencePerformanceOptions& options) {
+  command
+      .add_option("--ocr-performance", options.ocr_performance_profile,
+                  "OCR performance profile: serial, background, conservative, or fast")
+      ->check(CLI::IsMember({"serial", "background", "conservative", "fast"}));
+}
+
+}  // namespace
+
 void register_cli(CLI::App& app, CliContext& context) {
   auto& probe_opts = context.probe_opts;
   auto& build_opts = context.build_opts;
@@ -33,9 +46,7 @@ void register_cli(CLI::App& app, CliContext& context) {
   build->add_option("--stop-after", build_opts.stop_after,
                     "Supported foundation stages: media-ingest, audio, vision-plan, "
                     "foundation-color, foundation-ocr, package-skeleton");
-  build->add_option("--ocr-performance", build_opts.ocr_performance_profile,
-                    "OCR performance profile: serial, background, conservative, or fast")
-      ->check(CLI::IsMember({"serial", "background", "conservative", "fast"}));
+  add_pipeline_performance_options(*build, build_opts.performance);
   build->add_option("--sherpa-lib", build_opts.sherpa_lib_path,
                     "Explicit path to libsherpa-onnx-c-api.dylib for diarization");
   build->add_flag("--allow-fallback-diarization", build_opts.allow_fallback_diarization,
@@ -82,6 +93,7 @@ void register_cli(CLI::App& app, CliContext& context) {
   ic_create->add_option("--ffmpeg", opts.ic_ffmpeg, "ffmpeg executable path");
   ic_create->add_option("--probe-json", opts.ic_probe_json, "Precomputed probe JSON");
   ic_create->add_option("--sherpa-lib", opts.ic_sherpa_lib, "Path to sherpa-onnx shared library");
+  add_pipeline_performance_options(*ic_create, opts.ic_performance);
   ic_create->add_flag("--no-blake3", opts.ic_no_blake3, "Skip full-file BLAKE3 computation");
   ic_create->add_flag("--core-only-diagnostic", opts.ic_core_only,
       "Emit core-only SVPI without running semantic pipeline (diagnostic mode)");
@@ -163,6 +175,7 @@ void register_cli(CLI::App& app, CliContext& context) {
   cb_create_batch->add_option("--ffmpeg", opts.cb_ffmpeg, "ffmpeg executable path");
   cb_create_batch->add_option("--staging-dir", opts.cb_staging, "Staging directory");
   cb_create_batch->add_option("--sherpa-lib", opts.cb_sherpa_lib, "Path to sherpa-onnx shared library");
+  add_pipeline_performance_options(*cb_create_batch, opts.cb_performance);
   cb_create_batch->add_option("--sidecar-visibility", opts.cb_visibility,
       "Sidecar naming: visible, hidden, managed-dir")
       ->check(CLI::IsMember({"visible", "hidden", "managed-dir"}));

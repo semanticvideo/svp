@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <functional>
 #include <nlohmann/json.hpp>
+#include "svp/vision/inference_performance.hpp"
 
 namespace svp::media { struct MediaIngestPlan; }
 namespace svp::vision { class FrameCatalog; }
@@ -75,7 +76,8 @@ struct SpatialEmbeddingPlaceholderSummary {
     const svp::media::MediaIngestPlan* media_plan = nullptr,
     const std::filesystem::path& ffmpeg_path = {},
     svp::vision::FrameCatalog* frame_catalog = nullptr,
-    SpatialProgressCallback on_progress = {});
+    SpatialProgressCallback on_progress = {},
+    const svp::vision::InferencePerformanceOptions& performance = {});
 
 [[nodiscard]] nlohmann::json spatial_embedding_placeholder_summary_to_json(
     const SpatialEmbeddingPlaceholderSummary& summary);

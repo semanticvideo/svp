@@ -126,7 +126,8 @@ PackageSkeletonStageResult run_package_skeleton_stage(
             &context.plan,
             context.options.ffmpeg_path,
             &context.frame_catalog,
-            spatial_progress);
+            spatial_progress,
+            context.options.performance);
     // Emit completed for stages that had started but no final callback
     // (e.g. visual embeddings with unknown total, or stages that ran
     // but never reached current >= total).

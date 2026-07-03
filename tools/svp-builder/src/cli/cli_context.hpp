@@ -1,5 +1,7 @@
 #pragma once
 
+#include "svp/builder/build_pipeline.hpp"
+
 #include <CLI/CLI.hpp>
 
 #include <string>
@@ -37,7 +39,7 @@ struct BuildCliOptions {
   std::string staging_dir;
   std::string model_cache_dir;
   std::string stop_after = "media-ingest";
-  std::string ocr_performance_profile = "background";
+  svp::vision::InferencePerformanceOptions performance;
   std::string sherpa_lib_path;
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
@@ -56,6 +58,7 @@ struct InterlaceCliOptions {
   std::string ic_ffmpeg = "ffmpeg";
   std::string ic_probe_json;
   std::string ic_sherpa_lib;
+  svp::vision::InferencePerformanceOptions ic_performance;
   bool ic_no_blake3 = false;
   bool ic_core_only = false;
   bool ic_allow_fallback = false;
@@ -103,6 +106,7 @@ struct InterlaceCliOptions {
   std::string cb_staging;
   std::string cb_sherpa_lib;
   std::string cb_visibility = "visible";
+  svp::vision::InferencePerformanceOptions cb_performance;
   bool cb_recursive = false;
   bool cb_no_blake3 = false;
   bool cb_replace_mismatched = false;

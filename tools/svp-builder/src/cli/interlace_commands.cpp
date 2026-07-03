@@ -21,6 +21,7 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
     ic_opts.ffmpeg_path = opts.ic_ffmpeg;
     ic_opts.probe_json_path = opts.ic_probe_json;
     ic_opts.sherpa_lib_path = opts.ic_sherpa_lib;
+    ic_opts.performance = opts.ic_performance;
     ic_opts.compute_full_blake3 = !opts.ic_no_blake3;
     ic_opts.core_only_diagnostic = opts.ic_core_only;
     ic_opts.allow_fallback_diarization = opts.ic_allow_fallback;
@@ -141,6 +142,7 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
     cb_opts.ffmpeg_path = opts.cb_ffmpeg;
     cb_opts.staging_dir = opts.cb_staging;
     cb_opts.sherpa_lib_path = opts.cb_sherpa_lib;
+    cb_opts.performance = opts.cb_performance;
     cb_opts.recursive = opts.cb_recursive;
     cb_opts.visibility = *visibility;
     cb_opts.no_blake3 = opts.cb_no_blake3;

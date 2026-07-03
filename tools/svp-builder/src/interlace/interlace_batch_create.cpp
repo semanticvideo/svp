@@ -62,6 +62,7 @@ bool create_single_svpi(
     const std::string& staging_dir_override,
     const std::string& model_cache_dir,
     const std::string& sherpa_lib_path,
+    const svp::vision::InferencePerformanceOptions& performance,
     bool core_only_diagnostic,
     bool allow_fallback_diarization,
     bool force_single_speaker,
@@ -78,6 +79,7 @@ bool create_single_svpi(
   opts.staging_dir = staging_dir_override;
   opts.model_cache_dir = model_cache_dir;
   opts.sherpa_lib_path = sherpa_lib_path;
+  opts.performance = performance;
   opts.core_only_diagnostic = core_only_diagnostic;
   opts.allow_fallback_diarization = allow_fallback_diarization;
   opts.force_single_speaker = force_single_speaker;
@@ -197,6 +199,7 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
                   options.ffprobe_path, options.ffmpeg_path,
                   !options.no_blake3, options.staging_dir,
                   options.model_cache_dir, options.sherpa_lib_path,
+                  options.performance,
                   options.core_only_diagnostic,
                   options.allow_fallback_diarization,
                   options.force_single_speaker,
@@ -223,6 +226,7 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
               options.ffprobe_path, options.ffmpeg_path,
               !options.no_blake3, options.staging_dir,
               options.model_cache_dir, options.sherpa_lib_path,
+              options.performance,
               options.core_only_diagnostic,
               options.allow_fallback_diarization,
               options.force_single_speaker,
