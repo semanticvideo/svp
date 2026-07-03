@@ -3,6 +3,7 @@
 #include "svp/vision/visual_entity_tracker.hpp"
 #include "svp/vision/color_frame_sampling.hpp"
 #include "svp/vision/color_quantization.hpp"
+#include "svp/vision/evidence_crop.hpp"
 
 #include <cassert>
 #include <cstddef>
@@ -166,6 +167,52 @@ void test_depth_callback_not_called_without_frames() {
   std::cout << "test_depth_callback_not_called_without_frames: PASS\n";
 }
 
+void test_evidence_crop_callback_counts_skipped_inputs() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_evidence_crop_cb";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+
+  svp::vision::EvidenceCropOptions opts;
+  opts.crop_coverage_policy = "one_per_observation";
+  opts.ocr_frame_width = 0;
+  opts.ocr_frame_height = 0;
+  opts.source_frame_width = 0;
+  opts.source_frame_height = 0;
+
+  std::vector<svp::vision::CropGenerationInput> inputs(3);
+  for (std::size_t i = 0; i < inputs.size(); ++i) {
+    inputs[i].text_region_id = "text_region_" + std::to_string(i + 1);
+    inputs[i].text_observation_id = "text_obs_" + std::to_string(i + 1);
+    inputs[i].source_frame_id = "frame_" + std::to_string(i + 1);
+    inputs[i].bbox_left = 0;
+    inputs[i].bbox_top = 0;
+    inputs[i].bbox_right = 10;
+    inputs[i].bbox_bottom = 10;
+    inputs[i].frame_width = 10;
+    inputs[i].frame_height = 10;
+  }
+
+  std::vector<std::pair<std::size_t, std::size_t>> calls;
+  opts.on_progress = [&](std::size_t current, std::size_t total) {
+    calls.push_back({current, total});
+  };
+
+  const svp::vision::EvidenceCropResult result =
+      svp::vision::generate_evidence_crops_internal(opts, inputs, tmp_dir);
+
+  assert(calls.size() == inputs.size() + 1);
+  assert(calls.front().first == 0);
+  assert(calls.front().second == inputs.size());
+  assert(calls.back().first == inputs.size());
+  assert(calls.back().second == inputs.size());
+  assert(result.crop_count == 0);
+  assert(result.crops_skipped_count == static_cast<std::int64_t>(inputs.size()));
+
+  std::filesystem::remove_all(tmp_dir);
+  std::cout << "test_evidence_crop_callback_counts_skipped_inputs: PASS\n";
+}
+
 }  // namespace
 
 int main() {
@@ -173,6 +220,7 @@ int main() {
   test_embedding_callback_fires_with_text_count();
   test_visual_tracker_tracking_callback_fires();
   test_depth_callback_not_called_without_frames();
+  test_evidence_crop_callback_counts_skipped_inputs();
 
   std::cout << "All progress callback tests: PASS\n";
   return 0;

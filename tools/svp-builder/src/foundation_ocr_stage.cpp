@@ -5,6 +5,7 @@
 #include "svp/vision/visual_entity_tracker.hpp"
 
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <utility>
 
@@ -58,10 +59,70 @@ void run_foundation_ocr_stage(BuildPipelineContext& context) {
                           "frames");
     }
   };
+  bool evidence_crop_stage_started = false;
+  std::uint64_t evidence_crop_observation_total = 0;
+  std::uint64_t evidence_crop_current = 0;
+  auto start_evidence_crop_stage =
+      [&context, &evidence_crop_stage_started]() {
+        if (!evidence_crop_stage_started) {
+          emit_stage_started(context, ProgressStageId::ocr_evidence_crops);
+          evidence_crop_stage_started = true;
+        }
+      };
+  ocr_opts.on_evidence_crop_progress =
+      [&context,
+       &evidence_crop_observation_total,
+       &evidence_crop_current,
+       &start_evidence_crop_stage](std::size_t current, std::size_t total) {
+        if (total == 0) {
+          return;
+        }
+        evidence_crop_observation_total = static_cast<std::uint64_t>(total);
+        evidence_crop_current = static_cast<std::uint64_t>(current);
+        start_evidence_crop_stage();
+        emit_stage_progress(
+            context,
+            ProgressStageId::ocr_evidence_crops,
+            evidence_crop_current,
+            evidence_crop_observation_total * 2,
+            "steps",
+            "extracting evidence crops");
+      };
+  ocr_opts.on_evidence_roi_progress =
+      [&context,
+       &evidence_crop_observation_total,
+       &evidence_crop_current,
+       &start_evidence_crop_stage](std::size_t current, std::size_t /*total*/) {
+        if (evidence_crop_observation_total == 0) {
+          return;
+        }
+        evidence_crop_current =
+            evidence_crop_observation_total + static_cast<std::uint64_t>(current);
+        start_evidence_crop_stage();
+        emit_stage_progress(
+            context,
+            ProgressStageId::ocr_evidence_crops,
+            evidence_crop_current,
+            evidence_crop_observation_total * 2,
+            "steps",
+            "verifying evidence crops");
+      };
 
   svp::vision::OcrGenerationResult ocr_result =
       svp::vision::generate_ocr_observations(
           ocr_opts, decoded_frames, context.staging_dir);
+  if (evidence_crop_stage_started && ocr_result.blocker.empty()) {
+    const std::uint64_t evidence_crop_total = evidence_crop_observation_total * 2;
+    if (evidence_crop_current < evidence_crop_total) {
+      emit_stage_progress(context,
+                          ProgressStageId::ocr_evidence_crops,
+                          evidence_crop_total,
+                          evidence_crop_total,
+                          "steps",
+                          "verifying evidence crops");
+    }
+    emit_stage_completed(context, ProgressStageId::ocr_evidence_crops);
+  }
 
   // Append OCR processor provenance records
   if (!ocr_result.processors.empty()) {

@@ -2,11 +2,15 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
 namespace svp::vision {
+
+using EvidenceCropProgressCallback =
+    std::function<void(std::size_t current, std::size_t total)>;
 
 // A single evidence crop linked to a reconciled text region.
 // Stores the source pixels behind an OCR observation so that
@@ -148,6 +152,8 @@ struct EvidenceCropOptions {
 
   // JPEG quality (1-100, only used when format is jpeg)
   int jpeg_quality = 85;
+
+  EvidenceCropProgressCallback on_progress;
 };
 
 // Aggregate result of evidence crop generation.

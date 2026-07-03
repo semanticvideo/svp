@@ -254,6 +254,49 @@ void test_json_sink_stage_progress_fields() {
   assert(output.find("\"asr\"") != std::string::npos);
 }
 
+void test_plain_sink_ocr_evidence_crop_stage_progress() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::plain, oss, false);
+
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::ocr_evidence_crops,
+      7,
+      14,
+      "steps",
+      "verifying evidence crops"));
+
+  const std::string output = oss.str();
+  assert(output.find("OCR Evidence Crops") != std::string::npos);
+  assert(output.find("7/14") != std::string::npos);
+  assert(output.find("steps") != std::string::npos);
+  assert(output.find("50%") != std::string::npos);
+  assert(output.find("verifying evidence crops") != std::string::npos);
+}
+
+void test_json_sink_ocr_evidence_crop_stage_progress_fields() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::json, oss, false);
+
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::ocr_evidence_crops,
+      4,
+      12,
+      "steps",
+      "extracting evidence crops"));
+
+  const std::string output = oss.str();
+  assert(output.find("\"stage_progress\"") != std::string::npos);
+  assert(output.find("\"stage\":\"ocr_evidence_crops\"") != std::string::npos);
+  assert(output.find("\"stage_label\":\"OCR Evidence Crops\"") != std::string::npos);
+  assert(output.find("\"current\":4") != std::string::npos);
+  assert(output.find("\"total\":12") != std::string::npos);
+  assert(output.find("\"fraction\"") != std::string::npos);
+  assert(output.find("\"unit\":\"steps\"") != std::string::npos);
+  assert(output.find("\"extracting evidence crops\"") != std::string::npos);
+}
+
 void test_tty_sink_stage_progress_has_carriage_return() {
   std::ostringstream oss;
   auto sink = svp::builder::make_progress_sink(
@@ -381,6 +424,8 @@ int main() {
   test_plain_and_auto_non_tty_produce_same_output();
   test_plain_sink_stage_progress();
   test_json_sink_stage_progress_fields();
+  test_plain_sink_ocr_evidence_crop_stage_progress();
+  test_json_sink_ocr_evidence_crop_stage_progress_fields();
   test_tty_sink_stage_progress_has_carriage_return();
   test_make_stage_progress_fraction();
   test_make_stage_progress_zero_total();

@@ -82,10 +82,16 @@ PackageSkeletonStageResult run_package_skeleton_stage(
     auto spatial_progress = [&context, &started_stages, &completed_stages](
                                         const char* stage,
                                         std::size_t current,
-                                        std::size_t total) {
+                                        std::size_t total,
+                                        const char* message) {
       ProgressStageId stage_id = ProgressStageId::ocr;
+      std::string unit = "items";
       if (std::string(stage) == "ocr") {
         stage_id = ProgressStageId::ocr;
+        unit = "frames";
+      } else if (std::string(stage) == "ocr_evidence_crops") {
+        stage_id = ProgressStageId::ocr_evidence_crops;
+        unit = "steps";
       } else if (std::string(stage) == "depth") {
         stage_id = ProgressStageId::depth;
       } else if (std::string(stage) == "text_embeddings") {
@@ -101,7 +107,8 @@ PackageSkeletonStageResult run_package_skeleton_stage(
       if (total > 0) {
         emit_stage_progress(context, stage_id,
                             static_cast<std::uint64_t>(current),
-                            static_cast<std::uint64_t>(total), "items");
+                            static_cast<std::uint64_t>(total), unit,
+                            message == nullptr ? "" : message);
       }
       if (current > 0 && current >= total && total > 0 &&
           completed_stages.insert(stage).second) {
@@ -123,12 +130,14 @@ PackageSkeletonStageResult run_package_skeleton_stage(
     // Emit completed for stages that had started but no final callback
     // (e.g. visual embeddings with unknown total, or stages that ran
     // but never reached current >= total).
-    for (const auto& stage : {"ocr", "depth", "text_embeddings",
-                              "visual_tracking", "visual_embeddings"}) {
+    for (const auto& stage : {"ocr", "ocr_evidence_crops", "depth",
+                              "text_embeddings", "visual_tracking",
+                              "visual_embeddings"}) {
       if (started_stages.count(stage) &&
           completed_stages.insert(stage).second) {
         ProgressStageId sid = ProgressStageId::ocr;
-        if (std::string(stage) == "depth") sid = ProgressStageId::depth;
+        if (std::string(stage) == "ocr_evidence_crops") sid = ProgressStageId::ocr_evidence_crops;
+        else if (std::string(stage) == "depth") sid = ProgressStageId::depth;
         else if (std::string(stage) == "text_embeddings") sid = ProgressStageId::text_embeddings;
         else if (std::string(stage) == "visual_tracking") sid = ProgressStageId::visual_tracking;
         else if (std::string(stage) == "visual_embeddings") sid = ProgressStageId::visual_embeddings;

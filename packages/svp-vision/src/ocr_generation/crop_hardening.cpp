@@ -131,6 +131,7 @@ EvidenceCropOptions build_crop_options(const OcrGenerationOptions& options) {
   crop_opts.min_jpeg_quality = options.crop_min_jpeg_quality;
   crop_opts.crop_image_format = "jpeg";
   crop_opts.jpeg_quality = 95;
+  crop_opts.on_progress = options.on_evidence_crop_progress;
   return crop_opts;
 }
 
@@ -199,11 +200,24 @@ RoiHardeningSummary generate_and_harden_evidence_crops(
     observation_index_by_id[result.text_observations[i].text_observation_id] = i;
   }
 
+  if (options.on_evidence_roi_progress) {
+    options.on_evidence_roi_progress(0, result.evidence_crops.size());
+  }
+  std::size_t processed_crop_count = 0;
   for (auto& crop : result.evidence_crops) {
+    auto report_crop_processed = [&]() {
+      ++processed_crop_count;
+      if (options.on_evidence_roi_progress) {
+        options.on_evidence_roi_progress(processed_crop_count,
+                                         result.evidence_crops.size());
+      }
+    };
+
     auto obs_it = observation_index_by_id.find(crop.text_observation_id);
     if (obs_it == observation_index_by_id.end()) {
       crop.evidence_quality = "weak";
       crop.evidence_quality_reason = "Linked text observation was not found";
+      report_crop_processed();
       continue;
     }
 
@@ -228,6 +242,7 @@ RoiHardeningSummary generate_and_harden_evidence_crops(
       crop.evidence_quality = "unsupported";
       crop.evidence_quality_reason =
           "Crop image could not be decoded for ROI OCR verification";
+      report_crop_processed();
       continue;
     }
 
@@ -236,6 +251,7 @@ RoiHardeningSummary generate_and_harden_evidence_crops(
     if (roi_detection.text.empty()) {
       crop.evidence_quality = "weak";
       crop.evidence_quality_reason = "Crop was decoded but ROI OCR produced no text";
+      report_crop_processed();
       continue;
     }
 
@@ -258,6 +274,7 @@ RoiHardeningSummary generate_and_harden_evidence_crops(
     crop.evidence_quality_reason =
         "Crop was decoded and PP-OCR ROI re-read produced text for the linked observation";
     ++summary.verified_crop_count;
+    report_crop_processed();
   }
 
   rewrite_evidence_crop_jsonl(staging_dir, result);

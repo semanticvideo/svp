@@ -19,6 +19,7 @@ enum class ProgressStageId {
   vision_plan,
   color,
   ocr,
+  ocr_evidence_crops,
   depth,
   embeddings,
   text_embeddings,
