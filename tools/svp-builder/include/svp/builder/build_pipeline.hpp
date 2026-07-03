@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/builder/build_progress.hpp"
+#include "svp/vision/inference_performance.hpp"
 
 #include <filesystem>
 #include <memory>
@@ -42,7 +43,7 @@ struct BuildPipelineOptions {
   std::filesystem::path staging_dir;
   std::filesystem::path model_cache_dir;
   BuildStage stop_after = BuildStage::media_ingest;
-  std::string ocr_performance_profile = "background";
+  svp::vision::InferencePerformanceOptions performance;
   std::string sherpa_lib_path;
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;

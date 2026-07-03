@@ -5,6 +5,7 @@
 #include "svp/vision/depth_generation.hpp"
 #include "svp/vision/embedding_generation.hpp"
 #include "svp/vision/frame_catalog.hpp"
+#include "svp/vision/inference_performance.hpp"
 #include "svp/vision/ocr_generation.hpp"
 #include "svp/vision/visual_entity_tracker.hpp"
 #include "svp/package/entity_writer.hpp"
@@ -202,7 +203,8 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     const svp::media::MediaIngestPlan* media_plan,
     const std::filesystem::path& ffmpeg_path,
     svp::vision::FrameCatalog* frame_catalog,
-    SpatialProgressCallback on_progress) {
+    SpatialProgressCallback on_progress,
+    const svp::vision::InferencePerformanceOptions& performance) {
   SpatialEmbeddingPlaceholderSummary summary;
   summary.model_runtime_available = model_runtime_available;
 
@@ -270,6 +272,10 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     ocr_opts.generate_evidence_crops = (media_plan != nullptr);
     ocr_opts.crop_coverage_policy = "one_per_observation";
     ocr_opts.crop_min_jpeg_quality = 50;
+    ocr_opts.performance_profile = performance.ocr_performance_profile;
+    ocr_opts.recognition_parallel_workers =
+        svp::vision::recognition_workers_for_ocr_profile(
+            performance.ocr_performance_profile);
     ocr_opts.frame_catalog = frame_catalog;
     attach_ocr_progress_callbacks(ocr_opts, on_progress);
 
@@ -481,6 +487,10 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
   ocr_opts.model_cache_root = model_cache_root;
   ocr_opts.ffmpeg_path = ffmpeg_path;
   ocr_opts.media_plan = media_plan;
+  ocr_opts.performance_profile = performance.ocr_performance_profile;
+  ocr_opts.recognition_parallel_workers =
+      svp::vision::recognition_workers_for_ocr_profile(
+          performance.ocr_performance_profile);
   ocr_opts.canonical_raster_width = static_cast<int>(raster_w);
   ocr_opts.canonical_raster_height = static_cast<int>(raster_h);
   if (media_plan != nullptr) {

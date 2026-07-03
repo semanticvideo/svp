@@ -42,12 +42,12 @@ target_link_libraries(svp-package
   PUBLIC
     nlohmann_json::nlohmann_json
     svp::core
+    svp::vision
   PRIVATE
     libzip::zip
     SQLite::SQLite3
     ${BLAKE3_LIBRARY}
     ${ZSTD_LIBRARY}
-    svp::vision
     svp::media
 )
 

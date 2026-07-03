@@ -39,13 +39,14 @@ target_include_directories(svp-builder-lib
 target_compile_features(svp-builder-lib PUBLIC cxx_std_20)
 
 target_link_libraries(svp-builder-lib
+  PUBLIC
+    svp::vision
   PRIVATE
     nlohmann_json::nlohmann_json
     svp::audio
     svp::core
     svp::media
     svp::models
-    svp::vision
     svp::package
     svp::validation
     libzip::zip

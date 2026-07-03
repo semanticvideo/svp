@@ -1,6 +1,7 @@
 #include "build_pipeline_internal.hpp"
 
 #include "svp/vision/canonical_frame_input.hpp"
+#include "svp/vision/inference_performance.hpp"
 #include "svp/vision/ocr_generation.hpp"
 #include "svp/vision/visual_entity_tracker.hpp"
 
@@ -10,13 +11,6 @@
 #include <utility>
 
 namespace svp::builder {
-
-int recognition_workers_for_ocr_profile(const std::string& profile) {
-  if (profile == "serial") return 1;
-  if (profile == "background") return 2;
-  if (profile == "fast") return 6;
-  return 3;
-}
 
 void run_foundation_ocr_stage(BuildPipelineContext& context) {
   // Decode canonical frames (used as fallback) and run real OCR.
@@ -31,9 +25,11 @@ void run_foundation_ocr_stage(BuildPipelineContext& context) {
   ocr_opts.media_plan = &context.plan;
   ocr_opts.canonical_raster_width = context.plan.canonical_raster.width;
   ocr_opts.canonical_raster_height = context.plan.canonical_raster.height;
-  ocr_opts.performance_profile = context.options.ocr_performance_profile;
+  ocr_opts.performance_profile =
+      context.options.performance.ocr_performance_profile;
   ocr_opts.recognition_parallel_workers =
-      recognition_workers_for_ocr_profile(context.options.ocr_performance_profile);
+      svp::vision::recognition_workers_for_ocr_profile(
+          context.options.performance.ocr_performance_profile);
   ocr_opts.recognition_parallel_min_boxes = 16;
   {
     int src_w = static_cast<int>(context.plan.primary_video_stream.width);

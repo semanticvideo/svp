@@ -332,6 +332,7 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
   pipeline_opts.staging_dir = staging_dir;
   pipeline_opts.model_cache_dir = options.model_cache_dir;
   pipeline_opts.stop_after = BuildStage::package_skeleton;
+  pipeline_opts.performance = options.performance;
   pipeline_opts.sherpa_lib_path = options.sherpa_lib_path;
   pipeline_opts.allow_fallback_diarization = options.allow_fallback_diarization;
   pipeline_opts.force_single_speaker = options.force_single_speaker;

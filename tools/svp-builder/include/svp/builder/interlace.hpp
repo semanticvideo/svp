@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/builder/build_progress.hpp"
+#include "svp/builder/build_pipeline.hpp"
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
 #include "svp/validation/report.hpp"
@@ -21,6 +22,7 @@ struct InterlaceCreateOptions {
   std::string ffmpeg_path = "ffmpeg";
   std::string probe_json_path;
   std::string sherpa_lib_path;
+  svp::vision::InferencePerformanceOptions performance;
   bool compute_full_blake3 = true;
   bool compute_chunk_proof = true;
   bool core_only_diagnostic = false;
