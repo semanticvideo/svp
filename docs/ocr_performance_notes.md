@@ -254,7 +254,7 @@ These options did not produce a meaningful speedup in the tested shape:
 | `SVP_OCR_ONNX_EXECUTION_MODE=parallel`, `SVP_OCR_ONNX_INTER_OP_THREADS=2` | About 1% faster, not meaningful. |
 | Workers 4 plus `SVP_OCR_ONNX_INTRA_OP_THREADS=1` | Slower because the cap also slowed detector inference. |
 
-## Next Tests
+## Planned Tests Before Targeted Sweep
 
 The next tests should preserve OCR output identity while reducing CPU pressure.
 
@@ -266,3 +266,117 @@ Recommended order:
 4. Decide whether the product should expose separate foreground and background profiles:
    - Foreground fast: workers 6, if CPU pressure is acceptable.
    - Background balanced: lower worker count or recognizer-thread-limited workers, depending on the next test result.
+
+## Targeted CPU Spike Sweep
+
+Purpose:
+
+- Re-test only the gator region that showed the highest CPU pressure in the partial full-video run.
+- Avoid waiting for broad OCR sampling to drift into the heavy region.
+- Preserve quality and behavior.
+- Keep the test bounded.
+
+Source:
+
+- `/Users/domesposito/Desktop/gator/new-gator.mp4`
+
+Derivation:
+
+- The previous partial full-video run showed the worst local CPU pressure around `frame_000157` through `frame_000161`.
+- That local region averaged about 1,202% process CPU.
+- The gator file duration is 9,521,002,667 us.
+- The OCR sampler safe end is 9,520,902,667 us.
+- With `target_max_samples=600`, the effective gap is 15,868,171 us.
+- The targeted diagnostic window used sample indices 146 through 161:
+  - `2316752966,2332621137,2348489308,2364357479,2380225650,2396093821,2411961992,2427830163,2443698334,2459566505,2475434676,2491302847,2507171018,2523039189,2538907360,2554775531`
+
+Shared command shape:
+
+- OCR-only.
+- `--stop-after foundation-ocr`.
+- `SVP_OCR_DIAG_TIMESTAMPS_US` set to the 16 timestamps above.
+- `SVP_OCR_RECOGNITION_PARALLEL_MIN_BOXES=16`.
+- `SVP_BUILDER_MEMORY_LIMIT_MB=2048`.
+- No ASR and no full build.
+
+Results:
+
+| Setting | Run root | Wall to last OCR frame | Avg CPU | Peak RSS | Frame sum | Recognition sum | Output identity |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Workers 6 | `gator-heavycpu-parw6-default-20260703-124855` | 35,096 ms | 1,082.91% | 1,364,525,056 bytes | 33,086.10 ms | 30,477.71 ms | Control |
+| Workers 6, recognizer intra-op 1 | `gator-heavycpu-parw6-recintra1-20260703-125008` | 78,710 ms | 389.81% | 1,534,214,144 bytes | 76,708.87 ms | 74,129.90 ms | Incomplete output run; rejected on speed |
+| Workers 6, recognizer intra-op 2 | `gator-heavycpu-parw6-recintra2-20260703-125304` | 63,754 ms | 543.00% | 1,393,131,520 bytes | 61,739.25 ms | 59,160.38 ms | Differs |
+| Workers 4 | `gator-heavycpu-parw4-default-20260703-125522` | 38,128 ms | 963.17% | 1,178,845,184 bytes | 36,102.22 ms | 33,510.38 ms | Byte-identical |
+| Workers 3 | `gator-heavycpu-parw3-default-20260703-125729` | 39,278 ms | 895.11% | 1,151,025,152 bytes | 37,290.19 ms | 34,713.16 ms | Byte-identical |
+
+Output identity comparison:
+
+- Workers 4 and workers 3 matched the workers-6 control byte-for-byte for:
+  - `text_observations.jsonl`
+  - `text_regions.jsonl`
+  - `numeric_values.jsonl`
+  - `evidence_crops.jsonl`
+  - `text_absence.json`
+  - `processors.jsonl`
+- Workers 6 with recognizer intra-op 2 changed serialized confidence values in OCR outputs. Even when text looked the same, this is still an output change, so this path is not acceptable as a quality-preserving optimization.
+- Workers 6 with recognizer intra-op 1 was more than 2x slower than the uncapped workers-6 control and was rejected on speed before treating it as a candidate path.
+
+Interpretation:
+
+- Recognizer-only ONNX thread caps reduce CPU, but the current tested caps are not good product candidates:
+  - Intra-op 1 cuts CPU hardest but gives back too much speed.
+  - Intra-op 2 still gives back too much speed and changes serialized OCR outputs.
+- Reducing worker count is safer than capping recognizer ONNX threads in this build:
+  - Workers 4 keeps output identity, reduces peak RSS by about 185 MB versus workers 6, and cuts average CPU by about 120 percentage points on the spike window.
+  - Workers 3 keeps output identity, reduces peak RSS by about 214 MB versus workers 6, and cuts average CPU by about 188 percentage points on the spike window.
+  - Workers 3 is only about 3.0% slower than workers 4 on this window while using less CPU and memory.
+
+Current recommendation:
+
+- Keep workers 6 as the foreground fast candidate.
+- Treat workers 3 as the current conservative/default candidate.
+- Treat workers 4 as a possible balanced candidate if workers 3 proves too slow on broader samples.
+- Do not use recognizer ONNX thread caps for production profiles unless later tests prove an output-identical configuration.
+- Add `timestamp_us` to OCR frame diagnostics so future heavy-window tests can be derived directly from diagnostics instead of reconstructing sample timestamps from the sampling contract.
+
+## CLI Profile Validation
+
+Change:
+
+- Added `svp-builder build --ocr-performance conservative|fast`.
+- `conservative` maps to 3 OCR recognition workers.
+- `fast` maps to 6 OCR recognition workers.
+- The selected profile is recorded in builder output and OCR diagnostics.
+- Environment overrides remain available for diagnostics.
+
+Validation shape:
+
+- OCR-only.
+- `--stop-after foundation-ocr`.
+- No ASR and no full build.
+- Same heavy timestamp windows used in the previous tests.
+- `SVP_BUILDER_MEMORY_LIMIT_MB=2048`.
+
+Results:
+
+| File | Profile | Workers | Wall to last OCR frame | Avg CPU | Peak RSS | Output identity |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| `ultimate-2.mp4` | conservative | 3 | 37,374 ms | 930.06% | 1,195,687,936 bytes | Control |
+| `ultimate-2.mp4` | fast | 6 | 33,022 ms | 1,174.23% | 1,464,188,928 bytes | Byte-identical |
+| `new-gator.mp4` | conservative | 3 | 39,325 ms | 895.68% | 1,152,909,312 bytes | Control |
+| `new-gator.mp4` | fast | 6 | 35,574 ms | 1,087.11% | 1,362,001,920 bytes | Byte-identical |
+
+Run roots:
+
+- `/Users/domesposito/Projects/svp/build/diagnostics/profile-ultimate-conservative-20260703-130654`
+- `/Users/domesposito/Projects/svp/build/diagnostics/profile-ultimate-fast-20260703-130929`
+- `/Users/domesposito/Projects/svp/build/diagnostics/profile-gator-conservative-20260703-131157`
+- `/Users/domesposito/Projects/svp/build/diagnostics/profile-gator-fast-20260703-131313`
+
+Conclusion:
+
+- The two-profile approach is good.
+- Conservative keeps the footprint lower and remains much faster than the original single-worker baseline.
+- Fast is meaningfully quicker when the user wants foreground speed.
+- Both profiles preserved OCR output identity on the validation windows.
+- Both profiles stayed below the 2 GB memory limit.

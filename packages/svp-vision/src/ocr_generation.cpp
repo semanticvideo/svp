@@ -182,6 +182,9 @@ OcrGenerationResult generate_ocr_observations(
 
   PpOcrOptions pp_ocr_opts;
   pp_ocr_opts.model_cache_root = options.model_cache_root;
+  pp_ocr_opts.recognition_parallel_workers = options.recognition_parallel_workers;
+  pp_ocr_opts.recognition_parallel_min_boxes =
+      options.recognition_parallel_min_boxes;
   pp_ocr_opts.execution_provider = execution_provider_env_or_default(
       "SVP_OCR_EXECUTION_PROVIDER", pp_ocr_opts.execution_provider);
   pp_ocr_opts.intra_op_num_threads = positive_env_int_or_default(
@@ -192,6 +195,22 @@ OcrGenerationResult generate_ocr_observations(
       "SVP_OCR_ONNX_GRAPH_OPT_LEVEL", pp_ocr_opts.graph_optimization_level);
   pp_ocr_opts.execution_mode = execution_mode_env_or_default(
       "SVP_OCR_ONNX_EXECUTION_MODE", pp_ocr_opts.execution_mode);
+  pp_ocr_opts.det_intra_op_num_threads = positive_env_int_or_default(
+      "SVP_OCR_DET_ONNX_INTRA_OP_THREADS", pp_ocr_opts.intra_op_num_threads);
+  pp_ocr_opts.det_inter_op_num_threads = positive_env_int_or_default(
+      "SVP_OCR_DET_ONNX_INTER_OP_THREADS", pp_ocr_opts.inter_op_num_threads);
+  pp_ocr_opts.det_graph_optimization_level = graph_opt_env_or_default(
+      "SVP_OCR_DET_ONNX_GRAPH_OPT_LEVEL", pp_ocr_opts.graph_optimization_level);
+  pp_ocr_opts.det_execution_mode = execution_mode_env_or_default(
+      "SVP_OCR_DET_ONNX_EXECUTION_MODE", pp_ocr_opts.execution_mode);
+  pp_ocr_opts.rec_intra_op_num_threads = positive_env_int_or_default(
+      "SVP_OCR_REC_ONNX_INTRA_OP_THREADS", pp_ocr_opts.intra_op_num_threads);
+  pp_ocr_opts.rec_inter_op_num_threads = positive_env_int_or_default(
+      "SVP_OCR_REC_ONNX_INTER_OP_THREADS", pp_ocr_opts.inter_op_num_threads);
+  pp_ocr_opts.rec_graph_optimization_level = graph_opt_env_or_default(
+      "SVP_OCR_REC_ONNX_GRAPH_OPT_LEVEL", pp_ocr_opts.graph_optimization_level);
+  pp_ocr_opts.rec_execution_mode = execution_mode_env_or_default(
+      "SVP_OCR_REC_ONNX_EXECUTION_MODE", pp_ocr_opts.execution_mode);
   pp_ocr_opts.recognition_parallel_workers = positive_env_int_or_default(
       "SVP_OCR_RECOGNITION_PARALLEL_WORKERS",
       pp_ocr_opts.recognition_parallel_workers);
@@ -208,6 +227,15 @@ OcrGenerationResult generate_ocr_observations(
       {"inter_op_num_threads", std::to_string(pp_ocr_opts.inter_op_num_threads)},
       {"graph_optimization_level", std::to_string(pp_ocr_opts.graph_optimization_level)},
       {"execution_mode", pp_ocr_opts.execution_mode},
+      {"det_intra_op_num_threads", std::to_string(pp_ocr_opts.det_intra_op_num_threads)},
+      {"det_inter_op_num_threads", std::to_string(pp_ocr_opts.det_inter_op_num_threads)},
+      {"det_graph_optimization_level", std::to_string(pp_ocr_opts.det_graph_optimization_level)},
+      {"det_execution_mode", pp_ocr_opts.det_execution_mode},
+      {"rec_intra_op_num_threads", std::to_string(pp_ocr_opts.rec_intra_op_num_threads)},
+      {"rec_inter_op_num_threads", std::to_string(pp_ocr_opts.rec_inter_op_num_threads)},
+      {"rec_graph_optimization_level", std::to_string(pp_ocr_opts.rec_graph_optimization_level)},
+      {"rec_execution_mode", pp_ocr_opts.rec_execution_mode},
+      {"performance_profile", options.performance_profile},
       {"recognition_parallel_workers", std::to_string(pp_ocr_opts.recognition_parallel_workers)},
       {"recognition_parallel_min_boxes", std::to_string(pp_ocr_opts.recognition_parallel_min_boxes)}
   });

@@ -63,6 +63,14 @@ struct PpOcrOptions {
   int inter_op_num_threads = 0;
   int graph_optimization_level = -1;
   std::string execution_mode;
+  int det_intra_op_num_threads = 0;
+  int det_inter_op_num_threads = 0;
+  int det_graph_optimization_level = -1;
+  std::string det_execution_mode;
+  int rec_intra_op_num_threads = 0;
+  int rec_inter_op_num_threads = 0;
+  int rec_graph_optimization_level = -1;
+  std::string rec_execution_mode;
   int recognition_parallel_workers = 1;
   int recognition_parallel_min_boxes = 16;
 };

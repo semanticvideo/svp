@@ -86,6 +86,7 @@ Common options:
 | `--ffprobe <path>` | ffprobe executable |
 | `--sherpa-lib <path>` | sherpa-onnx C API library for diarization |
 | `--stop-after <stage>` | Stop after `media-ingest`, `audio`, `vision-plan`, `foundation-color`, `foundation-ocr`, or `package-skeleton` |
+| `--ocr-performance <profile>` | OCR profile: `conservative` for lower CPU/memory, or `fast` for foreground speed |
 | `--allow-fallback-diarization` | Allow explicit fallback when sherpa-onnx is unavailable |
 | `--force-single-speaker` | Intentionally skip diarization and declare one speaker |
 

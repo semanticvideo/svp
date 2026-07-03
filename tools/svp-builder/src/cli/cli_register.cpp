@@ -33,6 +33,9 @@ void register_cli(CLI::App& app, CliContext& context) {
   build->add_option("--stop-after", build_opts.stop_after,
                     "Supported foundation stages: media-ingest, audio, vision-plan, "
                     "foundation-color, foundation-ocr, package-skeleton");
+  build->add_option("--ocr-performance", build_opts.ocr_performance_profile,
+                    "OCR performance profile: conservative or fast")
+      ->check(CLI::IsMember({"conservative", "fast"}));
   build->add_option("--sherpa-lib", build_opts.sherpa_lib_path,
                     "Explicit path to libsherpa-onnx-c-api.dylib for diarization");
   build->add_flag("--allow-fallback-diarization", build_opts.allow_fallback_diarization,

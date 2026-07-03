@@ -227,16 +227,23 @@ PpOcrSession create_pp_ocr_session(const PpOcrOptions& options) {
       svp::core::HashString{svp::core::HashAlgorithm::blake3, ""}};
   det_manifest.files.push_back(det_file);
 
-  svp::models::OnnxSessionOptions sess_opts;
-  sess_opts.execution_provider = options.execution_provider;
-  sess_opts.intra_op_num_threads = options.intra_op_num_threads;
-  sess_opts.inter_op_num_threads = options.inter_op_num_threads;
-  sess_opts.graph_optimization_level = options.graph_optimization_level;
-  sess_opts.execution_mode = options.execution_mode;
+  svp::models::OnnxSessionOptions det_sess_opts;
+  det_sess_opts.execution_provider = options.execution_provider;
+  det_sess_opts.intra_op_num_threads = options.det_intra_op_num_threads;
+  det_sess_opts.inter_op_num_threads = options.det_inter_op_num_threads;
+  det_sess_opts.graph_optimization_level = options.det_graph_optimization_level;
+  det_sess_opts.execution_mode = options.det_execution_mode;
+
+  svp::models::OnnxSessionOptions rec_sess_opts;
+  rec_sess_opts.execution_provider = options.execution_provider;
+  rec_sess_opts.intra_op_num_threads = options.rec_intra_op_num_threads;
+  rec_sess_opts.inter_op_num_threads = options.rec_inter_op_num_threads;
+  rec_sess_opts.graph_optimization_level = options.rec_graph_optimization_level;
+  rec_sess_opts.execution_mode = options.rec_execution_mode;
 
   try {
     session.impl_->det_session = svp::models::OnnxSession::load(
-        det_manifest, bundles->det_bundle_dir, sess_opts);
+        det_manifest, bundles->det_bundle_dir, det_sess_opts);
   } catch (const std::exception& e) {
     session.blocker = std::string("Failed to load PP-OCR detector: ") + e.what();
     return session;
@@ -255,7 +262,7 @@ PpOcrSession create_pp_ocr_session(const PpOcrOptions& options) {
 
   try {
     session.impl_->rec_session = svp::models::OnnxSession::load(
-        rec_manifest, bundles->rec_bundle_dir, sess_opts);
+        rec_manifest, bundles->rec_bundle_dir, rec_sess_opts);
   } catch (const std::exception& e) {
     session.blocker = std::string("Failed to load PP-OCR recognizer: ") + e.what();
     return session;
@@ -353,6 +360,7 @@ PpOcrFrameResult run_pp_ocr_on_frame(
   result.detection_postprocess_ms = elapsed_ms(postprocess_start, SteadyClock::now());
   svp::core::check_memory_limit("ocr.ppocr.detector.after_postprocess", {
       {"frame_id", frame.frame_id},
+      {"timestamp_us", std::to_string(frame.timestamp_us)},
       {"frame_width", std::to_string(frame.width)},
       {"frame_height", std::to_string(frame.height)},
       {"det_input_width", std::to_string(det_input.width)},
@@ -375,6 +383,7 @@ PpOcrFrameResult run_pp_ocr_on_frame(
   result.frame_total_ms = elapsed_ms(frame_start, SteadyClock::now());
   svp::core::check_memory_limit("ocr.ppocr.frame.complete", {
       {"frame_id", frame.frame_id},
+      {"timestamp_us", std::to_string(frame.timestamp_us)},
       {"box_count", std::to_string(boxes.size())},
       {"recognition_attempts", std::to_string(recognized_attempts)},
       {"detection_count", std::to_string(result.detections.size())},
