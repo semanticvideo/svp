@@ -51,7 +51,7 @@ struct PpOcrOptions {
   double det_box_thresh = 0.6;
   double det_unclip_ratio = 1.5;
   int rec_image_height = 48;
-  int rec_max_width = 320;
+  int rec_max_width = 3200;
   double min_text_score = 0.0;
 };
 
@@ -79,6 +79,11 @@ struct PpOcrSession {
     const PpOcrSession& session,
     const PpOcrOptions& options,
     const ColorRasterFrame& frame);
+
+[[nodiscard]] PpOcrDetection run_pp_ocr_recognition_on_crop(
+    const PpOcrSession& session,
+    const PpOcrOptions& options,
+    const ColorRasterFrame& crop);
 
 [[nodiscard]] nlohmann::json pp_ocr_model_info_to_json(
     const PpOcrModelInfo& info);
