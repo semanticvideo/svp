@@ -75,7 +75,7 @@ The original order was:
 4. Import RC2 and update OCR/color implementation plans.
 5. Build deeper package checks with OCR/color schemas, registries, and paths.
 6. Create fixtures covering visible text, numeric text, and color coverage.
-7. Build reader and inspector with text/color summaries.
+7. Build inspector with reader APIs and text/color summaries.
 8. Build media ingest.
 9. Build audio/transcript.
 10. Build model runtime.

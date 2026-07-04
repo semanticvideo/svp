@@ -18,7 +18,6 @@ packages/svp-core/
 packages/svp-package/
 packages/svp-validation/
 tools/svp-validator/
-tools/svp-reader/
 tools/svp-inspector/
 tools/svp-builder/
 ```
@@ -31,7 +30,7 @@ tools/svp-builder/
 4. Create `packages/svp-validation` with validation report structs and JSON serialization.
 5. Create `packages/svp-package` with placeholder package probing API.
 6. Create `tools/svp-validator` executable with `--help`, `--version`, and `validate` command stub.
-7. Create empty build targets for reader, inspector, and builder if useful, but do not implement their behavior yet.
+7. Create empty build targets for inspector and builder if useful, but do not implement their behavior yet.
 
 ## Required commands
 

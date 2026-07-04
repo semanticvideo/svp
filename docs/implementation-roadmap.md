@@ -55,9 +55,9 @@ Required fixtures:
 
 The purpose of fixtures is to make validator behavior testable.
 
-## Phase 4: Reader
+## Phase 4: Package reader APIs
 
-Build `svp-reader` after the validator.
+Build package reader APIs after the validator.
 
 Reader responsibilities:
 
@@ -72,11 +72,14 @@ Reader responsibilities:
 
 ## Phase 5: Inspector
 
-Build `svp-inspector` after reader.
+Build `svp-inspector` on top of the reader APIs. Do not add a separate
+`svp-reader` executable unless a future machine-facing use case needs a distinct
+binary; manifest and index-manifest dump behavior belongs in `svp-inspector`.
 
 Inspector responsibilities:
 
 - print human-readable package summary
+- dump manifest and index manifest
 - list tracks
 - list speech regions
 - list blocks

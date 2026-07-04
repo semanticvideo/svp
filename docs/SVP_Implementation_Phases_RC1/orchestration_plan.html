@@ -396,7 +396,7 @@
         <ul>
           <li><code>svp-validator</code> emits structured reports and meaningful validation codes.</li>
           <li>Fixtures prove valid and invalid package behavior.</li>
-          <li><code>svp-reader</code> and <code>svp-inspector</code> make packages understandable.</li>
+          <li><code>svp-inspector</code> and the reader/query APIs make packages understandable.</li>
           <li>The builder creates partial packages first, then a complete package later.</li>
           <li>One simple 20 to 30 second video produces a `.svp` file, validation JSON, inspector output, and a trial report.</li>
           <li>Visible text and numeric values are stored as Core observations.</li>
@@ -766,18 +766,18 @@
 
       <div class="phase">
         <div class="phase-header">
-          <h3>5. Reader And Inspector</h3>
+          <h3>5. Inspector</h3>
           <span class="tag">debug layer</span>
         </div>
         <p><strong>Branch:</strong> <code>codex/phase-05-reader-inspector</code></p>
-        <p><strong>Scope:</strong> build tools that open packages and explain their contents without validating everything.</p>
+        <p><strong>Scope:</strong> build one inspector command, backed by reader/query APIs, that opens packages and explains their contents without validating everything.</p>
         <ul>
           <li>Implement package open/read APIs.</li>
           <li>Read manifests, transcript counts, text region counts, color observation counts, shot/scene counts, block metadata, and index summaries.</li>
           <li>Keep invalid package handling graceful.</li>
         </ul>
-        <p><strong>Reviewer focus:</strong> reader ownership versus validator ownership, useful partial-read behavior.</p>
-        <p class="small">Status: inspector summary and manifest/index-manifest dump support have landed. Further reader work should support package-writer and first-trial debugging.</p>
+        <p><strong>Reviewer focus:</strong> reader API ownership versus validator ownership, useful partial-read behavior, and keeping package debugging under one CLI.</p>
+        <p class="small">Status: inspector summary and manifest/index-manifest dump support have landed. The separate reader executable plan is folded into reader/query APIs plus <code>svp-inspector</code>.</p>
       </div>
 
       <div class="phase">

@@ -40,10 +40,14 @@ Early phase executables can be separate:
 
 ```text
 svp-validator
-svp-reader
 svp-inspector
 svp-builder
 ```
+
+The original separate `svp-reader` executable plan has been folded into
+`packages/svp-package`, `packages/svp-query`, and the `svp-inspector` CLI.
+Keep one package-debugging command unless a future use case needs a distinct
+machine-facing binary.
 
 Later, add a unified CLI wrapper:
 

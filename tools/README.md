@@ -6,9 +6,8 @@ querying, and interlacing SVP-family artifacts.
 Historically the tools were built in this order:
 
 1. svp-validator
-2. svp-reader
-3. svp-inspector
-4. svp-builder
+2. svp-inspector
+3. svp-builder
 
 The validator remains the spine of the project. Builder output is not complete
 until it is inspectable and validator-clean for the target artifact type.
@@ -17,13 +16,21 @@ until it is inspectable and validator-clean for the target artifact type.
 
 Validates package structure, schemas, binary blocks, hashes, SQLite logical row streams, validation code usage, and equivalence behavior.
 
-## svp-reader
-
-Reads package contents and exposes structured access.
-
 ## svp-inspector
 
-Human-readable package inspection CLI.
+Human-readable and agent-readable package inspection CLI.
+
+`svp-inspector` is the single command for package summaries, JSON dumps, and
+semantic queries. The old separate `svp-reader` executable plan was folded into
+library reader APIs plus this CLI to avoid splitting package debugging across
+two commands.
+
+### Dump package metadata
+
+```
+svp-inspector dump <package.svp> --section manifest
+svp-inspector dump <package.svp> --section index_manifest
+```
 
 ### Query modes
 
