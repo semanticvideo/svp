@@ -1,6 +1,7 @@
 #include "svp/models/runtime.hpp"
 
 #include "svp/core/memory_diagnostics.hpp"
+#include "svp/core/process_stdio.hpp"
 #include "svp/models/error.hpp"
 
 #include <algorithm>
@@ -8,6 +9,7 @@
 #include <atomic>
 #include <cstring>
 #include <fcntl.h>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <unistd.h>
@@ -28,7 +30,9 @@ std::atomic<bool> g_onnx_verbose{false};
 
 class StdoutStderrSuppressor {
  public:
-  StdoutStderrSuppressor() : suppressed_(false) {
+  StdoutStderrSuppressor()
+      : stdio_lock_(svp::core::process_stdio_suppression_mutex()),
+        suppressed_(false) {
     fflush(stdout);
     fflush(stderr);
     saved_stdout_ = dup(STDOUT_FILENO);
@@ -57,6 +61,7 @@ class StdoutStderrSuppressor {
   StdoutStderrSuppressor& operator=(const StdoutStderrSuppressor&) = delete;
 
  private:
+  std::unique_lock<std::recursive_mutex> stdio_lock_;
   bool suppressed_;
   int saved_stdout_;
   int saved_stderr_;

@@ -3,6 +3,7 @@ add_library(svp-core
   src/id.cpp
   src/memory_diagnostics.cpp
   src/path.cpp
+  src/process_stdio.cpp
   src/timestamp.cpp
   src/version.cpp
 )

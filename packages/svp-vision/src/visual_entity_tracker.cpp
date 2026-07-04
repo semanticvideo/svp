@@ -1,6 +1,7 @@
 #include "svp/vision/visual_entity_tracker.hpp"
 #include "svp/vision/noise_suppression.hpp"
 
+#include "svp/core/process_stdio.hpp"
 #include "svp/models/manifest.hpp"
 #include "svp/models/runtime.hpp"
 #include "svp/models/verification.hpp"
@@ -17,6 +18,7 @@
 #include <fcntl.h>
 #include <fstream>
 #include <iomanip>
+#include <mutex>
 #include <numeric>
 #include <optional>
 #include <set>
@@ -28,7 +30,9 @@ namespace {
 
 class StderrSuppressor {
  public:
-  StderrSuppressor() : suppressed_(false) {
+  StderrSuppressor()
+      : stdio_lock_(svp::core::process_stdio_suppression_mutex()),
+        suppressed_(false) {
     fflush(stderr);
     saved_stderr_ = dup(STDERR_FILENO);
     const int devnull = open("/dev/null", O_WRONLY);
@@ -51,6 +55,7 @@ class StderrSuppressor {
   StderrSuppressor& operator=(const StderrSuppressor&) = delete;
 
  private:
+  std::unique_lock<std::recursive_mutex> stdio_lock_;
   bool suppressed_;
   int saved_stderr_;
 };
