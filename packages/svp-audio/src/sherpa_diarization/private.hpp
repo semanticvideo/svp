@@ -154,6 +154,11 @@ struct SpeakerObservation {
   std::vector<float> embedding;
 };
 
+struct WordSpeakerEvidence {
+  int32_t segment_speaker = -1;
+  std::vector<float> embedding_similarity_by_speaker;
+};
+
 SherpaLibState& lib_state();
 SherpaDiarizationApi& get_api();
 
@@ -194,6 +199,19 @@ void collapse_fragmented_secondary_tracks(
 void collapse_single_dominant_track(std::vector<SherpaDiarizationSegment>& segments,
                                     int32_t& final_speaker_count);
 
+std::vector<int32_t> decode_word_speaker_sequence(
+    const std::vector<AsrWord>& words,
+    int32_t speaker_count,
+    const std::vector<WordSpeakerEvidence>& evidence);
+
 bool ends_utterance(const std::string& text);
+
+std::vector<std::string> assign_word_speakers_with_extractor(
+    const SherpaDiarizationApi& api,
+    const void* extractor,
+    int32_t embedding_dim,
+    const PcmS16MonoWavInfo& wav_info,
+    const std::vector<AsrWord>& words,
+    const SherpaDiarizationResult& diar_result);
 
 }  // namespace svp::audio::sherpa_diarization_internal

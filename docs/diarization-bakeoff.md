@@ -19,6 +19,46 @@ Required count expectations:
 | new-gator.mp4 | 20 accepted | Roughly 17 true speakers; current 20 is acceptable. |
 | Existing fixtures | Existing expected counts | Must remain stable. |
 
+## Current Scope
+
+The current bake-off scope is to improve speaker attribution while preserving
+the product shape of a quiet local background builder.
+
+Required behavior:
+
+- Preserve the current good speaker-count behavior.
+- Improve the two-speaker real sample attribution to at least 95% against the
+  Premiere CSV reference, ideally closer to 100%.
+- Keep the similar-timbre two-speaker fixture at 100% word-level attribution
+  against its Premiere reference.
+- Keep all named sample counts and existing fixture expectations stable.
+- Do not use the rejected model-swap contestants as the production path.
+- Do not run a hidden second speaker-embedding/refinement phase after the
+  diarization progress has completed.
+- Any speaker attribution refinement that is part of diarization must happen
+  before the existing diarization stage is marked complete. The progress UI
+  does not need a redesign; the existing 0-100% stage must simply account for
+  all diarization work.
+- Do not add a surprise fallback path. If refinement cannot run, produce honest
+  segment-overlap assignments and record the limitation rather than doing
+  unaccounted work later.
+- Keep normal `svp build` local-only, cross-platform viable, and free of a
+  Python runtime requirement.
+- Keep concerns separated; avoid adding more responsibility to already-large
+  files when a separate decoder/refinement owner is clearer.
+
+Memory acceptance framing:
+
+- There is no hard 2 GB cap.
+- Lower and predictable memory is strongly preferred because the product should
+  run quietly in the background.
+- A higher footprint is acceptable only when it buys meaningful quality and does
+  not create avoidable late-stage spikes.
+- Paths around a few GB are directionally acceptable if quality is strong.
+- Paths around 7-9 GB for equal or worse quality are not acceptable.
+- Avoid duplicate model/extractor passes and avoid rereading the full audio for
+  hidden late speaker refinement.
+
 ## Reference Inputs
 
 | Reference | Path | Purpose |

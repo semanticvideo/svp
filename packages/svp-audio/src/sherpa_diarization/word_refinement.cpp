@@ -3,6 +3,7 @@
 #include "svp/core/memory_diagnostics.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <iomanip>
@@ -39,9 +40,6 @@ constexpr std::size_t kFingerprintLocalEvidenceMinWords = 2;
 constexpr std::size_t kFingerprintUpdateMaxEmbeddings = 8;
 constexpr std::size_t kFingerprintSubUtteranceMaxWords = 4;
 constexpr std::int64_t kFingerprintSubUtteranceMaxDurationUs = 1500000;
-constexpr std::int64_t kFingerprintWordWindowPaddingUs = 100000;
-constexpr float kFingerprintWordLocalMinSimilarity = 0.12f;
-constexpr float kFingerprintWordLocalMinMargin = 0.015f;
 constexpr std::size_t kFingerprintMaxInteriorIslandWords = 2;
 
 std::string speaker_id_for_index(int32_t speaker_index) {
@@ -95,6 +93,50 @@ std::string segment_overlap_assignment(
     return speaker_id_for_index(nearest_seg->speaker_id);
   }
   return "speaker_unknown";
+}
+
+int32_t best_segment_index_for_word(
+    const AsrWord& word,
+    const std::vector<SherpaDiarizationSegment>& segments) {
+  int32_t best_index = -1;
+  std::int64_t best_overlap = 0;
+  for (std::size_t i = 0; i < segments.size(); ++i) {
+    const auto& seg = segments[i];
+    const std::int64_t seg_start =
+        static_cast<std::int64_t>(seg.start_sec * 1000000.0f);
+    const std::int64_t seg_end =
+        static_cast<std::int64_t>(seg.end_sec * 1000000.0f);
+    const std::int64_t overlap = std::min(word.end_us, seg_end) -
+                                 std::max(word.start_us, seg_start);
+    if (overlap > best_overlap) {
+      best_overlap = overlap;
+      best_index = static_cast<int32_t>(i);
+    }
+  }
+  if (best_index >= 0) return best_index;
+
+  std::int64_t nearest_dist = std::numeric_limits<std::int64_t>::max();
+  for (std::size_t i = 0; i < segments.size(); ++i) {
+    const auto& seg = segments[i];
+    const std::int64_t seg_start =
+        static_cast<std::int64_t>(seg.start_sec * 1000000.0f);
+    const std::int64_t seg_end =
+        static_cast<std::int64_t>(seg.end_sec * 1000000.0f);
+    std::int64_t dist;
+    if (word.end_us <= seg_start) {
+      dist = seg_start - word.end_us;
+    } else if (word.start_us >= seg_end) {
+      dist = word.start_us - seg_end;
+    } else {
+      dist = 0;
+    }
+    if (dist < nearest_dist) {
+      nearest_dist = dist;
+      best_index = static_cast<int32_t>(i);
+    }
+  }
+  if (nearest_dist <= kWordSpeakerNearestToleranceUs) return best_index;
+  return -1;
 }
 
 std::vector<SherpaDiarizationSegment> select_speaker_anchor_segments(
@@ -182,6 +224,48 @@ std::vector<std::string> refine_word_speakers_by_embedding(
 
   if (words.empty() || diar_result.final_speaker_count <= 1 ||
       diar_result.segments.empty()) {
+    return {};
+  }
+
+  if (diar_result.final_speaker_fingerprints.size() ==
+          static_cast<std::size_t>(diar_result.final_speaker_count) &&
+      diar_result.segment_fingerprint_similarities.size() ==
+          diar_result.segments.size()) {
+    std::vector<WordSpeakerEvidence> evidence(words.size());
+    for (std::size_t i = 0; i < words.size(); ++i) {
+      const int32_t segment_index =
+          best_segment_index_for_word(words[i], diar_result.segments);
+      if (segment_index >= 0 &&
+          static_cast<std::size_t>(segment_index) < diar_result.segments.size()) {
+        evidence[i].segment_speaker =
+            diar_result.segments[static_cast<std::size_t>(segment_index)].speaker_id;
+        if (static_cast<std::size_t>(segment_index) <
+            diar_result.segment_fingerprint_similarities.size()) {
+          evidence[i].embedding_similarity_by_speaker =
+              diar_result.segment_fingerprint_similarities[
+                  static_cast<std::size_t>(segment_index)];
+        }
+      }
+    }
+
+    const std::vector<int32_t> decoded =
+        decode_word_speaker_sequence(
+            words, diar_result.final_speaker_count, evidence);
+    if (decoded.size() != words.size()) return {};
+
+    std::vector<std::string> assignments;
+    assignments.reserve(decoded.size());
+    for (int32_t speaker : decoded) {
+      if (speaker >= 0) {
+        assignments.push_back(speaker_id_for_index(speaker));
+      } else {
+        assignments.push_back("speaker_unknown");
+      }
+    }
+    return assignments;
+  }
+
+  if (std::getenv("SVP_DIARIZATION_ENABLE_LATE_FINGERPRINT_REFINEMENT") == nullptr) {
     return {};
   }
 
@@ -302,6 +386,11 @@ std::vector<std::string> refine_word_speakers_by_embedding(
     return -1;
   };
 
+  std::vector<std::vector<float>> word_embedding_similarities(
+      words.size(),
+      std::vector<float>(
+          static_cast<std::size_t>(diar_result.final_speaker_count), -2.0f));
+
   auto assign_group_by_embedding = [&](std::size_t first_word,
                                        std::size_t last_word) {
     if (first_word > last_word || last_word >= words.size()) return;
@@ -386,6 +475,7 @@ std::vector<std::string> refine_word_speakers_by_embedding(
     const std::string speaker_id = speaker_id_for_index(selected_speaker);
     for (std::size_t i = first_word; i <= last_word; ++i) {
       assignments[i] = speaker_id;
+      word_embedding_similarities[i] = similarities;
     }
 
     if (margin >= kFingerprintUpdateMinMargin) {
@@ -445,38 +535,21 @@ std::vector<std::string> refine_word_speakers_by_embedding(
     }
   }
 
-  for (std::size_t word_index = 0; word_index < words.size(); ++word_index) {
-    const std::int64_t start_us =
-        std::max<std::int64_t>(0, words[word_index].start_us -
-                                      kFingerprintWordWindowPaddingUs);
-    const std::int64_t end_us =
-        words[word_index].end_us + kFingerprintWordWindowPaddingUs;
-    std::vector<float> word_embedding =
-        compute_embedding_for_range(start_us, end_us);
-    if (!has_embedding_signal(word_embedding)) continue;
-
-    int32_t best_speaker = -1;
-    float best_similarity = -2.0f;
-    float second_similarity = -2.0f;
-    for (int32_t speaker = 0; speaker < diar_result.final_speaker_count; ++speaker) {
-      const float similarity = cosine_similarity(
-          word_embedding,
-          fingerprints[static_cast<std::size_t>(speaker)].prototype);
-      if (similarity > best_similarity) {
-        second_similarity = best_similarity;
-        best_similarity = similarity;
-        best_speaker = speaker;
-      } else if (similarity > second_similarity) {
-        second_similarity = similarity;
+  std::vector<WordSpeakerEvidence> decoder_evidence(words.size());
+  for (std::size_t i = 0; i < words.size(); ++i) {
+    decoder_evidence[i].segment_speaker = current_speaker_index(assignments[i]);
+    decoder_evidence[i].embedding_similarity_by_speaker =
+        word_embedding_similarities[i];
+  }
+  const std::vector<int32_t> decoded =
+      decode_word_speaker_sequence(
+          words, diar_result.final_speaker_count, decoder_evidence);
+  if (decoded.size() == assignments.size()) {
+    for (std::size_t i = 0; i < assignments.size(); ++i) {
+      if (decoded[i] >= 0) {
+        assignments[i] = speaker_id_for_index(decoded[i]);
       }
     }
-
-    if (best_speaker < 0 ||
-        best_similarity < kFingerprintWordLocalMinSimilarity ||
-        best_similarity - second_similarity < kFingerprintWordLocalMinMargin) {
-      continue;
-    }
-    assignments[word_index] = speaker_id_for_index(best_speaker);
   }
 
   std::size_t run_start = 0;
@@ -488,10 +561,14 @@ std::vector<std::string> refine_word_speakers_by_embedding(
     }
 
     const std::size_t run_words = run_end - run_start + 1;
+    const bool fluent_after =
+        run_end + 1 < words.size() &&
+        words[run_end + 1].start_us - words[run_end].end_us <=
+            kUtteranceGapThresholdUs;
     if (run_start > 0 &&
         run_end + 1 < assignments.size() &&
         run_words <= kFingerprintMaxInteriorIslandWords &&
-        !ends_utterance(words[run_end].text) &&
+        fluent_after &&
         assignments[run_start - 1] == assignments[run_end + 1] &&
         assignments[run_start] != assignments[run_start - 1]) {
       for (std::size_t i = run_start; i <= run_end; ++i) {

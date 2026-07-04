@@ -40,6 +40,7 @@ struct DiarizationExecutionBoundary {
   nlohmann::json pairwise_similarity_matrix_json = nullptr;
   nlohmann::json merge_decisions_json = nullptr;
   SherpaDiarizationResult raw_diar_result;
+  std::vector<std::string> word_speaker_assignments;
 };
 
 [[nodiscard]] bool check_diarization_model_in_cache(
@@ -62,7 +63,8 @@ struct DiarizationExecutionBoundary {
     const std::filesystem::path& staging_root,
     const std::filesystem::path& model_cache_root,
     bool allow_fallback = false,
-    bool force_single_speaker = false);
+    bool force_single_speaker = false,
+    const std::vector<AsrWord>& words = {});
 
 [[nodiscard]] std::string diarization_status_to_string(DiarizationStatus status);
 
