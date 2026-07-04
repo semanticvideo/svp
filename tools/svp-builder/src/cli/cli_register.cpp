@@ -55,6 +55,8 @@ void register_cli(CLI::App& app, CliContext& context) {
   build->add_flag("--force-single-speaker", build_opts.force_single_speaker,
                   "Skip Sherpa diarization entirely and emit one speaker segment. "
                   "Use when you know the clip contains only one speaker.");
+  build->add_flag("--serial", build_opts.serial_pipeline,
+                  "Run per-video semantic pipeline stages serially instead of overlapping ASR/OCR work");
   build->add_option("--progress", build_opts.progress_mode,
                     "Progress output mode: auto, plain, json, none")
       ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
@@ -101,6 +103,8 @@ void register_cli(CLI::App& app, CliContext& context) {
       "Allow fallback diarization when sherpa-onnx is unavailable");
   ic_create->add_flag("--force-single-speaker", opts.ic_force_single,
       "Force single-speaker diarization");
+  ic_create->add_flag("--serial", opts.ic_serial_pipeline,
+      "Run per-video semantic pipeline stages serially instead of overlapping ASR/OCR work");
   ic_create->add_option("--progress", opts.ic_progress_mode,
       "Progress output mode: auto, plain, json, none")
       ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
@@ -176,6 +180,9 @@ void register_cli(CLI::App& app, CliContext& context) {
   cb_create_batch->add_option("--staging-dir", opts.cb_staging, "Staging directory");
   cb_create_batch->add_option("--sherpa-lib", opts.cb_sherpa_lib, "Path to sherpa-onnx shared library");
   add_pipeline_performance_options(*cb_create_batch, opts.cb_performance);
+  cb_create_batch->add_option("--jobs", opts.cb_jobs,
+      "Maximum number of media files to process concurrently")
+      ->check(CLI::PositiveNumber);
   cb_create_batch->add_option("--sidecar-visibility", opts.cb_visibility,
       "Sidecar naming: visible, hidden, managed-dir")
       ->check(CLI::IsMember({"visible", "hidden", "managed-dir"}));
@@ -190,6 +197,8 @@ void register_cli(CLI::App& app, CliContext& context) {
       "Allow fallback diarization when sherpa-onnx is unavailable");
   cb_create_batch->add_flag("--force-single-speaker", opts.cb_force_single,
       "Force single-speaker diarization");
+  cb_create_batch->add_flag("--serial", opts.cb_serial_pipeline,
+      "Run each media item's semantic pipeline stages serially; --jobs still controls batch item concurrency");
   cb_create_batch->add_option("--progress", opts.cb_progress_mode,
       "Progress output mode: auto, plain, json, none")
       ->check(CLI::IsMember({"auto", "plain", "json", "none"}));

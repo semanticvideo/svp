@@ -2,7 +2,9 @@
 
 #include "default_staging.hpp"
 
+#include <algorithm>
 #include <stdexcept>
+#include <thread>
 
 namespace svp::builder {
 
@@ -58,6 +60,38 @@ BuildStageExecutionPlan execution_plan_for_stage(BuildStage stage) {
               .run_package_skeleton = true};
   }
   throw std::runtime_error("unknown build stage");
+}
+
+BuilderConcurrencyPolicy builder_concurrency_policy(
+    const svp::vision::InferencePerformanceOptions& performance,
+    std::size_t requested_batch_jobs) {
+  const std::size_t hardware =
+      std::max<std::size_t>(1, std::thread::hardware_concurrency());
+
+  // Single-video work overlaps the two independent heavy lanes: audio/ASR and
+  // vision/OCR. Heavy stage internals keep their own existing worker policies.
+  constexpr std::size_t kSingleVideoHeavyLaneCap = 2;
+
+  // Batch caps are deliberately lower than raw hardware concurrency because a
+  // single item can already run ASR beside OCR, and fast OCR widens recognition
+  // workers through the existing OCR profile policy.
+  constexpr std::size_t kSerialOcrBatchHardwareDivisor = 2;
+  constexpr std::size_t kBackgroundOcrBatchHardwareDivisor = 3;
+  constexpr std::size_t kFastOcrBatchHardwareDivisor = 4;
+
+  std::size_t divisor = kBackgroundOcrBatchHardwareDivisor;
+  if (performance.ocr_performance_profile == "serial") {
+    divisor = kSerialOcrBatchHardwareDivisor;
+  } else if (performance.ocr_performance_profile == "fast") {
+    divisor = kFastOcrBatchHardwareDivisor;
+  }
+
+  const std::size_t cap = std::max<std::size_t>(1, hardware / divisor);
+  const std::size_t requested = std::max<std::size_t>(1, requested_batch_jobs);
+  return {
+      .single_video_heavy_lanes = std::min(kSingleVideoHeavyLaneCap, hardware),
+      .max_batch_jobs = std::max<std::size_t>(1, std::min(requested, cap)),
+  };
 }
 
 std::filesystem::path default_staging_dir_for_output(

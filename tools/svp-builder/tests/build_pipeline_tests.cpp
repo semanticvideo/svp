@@ -3,6 +3,8 @@
 #include "svp/builder/progress_renderer.hpp"
 #include "staging_cleanup.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -12,6 +14,11 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+namespace svp::package {
+void merge_processor_records(const std::filesystem::path& processors_path,
+                             const std::vector<nlohmann::json>& new_processors);
+}
 
 namespace {
 
@@ -523,6 +530,61 @@ void test_verbose_package_build_writes_foundation_json_sidecar() {
   std::filesystem::remove_all(tmp_dir);
 }
 
+void test_serial_package_pipeline_runs_audio_before_package_write() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_serial_package_order";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path source_path = write_mock_media_file(tmp_dir);
+  const std::filesystem::path probe_path = write_minimal_probe_json(tmp_dir);
+  const std::filesystem::path package_path = tmp_dir / "output.svp";
+
+  auto capturing_sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::BuildPipelineOptions options;
+  options.source_path = source_path.string();
+  options.probe_json_path = probe_path.string();
+  options.ffmpeg_path = "/usr/bin/true";
+  options.output_path = package_path;
+  options.staging_dir = tmp_dir / "staging";
+  options.stop_after = svp::builder::BuildStage::package_skeleton;
+  options.force_single_speaker = true;
+  options.serial_pipeline = true;
+  options.progress_sink = capturing_sink;
+
+  svp::builder::BuildPipeline pipeline;
+  const svp::builder::BuildPipelineResult result = pipeline.run(options);
+
+  (void)result;
+  std::optional<std::size_t> audio_completed;
+  std::optional<std::size_t> asr_completed;
+  std::optional<std::size_t> package_write_started;
+  for (std::size_t i = 0; i < capturing_sink->events.size(); ++i) {
+    const auto& event = capturing_sink->events[i];
+    if (event.kind == svp::builder::ProgressEventKind::stage_completed &&
+        event.stage_id == svp::builder::ProgressStageId::audio_extract) {
+      audio_completed = i;
+    }
+    if (event.kind == svp::builder::ProgressEventKind::stage_completed &&
+        event.stage_id == svp::builder::ProgressStageId::asr) {
+      asr_completed = i;
+    }
+    if (event.kind == svp::builder::ProgressEventKind::stage_started &&
+        event.stage_id == svp::builder::ProgressStageId::package_write) {
+      package_write_started = i;
+      break;
+    }
+  }
+
+  assert(audio_completed.has_value());
+  assert(asr_completed.has_value());
+  assert(package_write_started.has_value());
+  assert(*audio_completed < *package_write_started);
+  assert(*asr_completed < *package_write_started);
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
 void test_warning_event_factory_for_diarization_and_index() {
   const svp::builder::ProgressEvent diarization_warning =
       svp::builder::make_warning(
@@ -969,6 +1031,79 @@ void test_default_staging_preserved_on_failure() {
   std::filesystem::remove_all(tmp_dir);
 }
 
+void test_concurrency_policy_respects_ocr_profiles() {
+  svp::vision::InferencePerformanceOptions serial;
+  serial.ocr_performance_profile = "serial";
+  svp::vision::InferencePerformanceOptions background;
+  background.ocr_performance_profile = "background";
+  svp::vision::InferencePerformanceOptions fast;
+  fast.ocr_performance_profile = "fast";
+
+  const auto serial_policy =
+      svp::builder::builder_concurrency_policy(serial, 64);
+  const auto background_policy =
+      svp::builder::builder_concurrency_policy(background, 64);
+  const auto fast_policy =
+      svp::builder::builder_concurrency_policy(fast, 64);
+
+  assert(serial_policy.single_video_heavy_lanes > 0);
+  assert(background_policy.single_video_heavy_lanes > 0);
+  assert(fast_policy.single_video_heavy_lanes > 0);
+  assert(serial_policy.max_batch_jobs > 0);
+  assert(background_policy.max_batch_jobs > 0);
+  assert(fast_policy.max_batch_jobs > 0);
+  assert(fast_policy.max_batch_jobs <= background_policy.max_batch_jobs);
+}
+
+void test_scoped_progress_wrapper_tags_events() {
+  auto capturing_sink = std::make_shared<CapturingProgressSink>();
+  auto scoped = svp::builder::make_scoped_progress_sink(
+      capturing_sink, "scope-1", "clip1.mov");
+  scoped->emit(svp::builder::make_stage_started(
+      svp::builder::ProgressStageId::asr));
+  assert(capturing_sink->events.size() == 1);
+  assert(capturing_sink->events[0].scope_id == "scope-1");
+  assert(capturing_sink->events[0].scope_label == "clip1.mov");
+}
+
+std::vector<nlohmann::json> read_jsonl_records(const std::filesystem::path& path) {
+  std::vector<nlohmann::json> records;
+  std::ifstream input(path);
+  std::string line;
+  while (std::getline(input, line)) {
+    if (!line.empty()) {
+      records.push_back(nlohmann::json::parse(line));
+    }
+  }
+  return records;
+}
+
+void test_deterministic_processor_merge_orders_by_id() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_processor_merge_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir / "provenance");
+  const auto processors_path = tmp_dir / "provenance" / "processors.jsonl";
+
+  svp::package::merge_processor_records(processors_path, {
+      nlohmann::json{{"id", "processor_z"}, {"name", "z"}},
+      nlohmann::json{{"id", "processor_a"}, {"name", "a"}},
+  });
+  svp::package::merge_processor_records(processors_path, {
+      nlohmann::json{{"id", "processor_m"}, {"name", "m"}},
+      nlohmann::json{{"id", "processor_a"}, {"name", "a2"}},
+  });
+
+  const auto records = read_jsonl_records(processors_path);
+  assert(records.size() == 3);
+  assert(records[0]["id"] == "processor_a");
+  assert(records[0]["name"] == "a2");
+  assert(records[1]["id"] == "processor_m");
+  assert(records[2]["id"] == "processor_z");
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
 }  // namespace
 
 int main() {
@@ -989,6 +1124,7 @@ int main() {
   test_pipeline_package_write_failure_emits_stage_failed_no_validate();
   test_package_build_removes_default_foundation_json_sidecar();
   test_verbose_package_build_writes_foundation_json_sidecar();
+  test_serial_package_pipeline_runs_audio_before_package_write();
   test_warning_event_factory_for_diarization_and_index();
   test_stage_progress_event_has_progress_fields();
   test_stage_progress_zero_total_no_fraction();
@@ -1004,6 +1140,9 @@ int main() {
   test_default_staging_removed_after_success();
   test_explicit_staging_preserved_after_success();
   test_default_staging_preserved_on_failure();
+  test_concurrency_policy_respects_ocr_profiles();
+  test_scoped_progress_wrapper_tags_events();
+  test_deterministic_processor_merge_orders_by_id();
 
   return 0;
 }

@@ -1,4 +1,5 @@
 #include "svp/builder/interlace.hpp"
+#include "svp/builder/build_pipeline.hpp"
 #include "svp/builder/interlace_batch.hpp"
 #include "svp/builder/build_progress.hpp"
 #include "interlace_batch_internal.hpp"
@@ -11,9 +12,13 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace svp::builder {
 
@@ -66,6 +71,7 @@ bool create_single_svpi(
     bool core_only_diagnostic,
     bool allow_fallback_diarization,
     bool force_single_speaker,
+    bool serial_pipeline,
     std::string& error_message,
     std::string& blake3_state_out,
     const std::shared_ptr<BuildProgressSink>& progress_sink) {
@@ -83,6 +89,7 @@ bool create_single_svpi(
   opts.core_only_diagnostic = core_only_diagnostic;
   opts.allow_fallback_diarization = allow_fallback_diarization;
   opts.force_single_speaker = force_single_speaker;
+  opts.serial_pipeline = serial_pipeline;
   opts.progress_sink = progress_sink;
 
   auto result = svp::builder::interlace_create(opts);
@@ -180,14 +187,31 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
   sink->emit(make_stage_completed(ProgressStageId::batch_scan,
       std::to_string(media_files.size()) + " media files found"));
 
-  for (const auto& media_path : media_files) {
-    sink->emit(make_stage_started(ProgressStageId::batch_item,
-        media_path.filename().string()));
+  result.results.resize(media_files.size());
 
+  const BuilderConcurrencyPolicy policy = builder_concurrency_policy(
+      options.performance,
+      static_cast<std::size_t>(std::max(1, options.jobs)));
+  const std::size_t worker_count =
+      std::min<std::size_t>(media_files.size(), policy.max_batch_jobs);
+  std::atomic<std::size_t> next_index{0};
+
+  auto process_item = [&](std::size_t index) {
+    const auto& media_path = media_files[index];
     BatchFileResult file_result;
     file_result.source_filename = media_path.filename().string();
     file_result.source_relative_path =
         std::filesystem::relative(media_path, source_dir).string();
+
+    auto item_sink = make_scoped_progress_sink(
+        sink,
+        file_result.source_relative_path,
+        file_result.source_relative_path.empty()
+            ? file_result.source_filename
+            : file_result.source_relative_path);
+
+    item_sink->emit(make_stage_started(ProgressStageId::batch_item,
+        media_path.filename().string()));
 
     const bool use_out_dir =
         !options.out_dir.empty() && options.out_dir != "same-as-source";
@@ -203,7 +227,6 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
               file_result.svpi_path, media_path,
               "spec/registries/validation-codes.json", err)) {
         file_result.status = BatchFileStatus::already_valid;
-        result.already_valid_count++;
       } else {
         if (options.replace_mismatched) {
           std::string blake3_state;
@@ -219,19 +242,17 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
                   options.core_only_diagnostic,
                   options.allow_fallback_diarization,
                   options.force_single_speaker,
-                  create_err, blake3_state, sink)) {
+                  options.serial_pipeline,
+                  create_err, blake3_state, item_sink)) {
             file_result.status = BatchFileStatus::replaced;
             file_result.blake3_state = blake3_state;
-            result.replaced_count++;
           } else {
             file_result.status = BatchFileStatus::failed;
             file_result.error_message = create_err;
-            result.failed_count++;
           }
         } else {
           file_result.status = BatchFileStatus::binding_mismatch;
           file_result.error_message = err;
-          result.mismatch_count++;
         }
       }
     } else {
@@ -248,20 +269,59 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
               options.core_only_diagnostic,
               options.allow_fallback_diarization,
               options.force_single_speaker,
-              create_err, blake3_state, sink)) {
+              options.serial_pipeline,
+              create_err, blake3_state, item_sink)) {
         file_result.status = BatchFileStatus::created;
         file_result.blake3_state = blake3_state;
-        result.created_count++;
       } else {
         file_result.status = BatchFileStatus::failed;
         file_result.error_message = create_err;
-        result.failed_count++;
       }
     }
 
-    result.results.push_back(std::move(file_result));
-    sink->emit(make_stage_completed(ProgressStageId::batch_item,
+    item_sink->emit(make_stage_completed(ProgressStageId::batch_item,
         media_path.filename().string()));
+    result.results[index] = std::move(file_result);
+  };
+
+  std::vector<std::thread> workers;
+  workers.reserve(worker_count);
+  for (std::size_t worker = 0; worker < worker_count; ++worker) {
+    workers.emplace_back([&]() {
+      while (true) {
+        const std::size_t index = next_index.fetch_add(1);
+        if (index >= media_files.size()) {
+          return;
+        }
+        process_item(index);
+      }
+    });
+  }
+  for (auto& worker : workers) {
+    worker.join();
+  }
+
+  for (const auto& file_result : result.results) {
+    switch (file_result.status) {
+      case BatchFileStatus::created:
+        ++result.created_count;
+        break;
+      case BatchFileStatus::already_valid:
+        ++result.already_valid_count;
+        break;
+      case BatchFileStatus::skipped_unsupported:
+        ++result.skipped_count;
+        break;
+      case BatchFileStatus::binding_mismatch:
+        ++result.mismatch_count;
+        break;
+      case BatchFileStatus::failed:
+        ++result.failed_count;
+        break;
+      case BatchFileStatus::replaced:
+        ++result.replaced_count;
+        break;
+    }
   }
 
   return result;

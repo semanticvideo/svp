@@ -66,6 +66,8 @@ struct ProgressEvent {
   std::optional<std::uint64_t> total;
   std::optional<double> fraction;
   std::string unit;
+  std::string scope_id;
+  std::string scope_label;
 };
 
 class BuildProgressSink {
@@ -80,6 +82,14 @@ class NullBuildProgressSink : public BuildProgressSink {
 };
 
 std::shared_ptr<BuildProgressSink> default_progress_sink();
+std::shared_ptr<BuildProgressSink> make_scoped_progress_sink(
+    std::shared_ptr<BuildProgressSink> sink,
+    std::string scope_id,
+    std::string scope_label);
+
+ProgressEvent with_progress_scope(ProgressEvent event,
+                                  std::string scope_id,
+                                  std::string scope_label);
 
 ProgressEvent make_stage_started(ProgressStageId stage,
                                  std::string message = "");

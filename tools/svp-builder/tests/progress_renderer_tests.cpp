@@ -7,8 +7,19 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unistd.h>
 
 namespace {
+
+int count_substrings(const std::string& haystack, const std::string& needle) {
+  int count = 0;
+  std::size_t pos = 0;
+  while ((pos = haystack.find(needle, pos)) != std::string::npos) {
+    ++count;
+    pos += needle.size();
+  }
+  return count;
+}
 
 void test_parse_progress_mode_valid() {
   assert(svp::builder::parse_progress_mode("auto") ==
@@ -311,6 +322,29 @@ void test_tty_sink_stage_progress_has_carriage_return() {
   assert(output.find("frames") != std::string::npos);
 }
 
+void test_tty_sink_owns_terminal_fd() {
+  int pipe_fds[2] = {-1, -1};
+  assert(pipe(pipe_fds) == 0);
+
+  std::ostringstream fallback_oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::auto_, fallback_oss, true, pipe_fds[1]);
+  close(pipe_fds[1]);
+
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::ocr, 3, 10, "frames"));
+  sink.reset();
+
+  char buffer[512] = {};
+  const ssize_t bytes_read = read(pipe_fds[0], buffer, sizeof(buffer) - 1);
+  close(pipe_fds[0]);
+  assert(bytes_read > 0);
+  const std::string output(buffer, static_cast<std::size_t>(bytes_read));
+  assert(output.find("OCR") != std::string::npos);
+  assert(output.find("3/10") != std::string::npos);
+  assert(fallback_oss.str().empty());
+}
+
 void test_tty_sink_clears_wrapped_evidence_crop_progress() {
   std::ostringstream oss;
   auto sink = svp::builder::make_progress_sink(
@@ -433,6 +467,117 @@ void test_artifact_written_preserved_in_json() {
   assert(output.find("\"out/video.svp\"") != std::string::npos);
 }
 
+void test_plain_scoped_output_includes_scope_label() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::plain, oss, false);
+  sink->emit(svp::builder::with_progress_scope(
+      svp::builder::make_stage_progress(
+          svp::builder::ProgressStageId::asr, 4, 10, "chunks"),
+      "clip1", "clip1.mov"));
+  assert(oss.str().find("[clip1.mov] ASR") != std::string::npos);
+}
+
+void test_json_scoped_output_includes_scope_fields() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::json, oss, false);
+  sink->emit(svp::builder::with_progress_scope(
+      svp::builder::make_stage_started(
+          svp::builder::ProgressStageId::ocr),
+      "clip2", "clip2.mov"));
+  const std::string output = oss.str();
+  assert(output.find("\"scope_id\":\"clip2\"") != std::string::npos);
+  assert(output.find("\"scope_label\":\"clip2.mov\"") != std::string::npos);
+}
+
+void test_tty_interleaved_active_rows_include_both_labels() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::auto_, oss, true);
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::asr, 4, 10, "chunks"));
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::ocr, 6, 10, "frames"));
+  const std::string output = oss.str();
+  assert(output.find("ASR") != std::string::npos);
+  assert(output.find("OCR") != std::string::npos);
+  assert(output.find('\n') != std::string::npos);
+}
+
+void test_scoped_artifact_suppression_modes() {
+  const auto event = svp::builder::with_progress_scope(
+      svp::builder::make_artifact_written(
+          svp::builder::ProgressStageId::package_write,
+          "out/video.svp", "package"),
+      "clip", "clip.mov");
+
+  std::ostringstream plain_oss;
+  auto plain_sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::plain, plain_oss, false);
+  plain_sink->emit(event);
+  assert(plain_oss.str().empty());
+
+  std::ostringstream tty_oss;
+  auto tty_sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::auto_, tty_oss, true);
+  tty_sink->emit(event);
+  assert(tty_oss.str().empty());
+
+  std::ostringstream json_oss;
+  auto json_sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::json, json_oss, false);
+  json_sink->emit(event);
+  assert(json_oss.str().find("\"artifact_written\"") != std::string::npos);
+  assert(json_oss.str().find("\"scope_label\":\"clip.mov\"") != std::string::npos);
+}
+
+void test_tty_multi_row_wrapped_clear_keeps_active_rows() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::auto_, oss, true);
+  const std::string long_message =
+      "extracting evidence crops from a deliberately long terminal row that "
+      "must wrap so the TTY renderer proves it clears every physical row";
+  sink->emit(svp::builder::with_progress_scope(
+      svp::builder::make_stage_progress(
+          svp::builder::ProgressStageId::asr, 1, 10, "chunks"),
+      "clip1", "clip1.mov"));
+  sink->emit(svp::builder::with_progress_scope(
+      svp::builder::make_stage_progress(
+          svp::builder::ProgressStageId::ocr_evidence_crops,
+          10, 100, "steps", long_message),
+      "clip2", "clip2.mov"));
+  sink->emit(svp::builder::with_progress_scope(
+      svp::builder::make_stage_progress(
+          svp::builder::ProgressStageId::ocr_evidence_crops,
+          11, 100, "steps", long_message),
+      "clip2", "clip2.mov"));
+  const std::string output = oss.str();
+  assert(output.find("\033[1A") != std::string::npos);
+  assert(output.find("[clip1.mov] ASR") != std::string::npos);
+  assert(output.find("[clip2.mov] OCR Evidence Crops") != std::string::npos);
+}
+
+void test_tty_completed_row_does_not_duplicate_active_rows() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::auto_, oss, true);
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::asr, 1, 43, "chunks"));
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::ocr, 5, 549, "frames"));
+  sink->emit(svp::builder::make_stage_completed(
+      svp::builder::ProgressStageId::depth));
+
+  const std::string output = oss.str();
+  const std::size_t depth_pos = output.rfind("Depth");
+  assert(depth_pos != std::string::npos);
+  const std::string tail = output.substr(depth_pos);
+  assert(count_substrings(tail, "ASR") == 1);
+  assert(count_substrings(tail, "OCR") == 1);
+}
+
 }  // namespace
 
 int main() {
@@ -454,6 +599,7 @@ int main() {
   test_plain_sink_ocr_evidence_crop_stage_progress();
   test_json_sink_ocr_evidence_crop_stage_progress_fields();
   test_tty_sink_stage_progress_has_carriage_return();
+  test_tty_sink_owns_terminal_fd();
   test_tty_sink_clears_wrapped_evidence_crop_progress();
   test_make_stage_progress_fraction();
   test_make_stage_progress_zero_total();
@@ -462,6 +608,12 @@ int main() {
   test_artifact_written_suppressed_in_plain();
   test_artifact_written_suppressed_in_tty();
   test_artifact_written_preserved_in_json();
+  test_plain_scoped_output_includes_scope_label();
+  test_json_scoped_output_includes_scope_fields();
+  test_tty_interleaved_active_rows_include_both_labels();
+  test_scoped_artifact_suppression_modes();
+  test_tty_multi_row_wrapped_clear_keeps_active_rows();
+  test_tty_completed_row_does_not_duplicate_active_rows();
 
   return 0;
 }

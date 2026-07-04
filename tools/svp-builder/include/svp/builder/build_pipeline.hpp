@@ -3,6 +3,7 @@
 #include "svp/builder/build_progress.hpp"
 #include "svp/vision/inference_performance.hpp"
 
+#include <cstddef>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -29,6 +30,11 @@ struct BuildStageExecutionPlan {
   bool run_package_skeleton = false;
 };
 
+struct BuilderConcurrencyPolicy {
+  std::size_t single_video_heavy_lanes = 1;
+  std::size_t max_batch_jobs = 1;
+};
+
 struct BuildOutputPaths {
   std::filesystem::path package_path;
   std::filesystem::path json_output_path;
@@ -47,6 +53,7 @@ struct BuildPipelineOptions {
   std::string sherpa_lib_path;
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
+  bool serial_pipeline = false;
   std::shared_ptr<BuildProgressSink> progress_sink;
   bool quiet = false;
   bool verbose = false;
@@ -60,6 +67,9 @@ std::vector<std::string_view> supported_build_stage_names();
 std::optional<BuildStage> parse_build_stage(std::string_view value);
 std::string_view build_stage_name(BuildStage stage);
 BuildStageExecutionPlan execution_plan_for_stage(BuildStage stage);
+BuilderConcurrencyPolicy builder_concurrency_policy(
+    const svp::vision::InferencePerformanceOptions& performance,
+    std::size_t requested_batch_jobs);
 std::filesystem::path default_staging_dir_for_output(
     const std::filesystem::path& output_path);
 BuildOutputPaths resolve_package_skeleton_output_paths(

@@ -1,5 +1,7 @@
 #include "svp/audio/whisper_model.hpp"
 
+#include "svp/core/process_stdio.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -9,6 +11,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -44,7 +47,9 @@ constexpr int kMaxDecodeTokens = 224;
 
 class StdoutStderrSuppressor {
  public:
-  StdoutStderrSuppressor() : suppressed_(false) {
+  StdoutStderrSuppressor()
+      : stdio_lock_(svp::core::process_stdio_suppression_mutex()),
+        suppressed_(false) {
     fflush(stdout);
     fflush(stderr);
     saved_stdout_ = dup(STDOUT_FILENO);
@@ -73,6 +78,7 @@ class StdoutStderrSuppressor {
   StdoutStderrSuppressor& operator=(const StdoutStderrSuppressor&) = delete;
 
  private:
+  std::unique_lock<std::recursive_mutex> stdio_lock_;
   bool suppressed_;
   int saved_stdout_;
   int saved_stderr_;

@@ -14,20 +14,13 @@
 #include <ctime>
 #include <filesystem>
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <unordered_set>
 
 namespace svp::builder {
 
-PackageSkeletonStageResult run_package_skeleton_stage(
-    BuildPipelineContext& context) {
-    PackageSkeletonStageResult result;
-    result.json_output_path = context.options.output_path;
-    const BuildOutputPaths output_paths =
-        resolve_package_skeleton_output_paths(context.options.output_path);
-    result.package_path = output_paths.package_path;
-    result.json_output_path = output_paths.json_output_path;
-
+nlohmann::json make_package_manifest(BuildPipelineContext& context) {
     std::time_t now = std::time(nullptr);
     char buf[100];
     std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&now));
@@ -73,81 +66,111 @@ PackageSkeletonStageResult run_package_skeleton_stage(
         {"provenance", true}
       }}
     };
+    return manifest_json;
+}
 
-    // Write honest spatial/embedding placeholder entries
-    // This also runs real OCR generation on decoded frames before
-    // embedding generation so text_observations.jsonl is populated.
-    std::unordered_set<std::string> started_stages;
-    std::unordered_set<std::string> completed_stages;
-    auto spatial_progress = [&context, &started_stages, &completed_stages](
-                                        const char* stage,
-                                        std::size_t current,
-                                        std::size_t total,
-                                        const char* message) {
-      ProgressStageId stage_id = ProgressStageId::ocr;
-      std::string unit = "items";
-      if (std::string(stage) == "ocr") {
-        stage_id = ProgressStageId::ocr;
-        unit = "frames";
-      } else if (std::string(stage) == "ocr_evidence_crops") {
-        stage_id = ProgressStageId::ocr_evidence_crops;
-        unit = "steps";
-      } else if (std::string(stage) == "depth") {
-        stage_id = ProgressStageId::depth;
-      } else if (std::string(stage) == "text_embeddings") {
-        stage_id = ProgressStageId::text_embeddings;
-      } else if (std::string(stage) == "visual_tracking") {
-        stage_id = ProgressStageId::visual_tracking;
-      } else if (std::string(stage) == "visual_embeddings") {
-        stage_id = ProgressStageId::visual_embeddings;
-      }
-      if (started_stages.insert(stage).second) {
-        emit_stage_started(context, stage_id);
-      }
-      if (total > 0) {
-        emit_stage_progress(context, stage_id,
-                            static_cast<std::uint64_t>(current),
-                            static_cast<std::uint64_t>(total), unit,
-                            message == nullptr ? "" : message);
-      }
-      if (current > 0 && current >= total && total > 0 &&
-          completed_stages.insert(stage).second) {
-        emit_stage_completed(context, stage_id);
-      }
-    };
+ProgressStageId spatial_stage_id(const std::string& stage) {
+  if (stage == "ocr_evidence_crops") return ProgressStageId::ocr_evidence_crops;
+  if (stage == "depth") return ProgressStageId::depth;
+  if (stage == "text_embeddings") return ProgressStageId::text_embeddings;
+  if (stage == "visual_tracking") return ProgressStageId::visual_tracking;
+  if (stage == "visual_embeddings") return ProgressStageId::visual_embeddings;
+  return ProgressStageId::ocr;
+}
 
-    const svp::package::SpatialEmbeddingPlaceholderSummary placeholder_summary =
-        svp::package::write_spatial_and_embedding_placeholders(
-            context.staging_dir, context.model_runtime_available,
-            svp::media::media_ingest_plan_to_json(context.plan),
-            context.options.model_cache_dir.empty()
-                ? std::filesystem::path{}
-                : std::filesystem::path(context.options.model_cache_dir),
-            &context.plan,
-            context.options.ffmpeg_path,
-            &context.frame_catalog,
-            spatial_progress,
-            context.options.performance);
-    // Emit completed for stages that had started but no final callback
-    // (e.g. visual embeddings with unknown total, or stages that ran
-    // but never reached current >= total).
-    for (const auto& stage : {"ocr", "ocr_evidence_crops", "depth",
-                              "text_embeddings", "visual_tracking",
-                              "visual_embeddings"}) {
-      if (started_stages.count(stage) &&
-          completed_stages.insert(stage).second) {
-        ProgressStageId sid = ProgressStageId::ocr;
-        if (std::string(stage) == "ocr_evidence_crops") sid = ProgressStageId::ocr_evidence_crops;
-        else if (std::string(stage) == "depth") sid = ProgressStageId::depth;
-        else if (std::string(stage) == "text_embeddings") sid = ProgressStageId::text_embeddings;
-        else if (std::string(stage) == "visual_tracking") sid = ProgressStageId::visual_tracking;
-        else if (std::string(stage) == "visual_embeddings") sid = ProgressStageId::visual_embeddings;
-        emit_stage_completed(context, sid);
-      }
+std::string spatial_stage_unit(const std::string& stage) {
+  if (stage == "ocr") return "frames";
+  if (stage == "ocr_evidence_crops") return "steps";
+  return "items";
+}
+
+PackageVisionStageResult run_package_vision_stage(BuildPipelineContext& context) {
+  PackageVisionStageResult result;
+
+  // Write honest spatial/embedding placeholder entries. This also runs real OCR
+  // generation on decoded frames before embedding generation so text observations
+  // are available when text embeddings are generated.
+  std::unordered_set<std::string> started_stages;
+  std::unordered_set<std::string> completed_stages;
+  std::mutex spatial_progress_mutex;
+  auto spatial_progress = [&context, &started_stages, &completed_stages,
+                           &spatial_progress_mutex](
+                                      const char* stage,
+                                      std::size_t current,
+                                      std::size_t total,
+                                      const char* message) {
+    const std::string stage_name(stage == nullptr ? "" : stage);
+    const ProgressStageId stage_id = spatial_stage_id(stage_name);
+    bool should_start = false;
+    bool should_complete = false;
+    {
+      std::lock_guard<std::mutex> lock(spatial_progress_mutex);
+      should_start = started_stages.insert(stage_name).second;
+      should_complete =
+          current > 0 && current >= total && total > 0 &&
+          completed_stages.insert(stage_name).second;
     }
-    context.output["spatial_embedding_placeholders"] =
-        svp::package::spatial_embedding_placeholder_summary_to_json(
-            placeholder_summary);
+    if (should_start) {
+      emit_stage_started(context, stage_id);
+    }
+    if (total > 0) {
+      emit_stage_progress(context, stage_id,
+                          static_cast<std::uint64_t>(current),
+                          static_cast<std::uint64_t>(total),
+                          spatial_stage_unit(stage_name),
+                          message == nullptr ? "" : message);
+    }
+    if (should_complete) {
+      emit_stage_completed(context, stage_id);
+    }
+  };
+
+  const svp::package::SpatialEmbeddingPlaceholderSummary placeholder_summary =
+      svp::package::write_spatial_and_embedding_placeholders(
+          context.staging_dir, context.model_runtime_available,
+          svp::media::media_ingest_plan_to_json(context.plan),
+          context.options.model_cache_dir.empty()
+              ? std::filesystem::path{}
+              : std::filesystem::path(context.options.model_cache_dir),
+          &context.plan,
+          context.options.ffmpeg_path,
+          &context.frame_catalog,
+          spatial_progress,
+          context.options.performance,
+          context.options.serial_pipeline,
+          &result.processor_records);
+
+  for (const auto& stage : {"ocr", "ocr_evidence_crops", "depth",
+                            "text_embeddings", "visual_tracking",
+                            "visual_embeddings"}) {
+    if (started_stages.count(stage) &&
+        completed_stages.insert(stage).second) {
+      emit_stage_completed(context, spatial_stage_id(stage));
+    }
+  }
+  result.placeholder_summary_json =
+      svp::package::spatial_embedding_placeholder_summary_to_json(
+          placeholder_summary);
+  context.output["spatial_embedding_placeholders"] =
+      result.placeholder_summary_json;
+  return result;
+}
+
+PackageSkeletonStageResult run_package_final_stage(
+    BuildPipelineContext& context,
+    const PackageVisionStageResult& vision_result) {
+    PackageSkeletonStageResult result;
+    result.json_output_path = context.options.output_path;
+    const BuildOutputPaths output_paths =
+        resolve_package_skeleton_output_paths(context.options.output_path);
+    result.package_path = output_paths.package_path;
+    result.json_output_path = output_paths.json_output_path;
+
+    nlohmann::json manifest_json = make_package_manifest(context);
+
+    svp::package::merge_processor_records(
+        context.staging_dir / "provenance" / "processors.jsonl",
+        vision_result.processor_records);
 
     // Rewrite frames.jsonl with the complete frame catalog so that every
     // frame ID referenced by OCR, depth, masks, entities, and relationships
@@ -241,6 +264,12 @@ PackageSkeletonStageResult run_package_skeleton_stage(
       emit_stage_completed(context, ProgressStageId::validate);
     }
     return result;
+}
+
+PackageSkeletonStageResult run_package_skeleton_stage(
+    BuildPipelineContext& context) {
+  PackageVisionStageResult vision_result = run_package_vision_stage(context);
+  return run_package_final_stage(context, vision_result);
 }
 
 }  // namespace svp::builder
