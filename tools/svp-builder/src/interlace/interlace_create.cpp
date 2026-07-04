@@ -2,6 +2,8 @@
 #include "svp/builder/build_pipeline.hpp"
 #include "svp/builder/build_progress.hpp"
 
+#include "staging_cleanup.hpp"
+
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
 #include "svp/package/svpi_writer.hpp"
@@ -303,20 +305,23 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
       binding_doc.bindings[0].identity.blake3_state);
   sink->emit(make_stage_completed(ProgressStageId::media_binding));
 
+  const bool user_supplied_staging = !options.staging_dir.empty();
+  const std::filesystem::path staging_dir =
+      user_supplied_staging
+          ? std::filesystem::path(options.staging_dir)
+          : std::filesystem::path(options.output_path + ".staging");
+  StagingCleanupGuard staging_guard(staging_dir, user_supplied_staging);
+
   if (options.core_only_diagnostic) {
-    return write_core_only_svpi(
+    result = write_core_only_svpi(
         options, binding_doc, result.blake3_state,
         "not_generated",
         "SVPI sidecar created in core-only diagnostic mode (semantic pipeline skipped)",
         *sink);
+    if (result.success) staging_guard.cleanup_on_success();
+    return result;
   }
 
-  std::filesystem::path staging_dir;
-  if (!options.staging_dir.empty()) {
-    staging_dir = options.staging_dir;
-  } else {
-    staging_dir = std::filesystem::path(options.output_path + ".staging");
-  }
   std::filesystem::remove_all(staging_dir);
   std::filesystem::create_directories(staging_dir);
 
@@ -360,11 +365,13 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
 
   if (pipeline_result.exit_code != 0 && !has_semantic_content) {
     std::filesystem::remove_all(staging_dir);
-    return write_core_only_svpi(
+    result = write_core_only_svpi(
         options, binding_doc, result.blake3_state,
         "blocked",
         "SVPI sidecar created with core-only content (semantic pipeline failed, sections marked blocked)",
         *sink);
+    if (result.success) staging_guard.cleanup_on_success();
+    return result;
   }
 
   std::string provenance_notes =
@@ -372,9 +379,11 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
           ? "SVPI sidecar created from source media with semantic pipeline output, without embedding primary media bytes"
           : "SVPI sidecar created with core-only content (semantic pipeline produced no section output, sections marked not_generated)";
 
-  return write_svpi_from_staging(
+  result = write_svpi_from_staging(
       options, binding_doc, result.blake3_state,
       staging_dir, sections, provenance_notes, *sink);
+  if (result.success) staging_guard.cleanup_on_success();
+  return result;
 }
 
 }  // namespace svp::builder

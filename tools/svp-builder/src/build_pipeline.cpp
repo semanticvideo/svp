@@ -2,6 +2,7 @@
 #include "svp/builder/build_progress.hpp"
 
 #include "build_pipeline_internal.hpp"
+#include "staging_cleanup.hpp"
 #include "svp/audio/sherpa_diarization.hpp"
 #include "svp/audio/whisper_model.hpp"
 #include "svp/core/memory_diagnostics.hpp"
@@ -57,10 +58,12 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     nlohmann::json output = svp::media::media_ingest_plan_to_json(plan);
     sink->emit(make_stage_completed(ProgressStageId::media_probe));
 
+    const bool user_supplied_staging = !options.staging_dir.empty();
     const std::filesystem::path staging_dir =
-        options.staging_dir.empty()
-            ? default_staging_dir_for_output(options.output_path)
-            : options.staging_dir;
+        user_supplied_staging
+            ? options.staging_dir
+            : default_staging_dir_for_output(options.output_path);
+    StagingCleanupGuard staging_guard(staging_dir, user_supplied_staging);
     const bool model_runtime_available = svp::models::OnnxSession::is_available();
     svp::models::set_onnx_verbose(options.verbose);
     svp::audio::set_whisper_verbose(options.verbose);
@@ -143,6 +146,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
       return {.exit_code = package_result.validator_exit_code};
     }
     svp::core::check_memory_limit("builder.run.complete");
+    staging_guard.cleanup_on_success();
     return {.exit_code = 0};
   } catch (const std::exception& error) {
     svp::core::trace_memory_event("builder.run.exception", {

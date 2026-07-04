@@ -94,6 +94,20 @@ bool create_single_svpi(
   return true;
 }
 
+std::string batch_item_staging_dir(
+    const std::string& staging_dir_override,
+    const std::string& source_relative_path) {
+  if (staging_dir_override.empty()) {
+    return {};
+  }
+
+  std::filesystem::path item_staging =
+      std::filesystem::path(staging_dir_override) /
+      std::filesystem::path(source_relative_path);
+  item_staging.replace_extension(".staging");
+  return item_staging.string();
+}
+
 bool check_svpi_valid_and_bound(
     const std::filesystem::path& svpi_path,
     const std::filesystem::path& media_path,
@@ -197,7 +211,9 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
           if (create_single_svpi(
                   media_path, file_result.svpi_path,
                   options.ffprobe_path, options.ffmpeg_path,
-                  !options.no_blake3, options.staging_dir,
+                  !options.no_blake3,
+                  batch_item_staging_dir(options.staging_dir,
+                                         file_result.source_relative_path),
                   options.model_cache_dir, options.sherpa_lib_path,
                   options.performance,
                   options.core_only_diagnostic,
@@ -224,7 +240,9 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
       if (create_single_svpi(
               media_path, file_result.svpi_path,
               options.ffprobe_path, options.ffmpeg_path,
-              !options.no_blake3, options.staging_dir,
+              !options.no_blake3,
+              batch_item_staging_dir(options.staging_dir,
+                                     file_result.source_relative_path),
               options.model_cache_dir, options.sherpa_lib_path,
               options.performance,
               options.core_only_diagnostic,
