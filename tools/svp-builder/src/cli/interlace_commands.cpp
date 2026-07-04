@@ -28,6 +28,7 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
     ic_opts.core_only_diagnostic = opts.ic_core_only;
     ic_opts.allow_fallback_diarization = opts.ic_allow_fallback;
     ic_opts.force_single_speaker = opts.ic_force_single;
+    ic_opts.serial_pipeline = opts.ic_serial_pipeline;
     ic_opts.progress_sink = sink;
 
     const auto started_at = std::chrono::steady_clock::now();
@@ -163,6 +164,7 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
     cb_opts.core_only_diagnostic = opts.cb_core_only;
     cb_opts.allow_fallback_diarization = opts.cb_allow_fallback;
     cb_opts.force_single_speaker = opts.cb_force_single;
+    cb_opts.serial_pipeline = opts.cb_serial_pipeline;
     cb_opts.progress_sink = resolve_cli_progress_sink(opts.cb_progress_mode, opts.cb_quiet, opts.cb_create_batch_sub);
 
     auto result = svp::builder::interlace_create_batch(cb_opts);

@@ -137,6 +137,7 @@ PackageVisionStageResult run_package_vision_stage(BuildPipelineContext& context)
           &context.frame_catalog,
           spatial_progress,
           context.options.performance,
+          context.options.serial_pipeline,
           &result.processor_records);
 
   for (const auto& stage : {"ocr", "ocr_evidence_crops", "depth",

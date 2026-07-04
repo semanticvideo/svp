@@ -17,6 +17,7 @@
 #include <future>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -219,6 +220,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     svp::vision::FrameCatalog* frame_catalog,
     SpatialProgressCallback on_progress,
     const svp::vision::InferencePerformanceOptions& performance,
+    bool serial_model_stages,
     std::vector<nlohmann::json>* processor_records) {
   SpatialEmbeddingPlaceholderSummary summary;
   summary.model_runtime_available = model_runtime_available;
@@ -305,21 +307,32 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
       };
     }
 
-    auto depth_future = std::async(
-        std::launch::async,
-        [depth_opts = std::move(depth_opts), &staging_dir,
-         model_runtime_available]() mutable {
-          svp::vision::DepthGenerationResult depth_result;
+    auto run_depth_generation =
+        [&staging_dir, model_runtime_available](
+            svp::vision::DepthGenerationOptions options) {
+          svp::vision::DepthGenerationResult result;
           try {
-            depth_result = svp::vision::generate_depth_blocks(
-                depth_opts, staging_dir);
+            result = svp::vision::generate_depth_blocks(options, staging_dir);
           } catch (const std::exception& e) {
-            depth_result.blocker =
+            result.blocker =
                 std::string("Depth generation error: ") + e.what();
-            depth_result.onnx_runtime_available = model_runtime_available;
+            result.onnx_runtime_available = model_runtime_available;
           }
-          return depth_result;
-        });
+          return result;
+        };
+
+    std::optional<std::future<svp::vision::DepthGenerationResult>> depth_future;
+    svp::vision::DepthGenerationResult depth_result;
+    if (serial_model_stages) {
+      depth_result = run_depth_generation(std::move(depth_opts));
+    } else {
+      depth_future.emplace(std::async(
+          std::launch::async,
+          [run_depth_generation,
+           depth_opts = std::move(depth_opts)]() mutable {
+            return run_depth_generation(std::move(depth_opts));
+          }));
+    }
 
     svp::vision::OcrGenerationResult ocr_result;
     try {
@@ -373,7 +386,9 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     summary.embedding_generation_detail =
         svp::vision::embedding_generation_result_to_json(emb_result);
 
-    svp::vision::DepthGenerationResult depth_result = depth_future.get();
+    if (depth_future.has_value()) {
+      depth_result = depth_future->get();
+    }
     summary.depth_index_written = depth_result.depth_index_written;
     summary.depth_blocks_written = depth_result.depth_blocks_written;
     summary.depth_generation_run = depth_result.depth_generation_run;

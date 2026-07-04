@@ -71,6 +71,7 @@ bool create_single_svpi(
     bool core_only_diagnostic,
     bool allow_fallback_diarization,
     bool force_single_speaker,
+    bool serial_pipeline,
     std::string& error_message,
     std::string& blake3_state_out,
     const std::shared_ptr<BuildProgressSink>& progress_sink) {
@@ -88,6 +89,7 @@ bool create_single_svpi(
   opts.core_only_diagnostic = core_only_diagnostic;
   opts.allow_fallback_diarization = allow_fallback_diarization;
   opts.force_single_speaker = force_single_speaker;
+  opts.serial_pipeline = serial_pipeline;
   opts.progress_sink = progress_sink;
 
   auto result = svp::builder::interlace_create(opts);
@@ -240,6 +242,7 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
                   options.core_only_diagnostic,
                   options.allow_fallback_diarization,
                   options.force_single_speaker,
+                  options.serial_pipeline,
                   create_err, blake3_state, item_sink)) {
             file_result.status = BatchFileStatus::replaced;
             file_result.blake3_state = blake3_state;
@@ -266,6 +269,7 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
               options.core_only_diagnostic,
               options.allow_fallback_diarization,
               options.force_single_speaker,
+              options.serial_pipeline,
               create_err, blake3_state, item_sink)) {
         file_result.status = BatchFileStatus::created;
         file_result.blake3_state = blake3_state;

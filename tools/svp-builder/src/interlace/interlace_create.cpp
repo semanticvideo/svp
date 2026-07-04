@@ -337,6 +337,7 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
   pipeline_opts.sherpa_lib_path = options.sherpa_lib_path;
   pipeline_opts.allow_fallback_diarization = options.allow_fallback_diarization;
   pipeline_opts.force_single_speaker = options.force_single_speaker;
+  pipeline_opts.serial_pipeline = options.serial_pipeline;
   pipeline_opts.progress_sink = sink;
 
   BuildPipeline pipeline;

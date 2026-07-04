@@ -28,6 +28,7 @@ struct InterlaceCreateOptions {
   bool core_only_diagnostic = false;
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
+  bool serial_pipeline = false;
   std::shared_ptr<BuildProgressSink> progress_sink;
 };
 

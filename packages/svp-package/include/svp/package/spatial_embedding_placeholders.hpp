@@ -79,6 +79,7 @@ struct SpatialEmbeddingPlaceholderSummary {
     svp::vision::FrameCatalog* frame_catalog = nullptr,
     SpatialProgressCallback on_progress = {},
     const svp::vision::InferencePerformanceOptions& performance = {},
+    bool serial_model_stages = false,
     std::vector<nlohmann::json>* processor_records = nullptr);
 
 void merge_processor_records(const std::filesystem::path& processors_path,

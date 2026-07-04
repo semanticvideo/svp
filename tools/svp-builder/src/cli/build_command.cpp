@@ -61,6 +61,7 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
   pipeline_options.sherpa_lib_path = options.sherpa_lib_path;
   pipeline_options.allow_fallback_diarization = options.allow_fallback_diarization;
   pipeline_options.force_single_speaker = options.force_single_speaker;
+  pipeline_options.serial_pipeline = options.serial_pipeline;
   pipeline_options.progress_sink = progress_sink;
   pipeline_options.quiet = options.quiet;
   pipeline_options.verbose = options.verbose;

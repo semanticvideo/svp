@@ -530,6 +530,61 @@ void test_verbose_package_build_writes_foundation_json_sidecar() {
   std::filesystem::remove_all(tmp_dir);
 }
 
+void test_serial_package_pipeline_runs_audio_before_package_write() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_serial_package_order";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path source_path = write_mock_media_file(tmp_dir);
+  const std::filesystem::path probe_path = write_minimal_probe_json(tmp_dir);
+  const std::filesystem::path package_path = tmp_dir / "output.svp";
+
+  auto capturing_sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::BuildPipelineOptions options;
+  options.source_path = source_path.string();
+  options.probe_json_path = probe_path.string();
+  options.ffmpeg_path = "/usr/bin/true";
+  options.output_path = package_path;
+  options.staging_dir = tmp_dir / "staging";
+  options.stop_after = svp::builder::BuildStage::package_skeleton;
+  options.force_single_speaker = true;
+  options.serial_pipeline = true;
+  options.progress_sink = capturing_sink;
+
+  svp::builder::BuildPipeline pipeline;
+  const svp::builder::BuildPipelineResult result = pipeline.run(options);
+
+  (void)result;
+  std::optional<std::size_t> audio_completed;
+  std::optional<std::size_t> asr_completed;
+  std::optional<std::size_t> package_write_started;
+  for (std::size_t i = 0; i < capturing_sink->events.size(); ++i) {
+    const auto& event = capturing_sink->events[i];
+    if (event.kind == svp::builder::ProgressEventKind::stage_completed &&
+        event.stage_id == svp::builder::ProgressStageId::audio_extract) {
+      audio_completed = i;
+    }
+    if (event.kind == svp::builder::ProgressEventKind::stage_completed &&
+        event.stage_id == svp::builder::ProgressStageId::asr) {
+      asr_completed = i;
+    }
+    if (event.kind == svp::builder::ProgressEventKind::stage_started &&
+        event.stage_id == svp::builder::ProgressStageId::package_write) {
+      package_write_started = i;
+      break;
+    }
+  }
+
+  assert(audio_completed.has_value());
+  assert(asr_completed.has_value());
+  assert(package_write_started.has_value());
+  assert(*audio_completed < *package_write_started);
+  assert(*asr_completed < *package_write_started);
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
 void test_warning_event_factory_for_diarization_and_index() {
   const svp::builder::ProgressEvent diarization_warning =
       svp::builder::make_warning(
@@ -1069,6 +1124,7 @@ int main() {
   test_pipeline_package_write_failure_emits_stage_failed_no_validate();
   test_package_build_removes_default_foundation_json_sidecar();
   test_verbose_package_build_writes_foundation_json_sidecar();
+  test_serial_package_pipeline_runs_audio_before_package_write();
   test_warning_event_factory_for_diarization_and_index();
   test_stage_progress_event_has_progress_fields();
   test_stage_progress_zero_total_no_fraction();

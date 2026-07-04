@@ -43,6 +43,7 @@ struct BuildCliOptions {
   std::string sherpa_lib_path;
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
+  bool serial_pipeline = false;
   std::string progress_mode = "auto";
   bool quiet = false;
   bool verbose = false;
@@ -63,6 +64,7 @@ struct InterlaceCliOptions {
   bool ic_core_only = false;
   bool ic_allow_fallback = false;
   bool ic_force_single = false;
+  bool ic_serial_pipeline = false;
   std::string ic_progress_mode = "auto";
   bool ic_quiet = false;
 
@@ -115,6 +117,7 @@ struct InterlaceCliOptions {
   bool cb_core_only = false;
   bool cb_allow_fallback = false;
   bool cb_force_single = false;
+  bool cb_serial_pipeline = false;
   std::string cb_progress_mode = "auto";
   bool cb_quiet = false;
 

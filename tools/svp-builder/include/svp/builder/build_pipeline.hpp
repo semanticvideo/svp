@@ -53,6 +53,7 @@ struct BuildPipelineOptions {
   std::string sherpa_lib_path;
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
+  bool serial_pipeline = false;
   std::shared_ptr<BuildProgressSink> progress_sink;
   bool quiet = false;
   bool verbose = false;

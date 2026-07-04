@@ -120,40 +120,50 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         emit_stage_completed(context, ProgressStageId::color);
       }
 
-      auto run_audio_lane = [](BuildPipelineContext& audio_context) {
-        return run_audio_stage(audio_context);
-      };
-
-      nlohmann::json audio_output = output;
-      BuildPipelineContext audio_context{
-          effective_options, stage_plan, plan, staging_dir, model_runtime_available,
-          audio_output, svp::vision::FrameCatalog{}, *sink};
-
-      const BuilderConcurrencyPolicy policy =
-          builder_concurrency_policy(effective_options.performance, 1);
-      PackageVisionStageResult vision_result;
-      std::optional<int> audio_exit;
-      if (policy.single_video_heavy_lanes > 1) {
-        auto audio_future =
-            std::async(std::launch::async, [&run_audio_lane, &audio_context]() {
-              return run_audio_lane(audio_context);
-            });
-        vision_result = run_package_vision_stage(context);
-        audio_exit = audio_future.get();
-      } else {
-        audio_exit = run_audio_lane(audio_context);
-        if (!audio_exit) {
-          vision_result = run_package_vision_stage(context);
+      if (effective_options.serial_pipeline) {
+        const PackageVisionStageResult vision_result =
+            run_package_vision_stage(context);
+        if (const std::optional<int> audio_exit = run_audio_stage(context)) {
+          return {.exit_code = *audio_exit};
         }
-      }
-      if (audio_output.contains("audio_foundation")) {
-        output["audio_foundation"] = audio_output["audio_foundation"];
-      }
-      if (audio_exit) {
-        return {.exit_code = *audio_exit};
-      }
+        package_result = run_package_final_stage(context, vision_result);
+      } else {
+        auto run_audio_lane = [](BuildPipelineContext& audio_context) {
+          return run_audio_stage(audio_context);
+        };
 
-      package_result = run_package_final_stage(context, vision_result);
+        nlohmann::json audio_output = output;
+        BuildPipelineContext audio_context{
+            effective_options, stage_plan, plan, staging_dir,
+            model_runtime_available, audio_output,
+            svp::vision::FrameCatalog{}, *sink};
+
+        const BuilderConcurrencyPolicy policy =
+            builder_concurrency_policy(effective_options.performance, 1);
+        PackageVisionStageResult vision_result;
+        std::optional<int> audio_exit;
+        if (policy.single_video_heavy_lanes > 1) {
+          auto audio_future =
+              std::async(std::launch::async, [&run_audio_lane, &audio_context]() {
+                return run_audio_lane(audio_context);
+              });
+          vision_result = run_package_vision_stage(context);
+          audio_exit = audio_future.get();
+        } else {
+          audio_exit = run_audio_lane(audio_context);
+          if (!audio_exit) {
+            vision_result = run_package_vision_stage(context);
+          }
+        }
+        if (audio_output.contains("audio_foundation")) {
+          output["audio_foundation"] = audio_output["audio_foundation"];
+        }
+        if (audio_exit) {
+          return {.exit_code = *audio_exit};
+        }
+
+        package_result = run_package_final_stage(context, vision_result);
+      }
     } else if (stage_plan.run_audio) {
       if (const std::optional<int> audio_exit = run_audio_stage(context)) {
         return {.exit_code = *audio_exit};
