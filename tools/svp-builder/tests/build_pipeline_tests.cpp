@@ -1,6 +1,7 @@
 #include "svp/builder/build_pipeline.hpp"
 #include "svp/builder/build_progress.hpp"
 #include "svp/builder/progress_renderer.hpp"
+#include "staging_cleanup.hpp"
 
 #include <cassert>
 #include <filesystem>
@@ -839,6 +840,45 @@ void test_json_progress_preserves_all_event_types() {
   assert(output.find("\"items\"") != std::string::npos);
 }
 
+void test_default_staging_removed_after_success() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_staging_cleanup_default";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+
+  svp::builder::StagingCleanupGuard guard(tmp_dir, false);
+  guard.cleanup_on_success();
+
+  assert(!std::filesystem::exists(tmp_dir));
+}
+
+void test_explicit_staging_preserved_after_success() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_staging_cleanup_explicit";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+
+  svp::builder::StagingCleanupGuard guard(tmp_dir, true);
+  guard.cleanup_on_success();
+
+  assert(std::filesystem::exists(tmp_dir));
+  std::filesystem::remove_all(tmp_dir);
+}
+
+void test_default_staging_preserved_on_failure() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_staging_cleanup_fail";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+
+  {
+    svp::builder::StagingCleanupGuard guard(tmp_dir, false);
+  }
+
+  assert(std::filesystem::exists(tmp_dir));
+  std::filesystem::remove_all(tmp_dir);
+}
+
 }  // namespace
 
 int main() {
@@ -869,6 +909,9 @@ int main() {
   test_quiet_produces_no_stdout();
   test_noise_regression_forbidden_strings_absent();
   test_json_progress_preserves_all_event_types();
+  test_default_staging_removed_after_success();
+  test_explicit_staging_preserved_after_success();
+  test_default_staging_preserved_on_failure();
 
   return 0;
 }

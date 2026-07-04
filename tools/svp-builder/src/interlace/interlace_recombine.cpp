@@ -1,6 +1,8 @@
 #include "svp/builder/interlace.hpp"
 #include "svp/builder/build_progress.hpp"
 
+#include "staging_cleanup.hpp"
+
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
 #include "svp/package/package_layout.hpp"
@@ -189,12 +191,14 @@ InterlaceRecombineResult interlace_recombine(
     };
   }
 
+  const bool user_supplied_staging = !options.staging_dir.empty();
   std::filesystem::path staging_dir;
-  if (!options.staging_dir.empty()) {
+  if (user_supplied_staging) {
     staging_dir = options.staging_dir;
   } else {
     staging_dir = std::filesystem::path(options.output_path + ".staging");
   }
+  StagingCleanupGuard staging_guard(staging_dir, user_supplied_staging);
   std::filesystem::remove_all(staging_dir);
   std::filesystem::create_directories(staging_dir);
 
@@ -302,6 +306,7 @@ InterlaceRecombineResult interlace_recombine(
     sink->emit(make_stage_failed(ProgressStageId::validate, "SVP validation reported issues"));
   }
 
+  staging_guard.cleanup_on_success();
   return result;
 }
 

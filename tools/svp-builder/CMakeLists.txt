@@ -33,6 +33,7 @@ target_include_directories(svp-builder-lib
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/interlace
 )
 
@@ -104,6 +105,9 @@ if(BUILD_TESTING)
     tests/interlace_batch_tests.cpp
   )
 
+  target_include_directories(svp-builder-pipeline-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
   target_compile_features(svp-builder-pipeline-tests PRIVATE cxx_std_20)
   target_compile_options(svp-builder-pipeline-tests PRIVATE -UNDEBUG)
   target_compile_features(svp-builder-progress-renderer-tests PRIVATE cxx_std_20)

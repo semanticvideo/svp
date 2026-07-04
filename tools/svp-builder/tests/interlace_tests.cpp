@@ -1041,6 +1041,104 @@ void test_interlace_recombine_emits_progress_events() {
   std::cout << "  test_interlace_recombine_emits_progress_events passed\n";
 }
 
+void test_interlace_create_removes_default_staging() {
+  auto root = make_test_dir("svp-staging-cleanup-ic-default");
+  auto source = root / "test.mov";
+  create_mock_source_media(source, 512);
+  auto svpi_path = root / "output.svpi";
+  auto expected_staging = std::filesystem::path(svpi_path.string() + ".staging");
+
+  svp::builder::InterlaceCreateOptions opts;
+  opts.source_path = source.string();
+  opts.output_path = svpi_path.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.core_only_diagnostic = true;
+
+  auto result = svp::builder::interlace_create(opts);
+  CHECK(result.success);
+  CHECK(std::filesystem::exists(svpi_path));
+  CHECK(!std::filesystem::exists(expected_staging));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_interlace_create_removes_default_staging passed\n";
+}
+
+void test_interlace_create_preserves_explicit_staging() {
+  auto root = make_test_dir("svp-staging-cleanup-ic-explicit");
+  auto source = root / "test.mov";
+  create_mock_source_media(source, 512);
+  auto svpi_path = root / "output.svpi";
+  auto staging_dir = root / "my_staging";
+
+  svp::builder::InterlaceCreateOptions opts;
+  opts.source_path = source.string();
+  opts.output_path = svpi_path.string();
+  opts.staging_dir = staging_dir.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.core_only_diagnostic = true;
+
+  auto result = svp::builder::interlace_create(opts);
+  CHECK(result.success);
+  CHECK(std::filesystem::exists(svpi_path));
+  CHECK(std::filesystem::exists(staging_dir));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_interlace_create_preserves_explicit_staging passed\n";
+}
+
+void test_interlace_recombine_removes_default_staging() {
+  auto root = make_test_dir("svp-staging-cleanup-ir-default");
+  auto source = root / "test.mov";
+  create_mock_source_media(source, 512);
+  auto svpi_path = root / "test.svpi";
+  auto svp_path = root / "recombined.svp";
+  auto expected_staging = std::filesystem::path(svp_path.string() + ".staging");
+
+  CHECK(build_minimal_svpi(svpi_path, source, true));
+
+  svp::builder::InterlaceRecombineOptions opts;
+  opts.media_path = source.string();
+  opts.svpi_path = svpi_path.string();
+  opts.output_path = svp_path.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.validation_codes_path = "spec/registries/validation-codes.json";
+
+  auto result = svp::builder::interlace_recombine(opts);
+  CHECK(result.success);
+  CHECK(std::filesystem::exists(svp_path));
+  CHECK(!std::filesystem::exists(expected_staging));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_interlace_recombine_removes_default_staging passed\n";
+}
+
+void test_interlace_recombine_preserves_explicit_staging() {
+  auto root = make_test_dir("svp-staging-cleanup-ir-explicit");
+  auto source = root / "test.mov";
+  create_mock_source_media(source, 512);
+  auto svpi_path = root / "test.svpi";
+  auto svp_path = root / "recombined.svp";
+  auto staging_dir = root / "my_staging";
+
+  CHECK(build_minimal_svpi(svpi_path, source, true));
+
+  svp::builder::InterlaceRecombineOptions opts;
+  opts.media_path = source.string();
+  opts.svpi_path = svpi_path.string();
+  opts.output_path = svp_path.string();
+  opts.staging_dir = staging_dir.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.validation_codes_path = "spec/registries/validation-codes.json";
+
+  auto result = svp::builder::interlace_recombine(opts);
+  CHECK(result.success);
+  CHECK(std::filesystem::exists(svp_path));
+  CHECK(std::filesystem::exists(staging_dir));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_interlace_recombine_preserves_explicit_staging passed\n";
+}
+
 }  // namespace
 
 int main() {
@@ -1070,6 +1168,11 @@ int main() {
   test_interlace_validate_emits_progress_events();
   test_interlace_extract_emits_progress_events();
   test_interlace_recombine_emits_progress_events();
+
+  test_interlace_create_removes_default_staging();
+  test_interlace_create_preserves_explicit_staging();
+  test_interlace_recombine_removes_default_staging();
+  test_interlace_recombine_preserves_explicit_staging();
 
   std::cout << "All SVPI Phase 2 interlace tests passed!\n";
   return 0;

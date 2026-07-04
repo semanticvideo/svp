@@ -87,7 +87,7 @@ Common options:
 
 | Option | Description |
 |--------|-------------|
-| `--staging-dir <dir>` | Use a specific staging directory |
+| `--staging-dir <dir>` | Use a specific staging directory (preserved after build; default staging is removed on success) |
 | `--model-cache <dir>` | Use local SVP model cache |
 | `--ffmpeg <path>` | FFmpeg executable |
 | `--ffprobe <path>` | ffprobe executable |
