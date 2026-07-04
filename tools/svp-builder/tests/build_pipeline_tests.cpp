@@ -3,6 +3,8 @@
 #include "svp/builder/progress_renderer.hpp"
 #include "staging_cleanup.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -12,6 +14,11 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+namespace svp::package {
+void merge_processor_records(const std::filesystem::path& processors_path,
+                             const std::vector<nlohmann::json>& new_processors);
+}
 
 namespace {
 
@@ -969,6 +976,79 @@ void test_default_staging_preserved_on_failure() {
   std::filesystem::remove_all(tmp_dir);
 }
 
+void test_concurrency_policy_respects_ocr_profiles() {
+  svp::vision::InferencePerformanceOptions serial;
+  serial.ocr_performance_profile = "serial";
+  svp::vision::InferencePerformanceOptions background;
+  background.ocr_performance_profile = "background";
+  svp::vision::InferencePerformanceOptions fast;
+  fast.ocr_performance_profile = "fast";
+
+  const auto serial_policy =
+      svp::builder::builder_concurrency_policy(serial, 64);
+  const auto background_policy =
+      svp::builder::builder_concurrency_policy(background, 64);
+  const auto fast_policy =
+      svp::builder::builder_concurrency_policy(fast, 64);
+
+  assert(serial_policy.single_video_heavy_lanes > 0);
+  assert(background_policy.single_video_heavy_lanes > 0);
+  assert(fast_policy.single_video_heavy_lanes > 0);
+  assert(serial_policy.max_batch_jobs > 0);
+  assert(background_policy.max_batch_jobs > 0);
+  assert(fast_policy.max_batch_jobs > 0);
+  assert(fast_policy.max_batch_jobs <= background_policy.max_batch_jobs);
+}
+
+void test_scoped_progress_wrapper_tags_events() {
+  auto capturing_sink = std::make_shared<CapturingProgressSink>();
+  auto scoped = svp::builder::make_scoped_progress_sink(
+      capturing_sink, "scope-1", "clip1.mov");
+  scoped->emit(svp::builder::make_stage_started(
+      svp::builder::ProgressStageId::asr));
+  assert(capturing_sink->events.size() == 1);
+  assert(capturing_sink->events[0].scope_id == "scope-1");
+  assert(capturing_sink->events[0].scope_label == "clip1.mov");
+}
+
+std::vector<nlohmann::json> read_jsonl_records(const std::filesystem::path& path) {
+  std::vector<nlohmann::json> records;
+  std::ifstream input(path);
+  std::string line;
+  while (std::getline(input, line)) {
+    if (!line.empty()) {
+      records.push_back(nlohmann::json::parse(line));
+    }
+  }
+  return records;
+}
+
+void test_deterministic_processor_merge_orders_by_id() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_processor_merge_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir / "provenance");
+  const auto processors_path = tmp_dir / "provenance" / "processors.jsonl";
+
+  svp::package::merge_processor_records(processors_path, {
+      nlohmann::json{{"id", "processor_z"}, {"name", "z"}},
+      nlohmann::json{{"id", "processor_a"}, {"name", "a"}},
+  });
+  svp::package::merge_processor_records(processors_path, {
+      nlohmann::json{{"id", "processor_m"}, {"name", "m"}},
+      nlohmann::json{{"id", "processor_a"}, {"name", "a2"}},
+  });
+
+  const auto records = read_jsonl_records(processors_path);
+  assert(records.size() == 3);
+  assert(records[0]["id"] == "processor_a");
+  assert(records[0]["name"] == "a2");
+  assert(records[1]["id"] == "processor_m");
+  assert(records[2]["id"] == "processor_z");
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
 }  // namespace
 
 int main() {
@@ -1004,6 +1084,9 @@ int main() {
   test_default_staging_removed_after_success();
   test_explicit_staging_preserved_after_success();
   test_default_staging_preserved_on_failure();
+  test_concurrency_policy_respects_ocr_profiles();
+  test_scoped_progress_wrapper_tags_events();
+  test_deterministic_processor_merge_orders_by_id();
 
   return 0;
 }

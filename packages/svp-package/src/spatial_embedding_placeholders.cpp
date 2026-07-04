@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <future>
 #include <map>
 #include <memory>
 #include <string>
@@ -131,7 +132,7 @@ nlohmann::json make_embedding_placeholder_processor() {
   };
 }
 
-void append_processor_records(
+void append_processor_records_to_path(
     const std::filesystem::path& processors_path,
     const std::vector<nlohmann::json>& new_processors) {
   std::map<std::string, nlohmann::json> processors_by_id;
@@ -153,6 +154,19 @@ void append_processor_records(
     all_processors.push_back(processor);
   }
   write_jsonl(processors_path, all_processors);
+}
+
+void collect_or_append_processor_records(
+    const std::filesystem::path& processors_path,
+    const std::vector<nlohmann::json>& new_processors,
+    std::vector<nlohmann::json>* processor_records) {
+  if (processor_records != nullptr) {
+    processor_records->insert(processor_records->end(),
+                              new_processors.begin(),
+                              new_processors.end());
+    return;
+  }
+  append_processor_records_to_path(processors_path, new_processors);
 }
 
 void attach_ocr_progress_callbacks(svp::vision::OcrGenerationOptions& ocr_opts,
@@ -204,7 +218,8 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     const std::filesystem::path& ffmpeg_path,
     svp::vision::FrameCatalog* frame_catalog,
     SpatialProgressCallback on_progress,
-    const svp::vision::InferencePerformanceOptions& performance) {
+    const svp::vision::InferencePerformanceOptions& performance,
+    std::vector<nlohmann::json>* processor_records) {
   SpatialEmbeddingPlaceholderSummary summary;
   summary.model_runtime_available = model_runtime_available;
 
@@ -279,6 +294,33 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     ocr_opts.frame_catalog = frame_catalog;
     attach_ocr_progress_callbacks(ocr_opts, on_progress);
 
+    svp::vision::DepthGenerationOptions depth_opts;
+    depth_opts.model_cache_root = model_cache_root;
+    depth_opts.raster_width = raster_w;
+    depth_opts.raster_height = raster_h;
+    depth_opts.frame_input = decoded_frames;
+    if (on_progress) {
+      depth_opts.on_progress = [&on_progress](std::size_t current, std::size_t total) {
+        on_progress("depth", current, total, "");
+      };
+    }
+
+    auto depth_future = std::async(
+        std::launch::async,
+        [depth_opts = std::move(depth_opts), &staging_dir,
+         model_runtime_available]() mutable {
+          svp::vision::DepthGenerationResult depth_result;
+          try {
+            depth_result = svp::vision::generate_depth_blocks(
+                depth_opts, staging_dir);
+          } catch (const std::exception& e) {
+            depth_result.blocker =
+                std::string("Depth generation error: ") + e.what();
+            depth_result.onnx_runtime_available = model_runtime_available;
+          }
+          return depth_result;
+        });
+
     svp::vision::OcrGenerationResult ocr_result;
     try {
       ocr_result = svp::vision::generate_ocr_observations(
@@ -300,41 +342,11 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
 
     // Append OCR processor provenance records
     if (!ocr_result.processors.empty()) {
-      append_processor_records(staging_dir / "provenance" / "processors.jsonl",
-                               ocr_result.processors);
+      collect_or_append_processor_records(
+          staging_dir / "provenance" / "processors.jsonl",
+          ocr_result.processors,
+          processor_records);
     }
-
-    svp::vision::DepthGenerationOptions depth_opts;
-    depth_opts.model_cache_root = model_cache_root;
-    depth_opts.raster_width = raster_w;
-    depth_opts.raster_height = raster_h;
-    depth_opts.frame_input = decoded_frames;
-    if (on_progress) {
-      depth_opts.on_progress = [&on_progress](std::size_t current, std::size_t total) {
-        on_progress("depth", current, total, "");
-      };
-    }
-    svp::vision::DepthGenerationResult depth_result;
-    try {
-      depth_result = svp::vision::generate_depth_blocks(
-          depth_opts, staging_dir);
-    } catch (const std::exception& e) {
-      depth_result.blocker = std::string("Depth generation error: ") + e.what();
-      depth_result.onnx_runtime_available = model_runtime_available;
-    }
-
-    summary.depth_index_written = depth_result.depth_index_written;
-    summary.depth_blocks_written = depth_result.depth_blocks_written;
-    summary.depth_generation_run = depth_result.depth_generation_run;
-    summary.depth_model_available = depth_result.depth_model_available;
-    summary.depth_model_verified = depth_result.depth_model_verified;
-    // Report frame input availability from the decoded frames directly,
-    // not from depth_result which may have returned early at model gating.
-    summary.depth_frame_input_available =
-        decoded_frames.decoding_succeeded &&
-        !decoded_frames.frames.empty();
-    summary.depth_generation_detail =
-        svp::vision::depth_generation_result_to_json(depth_result);
 
     svp::vision::EmbeddingGenerationOptions emb_opts;
     emb_opts.model_cache_root = model_cache_root;
@@ -360,6 +372,20 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     summary.embedding_model_available = emb_result.embedding_model_available;
     summary.embedding_generation_detail =
         svp::vision::embedding_generation_result_to_json(emb_result);
+
+    svp::vision::DepthGenerationResult depth_result = depth_future.get();
+    summary.depth_index_written = depth_result.depth_index_written;
+    summary.depth_blocks_written = depth_result.depth_blocks_written;
+    summary.depth_generation_run = depth_result.depth_generation_run;
+    summary.depth_model_available = depth_result.depth_model_available;
+    summary.depth_model_verified = depth_result.depth_model_verified;
+    // Report frame input availability from the decoded frames directly,
+    // not from depth_result which may have returned early at model gating.
+    summary.depth_frame_input_available =
+        decoded_frames.decoding_succeeded &&
+        !decoded_frames.frames.empty();
+    summary.depth_generation_detail =
+        svp::vision::depth_generation_result_to_json(depth_result);
 
     if (!depth_result.depth_blocks_written) {
       write_empty_file(staging_dir / "spatial" / "depth.index.jsonl");
@@ -454,8 +480,10 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     } else {
       processors.push_back(make_embedding_placeholder_processor());
     }
-    append_processor_records(staging_dir / "provenance" / "processors.jsonl",
-                             processors);
+    collect_or_append_processor_records(
+        staging_dir / "provenance" / "processors.jsonl",
+        processors,
+        processor_records);
     summary.provenance_records_added += processors.size();
 
     return summary;
@@ -539,8 +567,10 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
       svp::vision::ocr_generation_result_to_json(ocr_result);
 
   if (!ocr_result.processors.empty()) {
-    append_processor_records(staging_dir / "provenance" / "processors.jsonl",
-                             ocr_result.processors);
+    collect_or_append_processor_records(
+        staging_dir / "provenance" / "processors.jsonl",
+        ocr_result.processors,
+        processor_records);
   }
 
   write_empty_file(staging_dir / "spatial" / "depth.index.jsonl");
@@ -569,11 +599,18 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
       make_spatial_placeholder_processor(),
       make_embedding_placeholder_processor(),
   };
-  append_processor_records(staging_dir / "provenance" / "processors.jsonl",
-                           placeholder_processors);
+  collect_or_append_processor_records(
+      staging_dir / "provenance" / "processors.jsonl",
+      placeholder_processors,
+      processor_records);
   summary.provenance_records_added += placeholder_processors.size();
 
   return summary;
+}
+
+void merge_processor_records(const std::filesystem::path& processors_path,
+                             const std::vector<nlohmann::json>& new_processors) {
+  append_processor_records_to_path(processors_path, new_processors);
 }
 
 nlohmann::json spatial_embedding_placeholder_summary_to_json(

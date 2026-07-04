@@ -7,11 +7,13 @@
 #include "svp/audio/whisper_model.hpp"
 #include "svp/core/memory_diagnostics.hpp"
 #include "svp/media/media_ingest_plan.hpp"
+#include "svp/models/cache.hpp"
 #include "svp/models/runtime.hpp"
 #include "svp/vision/noise_suppression.hpp"
 
 #include <exception>
 #include <filesystem>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -71,9 +73,14 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         {"staging_dir", options.staging_dir.string()}
     });
 
-    const std::string stop_after_name(build_stage_name(options.stop_after));
+    BuildPipelineOptions effective_options = options;
+    if (effective_options.model_cache_dir.empty()) {
+      effective_options.model_cache_dir = svp::models::model_cache_root();
+    }
+
+    const std::string stop_after_name(build_stage_name(effective_options.stop_after));
     const BuildStageExecutionPlan stage_plan =
-        execution_plan_for_stage(options.stop_after);
+        execution_plan_for_stage(effective_options.stop_after);
 
     sink->emit(make_stage_started(ProgressStageId::media_probe));
     const svp::media::MediaIngestPlan plan =
@@ -84,59 +91,94 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     nlohmann::json output = svp::media::media_ingest_plan_to_json(plan);
     sink->emit(make_stage_completed(ProgressStageId::media_probe));
 
-    const bool user_supplied_staging = !options.staging_dir.empty();
+    const bool user_supplied_staging = !effective_options.staging_dir.empty();
     const std::filesystem::path staging_dir =
         user_supplied_staging
-            ? options.staging_dir
-            : default_staging_dir_for_output(options.output_path);
+            ? effective_options.staging_dir
+            : default_staging_dir_for_output(effective_options.output_path);
     StagingCleanupGuard staging_guard(staging_dir, user_supplied_staging);
     const bool model_runtime_available = svp::models::OnnxSession::is_available();
     svp::models::set_onnx_verbose(options.verbose);
     svp::audio::set_whisper_verbose(options.verbose);
     svp::vision::set_opencv_verbose(options.verbose);
 
-    if (!options.sherpa_lib_path.empty()) {
-      svp::audio::set_sherpa_lib_path(options.sherpa_lib_path);
+    if (!effective_options.sherpa_lib_path.empty()) {
+      svp::audio::set_sherpa_lib_path(effective_options.sherpa_lib_path);
     }
 
-    BuildPipelineContext context{options, stage_plan, plan, staging_dir,
+    BuildPipelineContext context{effective_options, stage_plan, plan, staging_dir,
                                  model_runtime_available, output,
                                  svp::vision::FrameCatalog{}, *sink};
 
-    if (stage_plan.run_audio) {
-      emit_stage_started(context, ProgressStageId::audio_extract);
-      if (const std::optional<int> audio_exit = run_audio_stage(context)) {
-        emit_stage_failed(context, ProgressStageId::audio_extract);
+    PackageSkeletonStageResult package_result;
+    package_result.json_output_path = options.output_path;
+
+    if (stage_plan.run_package_skeleton) {
+      if (stage_plan.run_foundation_color) {
+        emit_stage_started(context, ProgressStageId::color);
+        run_foundation_color_stage(context);
+        emit_stage_completed(context, ProgressStageId::color);
+      }
+
+      auto run_audio_lane = [](BuildPipelineContext& audio_context) {
+        return run_audio_stage(audio_context);
+      };
+
+      nlohmann::json audio_output = output;
+      BuildPipelineContext audio_context{
+          effective_options, stage_plan, plan, staging_dir, model_runtime_available,
+          audio_output, svp::vision::FrameCatalog{}, *sink};
+
+      const BuilderConcurrencyPolicy policy =
+          builder_concurrency_policy(effective_options.performance, 1);
+      PackageVisionStageResult vision_result;
+      std::optional<int> audio_exit;
+      if (policy.single_video_heavy_lanes > 1) {
+        auto audio_future =
+            std::async(std::launch::async, [&run_audio_lane, &audio_context]() {
+              return run_audio_lane(audio_context);
+            });
+        vision_result = run_package_vision_stage(context);
+        audio_exit = audio_future.get();
+      } else {
+        audio_exit = run_audio_lane(audio_context);
+        if (!audio_exit) {
+          vision_result = run_package_vision_stage(context);
+        }
+      }
+      if (audio_output.contains("audio_foundation")) {
+        output["audio_foundation"] = audio_output["audio_foundation"];
+      }
+      if (audio_exit) {
         return {.exit_code = *audio_exit};
       }
-      emit_stage_completed(context, ProgressStageId::audio_extract);
+
+      package_result = run_package_final_stage(context, vision_result);
+    } else if (stage_plan.run_audio) {
+      if (const std::optional<int> audio_exit = run_audio_stage(context)) {
+        return {.exit_code = *audio_exit};
+      }
     }
-    if (stage_plan.run_vision_plan) {
+    if (!stage_plan.run_package_skeleton && stage_plan.run_vision_plan) {
       emit_stage_started(context, ProgressStageId::vision_plan);
       run_vision_plan_stage(context);
       emit_stage_completed(context, ProgressStageId::vision_plan);
     }
-    if (stage_plan.run_foundation_color) {
+    if (!stage_plan.run_package_skeleton && stage_plan.run_foundation_color) {
       emit_stage_started(context, ProgressStageId::color);
       run_foundation_color_stage(context);
       emit_stage_completed(context, ProgressStageId::color);
     }
-    if (stage_plan.run_foundation_ocr) {
+    if (!stage_plan.run_package_skeleton && stage_plan.run_foundation_ocr) {
       emit_stage_started(context, ProgressStageId::ocr);
       run_foundation_ocr_stage(context);
       emit_stage_completed(context, ProgressStageId::ocr);
     }
 
-    PackageSkeletonStageResult package_result;
-    package_result.json_output_path = options.output_path;
-    if (stage_plan.run_package_skeleton) {
-      package_result = run_package_skeleton_stage(context);
-    }
-
     output["builder_command"] = {
         {"command", "build"},
         {"stop_after", stop_after_name},
-        {"ocr_performance", options.performance.ocr_performance_profile},
+        {"ocr_performance", effective_options.performance.ocr_performance_profile},
         {"valid_svp_package_written", package_result.validator_passes},
     };
 

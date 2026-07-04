@@ -107,6 +107,7 @@ struct InterlaceCliOptions {
   std::string cb_sherpa_lib;
   std::string cb_visibility = "visible";
   svp::vision::InferencePerformanceOptions cb_performance;
+  int cb_jobs = 1;
   bool cb_recursive = false;
   bool cb_no_blake3 = false;
   bool cb_replace_mismatched = false;

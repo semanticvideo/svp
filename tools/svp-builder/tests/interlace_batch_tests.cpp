@@ -25,6 +25,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -953,10 +954,12 @@ void test_batch_create_out_dir_visible() {
 class CapturingProgressSink : public svp::builder::BuildProgressSink {
  public:
   void emit(const svp::builder::ProgressEvent& event) override {
+    std::lock_guard<std::mutex> lock(mutex);
     events.push_back(event);
   }
 
   std::vector<svp::builder::ProgressEvent> events;
+  std::mutex mutex;
 };
 
 bool has_event(const std::vector<svp::builder::ProgressEvent>& events,
@@ -976,6 +979,94 @@ int count_events(const std::vector<svp::builder::ProgressEvent>& events,
     if (e.kind == kind && e.stage_id == stage) ++count;
   }
   return count;
+}
+
+void test_batch_create_default_jobs_is_one() {
+  svp::builder::BatchCreateOptions opts;
+  CHECK(opts.jobs == 1);
+  std::cout << "  test_batch_create_default_jobs_is_one passed\n";
+}
+
+void test_batch_create_jobs_two_preserves_result_order_and_counters() {
+  const auto root = make_test_dir("svp_batch_jobs_order");
+  const auto src = root / "src";
+  std::filesystem::create_directories(src);
+  create_mock_source_media(src / "a_clip.mp4", 256);
+  create_mock_source_media(src / "b_clip.mp4", 256);
+
+  svp::builder::BatchCreateOptions opts;
+  opts.source_dir = src.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.visibility = svp::builder::SidecarVisibility::visible;
+  opts.core_only_diagnostic = true;
+  opts.jobs = 2;
+
+  auto result = svp::builder::interlace_create_batch(opts);
+  CHECK(result.results.size() == 2);
+  CHECK(result.results[0].source_filename == "a_clip.mp4");
+  CHECK(result.results[1].source_filename == "b_clip.mp4");
+  CHECK(result.created_count == 2);
+  CHECK(result.failed_count == 0);
+  CHECK(std::filesystem::exists(src / "a_clip.svpi"));
+  CHECK(std::filesystem::exists(src / "b_clip.svpi"));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_create_jobs_two_preserves_result_order_and_counters passed\n";
+}
+
+void test_batch_create_jobs_two_preserves_explicit_isolated_staging() {
+  const auto root = make_test_dir("svp_batch_jobs_staging");
+  const auto src = root / "src";
+  const auto staging = root / "staging";
+  std::filesystem::create_directories(src);
+  create_mock_source_media(src / "clip1.mp4", 256);
+  create_mock_source_media(src / "clip2.mp4", 256);
+
+  svp::builder::BatchCreateOptions opts;
+  opts.source_dir = src.string();
+  opts.staging_dir = staging.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.core_only_diagnostic = true;
+  opts.jobs = 2;
+
+  auto result = svp::builder::interlace_create_batch(opts);
+  CHECK(result.created_count == 2);
+  CHECK(std::filesystem::exists(staging / "clip1.staging"));
+  CHECK(std::filesystem::exists(staging / "clip2.staging"));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_create_jobs_two_preserves_explicit_isolated_staging passed\n";
+}
+
+void test_batch_create_jobs_two_emits_distinct_scopes() {
+  const auto root = make_test_dir("svp_batch_jobs_scoped_progress");
+  const auto src = root / "src";
+  std::filesystem::create_directories(src);
+  create_mock_source_media(src / "clip1.mp4", 256);
+  create_mock_source_media(src / "clip2.mp4", 256);
+
+  auto sink = std::make_shared<CapturingProgressSink>();
+  svp::builder::BatchCreateOptions opts;
+  opts.source_dir = src.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.core_only_diagnostic = true;
+  opts.jobs = 2;
+  opts.progress_sink = sink;
+
+  auto result = svp::builder::interlace_create_batch(opts);
+  CHECK(result.created_count == 2);
+
+  bool saw_clip1 = false;
+  bool saw_clip2 = false;
+  for (const auto& event : sink->events) {
+    if (event.scope_label == "clip1.mp4") saw_clip1 = true;
+    if (event.scope_label == "clip2.mp4") saw_clip2 = true;
+  }
+  CHECK(saw_clip1);
+  CHECK(saw_clip2);
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_create_jobs_two_emits_distinct_scopes passed\n";
 }
 
 void test_batch_create_emits_progress_events() {
@@ -1247,6 +1338,10 @@ int main() {
   test_complete_identity_batch_managed_dir();
   test_batch_create_out_dir_visible();
 
+  test_batch_create_default_jobs_is_one();
+  test_batch_create_jobs_two_preserves_result_order_and_counters();
+  test_batch_create_jobs_two_preserves_explicit_isolated_staging();
+  test_batch_create_jobs_two_emits_distinct_scopes();
   test_batch_create_emits_progress_events();
   test_batch_validate_emits_progress_events();
   test_complete_identity_emits_progress_events();

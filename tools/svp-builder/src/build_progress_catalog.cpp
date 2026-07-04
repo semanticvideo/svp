@@ -1,6 +1,7 @@
 #include "svp/builder/build_progress.hpp"
 
 #include <stdexcept>
+#include <utility>
 
 namespace svp::builder {
 
@@ -94,8 +95,49 @@ std::string_view progress_event_kind_name(ProgressEventKind kind) {
 
 void NullBuildProgressSink::emit(const ProgressEvent& /*event*/) {}
 
+class ScopedBuildProgressSink : public BuildProgressSink {
+ public:
+  ScopedBuildProgressSink(std::shared_ptr<BuildProgressSink> sink,
+                          std::string scope_id,
+                          std::string scope_label)
+      : sink_(std::move(sink)),
+        scope_id_(std::move(scope_id)),
+        scope_label_(std::move(scope_label)) {}
+
+  void emit(const ProgressEvent& event) override {
+    if (!sink_) {
+      return;
+    }
+    sink_->emit(with_progress_scope(event, scope_id_, scope_label_));
+  }
+
+ private:
+  std::shared_ptr<BuildProgressSink> sink_;
+  std::string scope_id_;
+  std::string scope_label_;
+};
+
 std::shared_ptr<BuildProgressSink> default_progress_sink() {
   return std::make_shared<NullBuildProgressSink>();
+}
+
+std::shared_ptr<BuildProgressSink> make_scoped_progress_sink(
+    std::shared_ptr<BuildProgressSink> sink,
+    std::string scope_id,
+    std::string scope_label) {
+  if (!sink) {
+    sink = default_progress_sink();
+  }
+  return std::make_shared<ScopedBuildProgressSink>(
+      std::move(sink), std::move(scope_id), std::move(scope_label));
+}
+
+ProgressEvent with_progress_scope(ProgressEvent event,
+                                  std::string scope_id,
+                                  std::string scope_label) {
+  event.scope_id = std::move(scope_id);
+  event.scope_label = std::move(scope_label);
+  return event;
 }
 
 ProgressEvent make_stage_started(ProgressStageId stage, std::string message) {

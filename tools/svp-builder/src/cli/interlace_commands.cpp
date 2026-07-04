@@ -155,6 +155,7 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
     cb_opts.staging_dir = opts.cb_staging;
     cb_opts.sherpa_lib_path = opts.cb_sherpa_lib;
     cb_opts.performance = opts.cb_performance;
+    cb_opts.jobs = opts.cb_jobs;
     cb_opts.recursive = opts.cb_recursive;
     cb_opts.visibility = *visibility;
     cb_opts.no_blake3 = opts.cb_no_blake3;

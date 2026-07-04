@@ -176,6 +176,9 @@ void register_cli(CLI::App& app, CliContext& context) {
   cb_create_batch->add_option("--staging-dir", opts.cb_staging, "Staging directory");
   cb_create_batch->add_option("--sherpa-lib", opts.cb_sherpa_lib, "Path to sherpa-onnx shared library");
   add_pipeline_performance_options(*cb_create_batch, opts.cb_performance);
+  cb_create_batch->add_option("--jobs", opts.cb_jobs,
+      "Maximum number of media files to process concurrently")
+      ->check(CLI::PositiveNumber);
   cb_create_batch->add_option("--sidecar-visibility", opts.cb_visibility,
       "Sidecar naming: visible, hidden, managed-dir")
       ->check(CLI::IsMember({"visible", "hidden", "managed-dir"}));

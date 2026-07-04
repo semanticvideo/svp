@@ -28,6 +28,7 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
                                          context.options.ffmpeg_path,
                                          context.model_runtime_available);
   nlohmann::json audio_json = svp::audio::audio_stage_plan_to_json(audio_plan);
+  emit_stage_started(context, ProgressStageId::audio_extract);
   const svp::audio::AudioExtractionRun extraction_run =
       svp::audio::execute_audio_extraction_plan(audio_plan.extraction_plan,
                                                 context.staging_dir,
@@ -41,6 +42,7 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
                                                context.model_runtime_available);
   const svp::audio::VadExecutionBoundary executed_boundary =
       svp::audio::execute_vad_boundary(vad_boundary, context.staging_dir);
+  emit_stage_completed(context, ProgressStageId::audio_extract);
 
   audio_json["audio_extraction"]["execution"] = extraction_run_json;
   audio_json["audio_extraction"]["extraction_run"] =
