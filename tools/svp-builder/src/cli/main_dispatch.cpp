@@ -30,5 +30,10 @@ int run_selected_command(const CliContext& context) {
     return run_diarize_command(context.diarize_opts);
   }
 
+  // diarize-replay (diagnostic)
+  if (*context.diarize_replay_subcommand) {
+    return run_diarize_replay_command(context.diarize_replay_opts);
+  }
+
   return 0;
 }

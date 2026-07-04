@@ -79,6 +79,26 @@ void register_cli(CLI::App& app, CliContext& context) {
                       "Write diarization segments as JSONL for diagnostics");
   context.diarize_subcommand = diarize;
 
+  // --- diarize-replay subcommand (diagnostic) ---
+  auto* diarize_replay = app.add_subcommand(
+      "diarize-replay",
+      "Replay word-level speaker attribution from staged diarization artifacts");
+  diarize_replay->add_option("--staging-dir",
+                             context.diarize_replay_opts.staging_dir,
+                             "Builder staging directory containing transcript and audio artifacts")
+      ->required();
+  diarize_replay->add_option("--model-dir",
+                             context.diarize_replay_opts.model_dir,
+                             "Sherpa diarization model directory")
+      ->required();
+  diarize_replay->add_option("--sherpa-lib",
+                             context.diarize_replay_opts.sherpa_lib_path,
+                             "Explicit path to libsherpa-onnx-c-api.dylib");
+  diarize_replay->add_option("--out-words-jsonl",
+                             context.diarize_replay_opts.out_words_jsonl_path,
+                             "Write replayed words JSONL with updated speaker_id values");
+  context.diarize_replay_subcommand = diarize_replay;
+
   // --- interlace subcommand ---
   auto* interlace = app.add_subcommand(
       "interlace", "SVPI sidecar operations: create, validate, inspect, extract, recombine");
