@@ -61,7 +61,7 @@ OUT_SVP="$RUN_DIR/package.svp"
 mkdir -p "$RUN_DIR"
 rm -rf "$STAGING_DIR" "$OUT_JSON" "$OUT_SVP"
 
-echo "Running svp-builder package-skeleton..."
+echo "Running svp-builder package..."
 set +e
 "$SVP_BUILDER" build \
   --model-cache "$MODEL_CACHE" \
@@ -69,7 +69,7 @@ set +e
   --out "$OUT_JSON" \
   --staging-dir "$STAGING_DIR" \
   "$VIDEO_PATH" \
-  --stop-after package-skeleton > "$RUN_DIR/builder.log" 2>&1
+  --stop-after package > "$RUN_DIR/builder.log" 2>&1
 BUILD_STATUS=$?
 set -e
 

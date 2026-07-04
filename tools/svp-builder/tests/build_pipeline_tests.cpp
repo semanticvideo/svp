@@ -24,7 +24,7 @@ void test_supported_stage_names_are_stable_and_ordered() {
                        "vision-plan",
                        "foundation-color",
                        "foundation-ocr",
-                       "package-skeleton",
+                       "package",
                    }));
 }
 
@@ -37,8 +37,19 @@ void test_stage_name_round_trip() {
   }
 
   assert(!svp::builder::parse_build_stage(""));
-  assert(!svp::builder::parse_build_stage("package"));
   assert(!svp::builder::parse_build_stage("foundation-audio"));
+}
+
+void test_package_skeleton_alias_is_temporarily_supported() {
+  const std::optional<svp::builder::BuildStage> canonical =
+      svp::builder::parse_build_stage("package");
+  const std::optional<svp::builder::BuildStage> alias =
+      svp::builder::parse_build_stage("package-skeleton");
+
+  assert(canonical.has_value());
+  assert(alias.has_value());
+  assert(*canonical == *alias);
+  assert(svp::builder::build_stage_name(*alias) == "package");
 }
 
 void test_execution_plan_preserves_existing_stage_conditions() {
@@ -833,6 +844,7 @@ void test_json_progress_preserves_all_event_types() {
 int main() {
   test_supported_stage_names_are_stable_and_ordered();
   test_stage_name_round_trip();
+  test_package_skeleton_alias_is_temporarily_supported();
   test_execution_plan_preserves_existing_stage_conditions();
   test_default_staging_dir_matches_existing_cli_contract();
   test_package_skeleton_output_path_resolution();

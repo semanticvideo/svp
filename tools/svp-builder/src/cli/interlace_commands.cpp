@@ -1,10 +1,12 @@
 #include "cli_context.hpp"
+#include "cli_elapsed.hpp"
 
 #include "svp/builder/interlace.hpp"
 #include "svp/builder/interlace_batch.hpp"
 #include "svp/validation/report_json.hpp"
 
 #include <iostream>
+#include <chrono>
 
 int run_interlace_command(const InterlaceCliOptions& opts) {
   // interlace create
@@ -28,6 +30,7 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
     ic_opts.force_single_speaker = opts.ic_force_single;
     ic_opts.progress_sink = sink;
 
+    const auto started_at = std::chrono::steady_clock::now();
     auto result = svp::builder::interlace_create(ic_opts);
     if (!result.success) {
       std::cerr << "interlace create failed: " << result.error_message << "\n";
@@ -36,6 +39,10 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
     std::cout << "SVPI created: " << result.svpi_path.string() << "\n";
     std::cout << "BLAKE3 state: " << result.blake3_state << "\n";
     std::cout << "Validation status: " << result.binding_state << "\n";
+    std::cout << "SVPI created in "
+              << format_elapsed_duration(std::chrono::steady_clock::now() -
+                                         started_at)
+              << "\n";
     return 0;
   }
 
@@ -108,6 +115,7 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
     ir_opts.validation_codes_path = opts.ir_codes;
     ir_opts.progress_sink = sink;
 
+    const auto started_at = std::chrono::steady_clock::now();
     auto result = svp::builder::interlace_recombine(ir_opts);
     if (!result.success) {
       std::cerr << "interlace recombine failed: " << result.error_message << "\n";
@@ -123,6 +131,10 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
         std::cout << "  " << err.code << ": " << err.message << "\n";
       }
     }
+    std::cout << "SVP created in "
+              << format_elapsed_duration(std::chrono::steady_clock::now() -
+                                         started_at)
+              << "\n";
     return 0;
   }
 

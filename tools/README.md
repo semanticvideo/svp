@@ -92,7 +92,7 @@ Common options:
 | `--ffmpeg <path>` | FFmpeg executable |
 | `--ffprobe <path>` | ffprobe executable |
 | `--sherpa-lib <path>` | sherpa-onnx C API library for diarization |
-| `--stop-after <stage>` | Stop after `media-ingest`, `audio`, `vision-plan`, `foundation-color`, `foundation-ocr`, or `package-skeleton` |
+| `--stop-after <stage>` | Diagnostic partial-stage stop after `media-ingest`, `audio`, `vision-plan`, `foundation-color`, `foundation-ocr`, or `package` |
 | `--ocr-performance <profile>` | OCR profile: `serial`, `background`, `conservative`, or `fast` (default: `background`) |
 | `--allow-fallback-diarization` | Allow explicit fallback when sherpa-onnx is unavailable |
 | `--force-single-speaker` | Intentionally skip diarization and declare one speaker |
