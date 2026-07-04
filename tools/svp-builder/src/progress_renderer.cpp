@@ -3,11 +3,15 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdlib>
 #include <iomanip>
+#include <map>
+#include <mutex>
 #include <ostream>
 #include <sstream>
 #include <string>
+#include <vector>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -43,14 +47,17 @@ std::string format_percent(double fraction) {
 }
 
 std::string format_stage_line(const ProgressEvent& event) {
-  const std::string_view label = progress_stage_label(event.stage_id);
+  std::string label(progress_stage_label(event.stage_id));
+  if (!event.scope_label.empty()) {
+    label = "[" + event.scope_label + "] " + label;
+  }
   switch (event.kind) {
     case ProgressEventKind::stage_started:
-      return std::string(label) + "  [working]";
+      return label + "  [working]";
     case ProgressEventKind::stage_completed:
-      return std::string(label) + "  [################################] 100%";
+      return label + "  [################################] 100%";
     case ProgressEventKind::stage_failed:
-      return std::string(label) + "  FAILED";
+      return label + "  FAILED";
     case ProgressEventKind::stage_progress: {
       std::ostringstream oss;
       oss << label << "  ";
@@ -73,11 +80,27 @@ std::string format_stage_line(const ProgressEvent& event) {
       return oss.str();
     }
     case ProgressEventKind::warning:
-      return std::string(label) + "  WARNING: " + event.message;
+      return label + "  WARNING: " + event.message;
     case ProgressEventKind::artifact_written:
-      return std::string(label) + "  wrote " + event.artifact_path.string();
+      return label + "  wrote " + event.artifact_path.string();
   }
-  return std::string(label);
+  return label;
+}
+
+struct ProgressRowKey {
+  std::string scope_id;
+  ProgressStageId stage_id;
+
+  bool operator<(const ProgressRowKey& other) const {
+    if (scope_id != other.scope_id) {
+      return scope_id < other.scope_id;
+    }
+    return static_cast<int>(stage_id) < static_cast<int>(other.stage_id);
+  }
+};
+
+ProgressRowKey row_key_for(const ProgressEvent& event) {
+  return {.scope_id = event.scope_id, .stage_id = event.stage_id};
 }
 
 class PlainProgressSink : public BuildProgressSink {
@@ -85,6 +108,7 @@ class PlainProgressSink : public BuildProgressSink {
   explicit PlainProgressSink(std::ostream& stream) : stream_(stream) {}
 
   void emit(const ProgressEvent& event) override {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (event.kind == ProgressEventKind::artifact_written) {
       return;
     }
@@ -98,6 +122,7 @@ class PlainProgressSink : public BuildProgressSink {
 
  private:
   std::ostream& stream_;
+  std::mutex mutex_;
 };
 
 class JsonProgressSink : public BuildProgressSink {
@@ -105,6 +130,7 @@ class JsonProgressSink : public BuildProgressSink {
   explicit JsonProgressSink(std::ostream& stream) : stream_(stream) {}
 
   void emit(const ProgressEvent& event) override {
+    std::lock_guard<std::mutex> lock(mutex_);
     nlohmann::json j;
     j["kind"] = std::string(progress_event_kind_name(event.kind));
     j["stage"] = std::string(progress_stage_id(event.stage_id));
@@ -128,11 +154,18 @@ class JsonProgressSink : public BuildProgressSink {
     if (!event.unit.empty()) {
       j["unit"] = event.unit;
     }
+    if (!event.scope_id.empty()) {
+      j["scope_id"] = event.scope_id;
+    }
+    if (!event.scope_label.empty()) {
+      j["scope_label"] = event.scope_label;
+    }
     stream_ << j.dump() << '\n';
   }
 
  private:
   std::ostream& stream_;
+  std::mutex mutex_;
 };
 
 class TtyProgressSink : public BuildProgressSink {
@@ -140,21 +173,31 @@ class TtyProgressSink : public BuildProgressSink {
   explicit TtyProgressSink(std::ostream& stream, int terminal_fd)
       : stream_(stream),
         use_color_(!no_color_env()),
-        terminal_fd_(terminal_fd >= 0 ? terminal_fd : STDOUT_FILENO) {}
+        terminal_fd_(terminal_fd >= 0 ? ::dup(terminal_fd) : -1),
+        owns_terminal_fd_(terminal_fd_ >= 0) {
+    if (terminal_fd_ < 0) {
+      terminal_fd_ = terminal_fd >= 0 ? terminal_fd : STDOUT_FILENO;
+    }
+  }
+
+  ~TtyProgressSink() override {
+    if (owns_terminal_fd_) {
+      ::close(terminal_fd_);
+    }
+  }
 
   void emit(const ProgressEvent& event) override {
-    const std::string_view label = progress_stage_label(event.stage_id);
-
+    std::lock_guard<std::mutex> lock(mutex_);
     if (event.kind == ProgressEventKind::stage_progress) {
-      write_progress_row(label, event);
+      update_active_row(event);
     } else if (event.kind == ProgressEventKind::stage_started) {
-      write_started_row(label, event);
+      update_active_row(event);
     } else if (event.kind == ProgressEventKind::stage_completed) {
-      write_completed_row(label, event);
+      finalize_row(event, true);
     } else if (event.kind == ProgressEventKind::stage_failed) {
-      write_failed_row(label, event);
+      finalize_row(event, false);
     } else if (event.kind == ProgressEventKind::warning) {
-      write_warning_row(label, event);
+      write_warning_row(event);
     } else if (event.kind == ProgressEventKind::artifact_written) {
       return;
     }
@@ -171,6 +214,35 @@ class TtyProgressSink : public BuildProgressSink {
     return kFallbackTerminalWidth;
   }
 
+  void write_text(std::string_view text) {
+    if (!owns_terminal_fd_) {
+      stream_ << text;
+      return;
+    }
+    const char* data = text.data();
+    std::size_t remaining = text.size();
+    while (remaining > 0) {
+      const ssize_t written = ::write(terminal_fd_, data, remaining);
+      if (written < 0) {
+        if (errno == EINTR) {
+          continue;
+        }
+        break;
+      }
+      if (written == 0) {
+        break;
+      }
+      data += written;
+      remaining -= static_cast<std::size_t>(written);
+    }
+  }
+
+  void flush_output() {
+    if (!owns_terminal_fd_) {
+      stream_.flush();
+    }
+  }
+
   std::size_t rendered_rows(const std::string& line) const {
     const int width = std::max(1, terminal_width());
     if (line.empty()) return 1;
@@ -178,34 +250,81 @@ class TtyProgressSink : public BuildProgressSink {
   }
 
   void clear_previous_rows() {
-    stream_ << '\r' << clear_line();
+    write_text("\r");
+    write_text(clear_line());
     for (std::size_t row = 1; row < rendered_rows_; ++row) {
-      stream_ << "\033[1A" << '\r' << clear_line();
+      write_text("\033[1A");
+      write_text("\r");
+      write_text(clear_line());
     }
-    stream_ << '\r';
+    write_text("\r");
   }
 
-  void write_row(const std::string& line, bool newline) {
+  void write_rows(const std::vector<std::string>& lines, bool newline) {
     clear_previous_rows();
-    stream_ << line;
-    rendered_rows_ = rendered_rows(line);
+    rendered_rows_ = 0;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+      if (i > 0) {
+        write_text("\n");
+      }
+      write_text(lines[i]);
+      rendered_rows_ += rendered_rows(lines[i]);
+    }
     if (newline) {
-      stream_ << '\n';
+      write_text("\n");
       rendered_rows_ = 0;
     }
-    stream_.flush();
+    flush_output();
   }
 
-  void write_started_row(std::string_view label, const ProgressEvent& event) {
+  std::vector<std::string> active_lines() const {
+    std::vector<std::string> lines;
+    lines.reserve(active_rows_.size());
+    for (const auto& [key, line] : active_rows_) {
+      (void)key;
+      lines.push_back(line);
+    }
+    return lines;
+  }
+
+  void redraw_active_rows() {
+    write_rows(active_lines(), false);
+  }
+
+  void write_history_line_then_active(const std::string& history_line) {
+    clear_previous_rows();
+    write_text(history_line);
+    write_text("\n");
+    rendered_rows_ = 0;
+    const std::vector<std::string> lines = active_lines();
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+      if (i > 0) {
+        write_text("\n");
+      }
+      write_text(lines[i]);
+      rendered_rows_ += rendered_rows(lines[i]);
+    }
+    flush_output();
+  }
+
+  static std::string scoped_label(const ProgressEvent& event) {
+    std::string label(progress_stage_label(event.stage_id));
+    if (!event.scope_label.empty()) {
+      label = "[" + event.scope_label + "] " + label;
+    }
+    return label;
+  }
+
+  std::string started_row(const ProgressEvent& event) const {
     std::ostringstream row;
-    row << "  " << label << "  [working]";
+    row << "  " << scoped_label(event) << "  [working]";
     if (!event.message.empty()) row << "  " << event.message;
-    write_row(row.str(), false);
+    return row.str();
   }
 
-  void write_progress_row(std::string_view label, const ProgressEvent& event) {
+  std::string progress_row(const ProgressEvent& event) const {
     std::ostringstream row;
-    row << "  " << label << "  ";
+    row << "  " << scoped_label(event) << "  ";
     if (event.fraction) {
       row << format_progress_bar(*event.fraction) << ' '
           << format_percent(*event.fraction);
@@ -220,39 +339,56 @@ class TtyProgressSink : public BuildProgressSink {
       row << "  " << *event.current << '/' << *event.total << ' ' << event.unit;
     }
     if (!event.message.empty()) row << "  " << event.message;
-    write_row(row.str(), false);
+    return row.str();
   }
 
-  void write_completed_row(std::string_view label, const ProgressEvent& event) {
+  std::string completed_row(const ProgressEvent& event) const {
     std::ostringstream row;
     if (use_color_) row << "\033[32m";
-    row << "  " << label << "  [################################] 100%";
+    row << "  " << scoped_label(event) << "  [################################] 100%";
     if (use_color_) row << "\033[0m";
     if (!event.message.empty()) row << "  " << event.message;
-    write_row(row.str(), true);
+    return row.str();
   }
 
-  void write_failed_row(std::string_view label, const ProgressEvent& event) {
+  std::string failed_row(const ProgressEvent& event) const {
     std::ostringstream row;
     if (use_color_) row << "\033[31m";
-    row << "  " << label << "  FAILED";
+    row << "  " << scoped_label(event) << "  FAILED";
     if (use_color_) row << "\033[0m";
     if (!event.message.empty()) row << "  " << event.message;
-    write_row(row.str(), true);
+    return row.str();
   }
 
-  void write_warning_row(std::string_view label, const ProgressEvent& event) {
+  void update_active_row(const ProgressEvent& event) {
+    active_rows_[row_key_for(event)] =
+        event.kind == ProgressEventKind::stage_started
+            ? started_row(event)
+            : progress_row(event);
+    redraw_active_rows();
+  }
+
+  void finalize_row(const ProgressEvent& event, bool completed) {
+    active_rows_.erase(row_key_for(event));
+    write_history_line_then_active(
+        completed ? completed_row(event) : failed_row(event));
+  }
+
+  void write_warning_row(const ProgressEvent& event) {
     std::ostringstream row;
     if (use_color_) row << "\033[33m";
-    row << "  ! " << label << ": " << event.message;
+    row << "  ! " << scoped_label(event) << ": " << event.message;
     if (use_color_) row << "\033[0m";
-    write_row(row.str(), true);
+    write_history_line_then_active(row.str());
   }
 
   std::ostream& stream_;
   bool use_color_;
   int terminal_fd_;
+  bool owns_terminal_fd_;
   std::size_t rendered_rows_ = 0;
+  std::map<ProgressRowKey, std::string> active_rows_;
+  std::mutex mutex_;
 };
 
 }  // namespace
