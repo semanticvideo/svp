@@ -229,6 +229,64 @@ void test_batch_create_creates_sidecars() {
   std::cout << "  test_batch_create_creates_sidecars passed\n";
 }
 
+void test_batch_create_removes_default_staging() {
+  auto root = make_test_dir("svp-batch-staging-cleanup-default");
+  auto dir = root / "videos";
+  std::filesystem::create_directories(dir);
+
+  auto media1 = dir / "clip1.mov";
+  auto media2 = dir / "clip2.mp4";
+  create_mock_source_media(media1, 512);
+  create_mock_source_media(media2, 512);
+
+  svp::builder::BatchCreateOptions opts;
+  opts.source_dir = dir.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.visibility = svp::builder::SidecarVisibility::visible;
+  opts.core_only_diagnostic = true;
+
+  auto result = svp::builder::interlace_create_batch(opts);
+  CHECK(result.created_count == 2);
+  CHECK(result.failed_count == 0);
+  CHECK(std::filesystem::exists(dir / "clip1.svpi"));
+  CHECK(std::filesystem::exists(dir / "clip2.svpi"));
+  CHECK(!std::filesystem::exists(dir / "clip1.svpi.staging"));
+  CHECK(!std::filesystem::exists(dir / "clip2.svpi.staging"));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_create_removes_default_staging passed\n";
+}
+
+void test_batch_create_preserves_explicit_item_staging() {
+  auto root = make_test_dir("svp-batch-staging-cleanup-explicit");
+  auto dir = root / "videos";
+  auto staging = root / "batch_staging";
+  std::filesystem::create_directories(dir);
+
+  auto media1 = dir / "clip1.mov";
+  auto media2 = dir / "clip2.mp4";
+  create_mock_source_media(media1, 512);
+  create_mock_source_media(media2, 512);
+
+  svp::builder::BatchCreateOptions opts;
+  opts.source_dir = dir.string();
+  opts.staging_dir = staging.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.visibility = svp::builder::SidecarVisibility::visible;
+  opts.core_only_diagnostic = true;
+
+  auto result = svp::builder::interlace_create_batch(opts);
+  CHECK(result.created_count == 2);
+  CHECK(result.failed_count == 0);
+  CHECK(std::filesystem::exists(dir / "clip1.svpi"));
+  CHECK(std::filesystem::exists(dir / "clip2.svpi"));
+  CHECK(std::filesystem::exists(staging / "clip1.staging"));
+  CHECK(std::filesystem::exists(staging / "clip2.staging"));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_create_preserves_explicit_item_staging passed\n";
+}
+
 void test_no_duplicate_on_rerun() {
   auto root = make_test_dir("svp-phase3-no-duplicate");
   auto dir = root / "videos";
@@ -1158,6 +1216,8 @@ int main() {
   test_hidden_sidecar_name_resolution();
   test_managed_dir_sidecar_name_resolution();
   test_batch_create_creates_sidecars();
+  test_batch_create_removes_default_staging();
+  test_batch_create_preserves_explicit_item_staging();
   test_no_duplicate_on_rerun();
   test_existing_mismatched_not_overwritten();
   test_batch_create_hidden_sidecars();
