@@ -323,10 +323,13 @@ SherpaDiarizationResult run_sherpa_diarization(
                                : final_speakers.size());
   stitch_dominant_non_overlapping_tracks(
       result.segments, result.final_speaker_count, speaker_observations.size());
+  collapse_fragmented_secondary_tracks(
+      result.segments, result.final_speaker_count, speaker_observations.size());
   collapse_single_dominant_track(result.segments, result.final_speaker_count);
   result.reconciliation_method =
       "windowed_sherpa_5min_5s_feed_overlap_2s; "
-      "bounded_10s_speaker_observations_global_gap_or_floor_reconciliation";
+      "bounded_10s_speaker_observations_global_gap_or_floor_reconciliation; "
+      "dominant_and_fragmented_secondary_track_policy";
 
   result.ran = true;
   return result;

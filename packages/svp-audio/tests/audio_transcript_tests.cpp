@@ -11,6 +11,7 @@
 #include "svp/audio/waveform_envelope.hpp"
 #include "svp/audio/whisper_mel.hpp"
 #include "svp/audio/whisper_model.hpp"
+#include "../src/sherpa_diarization/private.hpp"
 
 #include <cassert>
 #include <algorithm>
@@ -1402,6 +1403,62 @@ void test_reconcile_three_cluster_min_gap_merges_all_to_one() {
   assert(result.cluster_to_final.at(1) == result.cluster_to_final.at(2));
 }
 
+svp::audio::SherpaDiarizationSegment test_diarization_segment(
+    float start_sec,
+    float duration_sec,
+    int32_t speaker_id) {
+  return {start_sec, start_sec + duration_sec, speaker_id};
+}
+
+void test_fragmented_secondary_policy_collapses_to_two_speakers() {
+  using svp::audio::sherpa_diarization_internal::collapse_fragmented_secondary_tracks;
+
+  std::vector<svp::audio::SherpaDiarizationSegment> segments;
+  segments.push_back(test_diarization_segment(0.0f, 78.0f, 0));
+  segments.push_back(test_diarization_segment(100.0f, 11.0f, 1));
+  segments.push_back(test_diarization_segment(120.0f, 5.0f, 2));
+  segments.push_back(test_diarization_segment(140.0f, 3.0f, 3));
+  segments.push_back(test_diarization_segment(160.0f, 1.0f, 4));
+  segments.push_back(test_diarization_segment(180.0f, 0.8f, 5));
+  segments.push_back(test_diarization_segment(200.0f, 0.6f, 6));
+  segments.push_back(test_diarization_segment(220.0f, 0.5f, 7));
+  segments.push_back(test_diarization_segment(240.0f, 0.6f, 8));
+  segments.push_back(test_diarization_segment(260.0f, 0.5f, 9));
+
+  int32_t speaker_count = 10;
+  collapse_fragmented_secondary_tracks(segments, speaker_count, 35);
+
+  assert(speaker_count == 2);
+  assert(segments.front().speaker_id == 0);
+  for (std::size_t i = 1; i < segments.size(); ++i) {
+    assert(segments[i].speaker_id == 1);
+  }
+}
+
+void test_fragmented_secondary_policy_leaves_flatter_multi_speaker_case() {
+  using svp::audio::sherpa_diarization_internal::collapse_fragmented_secondary_tracks;
+
+  std::vector<svp::audio::SherpaDiarizationSegment> segments;
+  segments.push_back(test_diarization_segment(0.0f, 63.0f, 0));
+  segments.push_back(test_diarization_segment(100.0f, 10.0f, 1));
+  segments.push_back(test_diarization_segment(120.0f, 7.0f, 2));
+  segments.push_back(test_diarization_segment(140.0f, 5.0f, 3));
+  segments.push_back(test_diarization_segment(160.0f, 4.0f, 4));
+  segments.push_back(test_diarization_segment(180.0f, 3.0f, 5));
+  segments.push_back(test_diarization_segment(200.0f, 2.0f, 6));
+  segments.push_back(test_diarization_segment(220.0f, 2.0f, 7));
+  segments.push_back(test_diarization_segment(240.0f, 2.0f, 8));
+  segments.push_back(test_diarization_segment(260.0f, 2.0f, 9));
+
+  int32_t speaker_count = 10;
+  collapse_fragmented_secondary_tracks(segments, speaker_count, 35);
+
+  assert(speaker_count == 10);
+  for (std::size_t i = 0; i < segments.size(); ++i) {
+    assert(segments[i].speaker_id == static_cast<int32_t>(i));
+  }
+}
+
 void test_whisper_mel_30s_chunk_produces_valid_output_without_overread() {
   // A 30-second chunk at 16 kHz is exactly 480000 samples.
   // The STFT loop needs (kNFrames-1)*kNHop + kNFft = 480240 samples.
@@ -1627,7 +1684,10 @@ void test_speaker_total_speech_us_overlapping_not_double_counted() {
   boundary.reconciled_words.push_back({"gamma", 3000000, 6000000, 0.8, 0});
   boundary.reconciled_word_count = 3;
 
-  svp::audio::write_transcript_artifacts(boundary, root);
+  const svp::audio::TranscriptWriteResult result =
+      svp::audio::write_transcript_artifacts(boundary, root);
+  assert(result.word_count == 12);
+  assert(result.speaker_count == 2);
 
   std::ifstream input(root / "transcript/speakers.jsonl");
   std::string line;
@@ -1765,6 +1825,74 @@ void test_word_assignment_max_overlap_wins() {
   std::getline(input, line);
   const nlohmann::json word = nlohmann::json::parse(line);
   assert(word["speaker_id"] == "speaker_0001");
+
+  std::filesystem::remove_all(root);
+}
+
+void test_word_assignment_expands_sustained_non_dominant_utterance() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-word-assign-utterance-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  svp::audio::AsrChunkPlanResult plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+
+  svp::audio::AsrExecutionBoundary boundary =
+      svp::audio::build_asr_execution_boundary(plan, true, true, true, true);
+  boundary.asr_status = svp::audio::AsrStatus::ran;
+  boundary.one_speaker_mode = false;
+  boundary.diarization_status = "ran";
+  boundary.speaker_count = 2;
+
+  for (int i = 0; i < 12; ++i) {
+    std::string text = "word_" + std::to_string(i);
+    if (i == 11) text += ".";
+    boundary.reconciled_words.push_back({
+        text,
+        static_cast<std::int64_t>(i * 500000),
+        static_cast<std::int64_t>((i + 1) * 500000),
+        0.9,
+        0});
+  }
+  boundary.reconciled_word_count = boundary.reconciled_words.size();
+
+  svp::audio::SpeakerSegment dominant_before;
+  dominant_before.id = "speakerseg_000000";
+  dominant_before.speaker_id = "speaker_0001";
+  dominant_before.timing = {0, 1000000};
+  boundary.speaker_segments.push_back(std::move(dominant_before));
+
+  svp::audio::SpeakerSegment minority_island;
+  minority_island.id = "speakerseg_000001";
+  minority_island.speaker_id = "speaker_0002";
+  minority_island.timing = {1000000, 5000000};
+  boundary.speaker_segments.push_back(std::move(minority_island));
+
+  svp::audio::SpeakerSegment dominant_after;
+  dominant_after.id = "speakerseg_000002";
+  dominant_after.speaker_id = "speaker_0001";
+  dominant_after.timing = {5000000, 12000000};
+  boundary.speaker_segments.push_back(std::move(dominant_after));
+
+  const svp::audio::TranscriptWriteResult result =
+      svp::audio::write_transcript_artifacts(boundary, root);
+  assert(result.word_count == 12);
+  assert(result.speaker_count == 2);
+
+  std::ifstream input(root / "transcript/words.jsonl");
+  std::string line;
+  std::size_t word_count = 0;
+  while (std::getline(input, line)) {
+    const nlohmann::json word = nlohmann::json::parse(line);
+    assert(word["speaker_id"] == "speaker_0002");
+    ++word_count;
+  }
+  assert(word_count == 12);
+
+  std::ifstream transcript_input(root / "transcript/transcript.json");
+  const nlohmann::json transcript = nlohmann::json::parse(transcript_input);
+  assert(transcript["speaker_count"] == 2);
 
   std::filesystem::remove_all(root);
 }
@@ -2281,6 +2409,8 @@ int main() {
   test_reconcile_single_pair_high_similarity_merges_to_one();
   test_reconcile_three_cluster_largest_gap_keeps_two_speakers();
   test_reconcile_three_cluster_min_gap_merges_all_to_one();
+  test_fragmented_secondary_policy_collapses_to_two_speakers();
+  test_fragmented_secondary_policy_leaves_flatter_multi_speaker_case();
 
   // Whisper mel preprocessing tests
   test_whisper_mel_30s_chunk_produces_valid_output_without_overread();
@@ -2296,6 +2426,7 @@ int main() {
   test_speaker_total_speech_us_overlapping_not_double_counted();
   test_speaker_total_speech_us_multi_speaker();
   test_word_assignment_max_overlap_wins();
+  test_word_assignment_expands_sustained_non_dominant_utterance();
   test_word_assignment_gap_nearest_within_tolerance();
   test_word_assignment_gap_beyond_tolerance_gets_unknown();
   test_word_assignment_no_segments_all_unknown();

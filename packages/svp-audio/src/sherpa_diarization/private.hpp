@@ -23,6 +23,12 @@ inline constexpr std::size_t kDominantStitchMinObservations = 8;
 inline constexpr float kDominantStitchCombinedSpeechShare = 0.70f;
 inline constexpr float kDominantStitchMinTrackSpeechShare = 0.15f;
 inline constexpr float kDominantStitchMaxOverlapShare = 0.01f;
+inline constexpr int32_t kFragmentedSecondaryMinFinalSpeakers = 5;
+inline constexpr std::size_t kFragmentedSecondaryMinObservations = 8;
+inline constexpr float kFragmentedSecondaryDominantMinShare = 0.75f;
+inline constexpr float kFragmentedSecondaryDominantMaxShare = 0.90f;
+inline constexpr float kFragmentedSecondaryMinMinorityShare = 0.08f;
+inline constexpr float kFragmentedSecondaryMaxSingleMinorityShare = 0.15f;
 inline constexpr float kSingleDominantCollapseSpeechShare = 0.95f;
 inline constexpr float kSherpaLocalClusteringThreshold = 0.90f;
 inline constexpr int64_t kDiarizationWindowSamples =
@@ -178,6 +184,10 @@ std::map<int32_t, int32_t> cluster_speaker_observations(
     const std::vector<SpeakerObservation>& observations,
     const std::set<std::pair<int32_t, int32_t>>& cannot_link_observations);
 void stitch_dominant_non_overlapping_tracks(
+    std::vector<SherpaDiarizationSegment>& segments,
+    int32_t& final_speaker_count,
+    std::size_t observation_count);
+void collapse_fragmented_secondary_tracks(
     std::vector<SherpaDiarizationSegment>& segments,
     int32_t& final_speaker_count,
     std::size_t observation_count);
