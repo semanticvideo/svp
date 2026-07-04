@@ -76,6 +76,47 @@ Derived recall/precision:
 | 3D-Speaker / CAM++ ONNX fingerprinting | Tests a stronger local speaker embedding path with a clean Apache-2.0-oriented story. | Must be packageable as an SVP model bundle with exact license, notice, revision, and hashes. |
 | WeSpeaker ONNX fingerprinting | Tests an alternate ONNX speaker embedding path. | Exact model-weight license and attribution requirements must be recorded before production use. |
 
+## Contestant Results
+
+The first model-swap contestants were tested without production code changes by
+using diagnostic model-cache roots that keep the existing sherpa segmentation
+model and place each candidate speaker embedding model at the filename expected
+by the current implementation.
+
+| Contestant | Model cache entry | MONIQUE speaker count | MONIQUE attribution | Result |
+| --- | --- | ---: | ---: | --- |
+| Current baseline | `/Users/domesposito/Projects/svp-model-cache/model_sherpa_onnx_diarization` | 2 | 94.2925% | Baseline to beat. |
+| 3D-Speaker CAM++ VoxCeleb | `/Users/domesposito/Projects/svp-model-cache/model_3dspeaker_campplus_sv_en_voxceleb_16k` | 8 | 71.7004% best-effort majority map | Fails count gate and attribution. |
+| 3D-Speaker ERes2NetV2 zh-cn common | `/Users/domesposito/Projects/svp-model-cache/model_3dspeaker_eres2netv2_sv_zh_cn_16k_common` | 5 | 94.2331% best-effort majority map | Fails count gate and is slightly worse than baseline. |
+| WeSpeaker CAM++ VoxCeleb | `/Users/domesposito/Projects/svp-model-cache/model_wespeaker_campp_sv_en_voxceleb_16k` | 5 | 71.7004% best-effort majority map | Fails count gate and attribution. |
+
+Diagnostic output roots:
+
+| Contestant | Output root |
+| --- | --- |
+| 3D-Speaker CAM++ VoxCeleb | `/Users/domesposito/Projects/svp/build/diagnostics/diarization-bakeoff/campplus-monique` |
+| 3D-Speaker ERes2NetV2 zh-cn common | `/Users/domesposito/Projects/svp/build/diagnostics/diarization-bakeoff/eres2netv2-monique` |
+| WeSpeaker CAM++ VoxCeleb | `/Users/domesposito/Projects/svp/build/diagnostics/diarization-bakeoff/wespeaker-campp-monique` |
+
+Initial conclusion: direct embedding model swaps do not beat the current
+baseline under the existing reconciliation and word-refinement logic. The next
+contestant should be a decoder/assignment change over the current embedding
+path, not another blind model swap.
+
+Observed memory notes from manual Activity Monitor/watch during the initial
+model-swap runs:
+
+| Contestant | Observed peak footprint | Note |
+| --- | ---: | --- |
+| Current baseline | Within desired current range | Baseline branch behavior remains the memory target. |
+| 3D-Speaker CAM++ VoxCeleb | Roughly 4-5 GB | Higher than desired and did not beat baseline quality. |
+| 3D-Speaker ERes2NetV2 zh-cn common | Roughly 8-9 GB | Too high for the target environment and did not beat baseline quality. |
+| WeSpeaker CAM++ VoxCeleb | Roughly 3 GB | Lower than the 3D-Speaker swaps but still failed count and attribution gates. |
+
+These memory observations were not captured by automated diagnostics. If a
+future contestant looks promising on quality, rerun it with memory diagnostics
+enabled before considering it production-worthy.
+
 ## Distribution Constraints
 
 Any winning candidate must be:
@@ -87,4 +128,3 @@ Any winning candidate must be:
   text, and file hashes;
 - scored with the same reference inputs and scorer used for the other
   contestants.
-
