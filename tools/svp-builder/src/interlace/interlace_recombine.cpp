@@ -1,6 +1,7 @@
 #include "svp/builder/interlace.hpp"
 #include "svp/builder/build_progress.hpp"
 
+#include "default_staging.hpp"
 #include "staging_cleanup.hpp"
 
 #include "svp/package/media_binding.hpp"
@@ -196,7 +197,7 @@ InterlaceRecombineResult interlace_recombine(
   if (user_supplied_staging) {
     staging_dir = options.staging_dir;
   } else {
-    staging_dir = std::filesystem::path(options.output_path + ".staging");
+    staging_dir = make_default_staging_dir();
   }
   StagingCleanupGuard staging_guard(staging_dir, user_supplied_staging);
   std::filesystem::remove_all(staging_dir);

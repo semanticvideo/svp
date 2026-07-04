@@ -100,10 +100,19 @@ void test_execution_plan_preserves_existing_stage_conditions() {
   assert(package_skeleton.run_package_skeleton);
 }
 
-void test_default_staging_dir_matches_existing_cli_contract() {
+void test_default_staging_dir_is_under_temp_not_sibling() {
   const std::filesystem::path output_path = "out/example.foundation.json";
-  assert(svp::builder::default_staging_dir_for_output(output_path) ==
-         std::filesystem::path("out/example.foundation.json.staging"));
+  const auto staging = svp::builder::default_staging_dir_for_output(output_path);
+  const auto temp_base = std::filesystem::temp_directory_path();
+
+  const auto staging_parent = staging.parent_path().string();
+  const auto temp_str = temp_base.string();
+  assert(staging_parent == temp_str ||
+         staging_parent + "/" == temp_str ||
+         staging_parent == temp_str + "/");
+
+  assert(staging.filename().string().find("svp-builder-") == 0);
+  assert(staging.string() != output_path.string() + ".staging");
 }
 
 void test_package_skeleton_output_path_resolution() {
@@ -183,6 +192,15 @@ std::filesystem::path write_minimal_probe_json(
   })";
   out.close();
   return probe_path;
+}
+
+std::filesystem::path write_mock_media_file(
+    const std::filesystem::path& dir) {
+  const std::filesystem::path media_path = dir / "test_video.mp4";
+  std::ofstream out(media_path, std::ios::binary);
+  out << "mock media bytes";
+  out.close();
+  return media_path;
 }
 
 void test_stage_catalog_ids_and_labels_from_one_source() {
@@ -429,6 +447,78 @@ void test_pipeline_package_write_failure_emits_stage_failed_no_validate() {
   assert(found_pkg_failed);
   assert(!found_pkg_completed);
   assert(!found_validate);
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
+void test_package_build_removes_default_foundation_json_sidecar() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_package_no_json_sidecar";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path source_path = write_mock_media_file(tmp_dir);
+  const std::filesystem::path probe_path = write_minimal_probe_json(tmp_dir);
+  const std::filesystem::path package_path = tmp_dir / "output.svp";
+  const std::filesystem::path json_sidecar =
+      std::filesystem::path(package_path.string() + ".json");
+
+  {
+    std::ofstream stale(json_sidecar);
+    stale << R"({"stale":true})";
+  }
+
+  svp::builder::BuildPipelineOptions options;
+  options.source_path = source_path.string();
+  options.probe_json_path = probe_path.string();
+  options.ffmpeg_path = "/usr/bin/true";
+  options.output_path = package_path;
+  options.staging_dir = tmp_dir / "staging";
+  options.stop_after = svp::builder::BuildStage::package_skeleton;
+  options.force_single_speaker = true;
+
+  svp::builder::BuildPipeline pipeline;
+  const svp::builder::BuildPipelineResult result = pipeline.run(options);
+
+  (void)result;
+  assert(std::filesystem::exists(package_path));
+  assert(!std::filesystem::exists(json_sidecar));
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
+void test_verbose_package_build_writes_foundation_json_sidecar() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_package_verbose_json_sidecar";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path source_path = write_mock_media_file(tmp_dir);
+  const std::filesystem::path probe_path = write_minimal_probe_json(tmp_dir);
+  const std::filesystem::path package_path = tmp_dir / "output.svp";
+  const std::filesystem::path json_sidecar =
+      std::filesystem::path(package_path.string() + ".json");
+
+  svp::builder::BuildPipelineOptions options;
+  options.source_path = source_path.string();
+  options.probe_json_path = probe_path.string();
+  options.ffmpeg_path = "/usr/bin/true";
+  options.output_path = package_path;
+  options.staging_dir = tmp_dir / "staging";
+  options.stop_after = svp::builder::BuildStage::package_skeleton;
+  options.force_single_speaker = true;
+  options.verbose = true;
+
+  std::ostringstream captured_stdout;
+  std::streambuf* old_cout = std::cout.rdbuf();
+  std::cout.rdbuf(captured_stdout.rdbuf());
+
+  svp::builder::BuildPipeline pipeline;
+  const svp::builder::BuildPipelineResult result = pipeline.run(options);
+
+  std::cout.rdbuf(old_cout);
+
+  (void)result;
+  assert(std::filesystem::exists(package_path));
+  assert(std::filesystem::exists(json_sidecar));
 
   std::filesystem::remove_all(tmp_dir);
 }
@@ -886,7 +976,7 @@ int main() {
   test_stage_name_round_trip();
   test_package_skeleton_alias_is_temporarily_supported();
   test_execution_plan_preserves_existing_stage_conditions();
-  test_default_staging_dir_matches_existing_cli_contract();
+  test_default_staging_dir_is_under_temp_not_sibling();
   test_package_skeleton_output_path_resolution();
 
   test_stage_catalog_ids_and_labels_from_one_source();
@@ -897,6 +987,8 @@ int main() {
   test_pipeline_with_capturing_sink_emits_ordered_events();
   test_pipeline_with_default_sink_preserves_behavior();
   test_pipeline_package_write_failure_emits_stage_failed_no_validate();
+  test_package_build_removes_default_foundation_json_sidecar();
+  test_verbose_package_build_writes_foundation_json_sidecar();
   test_warning_event_factory_for_diarization_and_index();
   test_stage_progress_event_has_progress_fields();
   test_stage_progress_zero_total_no_fraction();

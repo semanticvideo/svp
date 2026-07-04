@@ -16,12 +16,38 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <system_error>
 
 #if defined(__APPLE__)
 #include <unistd.h>
 #endif
 
 namespace svp::builder {
+
+namespace {
+
+bool should_write_builder_foundation_json(
+    const BuildPipelineOptions& options,
+    const BuildStageExecutionPlan& stage_plan,
+    const PackageSkeletonStageResult& package_result) {
+  if (options.verbose) {
+    return true;
+  }
+  if (!stage_plan.run_package_skeleton) {
+    return true;
+  }
+  return package_result.json_output_path == options.output_path;
+}
+
+void remove_builder_foundation_json(
+    const std::filesystem::path& json_output_path) {
+  std::error_code ec;
+  if (std::filesystem::is_regular_file(json_output_path, ec)) {
+    std::filesystem::remove(json_output_path, ec);
+  }
+}
+
+}  // namespace
 
 BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) const {
   std::shared_ptr<BuildProgressSink> sink = options.progress_sink;
@@ -128,13 +154,19 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
       }
     }
 
-    write_json_file(package_result.json_output_path, output);
-    emit_artifact_written(context,
-                          stage_plan.run_package_skeleton
-                              ? ProgressStageId::package_write
-                              : ProgressStageId::media_probe,
-                          package_result.json_output_path,
-                          "builder foundation JSON");
+    const bool write_foundation_json =
+        should_write_builder_foundation_json(options, stage_plan, package_result);
+    if (write_foundation_json) {
+      write_json_file(package_result.json_output_path, output);
+      emit_artifact_written(context,
+                            stage_plan.run_package_skeleton
+                                ? ProgressStageId::package_write
+                                : ProgressStageId::media_probe,
+                            package_result.json_output_path,
+                            "builder foundation JSON");
+    } else {
+      remove_builder_foundation_json(package_result.json_output_path);
+    }
 
     if (options.verbose) {
       print_build_progress(context, package_result);

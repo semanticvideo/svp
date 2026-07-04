@@ -1,5 +1,7 @@
 #include "svp/builder/build_pipeline.hpp"
 
+#include "default_staging.hpp"
+
 #include <stdexcept>
 
 namespace svp::builder {
@@ -59,8 +61,8 @@ BuildStageExecutionPlan execution_plan_for_stage(BuildStage stage) {
 }
 
 std::filesystem::path default_staging_dir_for_output(
-    const std::filesystem::path& output_path) {
-  return std::filesystem::path(output_path.string() + ".staging");
+    const std::filesystem::path& /*output_path*/) {
+  return make_default_staging_dir();
 }
 
 BuildOutputPaths resolve_package_skeleton_output_paths(
