@@ -1,6 +1,9 @@
 #include "svp/builder/interlace.hpp"
 #include "svp/builder/build_progress.hpp"
 
+#include "default_staging.hpp"
+#include "staging_cleanup.hpp"
+
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
 #include "svp/package/package_layout.hpp"
@@ -193,8 +196,8 @@ InterlaceExtractResult interlace_extract(const InterlaceExtractOptions& options)
     }}
   };
 
-  std::filesystem::path staging_dir =
-      out_dir / (svpi_filename + ".staging");
+  std::filesystem::path staging_dir = make_default_staging_dir();
+  StagingCleanupGuard staging_guard(staging_dir, false);
   std::filesystem::remove_all(staging_dir);
   std::filesystem::create_directories(staging_dir);
 
@@ -302,6 +305,7 @@ InterlaceExtractResult interlace_extract(const InterlaceExtractOptions& options)
       ProgressStageId::extract, result.extracted_svpi_path, "extracted SVPI"));
   sink->emit(make_stage_completed(ProgressStageId::extract));
 
+  staging_guard.cleanup_on_success();
   return result;
 }
 

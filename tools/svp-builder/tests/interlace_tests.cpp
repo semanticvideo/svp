@@ -504,6 +504,11 @@ void test_interlace_extract_from_svp() {
   CHECK(result.success);
   CHECK(std::filesystem::exists(result.extracted_media_path));
   CHECK(std::filesystem::exists(result.extracted_svpi_path));
+  CHECK(!std::filesystem::exists(
+      std::filesystem::path(result.extracted_svpi_path.string() + ".staging")));
+  for (const auto& entry : std::filesystem::directory_iterator(out_dir)) {
+    CHECK(entry.path().filename().string().find(".staging") == std::string::npos);
+  }
 
   auto layout_result = svp::package::read_package_layout(result.extracted_svpi_path);
   CHECK(layout_result.has_value());

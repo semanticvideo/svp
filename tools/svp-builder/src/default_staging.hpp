@@ -8,12 +8,17 @@
 
 namespace svp::builder {
 
+inline constexpr int kDefaultStagingPathAllocationAttempts = 32;
+
 inline std::filesystem::path make_default_staging_dir() {
   const auto base = std::filesystem::temp_directory_path();
   std::random_device random;
   const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
 
-  for (int attempt = 0; attempt < 32; ++attempt) {
+  // Bound collision retries so a hostile or saturated temp directory fails
+  // explicitly instead of spinning while still giving random names ample space.
+  for (int attempt = 0; attempt < kDefaultStagingPathAllocationAttempts;
+       ++attempt) {
     std::ostringstream name;
     name << "svp-builder-" << ticks << "-" << random() << "-" << attempt;
     auto path = base / name.str();
