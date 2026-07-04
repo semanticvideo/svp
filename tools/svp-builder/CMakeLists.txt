@@ -55,6 +55,7 @@ target_link_libraries(svp-builder-lib
 add_executable(svp-builder
   src/main.cpp
   src/cli/cli_register.cpp
+  src/cli/cli_elapsed.cpp
   src/cli/cli_progress.cpp
   src/cli/probe_command.cpp
   src/cli/build_command.cpp
@@ -90,6 +91,11 @@ if(BUILD_TESTING)
     tests/progress_renderer_tests.cpp
   )
 
+  add_executable(svp-builder-cli-elapsed-tests
+    tests/cli_elapsed_tests.cpp
+    src/cli/cli_elapsed.cpp
+  )
+
   add_executable(svp-interlace-tests
     tests/interlace_tests.cpp
   )
@@ -102,6 +108,8 @@ if(BUILD_TESTING)
   target_compile_options(svp-builder-pipeline-tests PRIVATE -UNDEBUG)
   target_compile_features(svp-builder-progress-renderer-tests PRIVATE cxx_std_20)
   target_compile_options(svp-builder-progress-renderer-tests PRIVATE -UNDEBUG)
+  target_compile_features(svp-builder-cli-elapsed-tests PRIVATE cxx_std_20)
+  target_compile_options(svp-builder-cli-elapsed-tests PRIVATE -UNDEBUG)
   target_compile_features(svp-interlace-tests PRIVATE cxx_std_20)
   target_compile_features(svp-interlace-batch-tests PRIVATE cxx_std_20)
 
@@ -113,6 +121,10 @@ if(BUILD_TESTING)
   target_link_libraries(svp-builder-progress-renderer-tests
     PRIVATE
       svp::builder
+  )
+
+  target_include_directories(svp-builder-cli-elapsed-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
   )
 
   target_link_libraries(svp-interlace-tests
@@ -134,6 +146,7 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-builder-pipeline-tests COMMAND svp-builder-pipeline-tests)
   add_test(NAME svp-builder-progress-renderer-tests COMMAND svp-builder-progress-renderer-tests)
+  add_test(NAME svp-builder-cli-elapsed-tests COMMAND svp-builder-cli-elapsed-tests)
   add_test(NAME svp-interlace-tests COMMAND svp-interlace-tests
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   add_test(NAME svp-interlace-batch-tests COMMAND svp-interlace-batch-tests

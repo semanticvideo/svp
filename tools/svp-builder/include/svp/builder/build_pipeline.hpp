@@ -42,7 +42,7 @@ struct BuildPipelineOptions {
   std::filesystem::path output_path;
   std::filesystem::path staging_dir;
   std::filesystem::path model_cache_dir;
-  BuildStage stop_after = BuildStage::media_ingest;
+  BuildStage stop_after = BuildStage::package_skeleton;
   svp::vision::InferencePerformanceOptions performance;
   std::string sherpa_lib_path;
   bool allow_fallback_diarization = false;

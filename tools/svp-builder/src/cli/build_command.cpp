@@ -1,4 +1,5 @@
 #include "cli_context.hpp"
+#include "cli_elapsed.hpp"
 
 #include "svp/builder/build_pipeline.hpp"
 #include "svp/builder/progress_renderer.hpp"
@@ -6,6 +7,7 @@
 #include <unistd.h>
 
 #include <cstdio>
+#include <chrono>
 #include <iostream>
 #include <optional>
 
@@ -14,8 +16,11 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
       svp::builder::parse_build_stage(options.stop_after);
   if (!parsed_stage.has_value()) {
     std::cerr << "svp-builder build currently supports --stop-after media-ingest, audio, "
-                 "vision-plan, foundation-color, foundation-ocr, or package-skeleton\n";
+                 "vision-plan, foundation-color, foundation-ocr, or package\n";
     return 2;
+  }
+  if (options.stop_after == "package-skeleton") {
+    std::cerr << "warning: --stop-after package-skeleton is deprecated; use --stop-after package\n";
   }
 
   auto progress_opt = build_subcommand->get_option("--progress");
@@ -60,7 +65,15 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
   pipeline_options.quiet = options.quiet;
   pipeline_options.verbose = options.verbose;
 
+  const auto started_at = std::chrono::steady_clock::now();
   const svp::builder::BuildPipelineResult result =
       svp::builder::BuildPipeline{}.run(pipeline_options);
+  if (result.exit_code == 0 &&
+      *parsed_stage == svp::builder::BuildStage::package_skeleton) {
+    std::cout << "SVP created in "
+              << format_elapsed_duration(std::chrono::steady_clock::now() -
+                                         started_at)
+              << "\n";
+  }
   return result.exit_code;
 }

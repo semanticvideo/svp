@@ -5,7 +5,7 @@ This repository is coordinated through a Codex orchestrator thread. Builder and 
 ## Orchestration Loop
 
 - The current orchestrator thread owns sequencing, assignment, and merge decisions.
-- Work is split across fresh git worktrees. Do not work directly in another agent's active worktree.
+- Work location is assigned by the repo owner or orchestrator. Do not work directly in another agent's active worktree.
 - At most two builder agents may be active at the same time.
 - Every builder and reviewer must wake the orchestrator thread when finished by sending a message to that thread.
 - Do not start adjacent or later phases unless the orchestrator assigned them.
@@ -29,7 +29,7 @@ Read only what is needed for the assignment. Do not wander into unrelated phases
 Agents assigned implementation or review work are allowed to:
 
 - Create a new branch.
-- Create a new worktree.
+- Create a new worktree when the repo owner or orchestrator assigns one.
 - Commit their own completed changes.
 - Push their branch.
 - Open a pull request when assigned to do so.
@@ -49,10 +49,10 @@ Before committing:
 
 ## Worktree Rules
 
-- Create one fresh worktree per assigned branch.
-- Keep generated build folders, caches, and local outputs inside that worktree or ignored paths.
+- Use a worktree only when the repo owner or orchestrator assigns one.
+- Keep generated build folders, caches, and local outputs inside the assigned checkout/worktree or ignored paths.
 - Do not modify another worktree to fix your own build.
-- Report the worktree path in the handoff.
+- Report the checkout or worktree path in the handoff.
 
 ## Shared Contract Zones
 

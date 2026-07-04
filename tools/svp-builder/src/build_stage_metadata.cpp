@@ -6,7 +6,7 @@ namespace svp::builder {
 
 std::vector<std::string_view> supported_build_stage_names() {
   return {"media-ingest", "audio", "vision-plan", "foundation-color",
-          "foundation-ocr", "package-skeleton"};
+          "foundation-ocr", "package"};
 }
 
 std::optional<BuildStage> parse_build_stage(std::string_view value) {
@@ -15,6 +15,7 @@ std::optional<BuildStage> parse_build_stage(std::string_view value) {
   if (value == "vision-plan") return BuildStage::vision_plan;
   if (value == "foundation-color") return BuildStage::foundation_color;
   if (value == "foundation-ocr") return BuildStage::foundation_ocr;
+  if (value == "package") return BuildStage::package_skeleton;
   if (value == "package-skeleton") return BuildStage::package_skeleton;
   return std::nullopt;
 }
@@ -32,7 +33,7 @@ std::string_view build_stage_name(BuildStage stage) {
     case BuildStage::foundation_ocr:
       return "foundation-ocr";
     case BuildStage::package_skeleton:
-      return "package-skeleton";
+      return "package";
   }
   throw std::runtime_error("unknown build stage");
 }

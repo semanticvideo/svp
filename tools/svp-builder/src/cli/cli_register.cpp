@@ -30,22 +30,22 @@ void register_cli(CLI::App& app, CliContext& context) {
 
   // --- build subcommand ---
   auto* build = app.add_subcommand(
-      "build", "Write an honest builder foundation JSON artifact");
+      "build", "Build an SVP package from source media");
   build->add_option("source", build_opts.source_path, "Source media path")->required();
   build->add_option("--probe-json", build_opts.probe_json_path,
                     "Precomputed media probe JSON; skips running ffprobe");
   build->add_option("--ffprobe", build_opts.ffprobe_path, "ffprobe executable path");
   build->add_option("--ffmpeg", build_opts.ffmpeg_path, "ffmpeg executable path");
   build->add_option("--out", build_opts.output_path,
-                    "Output path for the builder foundation JSON")
+                    "Output .svp package path")
       ->required();
   build->add_option("--staging-dir", build_opts.staging_dir,
                     "Directory for staged builder outputs");
   build->add_option("--model-cache", build_opts.model_cache_dir,
                     "Path to SVP model cache directory containing model bundles");
   build->add_option("--stop-after", build_opts.stop_after,
-                    "Supported foundation stages: media-ingest, audio, vision-plan, "
-                    "foundation-color, foundation-ocr, package-skeleton");
+                    "Diagnostic partial-stage stop: media-ingest, audio, vision-plan, "
+                    "foundation-color, foundation-ocr, package");
   add_pipeline_performance_options(*build, build_opts.performance);
   build->add_option("--sherpa-lib", build_opts.sherpa_lib_path,
                     "Explicit path to libsherpa-onnx-c-api.dylib for diarization");

@@ -206,11 +206,9 @@ mkdir -p build/local-intro
 ./build/tools/svp-builder/svp-builder build \
   /Users/domesposito/Projects/samples/intro.mp4 \
   --out build/local-intro/intro.svp \
-  --staging-dir build/local-intro/staging \
   --model-cache /Users/domesposito/Projects/svp-model-cache \
   --ffmpeg /opt/homebrew/bin/ffmpeg \
-  --ffprobe /opt/homebrew/bin/ffprobe \
-  --stop-after package-skeleton
+  --ffprobe /opt/homebrew/bin/ffprobe
 ```
 
 If sherpa-onnx is installed in a nonstandard location, pass the C API library
@@ -220,10 +218,8 @@ explicitly:
 ./build/tools/svp-builder/svp-builder build \
   /path/to/video.mov \
   --out build/local-video/video.svp \
-  --staging-dir build/local-video/staging \
   --model-cache /Users/domesposito/Projects/svp-model-cache \
-  --sherpa-lib /path/to/libsherpa-onnx-c-api.dylib \
-  --stop-after package-skeleton
+  --sherpa-lib /path/to/libsherpa-onnx-c-api.dylib
 ```
 
 The builder can also stop at earlier foundation stages:
@@ -234,7 +230,7 @@ audio
 vision-plan
 foundation-color
 foundation-ocr
-package-skeleton
+package
 ```
 
 ## Create and Use SVPI Sidecars

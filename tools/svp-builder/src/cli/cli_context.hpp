@@ -38,7 +38,7 @@ struct BuildCliOptions {
   std::string output_path;
   std::string staging_dir;
   std::string model_cache_dir;
-  std::string stop_after = "media-ingest";
+  std::string stop_after = "package";
   svp::vision::InferencePerformanceOptions performance;
   std::string sherpa_lib_path;
   bool allow_fallback_diarization = false;
