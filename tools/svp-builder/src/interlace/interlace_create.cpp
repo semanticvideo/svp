@@ -2,6 +2,7 @@
 #include "svp/builder/build_pipeline.hpp"
 #include "svp/builder/build_progress.hpp"
 
+#include "default_staging.hpp"
 #include "staging_cleanup.hpp"
 
 #include "svp/package/media_binding.hpp"
@@ -194,6 +195,7 @@ InterlaceCreateResult write_core_only_svpi(
     const std::string& blake3_state,
     const std::string& section_state,
     const std::string& notes,
+    const std::filesystem::path& staging_dir,
     BuildProgressSink& sink) {
   InterlaceCreateResult result;
   result.svpi_path = options.output_path;
@@ -203,12 +205,6 @@ InterlaceCreateResult write_core_only_svpi(
 
   const std::filesystem::path source_path(options.source_path);
 
-  std::filesystem::path staging_dir;
-  if (!options.staging_dir.empty()) {
-    staging_dir = options.staging_dir;
-  } else {
-    staging_dir = std::filesystem::path(options.output_path + ".staging");
-  }
   std::filesystem::remove_all(staging_dir);
   std::filesystem::create_directories(staging_dir);
   std::filesystem::create_directories(staging_dir / "provenance");
@@ -309,7 +305,7 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
   const std::filesystem::path staging_dir =
       user_supplied_staging
           ? std::filesystem::path(options.staging_dir)
-          : std::filesystem::path(options.output_path + ".staging");
+          : make_default_staging_dir();
   StagingCleanupGuard staging_guard(staging_dir, user_supplied_staging);
 
   if (options.core_only_diagnostic) {
@@ -317,7 +313,7 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
         options, binding_doc, result.blake3_state,
         "not_generated",
         "SVPI sidecar created in core-only diagnostic mode (semantic pipeline skipped)",
-        *sink);
+        staging_dir, *sink);
     if (result.success) staging_guard.cleanup_on_success();
     return result;
   }
@@ -369,7 +365,7 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
         options, binding_doc, result.blake3_state,
         "blocked",
         "SVPI sidecar created with core-only content (semantic pipeline failed, sections marked blocked)",
-        *sink);
+        staging_dir, *sink);
     if (result.success) staging_guard.cleanup_on_success();
     return result;
   }

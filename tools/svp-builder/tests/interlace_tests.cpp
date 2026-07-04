@@ -1059,8 +1059,68 @@ void test_interlace_create_removes_default_staging() {
   CHECK(std::filesystem::exists(svpi_path));
   CHECK(!std::filesystem::exists(expected_staging));
 
+  auto parent = svpi_path.parent_path();
+  for (const auto& entry : std::filesystem::directory_iterator(parent)) {
+    CHECK(entry.path().filename().string().find(".staging") == std::string::npos);
+  }
+
   std::filesystem::remove_all(root);
   std::cout << "  test_interlace_create_removes_default_staging passed\n";
+}
+
+void test_interlace_create_core_only_no_visible_staging() {
+  auto root = make_test_dir("svp-staging-cleanup-ic-core-only");
+  auto source = root / "test.mov";
+  create_mock_source_media(source, 512);
+  auto svpi_path = root / "output.svpi";
+  auto expected_staging = std::filesystem::path(svpi_path.string() + ".staging");
+
+  svp::builder::InterlaceCreateOptions opts;
+  opts.source_path = source.string();
+  opts.output_path = svpi_path.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.core_only_diagnostic = true;
+
+  auto result = svp::builder::interlace_create(opts);
+  CHECK(result.success);
+  CHECK(std::filesystem::exists(svpi_path));
+  CHECK(!std::filesystem::exists(expected_staging));
+
+  auto parent = svpi_path.parent_path();
+  for (const auto& entry : std::filesystem::directory_iterator(parent)) {
+    CHECK(entry.path().filename().string().find(".staging") == std::string::npos);
+  }
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_interlace_create_core_only_no_visible_staging passed\n";
+}
+
+void test_interlace_create_fallback_no_visible_staging() {
+  auto root = make_test_dir("svp-staging-cleanup-ic-fallback");
+  auto source = root / "test.mov";
+  create_mock_source_media(source, 512);
+  auto svpi_path = root / "output.svpi";
+  auto expected_staging = std::filesystem::path(svpi_path.string() + ".staging");
+
+  svp::builder::InterlaceCreateOptions opts;
+  opts.source_path = source.string();
+  opts.output_path = svpi_path.string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.compute_full_blake3 = true;
+  opts.compute_chunk_proof = false;
+
+  auto result = svp::builder::interlace_create(opts);
+  CHECK(result.success);
+  CHECK(std::filesystem::exists(svpi_path));
+  CHECK(!std::filesystem::exists(expected_staging));
+
+  auto parent = svpi_path.parent_path();
+  for (const auto& entry : std::filesystem::directory_iterator(parent)) {
+    CHECK(entry.path().filename().string().find(".staging") == std::string::npos);
+  }
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_interlace_create_fallback_no_visible_staging passed\n";
 }
 
 void test_interlace_create_preserves_explicit_staging() {
@@ -1107,6 +1167,11 @@ void test_interlace_recombine_removes_default_staging() {
   CHECK(result.success);
   CHECK(std::filesystem::exists(svp_path));
   CHECK(!std::filesystem::exists(expected_staging));
+
+  auto parent = svp_path.parent_path();
+  for (const auto& entry : std::filesystem::directory_iterator(parent)) {
+    CHECK(entry.path().filename().string().find(".staging") == std::string::npos);
+  }
 
   std::filesystem::remove_all(root);
   std::cout << "  test_interlace_recombine_removes_default_staging passed\n";
@@ -1170,6 +1235,8 @@ int main() {
   test_interlace_recombine_emits_progress_events();
 
   test_interlace_create_removes_default_staging();
+  test_interlace_create_core_only_no_visible_staging();
+  test_interlace_create_fallback_no_visible_staging();
   test_interlace_create_preserves_explicit_staging();
   test_interlace_recombine_removes_default_staging();
   test_interlace_recombine_preserves_explicit_staging();

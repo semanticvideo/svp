@@ -100,10 +100,19 @@ void test_execution_plan_preserves_existing_stage_conditions() {
   assert(package_skeleton.run_package_skeleton);
 }
 
-void test_default_staging_dir_matches_existing_cli_contract() {
+void test_default_staging_dir_is_under_temp_not_sibling() {
   const std::filesystem::path output_path = "out/example.foundation.json";
-  assert(svp::builder::default_staging_dir_for_output(output_path) ==
-         std::filesystem::path("out/example.foundation.json.staging"));
+  const auto staging = svp::builder::default_staging_dir_for_output(output_path);
+  const auto temp_base = std::filesystem::temp_directory_path();
+
+  const auto staging_parent = staging.parent_path().string();
+  const auto temp_str = temp_base.string();
+  assert(staging_parent == temp_str ||
+         staging_parent + "/" == temp_str ||
+         staging_parent == temp_str + "/");
+
+  assert(staging.filename().string().find("svp-builder-") == 0);
+  assert(staging.string() != output_path.string() + ".staging");
 }
 
 void test_package_skeleton_output_path_resolution() {
@@ -886,7 +895,7 @@ int main() {
   test_stage_name_round_trip();
   test_package_skeleton_alias_is_temporarily_supported();
   test_execution_plan_preserves_existing_stage_conditions();
-  test_default_staging_dir_matches_existing_cli_contract();
+  test_default_staging_dir_is_under_temp_not_sibling();
   test_package_skeleton_output_path_resolution();
 
   test_stage_catalog_ids_and_labels_from_one_source();

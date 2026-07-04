@@ -253,6 +253,10 @@ void test_batch_create_removes_default_staging() {
   CHECK(!std::filesystem::exists(dir / "clip1.svpi.staging"));
   CHECK(!std::filesystem::exists(dir / "clip2.svpi.staging"));
 
+  for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+    CHECK(entry.path().filename().string().find(".staging") == std::string::npos);
+  }
+
   std::filesystem::remove_all(root);
   std::cout << "  test_batch_create_removes_default_staging passed\n";
 }
