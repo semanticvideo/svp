@@ -1,4 +1,5 @@
 #include "cli/cli_context.hpp"
+#include "staging_cleanup.hpp"
 #include "svp/core/version.hpp"
 
 #include <CLI/CLI.hpp>
@@ -7,6 +8,8 @@
 #include <iostream>
 
 int main(int argc, char** argv) {
+  svp::builder::install_staging_interrupt_cleanup();
+
   CLI::App app{"SVP builder"};
   app.set_version_flag("--version", svp::core::tool_version_label("svp-builder"));
   app.require_subcommand(0, 1);
