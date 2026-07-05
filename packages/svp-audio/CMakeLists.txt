@@ -78,7 +78,17 @@ target_link_libraries(svp-audio
 
 if(BUILD_TESTING)
   add_executable(svp-audio-tests
+    tests/asr_boundary_tests.cpp
+    tests/audio_stage_tests.cpp
+    tests/diarization_boundary_tests.cpp
+    tests/diarization_reconciliation_tests.cpp
     tests/audio_transcript_tests.cpp
+    tests/real_diarization_fixture_tests.cpp
+    tests/transcript_record_tests.cpp
+    tests/transcript_speaker_summary_tests.cpp
+    tests/transcript_word_assignment_tests.cpp
+    tests/transcript_writer_artifact_tests.cpp
+    tests/whisper_signal_tests.cpp
   )
 
   target_compile_features(svp-audio-tests PRIVATE cxx_std_20)
