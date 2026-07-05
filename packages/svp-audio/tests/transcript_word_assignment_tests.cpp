@@ -43,7 +43,6 @@ void test_word_assignment_max_overlap_wins() {
 
   std::filesystem::remove_all(root);
 }
-
 void test_word_assignment_expands_sustained_non_dominant_utterance() {
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "svp-word-assign-utterance-test";
@@ -239,4 +238,3 @@ void test_word_assignment_no_segments_all_unknown() {
 
   std::filesystem::remove_all(root);
 }
-

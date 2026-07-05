@@ -289,4 +289,3 @@ void test_asr_execution_boundary_json_reports_decoder_token_softmax_mean() {
   std::string note = encoded["asr_limitations"]["confidence_note"];
   assert(note.find("uncalibrated") != std::string::npos);
 }
-

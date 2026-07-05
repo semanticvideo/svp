@@ -232,4 +232,3 @@ void test_real_asr_diarization_word_attribution_fixtures_when_enabled() {
         fixture_case, fixture_root, model_cache_root);
   }
 }
-

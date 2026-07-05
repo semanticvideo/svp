@@ -61,7 +61,6 @@ void test_transcript_writer_produces_honest_blocked_absence() {
 
   std::filesystem::remove_all(root);
 }
-
 void test_transcript_writer_produces_honest_zero_duration_absence() {
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "svp-asr-transcript-zero-test";
@@ -348,4 +347,3 @@ void test_transcript_confidence_provenance_is_decoder_token_softmax_mean() {
 
   std::filesystem::remove_all(root);
 }
-

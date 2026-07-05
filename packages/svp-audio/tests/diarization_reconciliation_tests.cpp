@@ -148,4 +148,3 @@ void test_reconcile_clusters_still_works_after_lib_discovery() {
   assert(result.cluster_to_final[0] == 0);
   assert(result.cluster_to_final[1] == 1);
 }
-

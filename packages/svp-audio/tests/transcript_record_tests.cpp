@@ -54,4 +54,3 @@ void test_attached_punctuation_can_have_zero_duration() {
   assert(encoded["end_us"] == 84490000);
   assert(encoded["attached_to_word_id"] == "word_000001");
 }
-

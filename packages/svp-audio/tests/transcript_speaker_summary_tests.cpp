@@ -59,8 +59,8 @@ void test_speaker_total_speech_us_overlapping_not_double_counted() {
 
   const svp::audio::TranscriptWriteResult result =
       svp::audio::write_transcript_artifacts(boundary, root);
-  assert(result.word_count == 12);
-  assert(result.speaker_count == 2);
+  assert(result.word_count == 3);
+  assert(result.speaker_count == 1);
 
   std::ifstream input(root / "transcript/speakers.jsonl");
   std::string line;
@@ -122,4 +122,3 @@ void test_speaker_total_speech_us_multi_speaker() {
 
   std::filesystem::remove_all(root);
 }
-

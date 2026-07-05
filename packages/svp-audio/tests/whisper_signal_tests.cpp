@@ -212,4 +212,3 @@ void test_aggregate_word_confidence_empty() {
   indices = {5};  // out of range
   assert(svp::audio::aggregate_word_confidence(token_probs, indices) == 0.0);
 }
-

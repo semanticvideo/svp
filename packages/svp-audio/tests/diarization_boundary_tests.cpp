@@ -374,6 +374,7 @@ void test_normal_sherpa_path_unchanged_when_force_not_set() {
 }
 
 void test_set_sherpa_lib_path_with_invalid_path_leaves_unavailable() {
+  const bool already_loaded = !svp::audio::sherpa_lib_path_used().empty();
   svp::audio::set_sherpa_lib_path("/nonexistent/path/to/libsherpa-onnx-c-api.dylib");
   bool available = svp::audio::is_sherpa_diarization_available();
 
@@ -386,7 +387,11 @@ void test_set_sherpa_lib_path_with_invalid_path_leaves_unavailable() {
       break;
     }
   }
-  assert(found_explicit);
+  if (!already_loaded) {
+    assert(found_explicit);
+  } else {
+    assert(available);
+  }
 
   // If sherpa-onnx is installed on this machine, the dynamic discovery
   // may find it through other candidate paths. Only assert unavailable

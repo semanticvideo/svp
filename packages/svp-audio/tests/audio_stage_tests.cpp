@@ -135,7 +135,6 @@ void test_waveform_envelope_generates_ten_millisecond_json_records() {
 
   std::filesystem::remove_all(root);
 }
-
 void test_audio_extraction_executor_writes_staged_single_stream_outputs() {
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "svp-audio-executor-test";
@@ -407,4 +406,3 @@ void test_execute_vad_boundary_handles_runtime_unavailable_honestly() {
 
   std::filesystem::remove_all(root);
 }
-

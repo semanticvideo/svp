@@ -92,6 +92,7 @@ if(BUILD_TESTING)
   )
 
   target_compile_features(svp-audio-tests PRIVATE cxx_std_20)
+  target_compile_options(svp-audio-tests PRIVATE -UNDEBUG)
 
   target_compile_definitions(svp-audio-tests
     PRIVATE
