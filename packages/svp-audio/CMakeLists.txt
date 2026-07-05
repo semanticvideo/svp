@@ -22,6 +22,23 @@ add_library(svp-audio
   src/sherpa_diarization/sequence_decoder.cpp
   src/sherpa_diarization/wav_reader.cpp
   src/sherpa_diarization/windowing.cpp
+  src/sherpa_diarization/word_assignment/delayed_segment_handoff_repair.cpp
+  src/sherpa_diarization/word_assignment/dominant_speaker.cpp
+  src/sherpa_diarization/word_assignment/fingerprint_update.cpp
+  src/sherpa_diarization/word_assignment/group_embedding_assignment.cpp
+  src/sherpa_diarization/word_assignment/group_refinement.cpp
+  src/sherpa_diarization/word_assignment/interior_speaker_island_repair.cpp
+  src/sherpa_diarization/word_assignment/local_refinement.cpp
+  src/sherpa_diarization/word_assignment/nearest_segment_speaker.cpp
+  src/sherpa_diarization/word_assignment/punctuated_segment_island_repair.cpp
+  src/sherpa_diarization/word_assignment/sample_embeddings.cpp
+  src/sherpa_diarization/word_assignment/segment_initialization.cpp
+  src/sherpa_diarization/word_assignment/segment_overlap.cpp
+  src/sherpa_diarization/word_assignment/sequence_decoder_assignments.cpp
+  src/sherpa_diarization/word_assignment/speaker_fingerprints.cpp
+  src/sherpa_diarization/word_assignment/speaker_ids.cpp
+  src/sherpa_diarization/word_assignment/strong_segment_lock.cpp
+  src/sherpa_diarization/word_assignment/word_local_boundary_marking.cpp
   src/sherpa_diarization/word_assignment_replay.cpp
   src/sherpa_diarization/word_refinement.cpp
   src/transcript_records.cpp
