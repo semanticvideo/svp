@@ -43,6 +43,11 @@ add_library(svp-audio
   src/sherpa_diarization/word_refinement.cpp
   src/transcript_records.cpp
   src/transcript_writer.cpp
+  src/transcript_writer/speaker_assignment.cpp
+  src/transcript_writer/speaker_records.cpp
+  src/transcript_writer/status_strings.cpp
+  src/transcript_writer/transcript_metadata.cpp
+  src/transcript_writer/word_records.cpp
   src/vad_execution_boundary.cpp
   src/vad_task_plan.cpp
   src/waveform_envelope.cpp
