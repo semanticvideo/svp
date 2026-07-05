@@ -4,8 +4,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <iomanip>
 #include <limits>
+#include <map>
 #include <sstream>
 
 namespace svp::audio::sherpa_diarization_internal {
@@ -31,6 +33,13 @@ constexpr float kFingerprintLocalEvidenceMaxContraryMargin = 0.06f;
 constexpr std::size_t kFingerprintLocalEvidenceMinWords = 2;
 constexpr float kFingerprintUpdateMinMargin = 0.06f;
 constexpr std::size_t kFingerprintUpdateMaxEmbeddings = 8;
+constexpr float kSelectiveWordLocalUnstableGroupMargin = 0.10f;
+constexpr std::size_t kSelectiveWordLocalBoundaryRadiusWords = 4;
+constexpr std::int64_t kSelectiveWordLocalBoundaryRadiusUs = 1500000;
+// In 3+ speaker media, clear diarization segment overlap is a stronger anchor
+// than later smoothing. This prevents fingerprint/decoder passes from
+// collapsing distinct speakers when the segment evidence is already decisive.
+constexpr float kMultiSpeakerStrongSegmentOverlapLock = 0.60f;
 
 struct VoiceFingerprint {
   std::vector<float> prototype;
@@ -280,25 +289,30 @@ SegmentOverlap best_segment_overlap_for_word(
   const std::int64_t word_duration = word.end_us - word.start_us;
   if (word_duration <= 0) return {};
 
-  const SherpaDiarizationSegment* best_seg = nullptr;
-  std::int64_t best_overlap = 0;
+  std::map<int32_t, std::int64_t> overlap_by_speaker;
   for (const auto& seg : segments) {
+    if (seg.speaker_id < 0) continue;
     const std::int64_t seg_start =
         static_cast<std::int64_t>(seg.start_sec * 1000000.0f);
     const std::int64_t seg_end =
         static_cast<std::int64_t>(seg.end_sec * 1000000.0f);
     const std::int64_t overlap = std::min(word.end_us, seg_end) -
                                  std::max(word.start_us, seg_start);
-    if (overlap > best_overlap) {
-      best_overlap = overlap;
-      best_seg = &seg;
+    if (overlap > 0) {
+      overlap_by_speaker[seg.speaker_id] += overlap;
     }
   }
 
-  if (!best_seg || best_overlap <= 0) return {};
+  if (overlap_by_speaker.empty()) return {};
+  const auto best = std::max_element(
+      overlap_by_speaker.begin(), overlap_by_speaker.end(),
+      [](const auto& lhs, const auto& rhs) {
+        return lhs.second < rhs.second;
+      });
+  if (best == overlap_by_speaker.end() || best->second <= 0) return {};
   return {
-      best_seg->speaker_id,
-      static_cast<float>(best_overlap) / static_cast<float>(word_duration)
+      best->first,
+      static_cast<float>(best->second) / static_cast<float>(word_duration)
   };
 }
 
@@ -401,16 +415,27 @@ std::vector<std::string> assign_word_speakers_with_extractor(
                                      diar_result.final_speaker_count);
 
   std::vector<int32_t> segment_assignments(words.size(), -1);
+  std::vector<int32_t> strong_segment_assignments(words.size(), -1);
   std::vector<std::string> assignments(words.size(), "speaker_unknown");
   std::vector<std::vector<float>> word_embedding_similarities(
       words.size(),
       std::vector<float>(
           static_cast<std::size_t>(diar_result.final_speaker_count), -2.0f));
+  std::vector<bool> word_local_required(words.size(), false);
   for (std::size_t i = 0; i < words.size(); ++i) {
     segment_assignments[i] =
         best_segment_speaker_for_word(words[i], diar_result.segments);
+    const SegmentOverlap overlap =
+        best_segment_overlap_for_word(words[i], diar_result.segments);
+    if (diar_result.final_speaker_count > 2 &&
+        overlap.speaker >= 0 &&
+        overlap.overlap_fraction >= kMultiSpeakerStrongSegmentOverlapLock) {
+      strong_segment_assignments[i] = overlap.speaker;
+    }
     if (segment_assignments[i] >= 0) {
       assignments[i] = speaker_id_for_index(segment_assignments[i]);
+    } else {
+      word_local_required[i] = true;
     }
   }
 
@@ -511,6 +536,11 @@ std::vector<std::string> assign_word_speakers_with_extractor(
     for (std::size_t i = first_word; i <= last_word; ++i) {
       assignments[i] = speaker_id;
     }
+    if (margin < kSelectiveWordLocalUnstableGroupMargin) {
+      for (std::size_t i = first_word; i <= last_word; ++i) {
+        word_local_required[i] = true;
+      }
+    }
 
     if (margin >= kFingerprintUpdateMinMargin) {
       update_fingerprint(
@@ -543,6 +573,11 @@ std::vector<std::string> assign_word_speakers_with_extractor(
       return;
     }
 
+    if (diar_result.final_speaker_count > 2) {
+      assign_group_by_embedding(first_word, last_word);
+      return;
+    }
+
     std::size_t sub_start = first_word;
     while (sub_start <= last_word) {
       std::size_t sub_end = sub_start;
@@ -569,7 +604,47 @@ std::vector<std::string> assign_word_speakers_with_extractor(
     }
   }
 
+  auto mark_word_local_boundary = [&](std::int64_t boundary_us) {
+    for (std::size_t i = 0; i < words.size(); ++i) {
+      const std::int64_t midpoint_us =
+          words[i].start_us + ((words[i].end_us - words[i].start_us) / 2);
+      if (std::llabs(midpoint_us - boundary_us) >
+          kSelectiveWordLocalBoundaryRadiusUs) {
+        continue;
+      }
+      const std::size_t first =
+          i > kSelectiveWordLocalBoundaryRadiusWords
+              ? i - kSelectiveWordLocalBoundaryRadiusWords
+              : 0;
+      const std::size_t last = std::min(
+          words.size() - 1, i + kSelectiveWordLocalBoundaryRadiusWords);
+      for (std::size_t j = first; j <= last; ++j) {
+        word_local_required[j] = true;
+      }
+    }
+  };
+
+  for (std::size_t i = 1; i < words.size(); ++i) {
+    const int32_t previous_speaker = current_speaker_index(assignments[i - 1]);
+    const int32_t speaker = current_speaker_index(assignments[i]);
+    if (previous_speaker >= 0 && speaker >= 0 && previous_speaker != speaker) {
+      mark_word_local_boundary(words[i].start_us);
+    }
+  }
+  if (diar_result.final_speaker_count == 2) {
+    for (std::size_t seg_index = 1; seg_index < diar_result.segments.size();
+         ++seg_index) {
+      const auto& previous = diar_result.segments[seg_index - 1];
+      const auto& segment = diar_result.segments[seg_index];
+      if (previous.speaker_id != segment.speaker_id) {
+        mark_word_local_boundary(
+            static_cast<std::int64_t>(segment.start_sec * 1000000.0f));
+      }
+    }
+  }
+  std::size_t word_local_embedding_requests = 0;
   for (std::size_t word_index = 0; word_index < words.size(); ++word_index) {
+    if (!word_local_required[word_index]) continue;
     const std::int64_t start_us =
         std::max<std::int64_t>(0, words[word_index].start_us -
                                       kFingerprintWordWindowPaddingUs);
@@ -605,7 +680,12 @@ std::vector<std::string> assign_word_speakers_with_extractor(
     }
     assignments[word_index] = speaker_id_for_index(best_speaker);
     word_embedding_similarities[word_index] = similarities;
+    ++word_local_embedding_requests;
   }
+  svp::core::trace_memory_event("diarization.asr_word_fingerprint.selective_word_local", {
+      {"word_count", std::to_string(words.size())},
+      {"word_local_embeddings", std::to_string(word_local_embedding_requests)}
+  });
 
   std::vector<WordSpeakerEvidence> decoder_evidence(words.size());
   for (std::size_t i = 0; i < words.size(); ++i) {
@@ -755,6 +835,23 @@ std::vector<std::string> assign_word_speakers_with_extractor(
     }
 
     punct_run_start = punct_run_end + 1;
+  }
+
+  std::size_t strong_segment_locks_applied = 0;
+  for (std::size_t i = 0; i < assignments.size(); ++i) {
+    if (strong_segment_assignments[i] < 0) continue;
+    const std::string segment_speaker_id =
+        speaker_id_for_index(strong_segment_assignments[i]);
+    if (assignments[i] != segment_speaker_id) {
+      assignments[i] = segment_speaker_id;
+      ++strong_segment_locks_applied;
+    }
+  }
+  if (strong_segment_locks_applied > 0) {
+    svp::core::trace_memory_event("diarization.asr_word_fingerprint.segment_lock", {
+        {"word_count", std::to_string(words.size())},
+        {"locks_applied", std::to_string(strong_segment_locks_applied)}
+    });
   }
 
   return assignments;
