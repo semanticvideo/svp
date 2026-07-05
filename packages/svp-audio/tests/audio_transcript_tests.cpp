@@ -1935,7 +1935,7 @@ void test_word_assignment_gap_nearest_within_tolerance() {
   std::filesystem::remove_all(root);
 }
 
-void test_word_assignment_gap_beyond_tolerance_gets_unknown() {
+void test_word_assignment_single_speaker_gap_beyond_tolerance_uses_sole_speaker() {
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "svp-word-assign-gap-beyond-test";
   std::filesystem::remove_all(root);
@@ -1968,18 +1968,18 @@ void test_word_assignment_gap_beyond_tolerance_gets_unknown() {
   std::string line;
   std::getline(input, line);
   const nlohmann::json word = nlohmann::json::parse(line);
-  assert(word["speaker_id"] == "speaker_unknown");
+  assert(word["speaker_id"] == "speaker_0001");
 
   std::ifstream sinput(root / "transcript/speakers.jsonl");
-  bool found_unknown = false;
+  bool found_single = false;
   while (std::getline(sinput, line)) {
     const nlohmann::json speaker = nlohmann::json::parse(line);
-    if (speaker["id"] == "speaker_unknown") {
-      found_unknown = true;
+    if (speaker["id"] == "speaker_0001") {
+      found_single = true;
       assert(speaker["total_speech_us"] == 300000);
     }
   }
-  assert(found_unknown);
+  assert(found_single);
 
   std::filesystem::remove_all(root);
 }
@@ -2428,7 +2428,7 @@ int main() {
   test_word_assignment_max_overlap_wins();
   test_word_assignment_expands_sustained_non_dominant_utterance();
   test_word_assignment_gap_nearest_within_tolerance();
-  test_word_assignment_gap_beyond_tolerance_gets_unknown();
+  test_word_assignment_single_speaker_gap_beyond_tolerance_uses_sole_speaker();
   test_word_assignment_no_segments_all_unknown();
   test_transcript_confidence_provenance_is_decoder_token_softmax_mean();
 

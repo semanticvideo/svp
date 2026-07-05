@@ -190,6 +190,11 @@ std::vector<std::string> assign_word_speakers(
   std::vector<std::string> assignments;
   assignments.reserve(boundary.reconciled_words.size());
 
+  const std::string sole_segment_speaker =
+      boundary.speaker_count == 1 && !boundary.speaker_segments.empty()
+          ? dominant_segment_speaker(boundary.speaker_segments)
+          : "";
+
   bool used_external_assignments = false;
   for (std::size_t i = 0; i < boundary.reconciled_words.size(); ++i) {
     const AsrWord& word = boundary.reconciled_words[i];
@@ -202,6 +207,9 @@ std::vector<std::string> assign_word_speakers(
       speaker_id = "speaker_0001";
     } else if (!boundary.speaker_segments.empty()) {
       speaker_id = assign_speaker_by_segment_overlap(word, boundary.speaker_segments);
+      if (speaker_id == "speaker_unknown" && !sole_segment_speaker.empty()) {
+        speaker_id = sole_segment_speaker;
+      }
     }
     assignments.push_back(std::move(speaker_id));
   }
