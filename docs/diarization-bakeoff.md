@@ -157,6 +157,88 @@ These memory observations were not captured by automated diagnostics. If a
 future contestant looks promising on quality, rerun it with memory diagnostics
 enabled before considering it production-worthy.
 
+## Current Checkpoint: Segment-Lock Plus One-Speaker Gap Fix
+
+Recorded on branch:
+
+```text
+codex/fix-two-speaker-diarization
+```
+
+Implementation shape at this checkpoint:
+
+- Keeps selective word-local fingerprinting for unstable words and boundaries.
+- Aggregates clear segment overlap by speaker before using it as a lock.
+- Locks strong direct segment evidence in 3+ speaker media so later
+  fingerprint/decoder smoothing cannot collapse distinct speakers when the
+  diarization segments are already decisive.
+- Treats real one-speaker diarization as one speaker even when ASR words fall
+  outside segment coverage, instead of creating `speaker_unknown` as a second
+  transcript speaker.
+
+Measured current results:
+
+| Case | Expected | Current result | Quality / count | Memory measured |
+| --- | ---: | ---: | --- | ---: |
+| Real ASR fixture: one speaker | 1 | Pass | Real ASR + diarization attribution test passes. | Not separately logged |
+| Real ASR fixture: two speakers | 2 | Pass | Real ASR + diarization attribution test passes. | Not separately logged |
+| Real ASR fixture: three speakers | 3 | Pass | Real ASR + diarization attribution test passes. | Not separately logged |
+| Similar-timbre fixture | 2 | 2 | Speaker-side attribution remains 52/52 correct. | 0.576 GB peak RSS / 0.555 GB footprint |
+| MONIQUE.mp4 | 2 | 2 | 95.8509% against `MONIQUE.csv` quick comparison; 1594 correct, 69 wrong, 20 unmapped by strict CSV span. | 7.687 GB peak RSS / 7.571 GB footprint |
+| new-gator.mp4 | Roughly 17; 20 accepted | 20 | Count remains acceptable; no per-speaker reference yet. | 8.700 GB peak RSS / 85.717 GB footprint |
+| intro.mp4 | 1 | 1 | 51/51 words assigned to `speaker_0001`. | Not captured |
+| test-30.mp4 | 1 | 1 | 58/58 words assigned to `speaker_0001`. | Not captured |
+
+Fresh diagnostic output roots:
+
+| Case | Output root |
+| --- | --- |
+| MONIQUE replay | `/Users/domesposito/Projects/svp/build/diagnostics/current-segment-lock-monique-v1` |
+| Similar-timbre replay | `/Users/domesposito/Projects/svp/build/diagnostics/current-segment-lock-similar-v1` |
+| Gator replay | `/Users/domesposito/Projects/svp/build/diagnostics/current-segment-lock-gator-v1` |
+| intro automatic audio stage | `/Users/domesposito/Projects/svp/build/diagnostics/current-single-speaker-intro-v2` |
+| test-30 automatic audio stage | `/Users/domesposito/Projects/svp/build/diagnostics/current-single-speaker-test30-v2` |
+
+Commands run for this checkpoint:
+
+```text
+SVP_SHERPA_DIARIZATION_MODEL_DIR=/Users/domesposito/Projects/svp-model-cache/model_sherpa_onnx_diarization \
+  ctest --test-dir build --output-on-failure -R svp-audio-tests
+
+SVP_MODEL_CACHE_DIR=/Users/domesposito/Projects/svp-model-cache \
+SVP_SHERPA_DIARIZATION_MODEL_DIR=/Users/domesposito/Projects/svp-model-cache/model_sherpa_onnx_diarization \
+  ctest --test-dir build --output-on-failure -R svp-audio-tests
+```
+
+Both test runs passed. The real-model run exercises the one/two/three fixture
+attribution path using real fixture WAVs, real Whisper ASR, and real Sherpa
+diarization.
+
+Difference from the recorded baseline:
+
+| Metric | Baseline | Current checkpoint | Change |
+| --- | ---: | ---: | ---: |
+| MONIQUE attribution | 94.2925% | 95.8509% | +1.5584 percentage points |
+| MONIQUE correct words | 1586 | 1594 | +8 |
+| MONIQUE wrong words | 96 | 69 | -27 |
+| MONIQUE Speaker 1 recall | 95.19% | 97.57% | +2.38 points |
+| MONIQUE Speaker 2 recall | 92.02% | 91.45% | -0.57 points |
+| MONIQUE Speaker 2 precision | 88.31% | 93.65% | +5.34 points |
+| Similar-timbre attribution | 52/52 | 52/52 | No regression |
+| Gator accepted speaker count | 20 | 20 | No regression |
+
+Current caveats:
+
+- The MONIQUE percentage uses the current quick CSV comparison. It is useful
+  for branch-to-branch comparison, but the 20 unmapped words are strict CSV-span
+  misses and should not be treated as speaker-attribution errors without
+  reviewing their boundaries.
+- Gator footprint remains high in the diagnostic replay even though peak RSS is
+  lower than the earlier 12.33 GB replay measurement.
+- intro.mp4 and test-30.mp4 were corrected after this checkpoint exposed that
+  one-speaker segment gaps could create `speaker_unknown` as a second transcript
+  speaker.
+
 ## Distribution Constraints
 
 Any winning candidate must be:
