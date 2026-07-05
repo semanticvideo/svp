@@ -30,6 +30,13 @@ struct DiarizeCliOptions {
   std::string segments_jsonl_path;
 };
 
+struct DiarizeReplayCliOptions {
+  std::string staging_dir;
+  std::string model_dir;
+  std::string sherpa_lib_path;
+  std::string out_words_jsonl_path;
+};
+
 struct BuildCliOptions {
   std::string source_path;
   std::string probe_json_path;
@@ -173,10 +180,12 @@ struct CliContext {
   InterlaceCliOptions interlace_opts;
 
   DiarizeCliOptions diarize_opts;
+  DiarizeReplayCliOptions diarize_replay_opts;
 
   CLI::App* probe_subcommand = nullptr;
   CLI::App* build_subcommand = nullptr;
   CLI::App* diarize_subcommand = nullptr;
+  CLI::App* diarize_replay_subcommand = nullptr;
   CLI::App* interlace_subcommand = nullptr;
 
   CLI::App* ic_create = nullptr;
@@ -203,6 +212,8 @@ int run_probe_command(const ProbeCliOptions& options);
 int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand);
 
 int run_diarize_command(const DiarizeCliOptions& options);
+
+int run_diarize_replay_command(const DiarizeReplayCliOptions& options);
 
 int run_interlace_command(const InterlaceCliOptions& options);
 

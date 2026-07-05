@@ -61,6 +61,7 @@ add_executable(svp-builder
   src/cli/probe_command.cpp
   src/cli/build_command.cpp
   src/cli/diarize_command.cpp
+  src/cli/diarize_replay_command.cpp
   src/cli/interlace_commands.cpp
   src/cli/interlace_output.cpp
   src/cli/main_dispatch.cpp

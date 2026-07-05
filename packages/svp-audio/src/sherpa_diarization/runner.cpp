@@ -15,7 +15,8 @@ using namespace sherpa_diarization_internal;
 
 SherpaDiarizationResult run_sherpa_diarization(
     const std::filesystem::path& wav_path,
-    const std::filesystem::path& model_dir) {
+    const std::filesystem::path& model_dir,
+    const std::vector<AsrWord>& words) {
   SherpaDiarizationResult result;
 
   const SherpaDiarizationApi& api = get_api();
@@ -106,6 +107,12 @@ SherpaDiarizationResult run_sherpa_diarization(
           "sherpa-onnx failed to create speaker embedding extractor; using window-local speakers");
     }
   }
+  auto destroy_extractor = [&]() {
+    if (extractor) {
+      api.emb_destroy(extractor);
+      extractor = nullptr;
+    }
+  };
 
   std::vector<SherpaDiarizationSegment> preliminary_segments;
   std::vector<SpeakerObservation> speaker_observations;
@@ -137,7 +144,8 @@ SherpaDiarizationResult run_sherpa_diarization(
       result.blockers.push_back(
           "sherpa-onnx failed to create diarization pipeline "
           "(config validation failed) at window " + std::to_string(wi));
-          return result;
+      destroy_extractor();
+      return result;
     }
 
     std::vector<float> window_samples;
@@ -145,9 +153,10 @@ SherpaDiarizationResult run_sherpa_diarization(
       window_samples =
           read_pcm_s16le_mono_wav_range(wav_info, win.process_start, win.process_end);
     } catch (const std::exception& e) {
-      result.blockers.push_back(
-          std::string("failed to read WAV window: ") + e.what());
+        result.blockers.push_back(
+            std::string("failed to read WAV window: ") + e.what());
       api.destroy(sd);
+      destroy_extractor();
       return result;
     }
     if (window_samples.empty()) {
@@ -172,6 +181,7 @@ SherpaDiarizationResult run_sherpa_diarization(
             "sherpa-onnx diarization process returned null at window " +
             std::to_string(wi));
         api.destroy(sd);
+        destroy_extractor();
         return result;
       }
 
@@ -277,10 +287,6 @@ SherpaDiarizationResult run_sherpa_diarization(
     });
   }
 
-  if (extractor) {
-    api.emb_destroy(extractor);
-  }
-
   std::sort(preliminary_segments.begin(), preliminary_segments.end(),
             [](const SherpaDiarizationSegment& a,
                const SherpaDiarizationSegment& b) {
@@ -298,6 +304,7 @@ SherpaDiarizationResult run_sherpa_diarization(
     result.final_speaker_count = 0;
     result.reconciliation_method =
         "windowed_sherpa_5min_overlap_2s; no_speech_detected";
+    destroy_extractor();
     return result;
   }
 
@@ -323,10 +330,87 @@ SherpaDiarizationResult run_sherpa_diarization(
                                : final_speakers.size());
   stitch_dominant_non_overlapping_tracks(
       result.segments, result.final_speaker_count, speaker_observations.size());
+  collapse_fragmented_secondary_tracks(
+      result.segments, result.final_speaker_count, speaker_observations.size());
   collapse_single_dominant_track(result.segments, result.final_speaker_count);
+
+  result.final_speaker_fingerprints.assign(
+      static_cast<std::size_t>(std::max(0, result.final_speaker_count)),
+      std::vector<float>{});
+  std::vector<int32_t> fingerprint_counts(
+      static_cast<std::size_t>(std::max(0, result.final_speaker_count)), 0);
+  for (std::size_t i = 0;
+       i < preliminary_segments.size() && i < result.segments.size();
+       ++i) {
+    const int32_t observation_id = preliminary_segments[i].speaker_id;
+    const int32_t final_speaker = result.segments[i].speaker_id;
+    if (observation_id < 0 ||
+        observation_id >= static_cast<int32_t>(speaker_observations.size()) ||
+        final_speaker < 0 ||
+        final_speaker >= result.final_speaker_count) {
+      continue;
+    }
+    const std::vector<float>& embedding =
+        speaker_observations[static_cast<std::size_t>(observation_id)].embedding;
+    if (!has_embedding_signal(embedding)) continue;
+
+    std::vector<float>& prototype =
+        result.final_speaker_fingerprints[static_cast<std::size_t>(final_speaker)];
+    if (prototype.empty()) {
+      prototype.assign(embedding.size(), 0.0f);
+    }
+    if (prototype.size() != embedding.size()) continue;
+    for (std::size_t dim = 0; dim < embedding.size(); ++dim) {
+      prototype[dim] += embedding[dim];
+    }
+    ++fingerprint_counts[static_cast<std::size_t>(final_speaker)];
+  }
+  for (std::size_t speaker = 0;
+       speaker < result.final_speaker_fingerprints.size();
+       ++speaker) {
+    std::vector<float>& prototype = result.final_speaker_fingerprints[speaker];
+    const int32_t count = fingerprint_counts[speaker];
+    if (count <= 0 || prototype.empty()) continue;
+    for (float& value : prototype) {
+      value /= static_cast<float>(count);
+    }
+    normalize_embedding(prototype);
+  }
+  result.segment_fingerprint_similarities.assign(
+      result.segments.size(),
+      std::vector<float>(
+          static_cast<std::size_t>(std::max(0, result.final_speaker_count)), -2.0f));
+  for (std::size_t i = 0;
+       i < preliminary_segments.size() && i < result.segments.size();
+       ++i) {
+    const int32_t observation_id = preliminary_segments[i].speaker_id;
+    if (observation_id < 0 ||
+        observation_id >= static_cast<int32_t>(speaker_observations.size())) {
+      continue;
+    }
+    const std::vector<float>& embedding =
+        speaker_observations[static_cast<std::size_t>(observation_id)].embedding;
+    if (!has_embedding_signal(embedding)) continue;
+    for (int32_t speaker = 0; speaker < result.final_speaker_count; ++speaker) {
+      const std::vector<float>& prototype =
+          result.final_speaker_fingerprints[static_cast<std::size_t>(speaker)];
+      if (!has_embedding_signal(prototype)) continue;
+      result.segment_fingerprint_similarities[i][static_cast<std::size_t>(speaker)] =
+          cosine_similarity(embedding, prototype);
+    }
+  }
+
+  if (extractor && embedding_dim > 0 && !words.empty()) {
+    result.word_speaker_assignments =
+        assign_word_speakers_with_extractor(
+            api, extractor, embedding_dim, wav_info, words, result);
+  }
+  destroy_extractor();
+
   result.reconciliation_method =
       "windowed_sherpa_5min_5s_feed_overlap_2s; "
-      "bounded_10s_speaker_observations_global_gap_or_floor_reconciliation";
+      "bounded_10s_speaker_observations_global_gap_or_floor_reconciliation; "
+      "dominant_and_fragmented_secondary_track_policy";
 
   result.ran = true;
   return result;

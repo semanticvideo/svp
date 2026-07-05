@@ -273,6 +273,108 @@ void stitch_dominant_non_overlapping_tracks(
   });
 }
 
+void collapse_fragmented_secondary_tracks(
+    std::vector<SherpaDiarizationSegment>& segments,
+    int32_t& final_speaker_count,
+    std::size_t observation_count) {
+  if (final_speaker_count < kFragmentedSecondaryMinFinalSpeakers ||
+      observation_count < kFragmentedSecondaryMinObservations ||
+      segments.empty()) {
+    return;
+  }
+
+  std::vector<SpeakerTrackStats> stats(static_cast<std::size_t>(final_speaker_count));
+  std::int64_t total_speech_us = 0;
+  for (const auto& seg : segments) {
+    if (seg.speaker_id < 0 || seg.speaker_id >= final_speaker_count) continue;
+    auto& st = stats[static_cast<std::size_t>(seg.speaker_id)];
+    const std::int64_t dur_us = static_cast<std::int64_t>(
+        std::max(0.0f, seg.end_sec - seg.start_sec) * 1000000.0f);
+    st.speech_us += dur_us;
+    total_speech_us += dur_us;
+    if (!st.seen) {
+      st.first_start_sec = seg.start_sec;
+      st.last_end_sec = seg.end_sec;
+      st.seen = true;
+    } else {
+      st.first_start_sec = std::min(st.first_start_sec, seg.start_sec);
+      st.last_end_sec = std::max(st.last_end_sec, seg.end_sec);
+    }
+  }
+  if (total_speech_us <= 0) return;
+
+  int32_t dominant_speaker = -1;
+  int32_t largest_minority_speaker = -1;
+  std::int64_t dominant_speech_us = 0;
+  std::int64_t largest_minority_speech_us = 0;
+  std::int64_t minority_speech_us = 0;
+  float earliest_minority_start_sec = 0.0f;
+  bool saw_minority = false;
+  for (int32_t sid = 0; sid < final_speaker_count; ++sid) {
+    const auto& st = stats[static_cast<std::size_t>(sid)];
+    if (!st.seen) continue;
+    if (st.speech_us > dominant_speech_us) {
+      dominant_speaker = sid;
+      dominant_speech_us = st.speech_us;
+    }
+  }
+  if (dominant_speaker < 0) return;
+
+  for (int32_t sid = 0; sid < final_speaker_count; ++sid) {
+    const auto& st = stats[static_cast<std::size_t>(sid)];
+    if (!st.seen || sid == dominant_speaker) continue;
+    minority_speech_us += st.speech_us;
+    if (!saw_minority) {
+      earliest_minority_start_sec = st.first_start_sec;
+      saw_minority = true;
+    } else {
+      earliest_minority_start_sec =
+          std::min(earliest_minority_start_sec, st.first_start_sec);
+    }
+    if (st.speech_us > largest_minority_speech_us) {
+      largest_minority_speaker = sid;
+      largest_minority_speech_us = st.speech_us;
+    }
+  }
+  if (!saw_minority || largest_minority_speaker < 0) return;
+
+  const float dominant_share =
+      static_cast<float>(dominant_speech_us) / static_cast<float>(total_speech_us);
+  const float minority_share =
+      static_cast<float>(minority_speech_us) / static_cast<float>(total_speech_us);
+  const float largest_minority_share =
+      static_cast<float>(largest_minority_speech_us) /
+      static_cast<float>(total_speech_us);
+  if (dominant_share < kFragmentedSecondaryDominantMinShare ||
+      dominant_share > kFragmentedSecondaryDominantMaxShare ||
+      minority_share < kFragmentedSecondaryMinMinorityShare ||
+      largest_minority_share > kFragmentedSecondaryMaxSingleMinorityShare) {
+    return;
+  }
+
+  const bool dominant_starts_first =
+      stats[static_cast<std::size_t>(dominant_speaker)].first_start_sec <=
+      earliest_minority_start_sec;
+  const int32_t dominant_final = dominant_starts_first ? 0 : 1;
+  const int32_t minority_final = dominant_starts_first ? 1 : 0;
+  for (auto& seg : segments) {
+    if (seg.speaker_id == dominant_speaker) {
+      seg.speaker_id = dominant_final;
+    } else if (seg.speaker_id >= 0 && seg.speaker_id < final_speaker_count) {
+      seg.speaker_id = minority_final;
+    }
+  }
+  final_speaker_count = 2;
+  svp::core::trace_memory_event("diarization.fragmented_secondary_collapse", {
+      {"dominant_speaker", std::to_string(dominant_speaker)},
+      {"largest_minority_speaker", std::to_string(largest_minority_speaker)},
+      {"dominant_share", std::to_string(dominant_share)},
+      {"minority_share", std::to_string(minority_share)},
+      {"largest_minority_share", std::to_string(largest_minority_share)},
+      {"final_speaker_count", std::to_string(final_speaker_count)}
+  });
+}
+
 void collapse_single_dominant_track(std::vector<SherpaDiarizationSegment>& segments,
                                     int32_t& final_speaker_count) {
   if (final_speaker_count <= 1 || segments.empty()) return;

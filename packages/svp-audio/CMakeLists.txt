@@ -15,14 +15,39 @@ add_library(svp-audio
   src/audio_stage_plan.cpp
   src/diarization_boundary.cpp
   src/sherpa_diarization/api.cpp
+  src/sherpa_diarization/asr_word_assignment.cpp
   src/sherpa_diarization/embeddings.cpp
   src/sherpa_diarization/reconciliation.cpp
   src/sherpa_diarization/runner.cpp
+  src/sherpa_diarization/sequence_decoder.cpp
   src/sherpa_diarization/wav_reader.cpp
   src/sherpa_diarization/windowing.cpp
+  src/sherpa_diarization/word_assignment/delayed_segment_handoff_repair.cpp
+  src/sherpa_diarization/word_assignment/dominant_speaker.cpp
+  src/sherpa_diarization/word_assignment/fingerprint_update.cpp
+  src/sherpa_diarization/word_assignment/group_embedding_assignment.cpp
+  src/sherpa_diarization/word_assignment/group_refinement.cpp
+  src/sherpa_diarization/word_assignment/interior_speaker_island_repair.cpp
+  src/sherpa_diarization/word_assignment/local_refinement.cpp
+  src/sherpa_diarization/word_assignment/nearest_segment_speaker.cpp
+  src/sherpa_diarization/word_assignment/punctuated_segment_island_repair.cpp
+  src/sherpa_diarization/word_assignment/sample_embeddings.cpp
+  src/sherpa_diarization/word_assignment/segment_initialization.cpp
+  src/sherpa_diarization/word_assignment/segment_overlap.cpp
+  src/sherpa_diarization/word_assignment/sequence_decoder_assignments.cpp
+  src/sherpa_diarization/word_assignment/speaker_fingerprints.cpp
+  src/sherpa_diarization/word_assignment/speaker_ids.cpp
+  src/sherpa_diarization/word_assignment/strong_segment_lock.cpp
+  src/sherpa_diarization/word_assignment/word_local_boundary_marking.cpp
+  src/sherpa_diarization/word_assignment_replay.cpp
   src/sherpa_diarization/word_refinement.cpp
   src/transcript_records.cpp
   src/transcript_writer.cpp
+  src/transcript_writer/speaker_assignment.cpp
+  src/transcript_writer/speaker_records.cpp
+  src/transcript_writer/status_strings.cpp
+  src/transcript_writer/transcript_metadata.cpp
+  src/transcript_writer/word_records.cpp
   src/vad_execution_boundary.cpp
   src/vad_task_plan.cpp
   src/waveform_envelope.cpp
@@ -53,10 +78,21 @@ target_link_libraries(svp-audio
 
 if(BUILD_TESTING)
   add_executable(svp-audio-tests
+    tests/asr_boundary_tests.cpp
+    tests/audio_stage_tests.cpp
+    tests/diarization_boundary_tests.cpp
+    tests/diarization_reconciliation_tests.cpp
     tests/audio_transcript_tests.cpp
+    tests/real_diarization_fixture_tests.cpp
+    tests/transcript_record_tests.cpp
+    tests/transcript_speaker_summary_tests.cpp
+    tests/transcript_word_assignment_tests.cpp
+    tests/transcript_writer_artifact_tests.cpp
+    tests/whisper_signal_tests.cpp
   )
 
   target_compile_features(svp-audio-tests PRIVATE cxx_std_20)
+  target_compile_options(svp-audio-tests PRIVATE -UNDEBUG)
 
   target_compile_definitions(svp-audio-tests
     PRIVATE

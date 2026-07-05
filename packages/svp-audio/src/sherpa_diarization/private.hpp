@@ -23,6 +23,12 @@ inline constexpr std::size_t kDominantStitchMinObservations = 8;
 inline constexpr float kDominantStitchCombinedSpeechShare = 0.70f;
 inline constexpr float kDominantStitchMinTrackSpeechShare = 0.15f;
 inline constexpr float kDominantStitchMaxOverlapShare = 0.01f;
+inline constexpr int32_t kFragmentedSecondaryMinFinalSpeakers = 5;
+inline constexpr std::size_t kFragmentedSecondaryMinObservations = 8;
+inline constexpr float kFragmentedSecondaryDominantMinShare = 0.75f;
+inline constexpr float kFragmentedSecondaryDominantMaxShare = 0.90f;
+inline constexpr float kFragmentedSecondaryMinMinorityShare = 0.08f;
+inline constexpr float kFragmentedSecondaryMaxSingleMinorityShare = 0.15f;
 inline constexpr float kSingleDominantCollapseSpeechShare = 0.95f;
 inline constexpr float kSherpaLocalClusteringThreshold = 0.90f;
 inline constexpr int64_t kDiarizationWindowSamples =
@@ -148,6 +154,11 @@ struct SpeakerObservation {
   std::vector<float> embedding;
 };
 
+struct WordSpeakerEvidence {
+  int32_t segment_speaker = -1;
+  std::vector<float> embedding_similarity_by_speaker;
+};
+
 SherpaLibState& lib_state();
 SherpaDiarizationApi& get_api();
 
@@ -181,9 +192,26 @@ void stitch_dominant_non_overlapping_tracks(
     std::vector<SherpaDiarizationSegment>& segments,
     int32_t& final_speaker_count,
     std::size_t observation_count);
+void collapse_fragmented_secondary_tracks(
+    std::vector<SherpaDiarizationSegment>& segments,
+    int32_t& final_speaker_count,
+    std::size_t observation_count);
 void collapse_single_dominant_track(std::vector<SherpaDiarizationSegment>& segments,
                                     int32_t& final_speaker_count);
 
+std::vector<int32_t> decode_word_speaker_sequence(
+    const std::vector<AsrWord>& words,
+    int32_t speaker_count,
+    const std::vector<WordSpeakerEvidence>& evidence);
+
 bool ends_utterance(const std::string& text);
+
+std::vector<std::string> assign_word_speakers_with_extractor(
+    const SherpaDiarizationApi& api,
+    const void* extractor,
+    int32_t embedding_dim,
+    const PcmS16MonoWavInfo& wav_info,
+    const std::vector<AsrWord>& words,
+    const SherpaDiarizationResult& diar_result);
 
 }  // namespace svp::audio::sherpa_diarization_internal

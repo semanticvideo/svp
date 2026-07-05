@@ -126,7 +126,8 @@ DiarizationExecutionBoundary execute_diarization_boundary(
     const std::filesystem::path& staging_root,
     const std::filesystem::path& model_cache_root,
     bool allow_fallback,
-    bool force_single_speaker) {
+    bool force_single_speaker,
+    const std::vector<AsrWord>& words) {
   if (force_single_speaker) {
     SpeakerSegment single_segment;
     single_segment.id = segment_id_for_ordinal(0);
@@ -216,7 +217,7 @@ DiarizationExecutionBoundary execute_diarization_boundary(
   }
 
   SherpaDiarizationResult diar_result =
-      run_sherpa_diarization(wav_path, model_dir);
+      run_sherpa_diarization(wav_path, model_dir, words);
 
   if (!diar_result.ran) {
     for (const auto& blocker : diar_result.blockers) {
@@ -256,6 +257,7 @@ DiarizationExecutionBoundary execute_diarization_boundary(
   boundary.diarization_status = DiarizationStatus::ran;
   boundary.reconciliation_method = diar_result.reconciliation_method;
   boundary.preliminary_cluster_count = diar_result.preliminary_cluster_count;
+  boundary.word_speaker_assignments = diar_result.word_speaker_assignments;
 
   // Store similarity matrix and merge decisions as JSON in the boundary
   nlohmann::json sim_matrix_json = nlohmann::json::array();
