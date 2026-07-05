@@ -1017,7 +1017,7 @@ void test_explicit_staging_preserved_after_success() {
   std::filesystem::remove_all(tmp_dir);
 }
 
-void test_default_staging_preserved_on_failure() {
+void test_default_staging_removed_on_failure() {
   const std::filesystem::path tmp_dir =
       std::filesystem::temp_directory_path() / "svp_staging_cleanup_fail";
   std::filesystem::remove_all(tmp_dir);
@@ -1025,6 +1025,19 @@ void test_default_staging_preserved_on_failure() {
 
   {
     svp::builder::StagingCleanupGuard guard(tmp_dir, false);
+  }
+
+  assert(!std::filesystem::exists(tmp_dir));
+}
+
+void test_explicit_staging_preserved_on_failure() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_staging_cleanup_explicit_fail";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+
+  {
+    svp::builder::StagingCleanupGuard guard(tmp_dir, true);
   }
 
   assert(std::filesystem::exists(tmp_dir));
@@ -1139,7 +1152,8 @@ int main() {
   test_json_progress_preserves_all_event_types();
   test_default_staging_removed_after_success();
   test_explicit_staging_preserved_after_success();
-  test_default_staging_preserved_on_failure();
+  test_default_staging_removed_on_failure();
+  test_explicit_staging_preserved_on_failure();
   test_concurrency_policy_respects_ocr_profiles();
   test_scoped_progress_wrapper_tags_events();
   test_deterministic_processor_merge_orders_by_id();
