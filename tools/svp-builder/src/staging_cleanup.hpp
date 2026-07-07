@@ -16,14 +16,14 @@ namespace svp::builder {
 
 namespace staging_cleanup_internal {
 
-inline std::mutex& registry_mutex() {
-  static std::mutex mutex;
-  return mutex;
-}
+struct StagingRegistry {
+  std::mutex mutex;
+  std::vector<std::filesystem::path> paths;
+};
 
-inline std::vector<std::filesystem::path>& auto_staging_registry() {
-  static std::vector<std::filesystem::path> paths;
-  return paths;
+inline StagingRegistry& registry() {
+  static StagingRegistry* instance = new StagingRegistry();
+  return *instance;
 }
 
 inline void remove_staging_path(const std::filesystem::path& path) noexcept {
@@ -36,22 +36,25 @@ inline void remove_staging_path(const std::filesystem::path& path) noexcept {
 }
 
 inline void register_auto_staging(const std::filesystem::path& path) {
-  std::lock_guard<std::mutex> lock(registry_mutex());
-  auto_staging_registry().push_back(path);
+  StagingRegistry& staging_registry = registry();
+  std::lock_guard<std::mutex> lock(staging_registry.mutex);
+  staging_registry.paths.push_back(path);
 }
 
 inline void unregister_auto_staging(const std::filesystem::path& path) {
-  std::lock_guard<std::mutex> lock(registry_mutex());
-  auto& paths = auto_staging_registry();
+  StagingRegistry& staging_registry = registry();
+  std::lock_guard<std::mutex> lock(staging_registry.mutex);
+  auto& paths = staging_registry.paths;
   paths.erase(std::remove(paths.begin(), paths.end(), path), paths.end());
 }
 
 inline void cleanup_registered_auto_staging() noexcept {
   std::vector<std::filesystem::path> paths;
   {
-    std::lock_guard<std::mutex> lock(registry_mutex());
-    paths = auto_staging_registry();
-    auto_staging_registry().clear();
+    StagingRegistry& staging_registry = registry();
+    std::lock_guard<std::mutex> lock(staging_registry.mutex);
+    paths = staging_registry.paths;
+    staging_registry.paths.clear();
   }
   for (const auto& path : paths) {
     remove_staging_path(path);
