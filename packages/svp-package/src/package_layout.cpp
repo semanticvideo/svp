@@ -1,5 +1,7 @@
 #include "svp/package/package_layout.hpp"
 
+#include "package_source.hpp"
+
 #include <zip.h>
 
 #include <limits>
@@ -28,6 +30,50 @@ std::string zip_error_message(int error_code) {
   std::string message = zip_error_strerror(&error);
   zip_error_fini(&error);
   return message;
+}
+
+ZipArchive open_package_archive(const std::filesystem::path& path,
+                                std::string& error_message) {
+  const auto source_range = detail::resolve_package_byte_range(path);
+  if (!source_range.success) {
+    error_message = source_range.error_message;
+    return {};
+  }
+
+  if (!source_range.range.bounded) {
+    int error_code = ZIP_ER_OK;
+    ZipArchive archive{zip_open(path.string().c_str(), ZIP_RDONLY, &error_code)};
+    if (!archive) {
+      error_message = zip_error_message(error_code);
+    }
+    return archive;
+  }
+
+  if (source_range.range.size >
+          static_cast<std::uint64_t>(std::numeric_limits<zip_int64_t>::max())) {
+    error_message = "embedded SVPI byte range exceeds libzip limits";
+    return {};
+  }
+
+  zip_error_t zip_error;
+  zip_error_init(&zip_error);
+  zip_source_t* source = zip_source_file_create(
+      path.string().c_str(),
+      static_cast<zip_uint64_t>(source_range.range.offset),
+      static_cast<zip_int64_t>(source_range.range.size), &zip_error);
+  if (source == nullptr) {
+    error_message = zip_error_strerror(&zip_error);
+    zip_error_fini(&zip_error);
+    return {};
+  }
+
+  zip_t* archive = zip_open_from_source(source, ZIP_RDONLY, &zip_error);
+  if (archive == nullptr) {
+    error_message = zip_error_strerror(&zip_error);
+    zip_source_free(source);
+  }
+  zip_error_fini(&zip_error);
+  return ZipArchive{archive};
 }
 
 bool is_normalized_package_path(std::string_view path) {
@@ -134,10 +180,10 @@ const std::string& PackageLayoutResult::error_message() const noexcept {
 }
 
 PackageLayoutResult read_package_layout(const std::filesystem::path& path) {
-  int error_code = ZIP_ER_OK;
-  ZipArchive archive{zip_open(path.string().c_str(), ZIP_RDONLY, &error_code)};
+  std::string open_error;
+  ZipArchive archive = open_package_archive(path, open_error);
   if (!archive) {
-    return PackageLayoutResult::failure(zip_error_message(error_code));
+    return PackageLayoutResult::failure(std::move(open_error));
   }
 
   const auto entry_count = zip_get_num_entries(archive.get(), 0);
@@ -172,10 +218,10 @@ PackageLayoutResult read_package_layout(const std::filesystem::path& path) {
 
 PackageEntryReadResult read_package_entry(const std::filesystem::path& path,
                                           const std::string& entry) {
-  int error_code = ZIP_ER_OK;
-  ZipArchive archive{zip_open(path.string().c_str(), ZIP_RDONLY, &error_code)};
+  std::string open_error;
+  ZipArchive archive = open_package_archive(path, open_error);
   if (!archive) {
-    return PackageEntryReadResult::failure(zip_error_message(error_code));
+    return PackageEntryReadResult::failure(std::move(open_error));
   }
 
   zip_stat_t stat;

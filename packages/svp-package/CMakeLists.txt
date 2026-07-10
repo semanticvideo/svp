@@ -9,8 +9,17 @@ find_library(ZSTD_LIBRARY NAMES zstd REQUIRED)
 add_library(svp-package
   src/package_contract.cpp
   src/package_layout.cpp
+  src/package_source.cpp
   src/package_probe.cpp
   src/package_summary.cpp
+  src/mp4_top_level.cpp
+  src/embedded_svpi_box.cpp
+  src/embedded_file_io.cpp
+  src/embedded_mp4_copy.cpp
+  src/embedded_svpi_reader.cpp
+  src/embedded_svpi_writer.cpp
+  src/embedded_svpi_extract.cpp
+  src/embedded_svpi_strip.cpp
   src/package_writer.cpp
   src/index_logical_rows.cpp
   src/index_writer.cpp
@@ -64,9 +73,20 @@ if(BUILD_TESTING)
     tests/relationship_type_policy_tests.cpp
   )
 
+  add_executable(svp-embedded-svpi-tests
+    tests/embedded_svpi_tests_main.cpp
+    tests/embedded_svpi_test_support.cpp
+    tests/embedded_svpi_reader_tests.cpp
+    tests/embedded_svpi_writer_tests.cpp
+  )
+
   target_compile_features(svp-package-tests PRIVATE cxx_std_20)
   target_compile_features(svp-svpi-tests PRIVATE cxx_std_20)
   target_compile_features(svp-relationship-type-policy-tests PRIVATE cxx_std_20)
+  target_compile_features(svp-embedded-svpi-tests PRIVATE cxx_std_20)
+  target_include_directories(svp-embedded-svpi-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
 
   target_compile_definitions(svp-svpi-tests PRIVATE
     SVP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
@@ -91,7 +111,10 @@ if(BUILD_TESTING)
       svp::package
   )
 
+  target_link_libraries(svp-embedded-svpi-tests PRIVATE svp::package)
+
   add_test(NAME svp-package-tests COMMAND svp-package-tests)
   add_test(NAME svp-svpi-tests COMMAND svp-svpi-tests)
   add_test(NAME svp-relationship-type-policy-tests COMMAND svp-relationship-type-policy-tests)
+  add_test(NAME svp-embedded-svpi-tests COMMAND svp-embedded-svpi-tests)
 endif()

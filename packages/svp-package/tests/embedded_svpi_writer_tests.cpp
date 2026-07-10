@@ -1,0 +1,146 @@
+#include "embedded_svpi_test_declarations.hpp"
+#include "embedded_svpi_test_support.hpp"
+
+#include <algorithm>
+#include <filesystem>
+#include <string>
+
+namespace {
+
+using namespace svp::package;
+using namespace svp::package::test;
+
+void test_extract_and_strip_are_byte_exact() {
+  TempDirectory root;
+  const auto original = root.path / "original.mp4";
+  const auto svpi = root.path / "original.svpi";
+  const auto embedded = root.path / "embedded.mp4";
+  const auto extracted = root.path / "extracted.svpi";
+  const auto stripped = root.path / "stripped.mp4";
+  write_test_mp4(original, true);
+  write_bytes(svpi, {'P', 'K', 3, 4, 0, 1, 2, 3, 4, 5});
+
+  CHECK_EMBEDDED(embed_svpi_in_mp4(original, svpi, embedded).success);
+  CHECK_EMBEDDED(extract_embedded_svpi(embedded, extracted).success);
+  CHECK_EMBEDDED(strip_embedded_svpi(embedded, stripped).success);
+  CHECK_EMBEDDED(read_bytes(extracted) == read_bytes(svpi));
+  CHECK_EMBEDDED(read_bytes(stripped) == read_bytes(original));
+}
+
+void test_terminal_mfra_is_preserved_at_end() {
+  TempDirectory root;
+  const auto original = root.path / "fragmented.mp4";
+  const auto svpi = root.path / "package.svpi";
+  const auto replacement_svpi = root.path / "replacement.svpi";
+  const auto embedded = root.path / "embedded.mp4";
+  const auto replaced = root.path / "replaced.mp4";
+  const auto stripped = root.path / "stripped.mp4";
+  write_test_mp4(original, true, true);
+  write_bytes(svpi, {1, 2, 3});
+  write_bytes(replacement_svpi, {4, 5, 6, 7});
+  const auto original_size = std::filesystem::file_size(original);
+  const auto result = embed_svpi_in_mp4(original, svpi, embedded);
+  CHECK_EMBEDDED(result.success);
+  CHECK_EMBEDDED(result.inspection.embeddings.front().box_offset < original_size);
+  EmbeddedSvpiWriteOptions replacement_options;
+  replacement_options.replace_existing = true;
+  CHECK_EMBEDDED(embed_svpi_in_mp4(
+      embedded, replacement_svpi, replaced, replacement_options).success);
+  const auto original_bytes = read_bytes(original);
+  const auto replaced_bytes = read_bytes(replaced);
+  CHECK_EMBEDDED(std::equal(original_bytes.end() - 12,
+                            original_bytes.end(), replaced_bytes.end() - 12));
+  CHECK_EMBEDDED(strip_embedded_svpi(embedded, stripped).success);
+  CHECK_EMBEDDED(read_bytes(stripped) == original_bytes);
+}
+
+void test_zero_sized_top_level_box_is_rejected_without_output() {
+  TempDirectory root;
+  const auto input = root.path / "zero.mp4";
+  const auto svpi = root.path / "package.svpi";
+  const auto output = root.path / "output.mp4";
+  write_test_mp4(input, true, false, true);
+  write_bytes(svpi, {1, 2, 3});
+  const auto result = embed_svpi_in_mp4(input, svpi, output);
+  CHECK_EMBEDDED(!result.success);
+  CHECK_EMBEDDED(has_issue(result.inspection,
+                           EmbeddedSvpiIssueCode::zero_sized_top_level_box));
+  CHECK_EMBEDDED(!std::filesystem::exists(output));
+}
+
+void test_existing_embedding_requires_explicit_replacement() {
+  TempDirectory root;
+  const auto original = root.path / "original.mp4";
+  const auto first = root.path / "first.svpi";
+  const auto second = root.path / "second.svpi";
+  const auto embedded = root.path / "embedded.mp4";
+  const auto replaced = root.path / "replaced.mp4";
+  const auto extracted = root.path / "extracted.svpi";
+  write_test_mp4(original, false);
+  write_bytes(first, {1, 1, 1});
+  write_bytes(second, {2, 2, 2, 2});
+  CHECK_EMBEDDED(embed_svpi_in_mp4(original, first, embedded).success);
+  CHECK_EMBEDDED(!embed_svpi_in_mp4(embedded, second, replaced).success);
+  CHECK_EMBEDDED(!std::filesystem::exists(replaced));
+
+  EmbeddedSvpiWriteOptions options;
+  options.replace_existing = true;
+  CHECK_EMBEDDED(embed_svpi_in_mp4(embedded, second, replaced, options).success);
+  CHECK_EMBEDDED(inspect_embedded_svpi(replaced, true).embeddings.size() == 1);
+  CHECK_EMBEDDED(extract_embedded_svpi(replaced, extracted).success);
+  CHECK_EMBEDDED(read_bytes(extracted) == read_bytes(second));
+}
+
+void test_ambiguous_fragment_tail_layouts_are_rejected() {
+  TempDirectory root;
+  const auto svpi = root.path / "package.svpi";
+  write_bytes(svpi, {1, 2, 3});
+
+  const auto mfro = root.path / "mfro.mp4";
+  write_test_mp4(mfro, true);
+  auto bytes = read_bytes(mfro);
+  bytes.insert(bytes.end(), {0, 0, 0, 8, 'm', 'f', 'r', 'o'});
+  write_bytes(mfro, bytes);
+  auto result = embed_svpi_in_mp4(mfro, svpi, root.path / "mfro-out.mp4");
+  CHECK_EMBEDDED(!result.success);
+  CHECK_EMBEDDED(has_issue(result.inspection,
+                           EmbeddedSvpiIssueCode::unsafe_tail_layout));
+
+  const auto nonterminal_mfra = root.path / "nonterminal-mfra.mp4";
+  write_test_mp4(nonterminal_mfra, true, true);
+  bytes = read_bytes(nonterminal_mfra);
+  bytes.insert(bytes.end(), {0, 0, 0, 8, 'm', 'o', 'o', 'v'});
+  write_bytes(nonterminal_mfra, bytes);
+  result = embed_svpi_in_mp4(
+      nonterminal_mfra, svpi, root.path / "nonterminal-out.mp4");
+  CHECK_EMBEDDED(!result.success);
+  CHECK_EMBEDDED(has_issue(result.inspection,
+                           EmbeddedSvpiIssueCode::unsafe_tail_layout));
+}
+
+void test_failures_leave_no_partial_output() {
+  TempDirectory root;
+  const auto invalid = root.path / "invalid.mp4";
+  const auto svpi = root.path / "package.svpi";
+  const auto output = root.path / "output.mp4";
+  write_bytes(invalid, {0, 1, 2});
+  write_bytes(svpi, {1, 2, 3});
+  CHECK_EMBEDDED(!embed_svpi_in_mp4(invalid, svpi, output).success);
+  CHECK_EMBEDDED(!std::filesystem::exists(output));
+
+  for (const auto& entry : std::filesystem::directory_iterator(root.path)) {
+    CHECK_EMBEDDED(entry.path().filename().string().find(".svp-tmp-") ==
+                   std::string::npos);
+  }
+}
+
+}  // namespace
+
+void run_embedded_svpi_writer_tests() {
+  test_extract_and_strip_are_byte_exact();
+  test_terminal_mfra_is_preserved_at_end();
+  test_zero_sized_top_level_box_is_rejected_without_output();
+  test_existing_embedding_requires_explicit_replacement();
+  test_ambiguous_fragment_tail_layouts_are_rejected();
+  test_failures_leave_no_partial_output();
+}

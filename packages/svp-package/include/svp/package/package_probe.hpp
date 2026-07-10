@@ -10,9 +10,9 @@ struct PackageProbe {
   bool is_regular_file = false;
   bool has_svp_extension = false;
   bool has_svpi_extension = false;
+  bool has_mp4_extension = false;
 };
 
 [[nodiscard]] PackageProbe probe_package(const std::filesystem::path& path);
 
 }  // namespace svp::package
-

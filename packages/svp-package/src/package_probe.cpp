@@ -16,8 +16,8 @@ PackageProbe probe_package(const std::filesystem::path& path) {
   probe.is_regular_file = !error && std::filesystem::is_regular_file(status);
   probe.has_svp_extension = svp::core::has_extension(path, ".svp");
   probe.has_svpi_extension = svp::core::has_extension(path, ".svpi");
+  probe.has_mp4_extension = svp::core::has_extension(path, ".mp4");
   return probe;
 }
 
 }  // namespace svp::package
-
