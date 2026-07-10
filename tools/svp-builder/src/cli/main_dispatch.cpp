@@ -1,6 +1,12 @@
 #include "cli_context.hpp"
 
 int run_selected_command(const CliContext& context) {
+  if (*context.transport_opts.embed_sub ||
+      *context.transport_opts.extract_sub ||
+      *context.transport_opts.strip_sub) {
+    return run_transport_command(context.transport_opts);
+  }
+
   // interlace first, if any interlace subcommand was selected
   if (*context.interlace_opts.ic_create_sub ||
       *context.interlace_opts.iv_validate_sub ||

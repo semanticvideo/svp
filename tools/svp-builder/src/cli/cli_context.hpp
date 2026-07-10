@@ -43,6 +43,7 @@ struct BuildCliOptions {
   std::string ffprobe_path = "ffprobe";
   std::string ffmpeg_path = "ffmpeg";
   std::string output_path;
+  std::string output_format = "svp";
   std::string staging_dir;
   std::string model_cache_dir;
   std::string stop_after = "package";
@@ -54,6 +55,7 @@ struct BuildCliOptions {
   std::string progress_mode = "auto";
   bool quiet = false;
   bool verbose = false;
+  bool overwrite = false;
 };
 
 struct InterlaceCliOptions {
@@ -114,12 +116,14 @@ struct InterlaceCliOptions {
   std::string cb_ffmpeg = "ffmpeg";
   std::string cb_staging;
   std::string cb_sherpa_lib;
+  std::string cb_output_format = "svpi";
   std::string cb_visibility = "visible";
   svp::vision::InferencePerformanceOptions cb_performance;
   int cb_jobs = 1;
   bool cb_recursive = false;
   bool cb_no_blake3 = false;
   bool cb_replace_mismatched = false;
+  bool cb_overwrite = false;
   bool cb_json = false;
   bool cb_core_only = false;
   bool cb_allow_fallback = false;
@@ -174,10 +178,34 @@ struct InterlaceCliOptions {
   CLI::App* cib_complete_batch_sub = nullptr;
 };
 
+struct TransportCliOptions {
+  std::string embed_container;
+  std::string embed_svpi;
+  std::string embed_out;
+  std::string embed_ffprobe = "ffprobe";
+  std::string embed_codes = "spec/registries/validation-codes.json";
+  bool embed_replace = false;
+  bool embed_overwrite = false;
+
+  std::string extract_container;
+  std::string extract_out;
+  std::string extract_codes = "spec/registries/validation-codes.json";
+  bool extract_overwrite = false;
+
+  std::string strip_container;
+  std::string strip_out;
+  bool strip_overwrite = false;
+
+  CLI::App* embed_sub = nullptr;
+  CLI::App* extract_sub = nullptr;
+  CLI::App* strip_sub = nullptr;
+};
+
 struct CliContext {
   ProbeCliOptions probe_opts;
   BuildCliOptions build_opts;
   InterlaceCliOptions interlace_opts;
+  TransportCliOptions transport_opts;
 
   DiarizeCliOptions diarize_opts;
   DiarizeReplayCliOptions diarize_replay_opts;
@@ -187,12 +215,16 @@ struct CliContext {
   CLI::App* diarize_subcommand = nullptr;
   CLI::App* diarize_replay_subcommand = nullptr;
   CLI::App* interlace_subcommand = nullptr;
+  CLI::App* transport_subcommand = nullptr;
 
   CLI::App* ic_create = nullptr;
   CLI::App* iv_validate = nullptr;
   CLI::App* ii_inspect = nullptr;
   CLI::App* ie_extract = nullptr;
   CLI::App* ir_recombine = nullptr;
+  CLI::App* transport_embed = nullptr;
+  CLI::App* transport_extract = nullptr;
+  CLI::App* transport_strip = nullptr;
   CLI::App* cb_create_batch = nullptr;
   CLI::App* sc_scan = nullptr;
   CLI::App* vb_validate_batch = nullptr;
@@ -216,6 +248,7 @@ int run_diarize_command(const DiarizeCliOptions& options);
 int run_diarize_replay_command(const DiarizeReplayCliOptions& options);
 
 int run_interlace_command(const InterlaceCliOptions& options);
+int run_transport_command(const TransportCliOptions& options);
 
 int run_selected_command(const CliContext& context);
 

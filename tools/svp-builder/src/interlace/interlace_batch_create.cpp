@@ -174,11 +174,61 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
           ? source_dir
           : std::filesystem::path(options.out_dir);
 
+  if (options.output_format == BatchOutputFormat::embedded_svpi) {
+    const bool has_output_directory =
+        !options.out_dir.empty() && options.out_dir != "same-as-source";
+    if (!has_output_directory && !options.overwrite_sources) {
+      BatchFileResult r;
+      r.status = BatchFileStatus::failed;
+      r.error_message =
+          "Embedded SVPI batch output requires an explicit output directory or source overwrite permission.";
+      result.results.push_back(std::move(r));
+      result.failed_count = 1;
+      return result;
+    }
+    if (has_output_directory && options.overwrite_sources) {
+      BatchFileResult r;
+      r.status = BatchFileStatus::failed;
+      r.error_message =
+          "Source overwrite permission cannot be combined with an output directory.";
+      result.results.push_back(std::move(r));
+      result.failed_count = 1;
+      return result;
+    }
+
+    if (has_output_directory) {
+      std::error_code canonical_error;
+      const auto canonical_source = std::filesystem::weakly_canonical(
+          source_dir, canonical_error);
+      canonical_error.clear();
+      const auto canonical_output = std::filesystem::weakly_canonical(
+          out_dir, canonical_error);
+      if (!canonical_error) {
+        const auto relative_output = canonical_output.lexically_relative(
+            canonical_source);
+        const bool output_is_source = relative_output.empty() ||
+                                      relative_output == ".";
+        const bool output_is_descendant = !relative_output.empty() &&
+            *relative_output.begin() != "..";
+        if (output_is_source || output_is_descendant) {
+          BatchFileResult r;
+          r.status = BatchFileStatus::failed;
+          r.error_message =
+              "Embedded SVPI output directory must be separate from and outside the source directory.";
+          result.results.push_back(std::move(r));
+          result.failed_count = 1;
+          return result;
+        }
+      }
+    }
+  }
+
   if (!std::filesystem::exists(out_dir)) {
     std::filesystem::create_directories(out_dir);
   }
 
-  if (options.visibility == SidecarVisibility::managed_dir) {
+  if (options.output_format == BatchOutputFormat::svpi &&
+      options.visibility == SidecarVisibility::managed_dir) {
     std::filesystem::create_directories(out_dir / ".svpi");
   }
 
@@ -200,8 +250,10 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
     const auto& media_path = media_files[index];
     BatchFileResult file_result;
     file_result.source_filename = media_path.filename().string();
-    file_result.source_relative_path =
-        std::filesystem::relative(media_path, source_dir).string();
+    const auto source_relative_path =
+        media_path.lexically_normal().lexically_relative(
+            source_dir.lexically_normal());
+    file_result.source_relative_path = source_relative_path.string();
 
     auto item_sink = make_scoped_progress_sink(
         sink,
@@ -218,32 +270,105 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
     const auto local_out_dir =
         use_out_dir ? out_dir : media_path.parent_path();
 
-    file_result.svpi_path = resolve_sidecar_path(
-        media_path, options.visibility, local_out_dir);
+    file_result.artifact_path =
+        options.output_format == BatchOutputFormat::embedded_svpi &&
+                options.overwrite_sources
+            ? media_path
+            : resolve_batch_artifact_path(
+                  media_path, source_dir, local_out_dir,
+                  options.output_format, options.visibility);
 
-    if (std::filesystem::exists(file_result.svpi_path)) {
+    const bool requires_contained_output =
+        options.output_format == BatchOutputFormat::embedded_svpi &&
+        !options.overwrite_sources;
+    std::string containment_error;
+    if (requires_contained_output && !batch_artifact_is_contained(
+            file_result.artifact_path, out_dir, containment_error)) {
+      file_result.status = BatchFileStatus::failed;
+      file_result.error_message = containment_error;
+      item_sink->emit(make_stage_completed(
+          ProgressStageId::batch_item, media_path.filename().string()));
+      result.results[index] = std::move(file_result);
+      return;
+    }
+
+    std::error_code directory_error;
+    std::filesystem::create_directories(
+        file_result.artifact_path.parent_path(), directory_error);
+    if (directory_error ||
+        (requires_contained_output && !batch_artifact_is_contained(
+            file_result.artifact_path, out_dir, containment_error))) {
+      file_result.status = BatchFileStatus::failed;
+      file_result.error_message = directory_error
+          ? "Could not create the batch artifact directory: " +
+                directory_error.message()
+          : containment_error;
+      item_sink->emit(make_stage_completed(
+          ProgressStageId::batch_item, media_path.filename().string()));
+      result.results[index] = std::move(file_result);
+      return;
+    }
+
+    const auto staging_dir = batch_item_staging_dir(
+        options.staging_dir, file_result.source_relative_path);
+
+    if (options.output_format == BatchOutputFormat::embedded_svpi &&
+        options.overwrite_sources) {
+      std::string inspection_error;
+      const auto state = inspect_embedded_batch_artifact(
+          media_path, media_path, "spec/registries/validation-codes.json",
+          inspection_error);
+      if (state == EmbeddedBatchArtifactState::valid) {
+        file_result.status = BatchFileStatus::already_valid;
+      } else if (state == EmbeddedBatchArtifactState::invalid) {
+        file_result.status = BatchFileStatus::failed;
+        file_result.error_message = inspection_error;
+      } else {
+        std::string blake3_state;
+        std::string create_error;
+        if (create_embedded_batch_artifact(
+                options, media_path, media_path, staging_dir, create_error,
+                blake3_state, item_sink, true)) {
+          file_result.status = BatchFileStatus::created;
+          file_result.blake3_state = blake3_state;
+        } else {
+          file_result.status = BatchFileStatus::failed;
+          file_result.error_message = create_error;
+        }
+      }
+    } else if (std::filesystem::exists(file_result.artifact_path)) {
       std::string err;
-      if (check_svpi_valid_and_bound(
-              file_result.svpi_path, media_path,
-              "spec/registries/validation-codes.json", err)) {
+      const bool existing_valid =
+          options.output_format == BatchOutputFormat::svpi
+              ? check_svpi_valid_and_bound(
+                    file_result.artifact_path, media_path,
+                    "spec/registries/validation-codes.json", err)
+              : check_embedded_batch_artifact(
+                    file_result.artifact_path, media_path,
+                    "spec/registries/validation-codes.json", err);
+      if (existing_valid) {
         file_result.status = BatchFileStatus::already_valid;
       } else {
         if (options.replace_mismatched) {
           std::string blake3_state;
           std::string create_err;
-          if (create_single_svpi(
-                  media_path, file_result.svpi_path,
-                  options.ffprobe_path, options.ffmpeg_path,
-                  !options.no_blake3,
-                  batch_item_staging_dir(options.staging_dir,
-                                         file_result.source_relative_path),
-                  options.model_cache_dir, options.sherpa_lib_path,
-                  options.performance,
-                  options.core_only_diagnostic,
-                  options.allow_fallback_diarization,
-                  options.force_single_speaker,
-                  options.serial_pipeline,
-                  create_err, blake3_state, item_sink)) {
+          const bool replaced =
+              options.output_format == BatchOutputFormat::svpi
+                  ? create_single_svpi(
+                        media_path, file_result.artifact_path,
+                        options.ffprobe_path, options.ffmpeg_path,
+                        !options.no_blake3, staging_dir,
+                        options.model_cache_dir, options.sherpa_lib_path,
+                        options.performance, options.core_only_diagnostic,
+                        options.allow_fallback_diarization,
+                        options.force_single_speaker,
+                        options.serial_pipeline, create_err, blake3_state,
+                        item_sink)
+                  : create_embedded_batch_artifact(
+                        options, media_path, file_result.artifact_path,
+                        staging_dir, create_err, blake3_state, item_sink,
+                        true);
+          if (replaced) {
             file_result.status = BatchFileStatus::replaced;
             file_result.blake3_state = blake3_state;
           } else {
@@ -258,19 +383,23 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
     } else {
       std::string blake3_state;
       std::string create_err;
-      if (create_single_svpi(
-              media_path, file_result.svpi_path,
-              options.ffprobe_path, options.ffmpeg_path,
-              !options.no_blake3,
-              batch_item_staging_dir(options.staging_dir,
-                                     file_result.source_relative_path),
-              options.model_cache_dir, options.sherpa_lib_path,
-              options.performance,
-              options.core_only_diagnostic,
-              options.allow_fallback_diarization,
-              options.force_single_speaker,
-              options.serial_pipeline,
-              create_err, blake3_state, item_sink)) {
+      const bool created =
+          options.output_format == BatchOutputFormat::svpi
+              ? create_single_svpi(
+                    media_path, file_result.artifact_path,
+                    options.ffprobe_path, options.ffmpeg_path,
+                    !options.no_blake3, staging_dir,
+                    options.model_cache_dir, options.sherpa_lib_path,
+                    options.performance, options.core_only_diagnostic,
+                    options.allow_fallback_diarization,
+                    options.force_single_speaker,
+                    options.serial_pipeline, create_err, blake3_state,
+                    item_sink)
+              : create_embedded_batch_artifact(
+                    options, media_path, file_result.artifact_path,
+                    staging_dir, create_err, blake3_state, item_sink,
+                    false);
+      if (created) {
         file_result.status = BatchFileStatus::created;
         file_result.blake3_state = blake3_state;
       } else {

@@ -11,6 +11,7 @@ context.
 | File | Purpose |
 | --- | --- |
 | `SVPI_v0.1_Draft_Specification.md` | Current draft specification for `.svpi` layout, binding, validation, provenance, and media hygiene. |
+| `Embedded_SVPI_Transport_ISO_BMFF_v1.md` | Production Embedded SVPI Transport profile for one canonical SVPI in a top-level ISO BMFF `uuid` box. |
 | `SVPI_SPEC_AGENT_BRIEF.md` | Original drafting brief and design prompt for the SVPI spec. |
 
 ## Core idea
@@ -39,6 +40,7 @@ Folder-scale workflows:
 
 ```bash
 svp-builder interlace create-batch ./media --recursive
+svp-builder interlace create-batch ./media --output-format embedded-svpi --out-dir ./semantic-media
 svp-builder interlace scan ./media --recursive
 svp-builder interlace validate-batch ./media --recursive
 svp-builder interlace complete-identity-batch ./media --recursive

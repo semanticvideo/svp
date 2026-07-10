@@ -31,6 +31,8 @@ enum class ProgressStageId {
   index,
   package_write,
   svpi_write,
+  transport_embed,
+  embedded_validate,
   validate,
   validation_report,
   repackage,

@@ -117,6 +117,7 @@ void render_create_batch_json(const svp::builder::BatchCreateResult& result) {
   for (const auto& r : result.results) {
     nlohmann::json file;
     file["source"] = r.source_filename;
+    file["artifact"] = r.artifact_path.string();
     file["status"] = std::string(svp::builder::batch_file_status_label(r.status));
     if (!r.error_message.empty()) file["error"] = r.error_message;
     if (!r.blake3_state.empty()) file["blake3_state"] = r.blake3_state;
@@ -136,6 +137,9 @@ void render_create_batch_plain(const svp::builder::BatchCreateResult& result) {
   for (const auto& r : result.results) {
     std::cout << "  " << r.source_filename << ": "
               << svp::builder::batch_file_status_label(r.status) << "\n";
+    if (!r.artifact_path.empty()) {
+      std::cout << "    artifact: " << r.artifact_path.string() << "\n";
+    }
     if (!r.error_message.empty()) {
       std::cout << "    error: " << r.error_message << "\n";
     }

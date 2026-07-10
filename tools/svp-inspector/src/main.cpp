@@ -1,4 +1,8 @@
+#include "embedded_input_controller.hpp"
+#include "embedded_transport_output.hpp"
+
 #include "svp/core/version.hpp"
+#include "svp/package/embedded_svpi.hpp"
 #include "svp/package/package_layout.hpp"
 #include "svp/package/package_summary.hpp"
 #include "svp/query/query_ops.hpp"
@@ -1022,8 +1026,12 @@ int main(int argc, char** argv) {
   app.require_subcommand(0, 1);
 
   std::string package_path;
+  bool inspect_json = false;
   auto* inspect = app.add_subcommand("inspect", "Print a concise SVP/SVPI package summary");
-  inspect->add_option("package", package_path, "Path to a .svp or .svpi package")->required();
+  inspect->add_option(
+      "package", package_path,
+      "Path to an SVP, SVPI, or Embedded SVPI Transport")->required();
+  inspect->add_flag("--json", inspect_json, "Emit stable structured JSON output");
 
   std::string dump_package_path;
   std::string dump_section = "manifest";
@@ -1081,8 +1089,62 @@ int main(int argc, char** argv) {
   CLI11_PARSE(app, argc, argv);
 
   if (*inspect) {
+    const auto input = embedded_input_controller::preflight(package_path);
+    if (input.handled_as_transport) {
+      const auto& embedding = input.inspection();
+      if (embedding.embeddings.empty()) {
+        if (inspect_json) {
+          std::cout << nlohmann::json{{"embedding", embedded_transport_output::embedding_json(embedding)}}.dump(2)
+                    << "\n";
+        } else {
+          embedded_transport_output::print_embedding(embedding);
+        }
+        return embedding.container_structure_valid &&
+                       embedding.container.supported
+                   ? 0
+                   : 1;
+      }
+      if (!input.semantic_access_allowed) {
+        if (inspect_json) {
+          std::cout << nlohmann::json{
+              {"embedding", embedded_transport_output::embedding_json(embedding)},
+          }.dump(2) << "\n";
+        } else {
+          embedded_transport_output::print_embedding(embedding);
+        }
+        return 1;
+      }
+      const auto summary = svp::package::read_package_summary(package_path);
+      if (inspect_json) {
+        std::cout << nlohmann::json{
+            {"embedding", embedded_transport_output::embedding_json(embedding)},
+            {"package", embedded_transport_output::package_summary_json(summary)},
+            {"semantic", embedded_transport_output::semantic_summary_json(package_path)},
+        }.dump(2) << "\n";
+      } else {
+        embedded_transport_output::print_embedding(embedding);
+        std::cout << "\n";
+        print_summary(summary);
+        embedded_transport_output::print_semantic_summary(package_path);
+      }
+      return embedding.has_single_valid_embedding() &&
+                     embedding.embeddings.front().hash_verified &&
+                     embedding.embeddings.front().hash_matches &&
+                     summary.layout_readable
+                 ? 0
+                 : 1;
+    }
     const auto summary = svp::package::read_package_summary(package_path);
-    print_summary(summary);
+    if (inspect_json) {
+      std::cout << nlohmann::json{
+          {"package", embedded_transport_output::package_summary_json(summary)},
+          {"semantic", embedded_transport_output::semantic_summary_json(package_path)},
+      }.dump(2)
+                << "\n";
+    } else {
+      print_summary(summary);
+      embedded_transport_output::print_semantic_summary(package_path);
+    }
     return summary.layout_readable ? 0 : 1;
   }
 
@@ -1091,6 +1153,20 @@ int main(int argc, char** argv) {
   }
 
   if (*query) {
+    const auto input = embedded_input_controller::preflight(query_package_path);
+    if (input.handled_as_transport && !input.semantic_access_allowed) {
+      if (query_json) {
+        std::cout << nlohmann::json{
+            {"embedding", embedded_transport_output::embedding_json(
+                input.inspection())},
+            {"error", "Embedded SVPI Transport integrity validation failed."},
+        }.dump(2) << "\n";
+      } else {
+        embedded_transport_output::print_embedding(input.inspection());
+        std::cerr << "Embedded SVPI Transport integrity validation failed.\n";
+      }
+      return 1;
+    }
     if (query_mode == "layers") {
       query_cmd::print_layers(query_package_path, query_json);
     } else if (query_mode == "transcript") {

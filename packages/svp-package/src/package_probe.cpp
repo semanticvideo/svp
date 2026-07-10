@@ -16,8 +16,10 @@ PackageProbe probe_package(const std::filesystem::path& path) {
   probe.is_regular_file = !error && std::filesystem::is_regular_file(status);
   probe.has_svp_extension = svp::core::has_extension(path, ".svp");
   probe.has_svpi_extension = svp::core::has_extension(path, ".svpi");
+  if (probe.is_regular_file) {
+    probe.iso_bmff = inspect_iso_bmff_container(path);
+  }
   return probe;
 }
 
 }  // namespace svp::package
-

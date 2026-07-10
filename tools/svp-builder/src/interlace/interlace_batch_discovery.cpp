@@ -27,6 +27,12 @@ bool is_supported_video(const std::filesystem::path& path) {
   return false;
 }
 
+bool is_regular_non_symlink(const std::filesystem::directory_entry& entry) {
+  std::error_code error;
+  const auto status = entry.symlink_status(error);
+  return !error && std::filesystem::is_regular_file(status);
+}
+
 }  // namespace
 
 std::string make_utc_timestamp() {
@@ -42,13 +48,13 @@ std::vector<std::filesystem::path> discover_media_files(
   std::vector<std::filesystem::path> result;
   if (recursive) {
     for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
-      if (entry.is_regular_file() && is_supported_video(entry.path())) {
+      if (is_regular_non_symlink(entry) && is_supported_video(entry.path())) {
         result.push_back(entry.path());
       }
     }
   } else {
     for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-      if (entry.is_regular_file() && is_supported_video(entry.path())) {
+      if (is_regular_non_symlink(entry) && is_supported_video(entry.path())) {
         result.push_back(entry.path());
       }
     }

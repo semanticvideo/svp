@@ -48,6 +48,7 @@ if(BUILD_TESTING)
     tests/frame_connectivity_tests.cpp
     tests/spatial_relationship_tests.cpp
     tests/traversal_backend_parity_tests.cpp
+    tests/embedded_query_equivalence_tests.cpp
     tests/query_tests_main.cpp
   )
 

@@ -141,9 +141,39 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
 
   // interlace create-batch
   if (*opts.cb_create_batch_sub) {
+    auto output_format = svp::builder::parse_batch_output_format(
+        opts.cb_output_format);
+    if (!output_format) {
+      std::cerr << "invalid batch output format: "
+                << opts.cb_output_format << "\n";
+      return 2;
+    }
     auto visibility = svp::builder::parse_sidecar_visibility(opts.cb_visibility);
     if (!visibility) {
       std::cerr << "invalid sidecar visibility: " << opts.cb_visibility << "\n";
+      return 2;
+    }
+    if (*output_format == svp::builder::BatchOutputFormat::embedded_svpi) {
+      const bool has_output_directory =
+          !opts.cb_out_dir.empty() && opts.cb_out_dir != "same-as-source";
+      if (!has_output_directory && !opts.cb_overwrite) {
+        std::cerr << "--output-format embedded-svpi requires either --out-dir or explicit --overwrite\n";
+        return 2;
+      }
+      if (has_output_directory && opts.cb_overwrite) {
+        std::cerr << "--overwrite performs in-place replacement and cannot be combined with --out-dir\n";
+        return 2;
+      }
+      if (*visibility != svp::builder::SidecarVisibility::visible) {
+        std::cerr << "--sidecar-visibility applies only to --output-format svpi\n";
+        return 2;
+      }
+      if (opts.cb_no_blake3) {
+        std::cerr << "--no-blake3 cannot be used with --output-format embedded-svpi\n";
+        return 2;
+      }
+    } else if (opts.cb_overwrite) {
+      std::cerr << "--overwrite is supported only with --output-format embedded-svpi\n";
       return 2;
     }
 
@@ -158,9 +188,11 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
     cb_opts.performance = opts.cb_performance;
     cb_opts.jobs = opts.cb_jobs;
     cb_opts.recursive = opts.cb_recursive;
+    cb_opts.output_format = *output_format;
     cb_opts.visibility = *visibility;
     cb_opts.no_blake3 = opts.cb_no_blake3;
     cb_opts.replace_mismatched = opts.cb_replace_mismatched;
+    cb_opts.overwrite_sources = opts.cb_overwrite;
     cb_opts.core_only_diagnostic = opts.cb_core_only;
     cb_opts.allow_fallback_diarization = opts.cb_allow_fallback;
     cb_opts.force_single_speaker = opts.cb_force_single;
