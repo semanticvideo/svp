@@ -16,6 +16,7 @@ struct MicrophoneAsrStageResult {
   svp::audio::AsrExecutionBoundary boundary;
   nlohmann::json stream_results = nlohmann::json::array();
   nlohmann::json reconciliation = nlohmann::json::object();
+  nlohmann::json processor_record = nlohmann::json::object();
 };
 
 using MicrophoneAsrProgressCallback =

@@ -99,7 +99,7 @@ nlohmann::json ran_transcript_json(const AsrExecutionBoundary& boundary,
            : (boundary.diarization_status == "user_declared_single_speaker"
                 ? "User requested single-speaker mode. All words have speaker_id speaker_0001. Diarization was intentionally skipped."
                 : (boundary.diarization_status == "microphone_stream_assignment"
-                     ? "Microphone inputs collapse only when time-aligned diarization voice tracks match across sustained speech coverage. Same-time fingerprint mismatches preserve distinct voices. The input with stronger speech relative to its own noise floor is primary. Duplicate anchor chunks require a strict majority of aligned token content, and punctuation-bounded turns remain on the anchor with stronger time-local SNR. Diarization cannot reassign words between voice groups."
+                     ? "Each camera microphone remains an independent ownership source. Bleed removal requires time-aligned transcript agreement, local fingerprint agreement without contrary evidence, and stronger time-local SNR on another microphone. Missing fingerprint evidence preserves both sources. Diarization cannot reassign microphone ownership."
                      : "Speaker IDs assigned by max interval overlap with nearest-segment fallback (500ms tolerance). Sustained non-dominant speaker evidence may be expanded across the current ASR utterance. Words outside all segments and tolerance are marked speaker_unknown."))},
   };
 
@@ -161,6 +161,7 @@ nlohmann::json chunk_provenance_json(const AsrChunkPlan& chunk,
 
   return {
       {"chunk_id", chunk.chunk_id},
+      {"input_ref", chunk.input_ref},
       {"processor_id", processor_id},
       {"source_start_us", chunk.source_start_us},
       {"source_end_us", chunk.source_end_us},

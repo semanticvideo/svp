@@ -111,10 +111,17 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
   MicrophoneAsrStageResult result;
   std::vector<svp::audio::AsrExecutionBoundary> boundaries;
   std::vector<svp::audio::MicrophoneTranscript> transcripts;
-  const std::size_t chunks_per_stream =
-      svp::audio::build_asr_chunk_plan(media_duration_us).chunks.size();
-  const std::size_t total_chunks =
-      chunks_per_stream * extraction_plan.microphone_analysis_streams.size();
+  std::vector<std::size_t> chunks_by_stream;
+  std::size_t total_chunks = 0;
+  for (const auto& microphone : extraction_plan.microphone_analysis_streams) {
+    const std::int64_t duration_us =
+        microphone.timeline_duration_us.value_or(media_duration_us);
+    const std::size_t chunk_count =
+        svp::audio::build_asr_chunk_plan(duration_us).chunks.size();
+    chunks_by_stream.push_back(chunk_count);
+    total_chunks += chunk_count;
+  }
+  std::size_t completed_chunks_before_stream = 0;
   std::vector<std::string> fingerprint_blockers;
 
   // Deliberately sequential: a microphone's ASR completes before the next
@@ -127,9 +134,11 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
     const bool microphone_available =
         stream_ordinal < extraction_run.microphone_analysis_streams.size() &&
         extraction_run.microphone_analysis_streams[stream_ordinal].success;
+    const std::int64_t microphone_duration_us =
+        microphone_plan.timeline_duration_us.value_or(media_duration_us);
     const svp::audio::AsrChunkPlanResult chunk_plan =
         svp::audio::build_asr_chunk_plan(
-            media_duration_us, svp::audio::kDefaultAsrChunkDurationUs,
+            microphone_duration_us, svp::audio::kDefaultAsrChunkDurationUs,
             svp::audio::kDefaultAsrChunkOverlapUs, microphone_plan.output_ref);
     const svp::audio::AsrExecutionBoundary boundary =
         svp::audio::build_asr_execution_boundary(
@@ -138,16 +147,18 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
     svp::audio::AsrExecutionBoundary executed =
         svp::audio::execute_asr_boundary(
             boundary, staging_dir, model_cache_root,
-            [progress, stream_ordinal, chunks_per_stream, total_chunks](
+            [progress, completed_chunks_before_stream, total_chunks](
                 std::size_t current, std::size_t) {
               if (progress) {
-                progress(stream_ordinal * chunks_per_stream + current,
+                progress(completed_chunks_before_stream + current,
                          total_chunks);
               }
             });
     nlohmann::json stream_result = {
         {"source_audio_stream_id", microphone_plan.selected_source_audio_stream_id},
         {"source_stream_index", microphone_plan.source_stream_index},
+        {"source_start_us", microphone_plan.source_start_us},
+        {"timeline_duration_us", microphone_duration_us},
         {"analysis_audio_ref", microphone_plan.output_ref},
         {"asr_status", svp::audio::asr_status_to_string(executed.asr_status)},
         {"raw_word_count", executed.raw_word_count},
@@ -167,6 +178,7 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
     }
     result.stream_results.push_back(std::move(stream_result));
     boundaries.push_back(std::move(executed));
+    completed_chunks_before_stream += chunks_by_stream[stream_ordinal];
   }
 
   std::size_t speech_positive_streams = 0;
@@ -246,6 +258,7 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
   result.boundary.input_refs.clear();
   result.boundary.staged_chunk_output_refs.clear();
   result.boundary.chunk_plan.chunks.clear();
+  result.boundary.chunk_plan.total_duration_us = 0;
   result.boundary.blockers.clear();
   result.boundary.raw_word_count = 0;
   for (std::size_t stream_ordinal = 0; stream_ordinal < boundaries.size();
@@ -255,6 +268,9 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
                                       boundary.input_refs.begin(),
                                       boundary.input_refs.end());
     result.boundary.raw_word_count += boundary.raw_word_count;
+    result.boundary.chunk_plan.total_duration_us = std::max(
+        result.boundary.chunk_plan.total_duration_us,
+        boundary.chunk_plan.total_duration_us);
     for (const std::string& blocker : boundary.blockers) {
       result.boundary.blockers.push_back(
           "microphone stream " + std::to_string(stream_ordinal) + ": " + blocker);
@@ -270,10 +286,6 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
       result.boundary.chunk_plan.chunks.push_back(std::move(chunk));
     }
   }
-  result.boundary.blockers.insert(result.boundary.blockers.end(),
-                                  fingerprint_blockers.begin(),
-                                  fingerprint_blockers.end());
-
   if (!result.boundary.blockers.empty()) {
     result.boundary.asr_status = svp::audio::AsrStatus::blocked;
     result.boundary.reconciled_words.clear();
@@ -303,15 +315,13 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
   result.boundary.diarization_processor_id =
       "proc_microphone_stream_assignment_0001";
   result.boundary.diarization_note =
-      "Camera microphone inputs collapse only when time-aligned diarization voice "
-      "tracks match across sustained speech coverage. A fingerprint mismatch at "
-      "the same time is contrary identity evidence. The input with stronger speech "
-      "relative to its own non-speech noise floor supplies the primary transcript; "
-      "secondary input words are accepted only outside primary speech coverage. "
-      "When speaker-anchor ASR chunks contain a strict majority of aligned token "
-      "content, punctuation-bounded turns are retained only on the anchor with "
-      "stronger time-local speech SNR. "
-      "Diarization was not allowed to reassign ownership between voice groups.";
+      "Each camera microphone remains an independent ownership source. Words are "
+      "removed as bleed only when time-aligned turns share transcript content, "
+      "local diarization fingerprints provide no strong contrary evidence, and another "
+      "microphone has stronger time-local speech SNR. Missing fingerprint evidence "
+      "preserves both sources. Diarization was not allowed to reassign microphone "
+      "ownership.";
+  result.boundary.diarization_blockers = fingerprint_blockers;
   result.boundary.asr_status = svp::audio::AsrStatus::ran;
 
   result.reconciliation = {
@@ -327,19 +337,29 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
        reconciled.collapsed_microphone_stream_count},
       {"identity_policy", "camera_microphone_stream_locked"},
       {"voice_match_policy",
-       "time_aligned_diarization_fingerprint_coverage_and_agreement_required"},
+       "time_aligned_diarization_fingerprints_are_supporting_word_local_evidence_only"},
       {"minimum_voice_fingerprint_similarity",
        reconciliation_policy.minimum_voice_fingerprint_similarity},
+      {"maximum_contrary_voice_fingerprint_similarity",
+       reconciliation_policy.maximum_contrary_voice_fingerprint_similarity},
       {"minimum_aligned_voice_coverage_ratio",
        reconciliation_policy.minimum_aligned_voice_coverage_ratio},
       {"minimum_aligned_voice_match_ratio",
        reconciliation_policy.minimum_aligned_voice_match_ratio},
       {"minimum_duplicate_chunk_token_alignment_ratio",
        reconciliation_policy.minimum_duplicate_chunk_token_alignment_ratio},
+      {"minimum_duplicate_aligned_token_count",
+       reconciliation_policy.minimum_duplicate_aligned_token_count},
+      {"maximum_duplicate_word_time_delta_us",
+       reconciliation_policy.maximum_duplicate_word_time_delta_us},
+      {"minimum_fully_explained_voice_ratio",
+       reconciliation_policy.minimum_fully_explained_voice_ratio},
+      {"minimum_fully_explained_duplicate_word_ratio",
+       reconciliation_policy.minimum_fully_explained_duplicate_word_ratio},
       {"primary_selection_policy",
-       "median_speech_snr_then_word_signal_then_speech_coverage_then_asr_quality"},
+       "stronger_time_local_snr_wins_only_after_local_content_and_fingerprint_agreement"},
       {"source_grouping_policy",
-       "strongest_sources_anchor_speakers_weaker_matches_attach_upward_ambiguous_cross_group_sources_are_discarded"},
+       "microphone_sources_remain_independent_unless_sustained_voice_coverage_and_majority_word_local_duplicate_proof_fully_explain_a_weaker_source"},
       {"ranking_policy", "descending_deduplicated_word_count_then_stream_order"},
   };
   nlohmann::json voice_matches = nlohmann::json::array();
@@ -421,6 +441,9 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
         {"right_token_count", evidence.right_token_count},
         {"aligned_token_count", evidence.aligned_token_count},
         {"token_alignment_ratio", evidence.token_alignment_ratio},
+        {"time_aligned", evidence.time_aligned},
+        {"local_fingerprint_not_contrary",
+         evidence.local_fingerprint_not_contrary},
         {"duplicate_capture_proven", evidence.duplicate_capture_proven},
     });
   }
@@ -437,6 +460,42 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
     });
   }
   result.reconciliation["speakers"] = std::move(speaker_sources);
+  nlohmann::json input_streams = nlohmann::json::array();
+  for (const auto& microphone : extraction_plan.microphone_analysis_streams) {
+    input_streams.push_back({
+        {"source_audio_stream_id",
+         microphone.selected_source_audio_stream_id},
+        {"source_stream_index", microphone.source_stream_index},
+        {"source_start_us", microphone.source_start_us},
+        {"timeline_duration_us",
+         microphone.timeline_duration_us.has_value()
+             ? nlohmann::json(*microphone.timeline_duration_us)
+             : nlohmann::json(nullptr)},
+        {"input_ref", microphone.output_ref},
+    });
+  }
+  nlohmann::json fingerprint_models = nlohmann::json::array();
+  if (fingerprint_runtime_available) {
+    fingerprint_models.push_back("model_sherpa_onnx_diarization");
+  }
+  result.processor_record = {
+      {"id", result.boundary.diarization_processor_id},
+      {"name", "SVP microphone stream reconciliation"},
+      {"version", "1"},
+      {"input_refs", result.boundary.input_refs},
+      {"output_refs",
+       {result.boundary.transcript_output_ref, result.boundary.words_output_ref,
+        result.boundary.speakers_output_ref,
+        result.boundary.chunk_provenance_ref}},
+      {"model_refs", fingerprint_models},
+      {"runtime", "svp-audio"},
+      {"execution_provider", "cpu"},
+      {"identity_policy", "camera_microphone_stream_locked"},
+      {"input_streams", input_streams},
+      {"supporting_fingerprint_blockers", fingerprint_blockers},
+      {"reconciliation", result.reconciliation},
+      {"completed", true},
+  };
   return result;
 }
 

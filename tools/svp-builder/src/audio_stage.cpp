@@ -77,11 +77,18 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
     media_duration_us = svp::media::pts_to_microseconds(
         *context.plan.probe.container_timing->duration_pts,
         context.plan.probe.container_timing->timebase);
-  } else if (!context.plan.probe.audio_streams.empty() &&
-             context.plan.probe.audio_streams.front().timing.duration_pts.has_value()) {
-    media_duration_us = svp::media::pts_to_microseconds(
-        *context.plan.probe.audio_streams.front().timing.duration_pts,
-        context.plan.probe.audio_streams.front().timing.timebase);
+  } else {
+    if (audio_plan.extraction_plan.analysis_audio.timeline_duration_us.has_value()) {
+      media_duration_us =
+          *audio_plan.extraction_plan.analysis_audio.timeline_duration_us;
+    }
+    for (const auto& microphone :
+         audio_plan.extraction_plan.microphone_analysis_streams) {
+      if (microphone.timeline_duration_us.has_value()) {
+        media_duration_us =
+            std::max(media_duration_us, *microphone.timeline_duration_us);
+      }
+    }
   }
 
   const std::filesystem::path model_cache_root =
@@ -115,6 +122,13 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
         });
     executed_asr_boundary = std::move(microphone_result.boundary);
     microphone_asr_json = std::move(microphone_result.stream_results);
+    if (!microphone_result.processor_record.empty()) {
+      nlohmann::json processor_records = nlohmann::json::array();
+      processor_records.push_back(microphone_result.processor_record);
+      append_jsonl_file(
+          context.staging_dir / "provenance" / "processors.jsonl",
+          processor_records);
+    }
     if (!microphone_result.reconciliation.empty()) {
       audio_json["microphone_transcript_reconciliation"] =
           std::move(microphone_result.reconciliation);
