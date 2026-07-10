@@ -14,6 +14,9 @@ add_library(svp-audio
   src/audio_extraction_plan.cpp
   src/audio_stage_plan.cpp
   src/diarization_boundary.cpp
+  src/microphone_signal.cpp
+  src/microphone_transcript.cpp
+  src/microphone_word_ownership.cpp
   src/sherpa_diarization/api.cpp
   src/sherpa_diarization/asr_word_assignment.cpp
   src/sherpa_diarization/embeddings.cpp
@@ -82,6 +85,7 @@ if(BUILD_TESTING)
     tests/audio_stage_tests.cpp
     tests/diarization_boundary_tests.cpp
     tests/diarization_reconciliation_tests.cpp
+    tests/microphone_transcript_tests.cpp
     tests/audio_transcript_tests.cpp
     tests/real_diarization_fixture_tests.cpp
     tests/transcript_record_tests.cpp

@@ -6,7 +6,7 @@ int main() {
   test_attached_punctuation_can_have_zero_duration();
   test_audio_stage_plan_is_honest_about_pending_processors();
   test_audio_extraction_plan_documents_ffmpeg_commands_when_available();
-  test_multi_stream_analysis_audio_selects_first_stream();
+  test_multi_stream_analysis_audio_plans_each_microphone_and_canonical_mix();
   test_waveform_envelope_generates_ten_millisecond_json_records();
   test_audio_extraction_executor_writes_staged_single_stream_outputs();
   test_audio_extraction_executor_leaves_multi_stream_analysis_unrun();
@@ -75,5 +75,15 @@ int main() {
   test_force_single_speaker_json_reports_user_declared_status();
   test_force_single_speaker_transcript_provenance();
   test_normal_sherpa_path_unchanged_when_force_not_set();
+  test_microphone_bleed_deduplication_and_word_count_ranking();
+  test_microphone_equal_evidence_preserves_simultaneous_words();
+  test_microphone_matching_voice_without_shared_timing_stays_separate();
+  test_microphone_primary_selection_prefers_acoustic_strength();
+  test_time_aligned_diarization_preserves_two_speakers_and_collapses_bleed();
+  test_microphone_signal_profile_uses_diarization_negative_noise_floor();
+  test_weaker_bleed_chain_attaches_upward_without_becoming_a_speaker();
+  test_cross_anchor_duplicate_content_uses_time_local_snr_ownership();
+  test_cross_anchor_ownership_does_not_switch_inside_an_utterance();
+  test_microphone_silent_inputs_are_omitted_and_ties_use_stream_order();
   return 0;
 }

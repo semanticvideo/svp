@@ -82,7 +82,7 @@ void test_audio_extraction_plan_documents_ffmpeg_commands_when_available() {
   assert(extraction["analysis_audio_written"] == false);
 }
 
-void test_multi_stream_analysis_audio_selects_first_stream() {
+void test_multi_stream_analysis_audio_plans_each_microphone_and_canonical_mix() {
   svp::media::MediaProbe probe;
   probe.audio_streams.push_back({"astream_0001", 1, "aac", 48000, 2, {}});
   probe.audio_streams.push_back({"astream_0002", 2, "aac", 48000, 2, {}});
@@ -93,20 +93,28 @@ void test_multi_stream_analysis_audio_selects_first_stream() {
       svp::audio::audio_stage_plan_to_json(plan)["audio_extraction"];
 
   assert(extraction["original_streams"].size() == 2);
-  assert(extraction["analysis_audio"]["task_id"] == "task.audio.analysis.astream_000");
-  assert(extraction["analysis_audio"]["selected_source_audio_stream_id"] == "astream_0001");
-  assert(extraction["analysis_audio"]["depends_on"].size() == 1);
+  assert(extraction["microphone_analysis_streams"].size() == 2);
+  assert(extraction["microphone_analysis_streams"][0]["selected_source_audio_stream_id"] ==
+         "astream_0001");
+  assert(extraction["microphone_analysis_streams"][0]["source_stream_index"] == 1);
+  assert(extraction["microphone_analysis_streams"][0]["output_ref"] ==
+         "media/audio/analysis_stream_000_mono_16k.wav");
+  assert(extraction["microphone_analysis_streams"][1]["selected_source_audio_stream_id"] ==
+         "astream_0002");
+  assert(extraction["microphone_analysis_streams"][1]["source_stream_index"] == 2);
+  assert(extraction["microphone_analysis_streams"][1]["output_ref"] ==
+         "media/audio/analysis_stream_001_mono_16k.wav");
+  assert(extraction["analysis_audio"]["task_id"] == "task.audio.analysis.canonical_mix");
+  assert(extraction["analysis_audio"]["selected_source_audio_stream_id"] ==
+         "mixed_microphone_streams");
+  assert(extraction["analysis_audio"]["depends_on"].size() == 2);
   assert(extraction["analysis_audio"]["command_available"] == true);
   assert(!extraction["analysis_audio"]["arguments"].empty());
-  assert(!extraction["blockers"].empty());
-  bool has_multi_stream_blocker = false;
-  for (const auto& blocker : extraction["blockers"]) {
-    if (blocker.get<std::string>().find("multiple audio streams") != std::string::npos) {
-      has_multi_stream_blocker = true;
-      break;
-    }
-  }
-  assert(has_multi_stream_blocker);
+  const auto arguments =
+      extraction["analysis_audio"]["arguments"].get<std::vector<std::string>>();
+  assert(std::find(arguments.begin(), arguments.end(),
+                   "[0:1][0:2]amix=inputs=2:duration=longest:normalize=1[mixed]") !=
+         arguments.end());
 }
 
 void test_waveform_envelope_generates_ten_millisecond_json_records() {

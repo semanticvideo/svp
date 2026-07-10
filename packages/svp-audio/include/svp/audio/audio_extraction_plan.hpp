@@ -22,6 +22,7 @@ struct AnalysisAudioCommandPlan {
   std::string task_id;
   std::vector<std::string> depends_on;
   std::string selected_source_audio_stream_id;
+  std::int32_t source_stream_index = -1;
   std::string output_ref;
   std::vector<std::string> arguments;
 };
@@ -54,6 +55,7 @@ struct AudioExtractionPlan {
   bool ffmpeg_available = false;
   bool source_audio_present = false;
   std::vector<AudioExtractionCommandPlan> original_streams;
+  std::vector<AnalysisAudioCommandPlan> microphone_analysis_streams;
   AnalysisAudioCommandPlan analysis_audio;
   AudioAbsenceArtifactPlan audio_absence;
   WaveformArtifactPlan waveform;

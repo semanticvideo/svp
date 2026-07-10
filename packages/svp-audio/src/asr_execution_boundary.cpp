@@ -184,7 +184,8 @@ AsrExecutionBoundary build_asr_execution_boundary(const AsrChunkPlanResult& chun
                                                    bool analysis_audio_available,
                                                    bool model_runtime_available,
                                                    bool model_available,
-                                                   bool model_verified) {
+                                                   bool model_verified,
+                                                   const std::string& analysis_audio_ref) {
   AsrExecutionBoundary boundary;
   boundary.chunk_plan = chunk_plan;
   boundary.analysis_audio_available = analysis_audio_available;
@@ -192,7 +193,7 @@ AsrExecutionBoundary build_asr_execution_boundary(const AsrChunkPlanResult& chun
   boundary.model_available = model_available;
   boundary.model_verified = model_verified;
 
-  boundary.input_refs = {"media/audio/analysis_mono_16k.wav"};
+  boundary.input_refs = {analysis_audio_ref};
 
   for (const AsrChunkPlan& chunk : chunk_plan.chunks) {
     boundary.staged_chunk_output_refs.push_back(chunk.output_ref);
@@ -236,8 +237,10 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
 
   try {
     const std::filesystem::path model_dir = model_cache_root / boundary.model_id;
-    const std::filesystem::path input_wav =
-        staging_root / "media/audio/analysis_mono_16k.wav";
+    if (boundary.input_refs.size() != 1 || boundary.input_refs.front().empty()) {
+      throw std::runtime_error("ASR execution requires exactly one analysis audio input_ref");
+    }
+    const std::filesystem::path input_wav = staging_root / boundary.input_refs.front();
     if (!std::filesystem::exists(input_wav)) {
       throw std::runtime_error("staged analysis WAV file not found: " + input_wav.string());
     }
@@ -365,7 +368,9 @@ nlohmann::json asr_execution_boundary_to_json(const AsrExecutionBoundary& bounda
            ? "one_speaker_fallback"
            : (boundary.diarization_status == "user_declared_single_speaker"
                 ? "user_declared_single_speaker"
-                : "diarization_assigned")},
+                : (boundary.diarization_status == "microphone_stream_assignment"
+                     ? "camera_microphone_stream_locked"
+                     : "diarization_assigned"))},
   };
 
   nlohmann::json segments_json = nlohmann::json::array();
@@ -402,6 +407,10 @@ nlohmann::json asr_execution_boundary_to_json(const AsrExecutionBoundary& bounda
       {"diarization_note", boundary.diarization_note},
       {"diarization_blockers", boundary.diarization_blockers},
       {"speaker_segments", segments_json},
+      {"speaker_source_audio_stream_ids",
+       boundary.speaker_source_audio_stream_ids},
+      {"speaker_source_audio_stream_groups",
+       boundary.speaker_source_audio_stream_groups},
       {"asr_limitations", asr_limitations},
       {"blockers", boundary.blockers},
       {"chunk_plan", asr_chunk_plan_to_json(boundary.chunk_plan)},

@@ -22,6 +22,20 @@ std::string stream_task_id(std::size_t ordinal) {
   return output.str();
 }
 
+std::string microphone_analysis_output_ref(std::size_t ordinal) {
+  std::ostringstream output;
+  output << "media/audio/analysis_stream_" << std::setw(3) << std::setfill('0')
+         << ordinal << "_mono_16k.wav";
+  return output.str();
+}
+
+std::string microphone_analysis_task_id(std::size_t ordinal) {
+  std::ostringstream output;
+  output << "task.audio.analysis.microphone_" << std::setw(3)
+         << std::setfill('0') << ordinal;
+  return output.str();
+}
+
 std::vector<std::string> original_stream_arguments(
     const std::filesystem::path& ffmpeg_path,
     const std::filesystem::path& source_path,
@@ -71,6 +85,38 @@ std::vector<std::string> analysis_audio_arguments(
       "-c:a",
       "pcm_s16le",
       output_ref,
+  };
+}
+
+std::vector<std::string> mixed_analysis_audio_arguments(
+    const std::filesystem::path& ffmpeg_path,
+    const std::filesystem::path& source_path,
+    const std::vector<svp::media::AudioStreamProbe>& streams,
+    const std::string& output_ref) {
+  std::ostringstream inputs;
+  for (const auto& stream : streams) {
+    inputs << "[0:" << stream.index << "]";
+  }
+  std::ostringstream filter;
+  filter << inputs.str() << "amix=inputs=" << streams.size()
+         << ":duration=longest:normalize=1[mixed]";
+  return {
+      ffmpeg_path.string(), "-hide_banner", "-nostdin", "-nostats", "-v",
+      "error", "-y", "-i", source_path.string(), "-filter_complex",
+      filter.str(), "-map", "[mixed]", "-vn", "-ac", "1", "-ar", "16000",
+      "-c:a", "pcm_s16le", output_ref,
+  };
+}
+
+nlohmann::json analysis_command_to_json(const AnalysisAudioCommandPlan& command) {
+  return {
+      {"task_id", command.task_id},
+      {"depends_on", command.depends_on},
+      {"selected_source_audio_stream_id", command.selected_source_audio_stream_id},
+      {"source_stream_index", command.source_stream_index},
+      {"output_ref", command.output_ref},
+      {"arguments", command.arguments},
+      {"command_available", !command.arguments.empty()},
   };
 }
 
@@ -153,6 +199,7 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
     plan.analysis_audio.task_id = "task.audio.analysis.astream_000";
     plan.analysis_audio.depends_on = {"task.audio.extract.astream_000"};
     plan.analysis_audio.selected_source_audio_stream_id = stream.id;
+    plan.analysis_audio.source_stream_index = stream.index;
     plan.analysis_audio.arguments =
         ffmpeg_available
             ? analysis_audio_arguments(ffmpeg_path,
@@ -161,19 +208,30 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
                                        plan.analysis_audio.output_ref)
             : std::vector<std::string>{};
   } else if (probe.audio_streams.size() > 1) {
-    const svp::media::AudioStreamProbe& stream = probe.audio_streams.front();
-    plan.analysis_audio.task_id = "task.audio.analysis.astream_000";
-    plan.analysis_audio.depends_on = {stream_task_id(0)};
-    plan.analysis_audio.selected_source_audio_stream_id = stream.id;
+    plan.analysis_audio.task_id = "task.audio.analysis.canonical_mix";
+    plan.analysis_audio.depends_on = extraction_task_ids;
+    plan.analysis_audio.selected_source_audio_stream_id = "mixed_microphone_streams";
     plan.analysis_audio.arguments =
         ffmpeg_available
-            ? analysis_audio_arguments(ffmpeg_path,
-                                       source_path,
-                                       stream,
-                                       plan.analysis_audio.output_ref)
+            ? mixed_analysis_audio_arguments(ffmpeg_path, source_path,
+                                             probe.audio_streams,
+                                             plan.analysis_audio.output_ref)
             : std::vector<std::string>{};
-    plan.blockers.push_back(
-        "multiple audio streams present; first stream selected for analysis without VAD-based stream selection");
+    for (std::size_t index = 0; index < probe.audio_streams.size(); ++index) {
+      const auto& stream = probe.audio_streams[index];
+      AnalysisAudioCommandPlan microphone;
+      microphone.task_id = microphone_analysis_task_id(index);
+      microphone.depends_on = {stream_task_id(index)};
+      microphone.selected_source_audio_stream_id = stream.id;
+      microphone.source_stream_index = stream.index;
+      microphone.output_ref = microphone_analysis_output_ref(index);
+      microphone.arguments =
+          ffmpeg_available
+              ? analysis_audio_arguments(ffmpeg_path, source_path, stream,
+                                         microphone.output_ref)
+              : std::vector<std::string>{};
+      plan.microphone_analysis_streams.push_back(std::move(microphone));
+    }
   } else {
     plan.analysis_audio.task_id = "task.audio.analysis.silence_000";
     plan.analysis_audio.selected_source_audio_stream_id = "canonical_silence";
@@ -196,6 +254,9 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
 
   plan.processor_provenance.task_id = "task.audio.provenance.plan";
   plan.processor_provenance.depends_on = extraction_task_ids;
+  for (const auto& microphone : plan.microphone_analysis_streams) {
+    plan.processor_provenance.depends_on.push_back(microphone.task_id);
+  }
   if (!plan.analysis_audio.task_id.empty()) {
     plan.processor_provenance.depends_on.push_back(plan.analysis_audio.task_id);
   }
@@ -217,17 +278,24 @@ nlohmann::json audio_extraction_plan_to_json(const AudioExtractionPlan& plan) {
     original_streams.push_back(extraction_command_to_json(command));
   }
 
+  nlohmann::json microphone_analysis_streams = nlohmann::json::array();
+  for (const auto& command : plan.microphone_analysis_streams) {
+    microphone_analysis_streams.push_back(analysis_command_to_json(command));
+  }
+
   return {
       {"source_path", plan.source_path.string()},
       {"ffmpeg_path", plan.ffmpeg_path.string()},
       {"ffmpeg_available", plan.ffmpeg_available},
       {"source_audio_present", plan.source_audio_present},
       {"original_streams", original_streams},
+      {"microphone_analysis_streams", microphone_analysis_streams},
       {"analysis_audio",
        {{"task_id", plan.analysis_audio.task_id},
         {"depends_on", plan.analysis_audio.depends_on},
         {"selected_source_audio_stream_id",
          plan.analysis_audio.selected_source_audio_stream_id},
+        {"source_stream_index", plan.analysis_audio.source_stream_index},
         {"output_ref", plan.analysis_audio.output_ref},
         {"arguments", plan.analysis_audio.arguments},
         {"command_available", !plan.analysis_audio.arguments.empty()}}},

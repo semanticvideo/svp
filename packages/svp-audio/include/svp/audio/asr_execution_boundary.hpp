@@ -18,6 +18,8 @@ enum class AsrStatus {
   ran,
 };
 
+[[nodiscard]] std::string asr_status_to_string(AsrStatus status);
+
 struct AsrExecutionBoundary {
   std::string processor_id = "proc_whisper_asr_0001";
   std::string model_id = "model_whisper_small_en";
@@ -51,6 +53,8 @@ struct AsrExecutionBoundary {
   std::vector<SpeakerSegment> speaker_segments;
   std::vector<AsrWord> reconciled_words;
   std::vector<std::string> word_speaker_assignments;
+  std::vector<std::string> speaker_source_audio_stream_ids;
+  std::vector<std::vector<std::string>> speaker_source_audio_stream_groups;
 };
 
 [[nodiscard]] bool check_asr_model_in_cache(
@@ -66,7 +70,8 @@ struct AsrExecutionBoundary {
     bool analysis_audio_available,
     bool model_runtime_available,
     bool model_available,
-    bool model_verified);
+    bool model_verified,
+    const std::string& analysis_audio_ref = "media/audio/analysis_mono_16k.wav");
 
 using AsrChunkProgressCallback =
     std::function<void(std::size_t current, std::size_t total)>;
