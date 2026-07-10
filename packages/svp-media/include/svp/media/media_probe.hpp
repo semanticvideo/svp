@@ -37,6 +37,7 @@ struct AudioStreamProbe {
   std::int32_t sample_rate = 0;
   std::int32_t channels = 0;
   StreamTiming timing;
+  bool is_default = true;
 };
 
 struct MediaProbe {

@@ -3,6 +3,8 @@
 void test_audio_stage_plan_is_honest_about_pending_processors() {
   svp::media::MediaProbe probe;
   probe.audio_streams.push_back({"astream_0001", 1, "aac", 48000, 2, {}});
+  probe.audio_streams.push_back(
+      {"astream_0002", 2, "", 48000, 4, {}, false});
 
   const svp::audio::AudioStagePlan plan =
       svp::audio::build_audio_stage_plan("sample.mov", probe, false);
@@ -16,6 +18,8 @@ void test_audio_stage_plan_is_honest_about_pending_processors() {
   assert(!encoded["blockers"].empty());
   assert(encoded["audio_extraction"]["ffmpeg_available"] == false);
   assert(encoded["audio_extraction"]["extraction_run"] == false);
+  assert(encoded["audio_extraction"]["original_streams"].size() == 1);
+  assert(encoded["audio_extraction"]["microphone_analysis_streams"].empty());
   assert(encoded["vad_task_plan"]["vad_run"] == false);
   assert(encoded["vad_task_plan"]["speech_regions_written"] == false);
   assert(encoded["vad_execution_boundary"]["vad_run"] == false);
@@ -52,6 +56,7 @@ void test_audio_extraction_plan_documents_ffmpeg_commands_when_available() {
   assert(extraction["ffmpeg_available"] == true);
   assert(extraction["ffmpeg_path"] == "ffmpeg");
   assert(extraction["original_streams"].size() == 1);
+  assert(extraction["microphone_analysis_streams"].empty());
   assert(extraction["original_streams"][0]["task_id"] == "task.audio.extract.astream_000");
   assert(extraction["original_streams"][0]["output_ref"] ==
          "media/audio/original_stream_000.flac");

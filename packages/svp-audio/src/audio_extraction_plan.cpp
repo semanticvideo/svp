@@ -254,13 +254,31 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
   plan.ffmpeg_path = ffmpeg_path;
   plan.ffmpeg_available = ffmpeg_available;
   plan.source_audio_present = !probe.audio_streams.empty();
+  std::vector<const svp::media::AudioStreamProbe*> analysis_streams;
+  for (const auto& stream : probe.audio_streams) {
+    // Apple may expose a hidden auxiliary audio stream with no decodable codec.
+    // Keep known non-default codecs eligible because real microphone tracks are
+    // not required to carry the container's default disposition.
+    if (stream.is_default || !stream.codec_name.empty()) {
+      analysis_streams.push_back(&stream);
+    }
+  }
+  if (analysis_streams.empty()) {
+    for (const auto& stream : probe.audio_streams) {
+      analysis_streams.push_back(&stream);
+    }
+  }
+  std::vector<svp::media::AudioStreamProbe> analysis_stream_values;
+  for (const auto* stream : analysis_streams) {
+    analysis_stream_values.push_back(*stream);
+  }
   std::vector<std::string> extraction_task_ids;
   const svp::media::StreamTiming* presentation_origin =
       probe.audio_streams.empty() ? nullptr
                                   : &primary_presentation_timing(probe);
 
-  for (std::size_t index = 0; index < probe.audio_streams.size(); ++index) {
-    const svp::media::AudioStreamProbe& stream = probe.audio_streams[index];
+  for (std::size_t index = 0; index < analysis_streams.size(); ++index) {
+    const svp::media::AudioStreamProbe& stream = *analysis_streams[index];
     const std::string output_ref = stream_output_ref(index);
     const std::string task_id = stream_task_id(index);
     plan.original_streams.push_back(AudioExtractionCommandPlan{
@@ -275,8 +293,8 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
   }
 
   plan.analysis_audio.output_ref = "media/audio/analysis_mono_16k.wav";
-  if (probe.audio_streams.size() == 1) {
-    const svp::media::AudioStreamProbe& stream = probe.audio_streams.front();
+  if (analysis_streams.size() == 1) {
+    const svp::media::AudioStreamProbe& stream = *analysis_streams.front();
     plan.analysis_audio.task_id = "task.audio.analysis.astream_000";
     plan.analysis_audio.depends_on = {"task.audio.extract.astream_000"};
     plan.analysis_audio.selected_source_audio_stream_id = stream.id;
@@ -291,19 +309,19 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
                   ffmpeg_path, source_path, stream,
                   plan.analysis_audio.output_ref)
             : std::vector<std::string>{};
-  } else if (probe.audio_streams.size() > 1) {
+  } else if (analysis_streams.size() > 1) {
     plan.analysis_audio.task_id = "task.audio.analysis.canonical_mix";
     plan.analysis_audio.depends_on = extraction_task_ids;
     plan.analysis_audio.selected_source_audio_stream_id = "mixed_microphone_streams";
     plan.analysis_audio.arguments =
         ffmpeg_available
             ? mixed_analysis_audio_arguments(ffmpeg_path, source_path,
-                                             probe.audio_streams,
+                                             analysis_stream_values,
                                              *presentation_origin,
                                              plan.analysis_audio.output_ref)
             : std::vector<std::string>{};
-    for (std::size_t index = 0; index < probe.audio_streams.size(); ++index) {
-      const auto& stream = probe.audio_streams[index];
+    for (std::size_t index = 0; index < analysis_streams.size(); ++index) {
+      const auto& stream = *analysis_streams[index];
       AnalysisAudioCommandPlan microphone;
       microphone.task_id = microphone_analysis_task_id(index);
       microphone.depends_on = {stream_task_id(index)};

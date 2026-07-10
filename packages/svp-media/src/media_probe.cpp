@@ -396,12 +396,19 @@ nlohmann::json ffprobe_json_to_probe_contract(const nlohmann::json& ffprobe,
       const StreamTiming timing = parse_ffprobe_timing(stream, "audio stream");
       const std::optional<std::string> sample_rate =
           optional_string(stream, "sample_rate", "audio stream");
+      bool is_default = true;
+      const auto disposition = stream.find("disposition");
+      if (disposition != stream.end() && disposition->is_object()) {
+        is_default = optional_int32(*disposition, "default", 1,
+                                    "audio stream.disposition") != 0;
+      }
       contract["audio_streams"].push_back({
           {"id", generated_id("astream", audio_ordinal++)},
           {"index", optional_int32(stream, "index", 0, "audio stream")},
           {"codec_name", optional_string(stream, "codec_name", "audio stream").value_or("")},
           {"sample_rate", sample_rate.has_value() ? std::stoi(*sample_rate) : 0},
           {"channels", optional_int32(stream, "channels", 0, "audio stream")},
+          {"is_default", is_default},
           {"timing", stream_timing_to_json(timing)},
       });
     }
@@ -493,6 +500,7 @@ MediaProbe parse_media_probe_json(const nlohmann::json& value,
     parsed.sample_rate = optional_int32(stream, "sample_rate", 0, stream_source);
     parsed.channels = optional_int32(stream, "channels", 0, stream_source);
     parsed.timing = parse_nested_or_flat_stream_timing(stream, stream_source);
+    parsed.is_default = stream.value("is_default", true);
     probe.audio_streams.push_back(std::move(parsed));
   }
 
@@ -554,6 +562,7 @@ nlohmann::json media_probe_to_json(const MediaProbe& probe) {
         {"codec_name", stream.codec_name},
         {"sample_rate", stream.sample_rate},
         {"channels", stream.channels},
+        {"is_default", stream.is_default},
         {"timing", stream_timing_to_json(stream.timing)},
     });
   }
