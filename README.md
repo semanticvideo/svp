@@ -122,6 +122,23 @@ The SVPI draft spec lives at:
 docs/svpi/SVPI_v0.1_Draft_Specification.md
 ```
 
+## Embedded SVPI in MP4
+
+An SVPI can also be transported inside an ordinary MP4 without changing its
+semantic meaning. The MP4 profile stores one complete, unmodified canonical
+SVPI in a registered top-level `uuid` box. It does not transcode media or split
+semantic sections into MP4-native boxes.
+
+```text
+sidecar:      video.mp4 + video.svpi
+single file:  video-with-semantics.mp4 = original MP4 bytes + canonical SVPI
+```
+
+The Version 1 UUID is `e2b6a23c-22ca-5636-b165-991208c837f1`. The complete
+binary contract, placement rules, validation codes, and preservation limits
+are documented in
+[`docs/svpi/SVPI_Embedded_MP4_Profile_v1.md`](docs/svpi/SVPI_Embedded_MP4_Profile_v1.md).
+
 ## Architecture
 
 ```mermaid
@@ -135,8 +152,11 @@ flowchart TD
     Vision --> Models
     Package --> SVP[".svp package"]
     Package --> SVPI[".svpi sidecar"]
+    Package --> Embedded["MP4 + embedded SVPI"]
     SVP --> Validator["svp-validator"]
     SVPI --> Interlace["svp-builder interlace"]
+    Embedded --> Validator
+    Embedded --> Inspector
     SVP --> Inspector["svp-inspector"]
     Inspector --> Query["svp-query"]
 ```
@@ -276,6 +296,39 @@ Recombine source media plus SVPI into a full `.svp`:
   --out /path/to/recombined.svp
 ```
 
+Build a complete embedded MP4 directly through the normal build command:
+
+```bash
+./build/tools/svp-builder/svp-builder build \
+  /path/to/video.mp4 \
+  --out /path/to/video-with-semantics.mp4 \
+  --output-format embedded-mp4 \
+  --model-cache /path/to/svp-model-cache \
+  --sherpa-lib /path/to/libsherpa-onnx-c-api.dylib
+```
+
+The same command accepts `--output-format svp` (the default) and
+`--output-format svpi`.
+
+Embed an existing SVPI, extract it exactly, or reconstruct the clean MP4:
+
+```bash
+./build/tools/svp-builder/svp-builder interlace embed-mp4 \
+  /path/to/video.mp4 /path/to/video.svpi \
+  --out /path/to/video-with-semantics.mp4
+
+./build/tools/svp-builder/svp-builder interlace extract-embedded \
+  /path/to/video-with-semantics.mp4 \
+  --out /path/to/extracted.svpi
+
+./build/tools/svp-builder/svp-builder interlace strip-embedded \
+  /path/to/video-with-semantics.mp4 \
+  --out /path/to/clean.mp4
+```
+
+Existing embeddings require `--replace-existing`; existing output paths
+require explicit `--overwrite`.
+
 Batch workflows are also available:
 
 ```bash
@@ -290,10 +343,11 @@ Sidecar naming modes for `create-batch` are `visible`, `hidden`, and
 
 ## Validate and Inspect
 
-Validate a package:
+Validate an SVP, SVPI, or embedded MP4:
 
 ```bash
 ./build/tools/svp-validator/svp-validator validate build/local-intro/intro.svp
+./build/tools/svp-validator/svp-validator validate /path/to/video-with-semantics.mp4 --json
 ```
 
 Emit machine-readable validation JSON:
@@ -306,16 +360,18 @@ Print a concise package summary:
 
 ```bash
 ./build/tools/svp-inspector/svp-inspector inspect build/local-intro/intro.svp
+./build/tools/svp-inspector/svp-inspector inspect /path/to/video-with-semantics.mp4 --json
 ```
 
-`svp-inspector` can also inspect/query `.svpi` packages for the stored semantic
-records. Use `svp-builder interlace validate --media` when you specifically
-need binding verification against source media.
+`svp-inspector` can inspect and query `.svpi` packages and embedded MP4s through
+the same bounded package reader. Embedded validation compares a present SVPI
+full-file BLAKE3 binding with the logical clean MP4 bytes.
 
 List package layers:
 
 ```bash
 ./build/tools/svp-inspector/svp-inspector query build/local-intro/intro.svp --mode layers
+./build/tools/svp-inspector/svp-inspector query /path/to/video-with-semantics.mp4 --mode layers
 ```
 
 Query transcript words:

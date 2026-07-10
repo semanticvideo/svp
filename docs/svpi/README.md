@@ -11,6 +11,7 @@ context.
 | File | Purpose |
 | --- | --- |
 | `SVPI_v0.1_Draft_Specification.md` | Current draft specification for `.svpi` layout, binding, validation, provenance, and media hygiene. |
+| `SVPI_Embedded_MP4_Profile_v1.md` | Production transport profile for one complete canonical SVPI in a top-level MP4 `uuid` box. |
 | `SVPI_SPEC_AGENT_BRIEF.md` | Original drafting brief and design prompt for the SVPI spec. |
 
 ## Core idea
