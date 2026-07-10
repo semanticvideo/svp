@@ -12,6 +12,7 @@
 #include <limits>
 #include <optional>
 #include <sstream>
+#include <vector>
 
 namespace svp::validation {
 namespace {
@@ -55,7 +56,7 @@ bool hash_range(std::ifstream& input, blake3_hasher& hasher,
   }
   input.clear();
   input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
-  std::array<char, 1024 * 1024> buffer{};
+  std::vector<char> buffer(1024 * 1024);
   while (size > 0 && input) {
     const auto chunk = static_cast<std::streamsize>(
         std::min<std::uint64_t>(size, buffer.size()));

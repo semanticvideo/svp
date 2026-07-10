@@ -5,41 +5,10 @@
 #include "svp/builder/embedded_svpi_transport.hpp"
 #include "svp/builder/interlace.hpp"
 
-#include <cstdlib>
 #include <filesystem>
 #include <iostream>
-#include <vector>
-
-#include <unistd.h>
 
 namespace {
-
-class TemporaryBuildDirectory {
- public:
-  TemporaryBuildDirectory() {
-    auto pattern = (std::filesystem::temp_directory_path() /
-                    "svp-embedded-build-XXXXXX").string();
-    std::vector<char> writable(pattern.begin(), pattern.end());
-    writable.push_back('\0');
-    if (mkdtemp(writable.data()) != nullptr) {
-      path_ = writable.data();
-    }
-  }
-
-  ~TemporaryBuildDirectory() {
-    if (!path_.empty()) {
-      std::error_code ignored;
-      std::filesystem::remove_all(path_, ignored);
-    }
-  }
-
-  [[nodiscard]] const std::filesystem::path& path() const noexcept {
-    return path_;
-  }
-
- private:
-  std::filesystem::path path_;
-};
 
 svp::builder::InterlaceCreateOptions make_create_options(
     const BuildCliOptions& options,
@@ -88,27 +57,12 @@ int run_selected_output_build(
     return 0;
   }
 
-  TemporaryBuildDirectory temporary;
-  if (temporary.path().empty()) {
-    std::cerr << "unable to create managed temporary directory for canonical SVPI\n";
-    return 1;
-  }
-  const auto temporary_svpi = temporary.path() / "semantic-package.svpi";
-  const auto svpi = svp::builder::interlace_create(
-      make_create_options(options, temporary_svpi, progress_sink));
-  if (!svpi.success) {
-    std::cerr << "canonical SVPI build failed: " << svpi.error_message << "\n";
-    return 1;
-  }
-
-  svp::builder::EmbeddedTransportEmbedOptions embed;
-  embed.container_path = options.source_path;
-  embed.svpi_path = temporary_svpi;
-  embed.output_path = options.output_path;
-  embed.ffprobe_path = options.ffprobe_path;
-  embed.overwrite_output = options.overwrite;
-  embed.progress_sink = progress_sink;
-  const auto result = svp::builder::embed_svpi_transport(embed);
+  svp::builder::EmbeddedTransportBuildOptions build;
+  build.svpi_options = make_create_options(
+      options, std::filesystem::path{}, progress_sink);
+  build.output_path = options.output_path;
+  build.overwrite_output = options.overwrite;
+  const auto result = svp::builder::build_embedded_svpi_transport(build);
   if (!result.success) {
     std::cerr << "embedded SVPI transport build failed: "
               << result.error_message << "\n";

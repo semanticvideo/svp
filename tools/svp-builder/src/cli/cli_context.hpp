@@ -116,12 +116,14 @@ struct InterlaceCliOptions {
   std::string cb_ffmpeg = "ffmpeg";
   std::string cb_staging;
   std::string cb_sherpa_lib;
+  std::string cb_output_format = "svpi";
   std::string cb_visibility = "visible";
   svp::vision::InferencePerformanceOptions cb_performance;
   int cb_jobs = 1;
   bool cb_recursive = false;
   bool cb_no_blake3 = false;
   bool cb_replace_mismatched = false;
+  bool cb_overwrite = false;
   bool cb_json = false;
   bool cb_core_only = false;
   bool cb_allow_fallback = false;

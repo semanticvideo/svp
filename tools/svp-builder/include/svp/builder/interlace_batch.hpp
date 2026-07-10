@@ -16,6 +16,16 @@ enum class SidecarVisibility {
   managed_dir,
 };
 
+enum class BatchOutputFormat {
+  svpi,
+  embedded_svpi,
+};
+
+[[nodiscard]] std::string_view batch_output_format_name(
+    BatchOutputFormat format) noexcept;
+[[nodiscard]] std::optional<BatchOutputFormat> parse_batch_output_format(
+    std::string_view format) noexcept;
+
 [[nodiscard]] std::string_view sidecar_visibility_name(SidecarVisibility v) noexcept;
 [[nodiscard]] std::optional<SidecarVisibility> parse_sidecar_visibility(std::string_view v) noexcept;
 
@@ -23,6 +33,13 @@ enum class SidecarVisibility {
     const std::filesystem::path& media_path,
     SidecarVisibility visibility,
     const std::filesystem::path& out_dir);
+
+[[nodiscard]] std::filesystem::path resolve_batch_artifact_path(
+    const std::filesystem::path& media_path,
+    const std::filesystem::path& source_dir,
+    const std::filesystem::path& out_dir,
+    BatchOutputFormat format,
+    SidecarVisibility visibility);
 
 struct BatchCreateOptions {
   std::string source_dir;
@@ -35,9 +52,11 @@ struct BatchCreateOptions {
   svp::vision::InferencePerformanceOptions performance;
   int jobs = 1;
   bool recursive = false;
+  BatchOutputFormat output_format = BatchOutputFormat::svpi;
   SidecarVisibility visibility = SidecarVisibility::visible;
   bool no_blake3 = false;
   bool replace_mismatched = false;
+  bool overwrite_sources = false;
   bool core_only_diagnostic = false;
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
@@ -59,7 +78,7 @@ enum class BatchFileStatus {
 struct BatchFileResult {
   std::string source_filename;
   std::string source_relative_path;
-  std::filesystem::path svpi_path;
+  std::filesystem::path artifact_path;
   BatchFileStatus status = BatchFileStatus::failed;
   std::string error_message;
   std::string blake3_state;

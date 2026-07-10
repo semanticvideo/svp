@@ -20,12 +20,15 @@ add_library(svp-builder-lib
   src/interlace/interlace_extract.cpp
   src/interlace/interlace_recombine.cpp
   src/transport/embedded_transport_embed.cpp
+  src/transport/embedded_transport_build.cpp
   src/transport/embedded_transport_extract.cpp
   src/transport/embedded_transport_strip.cpp
   src/transport/replacement_binding_media.cpp
   src/transport/transport_output_policy.cpp
   src/interlace/interlace_batch_discovery.cpp
   src/interlace/interlace_batch_sidecar.cpp
+  src/interlace/interlace_batch_output.cpp
+  src/interlace/interlace_batch_embedded.cpp
   src/interlace/interlace_batch_create.cpp
   src/interlace/interlace_batch_scan.cpp
   src/interlace/interlace_batch_validate.cpp

@@ -11,6 +11,7 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <vector>
 
 namespace svp::package {
 namespace {
@@ -34,7 +35,7 @@ bool hash_range(const std::filesystem::path& path, std::uint64_t offset,
 
   blake3_hasher hasher;
   blake3_hasher_init(&hasher);
-  std::array<char, 1024 * 1024> buffer{};
+  std::vector<char> buffer(1024 * 1024);
   std::uint64_t remaining = size;
   while (remaining > 0) {
     const auto chunk = static_cast<std::streamsize>(

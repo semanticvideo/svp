@@ -74,7 +74,7 @@ bool copy_bytes(std::ifstream& input, std::ofstream& output,
   if (!input) {
     return false;
   }
-  std::array<char, kCopyBufferSize> buffer{};
+  std::vector<char> buffer(kCopyBufferSize);
   while (size > 0) {
     const auto chunk = static_cast<std::streamsize>(
         std::min<std::uint64_t>(size, buffer.size()));
@@ -104,7 +104,7 @@ bool hash_file(const std::filesystem::path& path, std::uint64_t& size,
   }
   blake3_hasher hasher;
   blake3_hasher_init(&hasher);
-  std::array<char, kCopyBufferSize> buffer{};
+  std::vector<char> buffer(kCopyBufferSize);
   while (input) {
     input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
     const auto count = input.gcount();

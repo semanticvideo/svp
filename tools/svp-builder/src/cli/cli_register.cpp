@@ -197,7 +197,7 @@ void register_cli(CLI::App& app, CliContext& context) {
 
   // interlace create-batch
   auto* cb_create_batch = interlace->add_subcommand(
-      "create-batch", "Create .svpi sidecars for all supported videos in a directory");
+      "create-batch", "Create SVPI sidecars or Embedded SVPI Transport media for a directory");
   cb_create_batch->add_option("source-dir", opts.cb_source_dir, "Directory containing source videos")->required();
   cb_create_batch->add_option("--out-dir", opts.cb_out_dir, "Output directory (default: same as source)");
   cb_create_batch->add_option("--model-cache", opts.cb_model_cache, "Model cache directory");
@@ -209,13 +209,18 @@ void register_cli(CLI::App& app, CliContext& context) {
   cb_create_batch->add_option("--jobs", opts.cb_jobs,
       "Maximum number of media files to process concurrently")
       ->check(CLI::PositiveNumber);
+  cb_create_batch->add_option("--output-format", opts.cb_output_format,
+      "Batch output representation: svpi or embedded-svpi")
+      ->check(CLI::IsMember({"svpi", "embedded-svpi"}));
   cb_create_batch->add_option("--sidecar-visibility", opts.cb_visibility,
-      "Sidecar naming: visible, hidden, managed-dir")
+      "SVPI-only sidecar naming: visible, hidden, managed-dir")
       ->check(CLI::IsMember({"visible", "hidden", "managed-dir"}));
   cb_create_batch->add_flag("--recursive", opts.cb_recursive, "Search subdirectories recursively");
   cb_create_batch->add_flag("--no-blake3", opts.cb_no_blake3, "Skip full-file BLAKE3 computation");
   cb_create_batch->add_flag("--replace-mismatched", opts.cb_replace_mismatched,
-      "Replace existing sidecars that fail binding verification");
+      "Replace existing output artifacts that fail validation or binding verification");
+  cb_create_batch->add_flag("--overwrite", opts.cb_overwrite,
+      "Atomically replace source media in place (embedded-svpi only, no --out-dir)");
   cb_create_batch->add_flag("--json", opts.cb_json, "Emit JSON summary report");
   cb_create_batch->add_flag("--core-only-diagnostic", opts.cb_core_only,
       "Emit core-only SVPI without running semantic pipeline (diagnostic mode)");

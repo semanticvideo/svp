@@ -3,6 +3,7 @@
 #include "svp/builder/build_progress.hpp"
 
 #include "svp/package/media_binding.hpp"
+#include "svp/package/embedded_svpi.hpp"
 #include "svp/package/media_binding_factory.hpp"
 #include "svp/package/svpi_writer.hpp"
 #include "svp/package/package_layout.hpp"
@@ -70,6 +71,38 @@ void create_mock_source_media(const std::filesystem::path& path, int size_bytes 
   for (int i = 0; i < size_bytes; ++i) {
     out.put(static_cast<char>(i % 256));
   }
+}
+
+void write_u32_be(std::ofstream& output, std::uint32_t value) {
+  const char bytes[] = {
+      static_cast<char>((value >> 24) & 0xff),
+      static_cast<char>((value >> 16) & 0xff),
+      static_cast<char>((value >> 8) & 0xff),
+      static_cast<char>(value & 0xff),
+  };
+  output.write(bytes, sizeof(bytes));
+}
+
+void create_mock_iso_bmff(const std::filesystem::path& path,
+                          int media_payload_size = 512) {
+  std::ofstream output(path, std::ios::binary);
+  write_u32_be(output, 24);
+  output.write("ftyp", 4);
+  output.write("mp42", 4);
+  write_u32_be(output, 0);
+  output.write("mp42", 4);
+  output.write("isom", 4);
+  write_u32_be(output, static_cast<std::uint32_t>(8 + media_payload_size));
+  output.write("mdat", 4);
+  for (int index = 0; index < media_payload_size; ++index) {
+    output.put(static_cast<char>(index % 251));
+  }
+}
+
+std::string read_binary_file(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  return {std::istreambuf_iterator<char>(input),
+          std::istreambuf_iterator<char>()};
 }
 
 nlohmann::json make_svpi_manifest(const std::string& package_id) {
@@ -394,6 +427,187 @@ void test_batch_create_managed_dir_sidecars() {
 
   std::filesystem::remove_all(root);
   std::cout << "  test_batch_create_managed_dir_sidecars passed\n";
+}
+
+void test_batch_output_format_and_embedded_path_resolution() {
+  CHECK(svp::builder::parse_batch_output_format("svpi") ==
+        svp::builder::BatchOutputFormat::svpi);
+  CHECK(svp::builder::parse_batch_output_format("embedded-svpi") ==
+        svp::builder::BatchOutputFormat::embedded_svpi);
+  CHECK(!svp::builder::parse_batch_output_format("svp"));
+
+  const auto source = std::filesystem::path("/source/nested/clip.MP4");
+  const auto output = svp::builder::resolve_batch_artifact_path(
+      source, "/source", "/output",
+      svp::builder::BatchOutputFormat::embedded_svpi,
+      svp::builder::SidecarVisibility::visible);
+  CHECK(output == std::filesystem::path("/output/nested/clip.MP4"));
+  std::cout << "  test_batch_output_format_and_embedded_path_resolution passed\n";
+}
+
+void test_batch_create_embedded_outputs_and_rerun() {
+  auto root = make_test_dir("svp-batch-embedded-output");
+  auto source = root / "source";
+  auto output = root / "output";
+  std::filesystem::create_directories(source / "nested");
+  create_mock_iso_bmff(source / "clip1.mp4", 512);
+  create_mock_iso_bmff(source / "nested" / "clip2.mp4", 768);
+
+  svp::builder::BatchCreateOptions options;
+  options.source_dir = source.string();
+  options.out_dir = output.string();
+  options.recursive = true;
+  options.output_format = svp::builder::BatchOutputFormat::embedded_svpi;
+  options.ffprobe_path = "/usr/bin/true";
+  options.core_only_diagnostic = true;
+
+  const auto first = svp::builder::interlace_create_batch(options);
+  CHECK(first.created_count == 2);
+  CHECK(first.failed_count == 0);
+  CHECK(std::filesystem::exists(output / "clip1.mp4"));
+  CHECK(std::filesystem::exists(output / "nested" / "clip2.mp4"));
+  CHECK(!std::filesystem::exists(output / "clip1.svpi"));
+  CHECK(svp::package::inspect_embedded_svpi(
+            output / "clip1.mp4", true).has_single_valid_embedding());
+  CHECK(svp::package::inspect_embedded_svpi(
+            output / "nested" / "clip2.mp4", true)
+            .has_single_valid_embedding());
+
+  const auto second = svp::builder::interlace_create_batch(options);
+  CHECK(second.created_count == 0);
+  CHECK(second.already_valid_count == 2);
+  CHECK(second.failed_count == 0);
+
+  const auto clean = root / "clean.mp4";
+  const auto stripped = svp::package::strip_embedded_svpi(
+      output / "clip1.mp4", clean);
+  CHECK(stripped.success);
+  CHECK(read_binary_file(clean) == read_binary_file(source / "clip1.mp4"));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_create_embedded_outputs_and_rerun passed\n";
+}
+
+void test_batch_create_embedded_requires_destination_or_overwrite() {
+  auto root = make_test_dir("svp-batch-embedded-destination-policy");
+  auto source = root / "source";
+  std::filesystem::create_directories(source);
+  const auto media = source / "clip.mp4";
+  create_mock_iso_bmff(media);
+  const auto original = read_binary_file(media);
+
+  svp::builder::BatchCreateOptions options;
+  options.source_dir = source.string();
+  options.output_format = svp::builder::BatchOutputFormat::embedded_svpi;
+  options.ffprobe_path = "/usr/bin/true";
+  options.core_only_diagnostic = true;
+
+  const auto result = svp::builder::interlace_create_batch(options);
+  CHECK(result.failed_count == 1);
+  CHECK(read_binary_file(media) == original);
+
+  options.out_dir = (source / "generated").string();
+  const auto nested = svp::builder::interlace_create_batch(options);
+  CHECK(nested.failed_count == 1);
+  CHECK(read_binary_file(media) == original);
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_create_embedded_requires_destination_or_overwrite passed\n";
+}
+
+void test_batch_create_embedded_overwrites_sources_atomically() {
+  auto root = make_test_dir("svp-batch-embedded-in-place");
+  auto source = root / "source";
+  std::filesystem::create_directories(source);
+  const auto media = source / "clip.mp4";
+  create_mock_iso_bmff(media, 1024);
+  const auto original = read_binary_file(media);
+
+  svp::builder::BatchCreateOptions options;
+  options.source_dir = source.string();
+  options.output_format = svp::builder::BatchOutputFormat::embedded_svpi;
+  options.overwrite_sources = true;
+  options.ffprobe_path = "/usr/bin/true";
+  options.core_only_diagnostic = true;
+
+  const auto first = svp::builder::interlace_create_batch(options);
+  CHECK(first.created_count == 1);
+  CHECK(first.failed_count == 0);
+  CHECK(svp::package::inspect_embedded_svpi(media, true)
+            .has_single_valid_embedding());
+
+  const auto clean = root / "clean.mp4";
+  CHECK(svp::package::strip_embedded_svpi(media, clean).success);
+  CHECK(read_binary_file(clean) == original);
+
+  const auto second = svp::builder::interlace_create_batch(options);
+  CHECK(second.created_count == 0);
+  CHECK(second.already_valid_count == 1);
+  CHECK(second.failed_count == 0);
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_create_embedded_overwrites_sources_atomically passed\n";
+}
+
+void test_batch_create_embedded_replaces_stale_output_only_when_requested() {
+  auto root = make_test_dir("svp-batch-embedded-replace-stale");
+  auto source = root / "source";
+  auto output = root / "output";
+  std::filesystem::create_directories(source);
+  const auto media = source / "clip.mp4";
+  create_mock_iso_bmff(media, 512);
+
+  svp::builder::BatchCreateOptions options;
+  options.source_dir = source.string();
+  options.out_dir = output.string();
+  options.output_format = svp::builder::BatchOutputFormat::embedded_svpi;
+  options.ffprobe_path = "/usr/bin/true";
+  options.core_only_diagnostic = true;
+  CHECK(svp::builder::interlace_create_batch(options).created_count == 1);
+
+  create_mock_iso_bmff(media, 1536);
+  const auto stale = svp::builder::interlace_create_batch(options);
+  CHECK(stale.mismatch_count == 1);
+  CHECK(stale.replaced_count == 0);
+
+  options.replace_mismatched = true;
+  const auto replaced = svp::builder::interlace_create_batch(options);
+  CHECK(replaced.replaced_count == 1);
+  CHECK(replaced.failed_count == 0);
+
+  const auto clean = root / "clean.mp4";
+  CHECK(svp::package::strip_embedded_svpi(
+            output / "clip.mp4", clean).success);
+  CHECK(read_binary_file(clean) == read_binary_file(media));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_create_embedded_replaces_stale_output_only_when_requested passed\n";
+}
+
+void test_batch_create_embedded_invalid_source_is_not_modified() {
+  auto root = make_test_dir("svp-batch-embedded-invalid-source");
+  auto source = root / "source";
+  std::filesystem::create_directories(source);
+  const auto media = source / "broken.mp4";
+  create_mock_source_media(media, 512);
+  const auto original = read_binary_file(media);
+
+  svp::builder::BatchCreateOptions options;
+  options.source_dir = source.string();
+  options.output_format = svp::builder::BatchOutputFormat::embedded_svpi;
+  options.overwrite_sources = true;
+  options.ffprobe_path = "/usr/bin/true";
+  options.core_only_diagnostic = true;
+  const auto result = svp::builder::interlace_create_batch(options);
+  CHECK(result.failed_count == 1);
+  CHECK(read_binary_file(media) == original);
+  for (const auto& entry : std::filesystem::directory_iterator(source)) {
+    CHECK(entry.path().filename().string().find(".svp-tmp-") ==
+          std::string::npos);
+  }
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_create_embedded_invalid_source_is_not_modified passed\n";
 }
 
 void test_scan_detects_missing_sidecar() {
@@ -1317,6 +1531,12 @@ int main() {
   test_existing_mismatched_not_overwritten();
   test_batch_create_hidden_sidecars();
   test_batch_create_managed_dir_sidecars();
+  test_batch_output_format_and_embedded_path_resolution();
+  test_batch_create_embedded_outputs_and_rerun();
+  test_batch_create_embedded_requires_destination_or_overwrite();
+  test_batch_create_embedded_overwrites_sources_atomically();
+  test_batch_create_embedded_replaces_stale_output_only_when_requested();
+  test_batch_create_embedded_invalid_source_is_not_modified();
   test_scan_detects_missing_sidecar();
   test_scan_detects_unbound_sidecar();
   test_scan_finds_verified_pair();

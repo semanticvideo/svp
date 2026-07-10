@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/builder/build_progress.hpp"
+#include "svp/builder/interlace.hpp"
 #include "svp/validation/report.hpp"
 
 #include <filesystem>
@@ -8,6 +9,22 @@
 #include <string>
 
 namespace svp::builder {
+
+struct EmbeddedTransportBuildOptions {
+  InterlaceCreateOptions svpi_options;
+  std::filesystem::path output_path;
+  bool overwrite_output = false;
+};
+
+struct EmbeddedTransportBuildResult {
+  bool success = false;
+  std::filesystem::path output_path;
+  svp::validation::ValidationReport validation_report;
+  std::string error_message;
+};
+
+[[nodiscard]] EmbeddedTransportBuildResult build_embedded_svpi_transport(
+    const EmbeddedTransportBuildOptions& options);
 
 struct EmbeddedTransportEmbedOptions {
   std::filesystem::path container_path;
