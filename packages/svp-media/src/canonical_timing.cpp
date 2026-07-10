@@ -54,6 +54,41 @@ std::int64_t pts_to_microseconds(std::int64_t normalized_pts,
   return round_half_to_even_wide(numerator, static_cast<__int128>(timebase.denominator));
 }
 
+std::int64_t normalized_pts_to_microseconds(
+    std::int64_t source_pts,
+    Rational source_timebase,
+    std::int64_t origin_pts,
+    Rational origin_timebase) {
+  const std::int64_t delta = pts_delta_to_microseconds(
+      source_pts, source_timebase, origin_pts, origin_timebase);
+  if (delta < 0) {
+    throw std::invalid_argument(
+        "source PTS precedes the primary presentation start");
+  }
+  return delta;
+}
+
+std::int64_t pts_delta_to_microseconds(
+    std::int64_t source_pts,
+    Rational source_timebase,
+    std::int64_t origin_pts,
+    Rational origin_timebase) {
+  const Rational source = normalize(source_timebase);
+  const Rational origin = normalize(origin_timebase);
+  const __int128 normalized_numerator =
+      static_cast<__int128>(source_pts) * source.numerator *
+          origin.denominator -
+      static_cast<__int128>(origin_pts) * origin.numerator *
+          source.denominator;
+  const __int128 denominator =
+      static_cast<__int128>(source.denominator) * origin.denominator;
+  if (normalized_numerator < 0) {
+    return -round_half_to_even_wide(-normalized_numerator * 1000000,
+                                    denominator);
+  }
+  return round_half_to_even_wide(normalized_numerator * 1000000, denominator);
+}
+
 std::int64_t frame_index_to_microseconds(std::int64_t frame_index,
                                          Rational frame_rate) {
   const Rational rate = normalize(frame_rate);

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <nlohmann/json_fwd.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,8 @@ struct AnalysisAudioCommandPlan {
   std::vector<std::string> depends_on;
   std::string selected_source_audio_stream_id;
   std::int32_t source_stream_index = -1;
+  std::int64_t source_start_us = 0;
+  std::optional<std::int64_t> timeline_duration_us;
   std::string output_ref;
   std::vector<std::string> arguments;
 };

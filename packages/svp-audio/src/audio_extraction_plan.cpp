@@ -1,5 +1,7 @@
 #include "svp/audio/audio_extraction_plan.hpp"
 
+#include "svp/media/canonical_timing.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <iomanip>
@@ -36,6 +38,54 @@ std::string microphone_analysis_task_id(std::size_t ordinal) {
   return output.str();
 }
 
+const svp::media::StreamTiming& primary_presentation_timing(
+    const svp::media::MediaProbe& probe) {
+  if (!probe.video_streams.empty()) return probe.video_streams.front().timing;
+  if (probe.container_timing.has_value()) return *probe.container_timing;
+  const svp::media::StreamTiming* earliest = &probe.audio_streams.front().timing;
+  for (const auto& stream : probe.audio_streams) {
+    const __int128 left = static_cast<__int128>(stream.timing.start_pts) *
+                          stream.timing.timebase.numerator *
+                          earliest->timebase.denominator;
+    const __int128 right = static_cast<__int128>(earliest->start_pts) *
+                           earliest->timebase.numerator *
+                           stream.timing.timebase.denominator;
+    if (left < right) earliest = &stream.timing;
+  }
+  return *earliest;
+}
+
+std::int64_t normalized_stream_start_us(
+    const svp::media::AudioStreamProbe& stream,
+    const svp::media::StreamTiming& origin) {
+  return svp::media::pts_delta_to_microseconds(
+      stream.timing.start_pts, stream.timing.timebase,
+      origin.start_pts, origin.timebase);
+}
+
+std::optional<std::int64_t> stream_timeline_duration_us(
+    const svp::media::AudioStreamProbe& stream,
+    const svp::media::StreamTiming& origin) {
+  if (!stream.timing.duration_pts.has_value()) return std::nullopt;
+  const std::int64_t start_us =
+      normalized_stream_start_us(stream, origin);
+  const std::int64_t duration_us = svp::media::pts_to_microseconds(
+      *stream.timing.duration_pts, stream.timing.timebase);
+  return std::max<std::int64_t>(0, start_us + duration_us);
+}
+
+std::string signed_seconds_string(std::int64_t microseconds) {
+  if (microseconds >= 0) {
+    return svp::media::microseconds_to_seconds_string(microseconds);
+  }
+  return "-" + svp::media::microseconds_to_seconds_string(-microseconds);
+}
+
+std::string timeline_normalization_filter(std::int64_t source_start_us) {
+  return "asetpts=PTS-STARTPTS+" + signed_seconds_string(source_start_us) +
+         "/TB,aresample=async=1:first_pts=0";
+}
+
 std::vector<std::string> original_stream_arguments(
     const std::filesystem::path& ffmpeg_path,
     const std::filesystem::path& source_path,
@@ -64,6 +114,7 @@ std::vector<std::string> analysis_audio_arguments(
     const std::filesystem::path& ffmpeg_path,
     const std::filesystem::path& source_path,
     const svp::media::AudioStreamProbe& stream,
+    std::int64_t source_start_us,
     const std::string& output_ref) {
   return {
       ffmpeg_path.string(),
@@ -78,6 +129,8 @@ std::vector<std::string> analysis_audio_arguments(
       "-map",
       "0:" + std::to_string(stream.index),
       "-vn",
+      "-af",
+      timeline_normalization_filter(source_start_us),
       "-ac",
       "1",
       "-ar",
@@ -92,13 +145,20 @@ std::vector<std::string> mixed_analysis_audio_arguments(
     const std::filesystem::path& ffmpeg_path,
     const std::filesystem::path& source_path,
     const std::vector<svp::media::AudioStreamProbe>& streams,
+    const svp::media::StreamTiming& origin,
     const std::string& output_ref) {
   std::ostringstream inputs;
-  for (const auto& stream : streams) {
-    inputs << "[0:" << stream.index << "]";
+  std::ostringstream normalized_inputs;
+  for (std::size_t index = 0; index < streams.size(); ++index) {
+    inputs << "[0:" << streams[index].index
+           << "]" << timeline_normalization_filter(
+                            normalized_stream_start_us(streams[index], origin))
+           << "[mic" << index << "];";
+    normalized_inputs << "[mic" << index << "]";
   }
   std::ostringstream filter;
-  filter << inputs.str() << "amix=inputs=" << streams.size()
+  filter << inputs.str() << normalized_inputs.str()
+         << "amix=inputs=" << streams.size()
          << ":duration=longest:normalize=1[mixed]";
   return {
       ffmpeg_path.string(), "-hide_banner", "-nostdin", "-nostats", "-v",
@@ -114,6 +174,11 @@ nlohmann::json analysis_command_to_json(const AnalysisAudioCommandPlan& command)
       {"depends_on", command.depends_on},
       {"selected_source_audio_stream_id", command.selected_source_audio_stream_id},
       {"source_stream_index", command.source_stream_index},
+      {"source_start_us", command.source_start_us},
+      {"timeline_duration_us",
+       command.timeline_duration_us.has_value()
+           ? nlohmann::json(*command.timeline_duration_us)
+           : nlohmann::json(nullptr)},
       {"output_ref", command.output_ref},
       {"arguments", command.arguments},
       {"command_available", !command.arguments.empty()},
@@ -177,6 +242,9 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
   plan.ffmpeg_available = ffmpeg_available;
   plan.source_audio_present = !probe.audio_streams.empty();
   std::vector<std::string> extraction_task_ids;
+  const svp::media::StreamTiming* presentation_origin =
+      probe.audio_streams.empty() ? nullptr
+                                  : &primary_presentation_timing(probe);
 
   for (std::size_t index = 0; index < probe.audio_streams.size(); ++index) {
     const svp::media::AudioStreamProbe& stream = probe.audio_streams[index];
@@ -200,11 +268,16 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
     plan.analysis_audio.depends_on = {"task.audio.extract.astream_000"};
     plan.analysis_audio.selected_source_audio_stream_id = stream.id;
     plan.analysis_audio.source_stream_index = stream.index;
+    plan.analysis_audio.source_start_us =
+        normalized_stream_start_us(stream, *presentation_origin);
+    plan.analysis_audio.timeline_duration_us =
+        stream_timeline_duration_us(stream, *presentation_origin);
     plan.analysis_audio.arguments =
         ffmpeg_available
             ? analysis_audio_arguments(ffmpeg_path,
                                        source_path,
                                        stream,
+                                       plan.analysis_audio.source_start_us,
                                        plan.analysis_audio.output_ref)
             : std::vector<std::string>{};
   } else if (probe.audio_streams.size() > 1) {
@@ -215,6 +288,7 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
         ffmpeg_available
             ? mixed_analysis_audio_arguments(ffmpeg_path, source_path,
                                              probe.audio_streams,
+                                             *presentation_origin,
                                              plan.analysis_audio.output_ref)
             : std::vector<std::string>{};
     for (std::size_t index = 0; index < probe.audio_streams.size(); ++index) {
@@ -224,10 +298,15 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
       microphone.depends_on = {stream_task_id(index)};
       microphone.selected_source_audio_stream_id = stream.id;
       microphone.source_stream_index = stream.index;
+      microphone.source_start_us =
+          normalized_stream_start_us(stream, *presentation_origin);
+      microphone.timeline_duration_us =
+          stream_timeline_duration_us(stream, *presentation_origin);
       microphone.output_ref = microphone_analysis_output_ref(index);
       microphone.arguments =
           ffmpeg_available
               ? analysis_audio_arguments(ffmpeg_path, source_path, stream,
+                                         microphone.source_start_us,
                                          microphone.output_ref)
               : std::vector<std::string>{};
       plan.microphone_analysis_streams.push_back(std::move(microphone));
@@ -296,6 +375,11 @@ nlohmann::json audio_extraction_plan_to_json(const AudioExtractionPlan& plan) {
         {"selected_source_audio_stream_id",
          plan.analysis_audio.selected_source_audio_stream_id},
         {"source_stream_index", plan.analysis_audio.source_stream_index},
+        {"source_start_us", plan.analysis_audio.source_start_us},
+        {"timeline_duration_us",
+         plan.analysis_audio.timeline_duration_us.has_value()
+             ? nlohmann::json(*plan.analysis_audio.timeline_duration_us)
+             : nlohmann::json(nullptr)},
         {"output_ref", plan.analysis_audio.output_ref},
         {"arguments", plan.analysis_audio.arguments},
         {"command_available", !plan.analysis_audio.arguments.empty()}}},
