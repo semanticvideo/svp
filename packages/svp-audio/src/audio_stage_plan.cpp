@@ -30,14 +30,15 @@ AudioStagePlan build_audio_stage_plan(const std::filesystem::path& source_path,
   AudioStagePlan plan;
   plan.source_path = source_path;
   plan.source_audio_present = !probe.audio_streams.empty();
-  if (plan.source_audio_present) {
-    plan.selected_audio_stream_id = probe.audio_streams.front().id;
-  }
   plan.extraction_plan =
       build_audio_extraction_plan(source_path,
                                   probe,
                                   ffmpeg_audio_extraction_available,
                                   ffmpeg_path);
+  plan.selected_audio_stream_id =
+      plan.extraction_plan.microphone_analysis_streams.size() > 1
+          ? "camera_microphone_streams"
+          : plan.extraction_plan.analysis_audio.selected_source_audio_stream_id;
   plan.vad_task_plan = build_vad_task_plan(probe, std::nullopt, model_runtime_available);
   plan.vad_execution_boundary =
       build_vad_execution_boundary(plan.vad_task_plan, false, false, model_runtime_available);
@@ -65,9 +66,6 @@ AudioStagePlan build_audio_stage_plan(const std::filesystem::path& source_path,
   if (!model_runtime_available) {
     plan.blockers.push_back("VAD model runtime is not wired in this foundation pass");
   }
-  plan.blockers.push_back("whisper.cpp transcription is not wired in this foundation pass");
-  plan.blockers.push_back("sherpa-onnx diarization model inference is not wired; fallback one-speaker boundary is available");
-
   return plan;
 }
 

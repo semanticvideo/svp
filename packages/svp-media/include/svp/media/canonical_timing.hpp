@@ -11,6 +11,16 @@ namespace svp::media {
                                               std::int64_t denominator);
 [[nodiscard]] std::int64_t pts_to_microseconds(std::int64_t normalized_pts,
                                                Rational source_timebase);
+[[nodiscard]] std::int64_t normalized_pts_to_microseconds(
+    std::int64_t source_pts,
+    Rational source_timebase,
+    std::int64_t origin_pts,
+    Rational origin_timebase);
+[[nodiscard]] std::int64_t pts_delta_to_microseconds(
+    std::int64_t source_pts,
+    Rational source_timebase,
+    std::int64_t origin_pts,
+    Rational origin_timebase);
 [[nodiscard]] std::int64_t frame_index_to_microseconds(std::int64_t frame_index,
                                                        Rational frame_rate);
 [[nodiscard]] std::string microseconds_to_seconds_string(std::int64_t microseconds);

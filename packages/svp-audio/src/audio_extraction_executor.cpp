@@ -215,6 +215,13 @@ nlohmann::json audio_absence_record(const AudioExtractionPlan& plan,
     }
   }
 
+  nlohmann::json microphone_analysis_refs = nlohmann::json::array();
+  for (const auto& command_run : run.microphone_analysis_streams) {
+    if (command_run.success) {
+      microphone_analysis_refs.push_back(command_run.output_ref);
+    }
+  }
+
   return {
       {"source_audio_present", plan.source_audio_present},
       {"source_audio_stream_count", plan.original_streams.size()},
@@ -222,6 +229,7 @@ nlohmann::json audio_absence_record(const AudioExtractionPlan& plan,
        plan.analysis_audio.selected_source_audio_stream_id},
       {"canonical_silence_generated", false},
       {"original_audio_refs", original_audio_refs},
+      {"microphone_analysis_refs", microphone_analysis_refs},
       {"analysis_audio_ref", run.analysis_audio.success ? run.analysis_audio.output_ref : ""},
       {"analysis_audio_written", run.analysis_audio.success},
       {"provenance_id", plan.audio_absence.processor_id},
@@ -240,10 +248,16 @@ nlohmann::json extraction_processor_record(const AudioExtractionPlan& plan,
   for (const AudioExtractionCommandRun& command_run : run.original_streams) {
     output_refs.push_back(command_run.output_ref);
   }
+  for (const AudioExtractionCommandRun& command_run : run.microphone_analysis_streams) {
+    output_refs.push_back(command_run.output_ref);
+  }
   output_refs.push_back(run.analysis_audio.output_ref);
 
   nlohmann::json task_ids = nlohmann::json::array();
   for (const AudioExtractionCommandRun& command_run : run.original_streams) {
+    task_ids.push_back(command_run.task_id);
+  }
+  for (const AudioExtractionCommandRun& command_run : run.microphone_analysis_streams) {
     task_ids.push_back(command_run.task_id);
   }
   task_ids.push_back(run.analysis_audio.task_id);
@@ -259,7 +273,9 @@ nlohmann::json extraction_processor_record(const AudioExtractionPlan& plan,
       {"runtime", "ffmpeg_cli"},
       {"execution_provider", "cpu"},
       {"foundation_status", run.extraction_run ? "attempted" : "planned"},
-      {"completed", run.original_streams_written && run.analysis_audio_written},
+      {"completed", run.original_streams_written &&
+                        run.microphone_analysis_streams_written &&
+                        run.analysis_audio_written},
   };
 }
 
@@ -402,6 +418,17 @@ AudioExtractionRun execute_audio_extraction_plan(const AudioExtractionPlan& plan
     run.original_streams.push_back(std::move(command_run));
   }
 
+  for (const AnalysisAudioCommandPlan& command : plan.microphone_analysis_streams) {
+    AudioExtractionCommandRun command_run =
+        execute_command(command.task_id, command.output_ref, command.arguments,
+                        staging_root, suppress_stderr);
+    run.extraction_run = run.extraction_run || command_run.command_executed;
+    if (!command_run.success && !command_run.skipped_reason.empty()) {
+      run.blockers.push_back(command.task_id + ": " + command_run.skipped_reason);
+    }
+    run.microphone_analysis_streams.push_back(std::move(command_run));
+  }
+
   run.analysis_audio = execute_command(plan.analysis_audio.task_id,
                                        plan.analysis_audio.output_ref,
                                        plan.analysis_audio.arguments,
@@ -416,6 +443,13 @@ AudioExtractionRun execute_audio_extraction_plan(const AudioExtractionPlan& plan
   run.original_streams_written = !run.original_streams.empty();
   for (const AudioExtractionCommandRun& command_run : run.original_streams) {
     run.original_streams_written = run.original_streams_written && command_run.success;
+  }
+  run.microphone_analysis_streams_written =
+      plan.microphone_analysis_streams.empty() ||
+      run.microphone_analysis_streams.size() == plan.microphone_analysis_streams.size();
+  for (const AudioExtractionCommandRun& command_run : run.microphone_analysis_streams) {
+    run.microphone_analysis_streams_written =
+        run.microphone_analysis_streams_written && command_run.success;
   }
   run.analysis_audio_written = run.analysis_audio.success;
   run.audio_absence = stage_audio_absence(plan, run, staging_root);
@@ -444,10 +478,15 @@ nlohmann::json audio_extraction_run_to_json(const AudioExtractionRun& run) {
   for (const AudioExtractionCommandRun& command_run : run.original_streams) {
     original_streams.push_back(command_run_to_json(command_run));
   }
+  nlohmann::json microphone_analysis_streams = nlohmann::json::array();
+  for (const AudioExtractionCommandRun& command_run : run.microphone_analysis_streams) {
+    microphone_analysis_streams.push_back(command_run_to_json(command_run));
+  }
 
   return {
       {"staging_root", run.staging_root.string()},
       {"original_streams", original_streams},
+      {"microphone_analysis_streams", microphone_analysis_streams},
       {"analysis_audio", command_run_to_json(run.analysis_audio)},
       {"audio_absence", derived_artifact_run_to_json(run.audio_absence)},
       {"waveform", derived_artifact_run_to_json(run.waveform)},
@@ -456,6 +495,8 @@ nlohmann::json audio_extraction_run_to_json(const AudioExtractionRun& run) {
       {"blockers", run.blockers},
       {"extraction_run", run.extraction_run},
       {"original_streams_written", run.original_streams_written},
+      {"microphone_analysis_streams_written",
+       run.microphone_analysis_streams_written},
       {"analysis_audio_written", run.analysis_audio_written},
       {"audio_absence_written", run.audio_absence_written},
       {"waveform_written", run.waveform_written},

@@ -1,4 +1,5 @@
 #include "build_pipeline_internal.hpp"
+#include "microphone_asr_stage.hpp"
 
 #include "svp/audio/asr_chunk_planner.hpp"
 #include "svp/audio/asr_execution_boundary.hpp"
@@ -49,6 +50,8 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
       extraction_run.extraction_run;
   audio_json["audio_extraction"]["original_streams_written"] =
       extraction_run.original_streams_written;
+  audio_json["audio_extraction"]["microphone_analysis_streams_written"] =
+      extraction_run.microphone_analysis_streams_written;
   audio_json["audio_extraction"]["analysis_audio_written"] =
       extraction_run.analysis_audio_written;
   audio_json["audio_extraction"]["audio_absence_written"] =
@@ -74,15 +77,19 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
     media_duration_us = svp::media::pts_to_microseconds(
         *context.plan.probe.container_timing->duration_pts,
         context.plan.probe.container_timing->timebase);
-  } else if (!context.plan.probe.audio_streams.empty() &&
-             context.plan.probe.audio_streams.front().timing.duration_pts.has_value()) {
-    media_duration_us = svp::media::pts_to_microseconds(
-        *context.plan.probe.audio_streams.front().timing.duration_pts,
-        context.plan.probe.audio_streams.front().timing.timebase);
+  } else {
+    if (audio_plan.extraction_plan.analysis_audio.timeline_duration_us.has_value()) {
+      media_duration_us =
+          *audio_plan.extraction_plan.analysis_audio.timeline_duration_us;
+    }
+    for (const auto& microphone :
+         audio_plan.extraction_plan.microphone_analysis_streams) {
+      if (microphone.timeline_duration_us.has_value()) {
+        media_duration_us =
+            std::max(media_duration_us, *microphone.timeline_duration_us);
+      }
+    }
   }
-
-  const svp::audio::AsrChunkPlanResult asr_chunk_plan =
-      svp::audio::build_asr_chunk_plan(media_duration_us);
 
   const std::filesystem::path model_cache_root =
       context.options.model_cache_dir.empty()
@@ -98,27 +105,72 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
       svp::audio::verify_asr_model_files(
           "model_whisper_small_en", model_cache_root);
 
-  const svp::audio::AsrExecutionBoundary asr_boundary =
-      svp::audio::build_asr_execution_boundary(
-          asr_chunk_plan,
-          extraction_run.analysis_audio_written,
-          context.model_runtime_available,
-          asr_model_available,
-          asr_model_verified);
-
   emit_stage_started(context, ProgressStageId::asr);
-  const svp::audio::AsrExecutionBoundary executed_asr_boundary =
-      svp::audio::execute_asr_boundary(
-          asr_boundary, context.staging_dir, model_cache_root,
-          [&context](std::size_t current, std::size_t total) {
-            if (total > 0) {
-              emit_stage_progress(context, ProgressStageId::asr,
-                                  static_cast<std::uint64_t>(current),
-                                  static_cast<std::uint64_t>(total),
-                                  "chunks");
-            }
-          });
+  const bool microphone_stream_mode =
+      audio_plan.extraction_plan.microphone_analysis_streams.size() > 1;
+  svp::audio::AsrExecutionBoundary executed_asr_boundary;
+  nlohmann::json microphone_asr_json = nlohmann::json::array();
+  if (microphone_stream_mode) {
+    MicrophoneAsrStageResult microphone_result = run_microphone_asr_stage(
+        audio_plan.extraction_plan, extraction_run, media_duration_us,
+        context.model_runtime_available, asr_model_available, asr_model_verified,
+        context.staging_dir, model_cache_root,
+        [&context](std::size_t current, std::size_t total) {
+          emit_stage_progress(context, ProgressStageId::asr,
+                              static_cast<std::uint64_t>(current),
+                              static_cast<std::uint64_t>(total), "chunks");
+        });
+    executed_asr_boundary = std::move(microphone_result.boundary);
+    microphone_asr_json = std::move(microphone_result.stream_results);
+    if (!microphone_result.processor_record.empty()) {
+      nlohmann::json processor_records = nlohmann::json::array();
+      processor_records.push_back(microphone_result.processor_record);
+      append_jsonl_file(
+          context.staging_dir / "provenance" / "processors.jsonl",
+          processor_records);
+    }
+    if (!microphone_result.reconciliation.empty()) {
+      audio_json["microphone_transcript_reconciliation"] =
+          std::move(microphone_result.reconciliation);
+    }
+  } else {
+    const svp::audio::AsrChunkPlanResult asr_chunk_plan =
+        svp::audio::build_asr_chunk_plan(media_duration_us);
+    const svp::audio::AsrExecutionBoundary asr_boundary =
+        svp::audio::build_asr_execution_boundary(
+            asr_chunk_plan, extraction_run.analysis_audio_written,
+            context.model_runtime_available, asr_model_available,
+            asr_model_verified);
+    executed_asr_boundary = svp::audio::execute_asr_boundary(
+        asr_boundary, context.staging_dir, model_cache_root,
+        [&context](std::size_t current, std::size_t total) {
+          if (total > 0) {
+            emit_stage_progress(context, ProgressStageId::asr,
+                                static_cast<std::uint64_t>(current),
+                                static_cast<std::uint64_t>(total), "chunks");
+          }
+        });
+  }
   emit_stage_completed(context, ProgressStageId::asr);
+
+  audio_json["microphone_asr"] = std::move(microphone_asr_json);
+
+  if (microphone_stream_mode) {
+    const svp::audio::TranscriptWriteResult transcript_result =
+        svp::audio::write_transcript_artifacts(executed_asr_boundary,
+                                               context.staging_dir);
+    audio_json["asr_chunk_plan"] =
+        svp::audio::asr_chunk_plan_to_json(executed_asr_boundary.chunk_plan);
+    audio_json["asr_execution_boundary"] =
+        svp::audio::asr_execution_boundary_to_json(executed_asr_boundary);
+    audio_json["transcript_write_result"] =
+        svp::audio::transcript_write_result_to_json(transcript_result);
+    for (const std::string& blocker : executed_asr_boundary.blockers) {
+      audio_json["blockers"].push_back(blocker);
+    }
+    context.output["audio_foundation"] = std::move(audio_json);
+    return std::nullopt;
+  }
 
   // Diarization boundary: check for diarization model in cache.
   // If unavailable, honest fallback one-speaker segment is produced.

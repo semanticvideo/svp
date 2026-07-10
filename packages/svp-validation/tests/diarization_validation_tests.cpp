@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -20,7 +21,9 @@ void write_file(const std::filesystem::path& path, const std::string& content) {
 }
 
 std::filesystem::path create_test_package(const std::string& test_name,
-                                          const nlohmann::json& transcript_json) {
+                                          const nlohmann::json& transcript_json,
+                                          const std::vector<nlohmann::json>& processors = {},
+                                          const std::vector<nlohmann::json>& chunks = {}) {
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / test_name;
   std::filesystem::remove_all(root);
@@ -31,6 +34,17 @@ std::filesystem::path create_test_package(const std::string& test_name,
 
   write_file(staging_dir / "transcript" / "transcript.json",
              transcript_json.dump());
+  if (!processors.empty()) {
+    std::string records;
+    for (const auto& processor : processors) records += processor.dump() + "\n";
+    write_file(staging_dir / "provenance" / "processors.jsonl", records);
+  }
+  if (!chunks.empty()) {
+    std::string records;
+    for (const auto& chunk : chunks) records += chunk.dump() + "\n";
+    write_file(staging_dir / "transcript" / "asr_chunk_provenance.jsonl",
+               records);
+  }
 
   nlohmann::json manifest = {
     {"svp_version", "1.0-rc.2"},
@@ -145,6 +159,72 @@ void test_validator_allows_ran_with_zero_speakers() {
   std::filesystem::remove_all(package_path.parent_path());
 }
 
+void test_validator_allows_microphone_assignment_with_zero_speakers() {
+  nlohmann::json transcript = {
+    {"diarization", {{"status", "microphone_stream_assignment"},
+                       {"processor_id", "proc_microphone_stream_assignment_0001"}}},
+    {"speaker_count", 0},
+    {"speaker_sources", nlohmann::json::array()}
+  };
+
+  const nlohmann::json processor = {
+    {"id", "proc_microphone_stream_assignment_0001"},
+    {"input_refs", {"media/audio/analysis_stream_000_mono_16k.wav"}},
+    {"input_streams",
+     {{{"source_audio_stream_id", "astream_0001"},
+       {"input_ref", "media/audio/analysis_stream_000_mono_16k.wav"}}}},
+    {"reconciliation",
+     {{"source_assignment_evidence", nlohmann::json::array()},
+      {"cross_anchor_chunk_content_evidence", nlohmann::json::array()},
+      {"maximum_duplicate_word_time_delta_us", 1500000}}}
+  };
+  const nlohmann::json chunk = {
+    {"chunk_id", "microphone_000_asr_chunk_000000"},
+    {"input_ref", "media/audio/analysis_stream_000_mono_16k.wav"}
+  };
+
+  const auto package_path = create_test_package(
+      "svp-diar-validation-microphone-assignment-zero", transcript,
+      {processor}, {chunk});
+  const std::filesystem::path repo_root =
+      std::filesystem::current_path().parent_path().parent_path();
+
+  svp::validation::ValidatorOptions options;
+  options.validation_codes_path =
+      repo_root / "spec" / "registries" / "validation-codes.json";
+  options.registry_root_path = repo_root / "spec" / "registries";
+  options.schema_root_path = repo_root / "spec" / "schemas";
+
+  const svp::validation::ValidationReport report =
+      svp::validation::validate_package(package_path, options);
+  assert(!has_finding_with_code(report, "ERR_DIARIZATION_UNAVAILABLE"));
+
+  std::filesystem::remove_all(package_path.parent_path());
+}
+
+void test_validator_rejects_dangling_microphone_processor_reference() {
+  nlohmann::json transcript = {
+    {"diarization", {{"status", "microphone_stream_assignment"},
+                       {"processor_id", "proc_microphone_stream_assignment_0001"}}},
+    {"speaker_count", 0},
+    {"speaker_sources", nlohmann::json::array()}
+  };
+  const auto package_path = create_test_package(
+      "svp-diar-validation-microphone-assignment-dangling", transcript);
+  const std::filesystem::path repo_root =
+      std::filesystem::current_path().parent_path().parent_path();
+  svp::validation::ValidatorOptions options;
+  options.validation_codes_path =
+      repo_root / "spec" / "registries" / "validation-codes.json";
+  options.registry_root_path = repo_root / "spec" / "registries";
+  options.schema_root_path = repo_root / "spec" / "schemas";
+
+  const svp::validation::ValidationReport report =
+      svp::validation::validate_package(package_path, options);
+  assert(has_finding_with_code(report, "ERR_DIARIZATION_UNAVAILABLE"));
+  std::filesystem::remove_all(package_path.parent_path());
+}
+
 void test_validator_emits_error_for_unparsable_transcript() {
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "svp-diar-validation-unparsable";
@@ -196,6 +276,8 @@ int main() {
   test_validator_emits_warning_for_fallback_diarization();
   test_validator_emits_error_for_unavailable_diarization();
   test_validator_allows_ran_with_zero_speakers();
+  test_validator_allows_microphone_assignment_with_zero_speakers();
+  test_validator_rejects_dangling_microphone_processor_reference();
   test_validator_emits_error_for_unparsable_transcript();
   return 0;
 }

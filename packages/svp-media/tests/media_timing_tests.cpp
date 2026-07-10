@@ -23,6 +23,15 @@ void test_frame_rates() {
   assert(svp::media::frame_index_to_microseconds(1, {60, 1}) == 16667);
 }
 
+void test_stream_pts_are_normalized_against_primary_presentation_start() {
+  assert(svp::media::pts_delta_to_microseconds(
+             96000, {1, 48000}, 1000, {1, 1000}) == 1000000);
+  assert(svp::media::pts_delta_to_microseconds(
+             24000, {1, 48000}, 1000, {1, 1000}) == -500000);
+  assert(svp::media::normalized_pts_to_microseconds(
+             96000, {1, 48000}, 1000, {1, 1000}) == 1000000);
+}
+
 void test_canonical_rasters() {
   auto landscape =
       svp::media::compute_canonical_analysis_raster({1920, 1080, 0, {1, 1}});
@@ -156,6 +165,7 @@ void test_ffprobe_side_data_rotation_feeds_canonical_raster() {
 int main() {
   test_round_half_to_even();
   test_frame_rates();
+  test_stream_pts_are_normalized_against_primary_presentation_start();
   test_canonical_rasters();
   test_probe_json_round_trip_preserves_nested_timing();
   test_probe_json_parser_keeps_legacy_flat_timing();

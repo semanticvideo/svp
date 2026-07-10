@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <nlohmann/json_fwd.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,9 @@ struct AnalysisAudioCommandPlan {
   std::string task_id;
   std::vector<std::string> depends_on;
   std::string selected_source_audio_stream_id;
+  std::int32_t source_stream_index = -1;
+  std::int64_t source_start_us = 0;
+  std::optional<std::int64_t> timeline_duration_us;
   std::string output_ref;
   std::vector<std::string> arguments;
 };
@@ -54,6 +58,7 @@ struct AudioExtractionPlan {
   bool ffmpeg_available = false;
   bool source_audio_present = false;
   std::vector<AudioExtractionCommandPlan> original_streams;
+  std::vector<AnalysisAudioCommandPlan> microphone_analysis_streams;
   AnalysisAudioCommandPlan analysis_audio;
   AudioAbsenceArtifactPlan audio_absence;
   WaveformArtifactPlan waveform;

@@ -11,6 +11,7 @@ add_library(svp-builder-lib
   src/build_stage_metadata.cpp
   src/foundation_color_stage.cpp
   src/foundation_ocr_stage.cpp
+  src/microphone_asr_stage.cpp
   src/package_skeleton_stage.cpp
   src/progress_renderer.cpp
   src/vision_plan_stage.cpp

@@ -37,9 +37,10 @@ nlohmann::json speaker_json(const std::string& speaker_id,
                             const std::string& processor_id,
                             const std::string& diarization_status,
                             int speaker_number,
-                            std::int64_t total_speech_us) {
+                            std::int64_t total_speech_us,
+                            const std::string& source_audio_stream_id = "") {
   std::string display_name = "Speaker " + std::to_string(speaker_number);
-  return {
+  nlohmann::json speaker = {
       {"id", speaker_id},
       {"display_name", display_name},
       {"total_speech_us", total_speech_us},
@@ -47,6 +48,10 @@ nlohmann::json speaker_json(const std::string& speaker_id,
       {"processor_id", processor_id},
       {"diarization_status", diarization_status},
   };
+  if (!source_audio_stream_id.empty()) {
+    speaker["source_audio_stream_id"] = source_audio_stream_id;
+  }
+  return speaker;
 }
 
 }  // namespace
@@ -81,9 +86,16 @@ std::vector<nlohmann::json> build_speaker_records(
     if (it != speaker_intervals.end()) {
       total_speech = compute_total_speech_us(it->second);
     }
-    speaker_records.push_back(speaker_json(sid, boundary.diarization_processor_id,
-                                           boundary.diarization_status, speaker_number,
-                                           total_speech));
+    const std::string source_audio_stream_id =
+        boundary.diarization_status == "microphone_stream_assignment" &&
+                static_cast<std::size_t>(speaker_number) <=
+                    boundary.speaker_source_audio_stream_ids.size()
+            ? boundary.speaker_source_audio_stream_ids[
+                  static_cast<std::size_t>(speaker_number - 1)]
+            : "";
+    speaker_records.push_back(speaker_json(
+        sid, boundary.diarization_processor_id, boundary.diarization_status,
+        speaker_number, total_speech, source_audio_stream_id));
     speaker_number++;
   }
   return speaker_records;

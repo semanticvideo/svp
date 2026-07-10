@@ -3,6 +3,8 @@
 void test_audio_stage_plan_is_honest_about_pending_processors() {
   svp::media::MediaProbe probe;
   probe.audio_streams.push_back({"astream_0001", 1, "aac", 48000, 2, {}});
+  probe.audio_streams.push_back(
+      {"astream_0002", 2, "", 48000, 4, {}, false});
 
   const svp::audio::AudioStagePlan plan =
       svp::audio::build_audio_stage_plan("sample.mov", probe, false);
@@ -16,6 +18,8 @@ void test_audio_stage_plan_is_honest_about_pending_processors() {
   assert(!encoded["blockers"].empty());
   assert(encoded["audio_extraction"]["ffmpeg_available"] == false);
   assert(encoded["audio_extraction"]["extraction_run"] == false);
+  assert(encoded["audio_extraction"]["original_streams"].size() == 1);
+  assert(encoded["audio_extraction"]["microphone_analysis_streams"].empty());
   assert(encoded["vad_task_plan"]["vad_run"] == false);
   assert(encoded["vad_task_plan"]["speech_regions_written"] == false);
   assert(encoded["vad_execution_boundary"]["vad_run"] == false);
@@ -52,6 +56,7 @@ void test_audio_extraction_plan_documents_ffmpeg_commands_when_available() {
   assert(extraction["ffmpeg_available"] == true);
   assert(extraction["ffmpeg_path"] == "ffmpeg");
   assert(extraction["original_streams"].size() == 1);
+  assert(extraction["microphone_analysis_streams"].empty());
   assert(extraction["original_streams"][0]["task_id"] == "task.audio.extract.astream_000");
   assert(extraction["original_streams"][0]["output_ref"] ==
          "media/audio/original_stream_000.flac");
@@ -64,6 +69,11 @@ void test_audio_extraction_plan_documents_ffmpeg_commands_when_available() {
   assert(extraction["analysis_audio"]["selected_source_audio_stream_id"] == "astream_0001");
   assert(extraction["analysis_audio"]["output_ref"] == "media/audio/analysis_mono_16k.wav");
   assert(extraction["analysis_audio"]["command_available"] == true);
+  const auto single_analysis_arguments =
+      extraction["analysis_audio"]["arguments"].get<std::vector<std::string>>();
+  assert(std::find(single_analysis_arguments.begin(),
+                   single_analysis_arguments.end(), "-af") ==
+         single_analysis_arguments.end());
   assert(extraction["audio_absence"]["output_ref"] == "media/audio/audio_absence.json");
   assert(extraction["audio_absence"]["processor_id"] ==
          "proc_audio_absence_foundation_0001");
@@ -82,10 +92,19 @@ void test_audio_extraction_plan_documents_ffmpeg_commands_when_available() {
   assert(extraction["analysis_audio_written"] == false);
 }
 
-void test_multi_stream_analysis_audio_selects_first_stream() {
+void test_multi_stream_analysis_audio_plans_each_microphone_and_canonical_mix() {
   svp::media::MediaProbe probe;
+  svp::media::VideoStreamProbe video;
+  video.id = "vstream_0001";
+  video.timing.timebase = {1, 1000};
+  probe.video_streams.push_back(video);
   probe.audio_streams.push_back({"astream_0001", 1, "aac", 48000, 2, {}});
   probe.audio_streams.push_back({"astream_0002", 2, "aac", 48000, 2, {}});
+  probe.audio_streams[0].timing.timebase = {1, 48000};
+  probe.audio_streams[0].timing.start_pts = 48000;
+  probe.audio_streams[0].timing.duration_pts = 96000;
+  probe.audio_streams[1].timing.timebase = {1, 48000};
+  probe.audio_streams[1].timing.duration_pts = 192000;
 
   const svp::audio::AudioStagePlan plan =
       svp::audio::build_audio_stage_plan("sample.mov", probe, true);
@@ -93,20 +112,34 @@ void test_multi_stream_analysis_audio_selects_first_stream() {
       svp::audio::audio_stage_plan_to_json(plan)["audio_extraction"];
 
   assert(extraction["original_streams"].size() == 2);
-  assert(extraction["analysis_audio"]["task_id"] == "task.audio.analysis.astream_000");
-  assert(extraction["analysis_audio"]["selected_source_audio_stream_id"] == "astream_0001");
-  assert(extraction["analysis_audio"]["depends_on"].size() == 1);
+  assert(extraction["microphone_analysis_streams"].size() == 2);
+  assert(extraction["microphone_analysis_streams"][0]["selected_source_audio_stream_id"] ==
+         "astream_0001");
+  assert(extraction["microphone_analysis_streams"][0]["source_stream_index"] == 1);
+  assert(extraction["microphone_analysis_streams"][0]["source_start_us"] ==
+         1000000);
+  assert(extraction["microphone_analysis_streams"][0]["timeline_duration_us"] ==
+         3000000);
+  assert(extraction["microphone_analysis_streams"][0]["output_ref"] ==
+         "media/audio/analysis_stream_000_mono_16k.wav");
+  assert(extraction["microphone_analysis_streams"][1]["selected_source_audio_stream_id"] ==
+         "astream_0002");
+  assert(extraction["microphone_analysis_streams"][1]["source_stream_index"] == 2);
+  assert(extraction["microphone_analysis_streams"][1]["timeline_duration_us"] ==
+         4000000);
+  assert(extraction["microphone_analysis_streams"][1]["output_ref"] ==
+         "media/audio/analysis_stream_001_mono_16k.wav");
+  assert(extraction["analysis_audio"]["task_id"] == "task.audio.analysis.canonical_mix");
+  assert(extraction["analysis_audio"]["selected_source_audio_stream_id"] ==
+         "mixed_microphone_streams");
+  assert(extraction["analysis_audio"]["depends_on"].size() == 2);
   assert(extraction["analysis_audio"]["command_available"] == true);
   assert(!extraction["analysis_audio"]["arguments"].empty());
-  assert(!extraction["blockers"].empty());
-  bool has_multi_stream_blocker = false;
-  for (const auto& blocker : extraction["blockers"]) {
-    if (blocker.get<std::string>().find("multiple audio streams") != std::string::npos) {
-      has_multi_stream_blocker = true;
-      break;
-    }
-  }
-  assert(has_multi_stream_blocker);
+  const auto arguments =
+      extraction["analysis_audio"]["arguments"].get<std::vector<std::string>>();
+  assert(std::find(arguments.begin(), arguments.end(),
+                   "[0:1]asetpts=PTS-STARTPTS+1.000/TB,aresample=async=1:first_pts=0[mic0];[0:2]asetpts=PTS-STARTPTS+0.000/TB,aresample=async=1:first_pts=0[mic1];[mic0][mic1]amix=inputs=2:duration=longest:normalize=1[mixed]") !=
+         arguments.end());
 }
 
 void test_waveform_envelope_generates_ten_millisecond_json_records() {

@@ -34,6 +34,7 @@ struct AudioDerivedArtifactRun {
 struct AudioExtractionRun {
   std::filesystem::path staging_root;
   std::vector<AudioExtractionCommandRun> original_streams;
+  std::vector<AudioExtractionCommandRun> microphone_analysis_streams;
   AudioExtractionCommandRun analysis_audio;
   AudioDerivedArtifactRun audio_absence;
   AudioDerivedArtifactRun waveform;
@@ -41,6 +42,7 @@ struct AudioExtractionRun {
   std::vector<std::string> blockers;
   bool extraction_run = false;
   bool original_streams_written = false;
+  bool microphone_analysis_streams_written = false;
   bool analysis_audio_written = false;
   bool audio_absence_written = false;
   bool waveform_written = false;
