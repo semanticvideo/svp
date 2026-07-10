@@ -29,6 +29,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -84,13 +85,14 @@ void write_u32_be(std::ofstream& output, std::uint32_t value) {
 }
 
 void create_mock_iso_bmff(const std::filesystem::path& path,
-                          int media_payload_size = 512) {
+                          int media_payload_size = 512,
+                          std::string_view major_brand = "mp42") {
   std::ofstream output(path, std::ios::binary);
   write_u32_be(output, 24);
   output.write("ftyp", 4);
-  output.write("mp42", 4);
+  output.write(major_brand.data(), 4);
   write_u32_be(output, 0);
-  output.write("mp42", 4);
+  output.write(major_brand.data(), 4);
   output.write("isom", 4);
   write_u32_be(output, static_cast<std::uint32_t>(8 + media_payload_size));
   output.write("mdat", 4);
@@ -608,6 +610,106 @@ void test_batch_create_embedded_invalid_source_is_not_modified() {
 
   std::filesystem::remove_all(root);
   std::cout << "  test_batch_create_embedded_invalid_source_is_not_modified passed\n";
+}
+
+void test_batch_create_embedded_rejects_symlinked_sources() {
+  auto root = make_test_dir("svp-batch-embedded-symlink-source");
+  const auto source = root / "source";
+  const auto output = root / "output";
+  const auto external = root / "external.mp4";
+  std::filesystem::create_directories(source);
+  create_mock_iso_bmff(external);
+  const auto external_bytes = read_binary_file(external);
+  std::filesystem::create_symlink(external, source / "escape.mp4");
+
+  svp::builder::BatchCreateOptions options;
+  options.source_dir = source.string();
+  options.out_dir = output.string();
+  options.output_format = svp::builder::BatchOutputFormat::embedded_svpi;
+  options.replace_mismatched = true;
+  options.ffprobe_path = "/usr/bin/true";
+  options.core_only_diagnostic = true;
+
+  const auto result = svp::builder::interlace_create_batch(options);
+  CHECK(result.results.empty());
+  CHECK(result.created_count == 0);
+  CHECK(result.replaced_count == 0);
+  CHECK(read_binary_file(external) == external_bytes);
+  CHECK(!std::filesystem::exists(output / "escape.mp4"));
+  CHECK(svp::builder::resolve_batch_artifact_path(
+            source / ".." / "external.mp4", source, output,
+            svp::builder::BatchOutputFormat::embedded_svpi,
+            svp::builder::SidecarVisibility::visible).empty());
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_create_embedded_rejects_symlinked_sources passed\n";
+}
+
+void test_batch_create_embedded_rejects_output_symlink_escape() {
+  auto root = make_test_dir("svp-batch-embedded-output-symlink");
+  const auto source = root / "source";
+  const auto output = root / "output";
+  const auto external_output = root / "external-output";
+  std::filesystem::create_directories(source / "nested");
+  std::filesystem::create_directories(output);
+  std::filesystem::create_directories(external_output);
+  create_mock_iso_bmff(source / "nested" / "clip.mp4");
+  std::filesystem::create_directory_symlink(
+      external_output, output / "nested");
+
+  svp::builder::BatchCreateOptions options;
+  options.source_dir = source.string();
+  options.out_dir = output.string();
+  options.recursive = true;
+  options.output_format = svp::builder::BatchOutputFormat::embedded_svpi;
+  options.replace_mismatched = true;
+  options.ffprobe_path = "/usr/bin/true";
+  options.core_only_diagnostic = true;
+
+  const auto result = svp::builder::interlace_create_batch(options);
+  CHECK(result.failed_count == 1);
+  CHECK(result.created_count == 0);
+  CHECK(result.replaced_count == 0);
+  CHECK(!std::filesystem::exists(external_output / "clip.mp4"));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_create_embedded_rejects_output_symlink_escape passed\n";
+}
+
+void test_batch_create_embedded_m4a_round_trip() {
+  auto root = make_test_dir("svp-batch-embedded-m4a");
+  const auto source = root / "source";
+  const auto output = root / "output";
+  const auto original = source / "audio.M4A";
+  const auto extracted = root / "audio.svpi";
+  const auto stripped = root / "audio.M4A";
+  std::filesystem::create_directories(source);
+  create_mock_iso_bmff(original, 640, "M4A ");
+  const auto original_bytes = read_binary_file(original);
+
+  svp::builder::BatchCreateOptions options;
+  options.source_dir = source.string();
+  options.out_dir = output.string();
+  options.output_format = svp::builder::BatchOutputFormat::embedded_svpi;
+  options.ffprobe_path = "/usr/bin/true";
+  options.core_only_diagnostic = true;
+
+  const auto result = svp::builder::interlace_create_batch(options);
+  CHECK(result.created_count == 1);
+  CHECK(result.failed_count == 0);
+  const auto embedded = output / "audio.M4A";
+  CHECK(std::filesystem::exists(embedded));
+  CHECK(svp::package::inspect_embedded_svpi(
+            embedded, true).has_single_valid_embedding());
+  CHECK(svp::package::extract_embedded_svpi(
+            embedded, extracted).success);
+  CHECK(svp::package::strip_embedded_svpi(
+            embedded, stripped).success);
+  CHECK(std::filesystem::file_size(extracted) > 0);
+  CHECK(read_binary_file(stripped) == original_bytes);
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_batch_create_embedded_m4a_round_trip passed\n";
 }
 
 void test_scan_detects_missing_sidecar() {
@@ -1537,6 +1639,9 @@ int main() {
   test_batch_create_embedded_overwrites_sources_atomically();
   test_batch_create_embedded_replaces_stale_output_only_when_requested();
   test_batch_create_embedded_invalid_source_is_not_modified();
+  test_batch_create_embedded_rejects_symlinked_sources();
+  test_batch_create_embedded_rejects_output_symlink_escape();
+  test_batch_create_embedded_m4a_round_trip();
   test_scan_detects_missing_sidecar();
   test_scan_detects_unbound_sidecar();
   test_scan_finds_verified_pair();

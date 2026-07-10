@@ -250,8 +250,10 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
     const auto& media_path = media_files[index];
     BatchFileResult file_result;
     file_result.source_filename = media_path.filename().string();
-    file_result.source_relative_path =
-        std::filesystem::relative(media_path, source_dir).string();
+    const auto source_relative_path =
+        media_path.lexically_normal().lexically_relative(
+            source_dir.lexically_normal());
+    file_result.source_relative_path = source_relative_path.string();
 
     auto item_sink = make_scoped_progress_sink(
         sink,
@@ -275,8 +277,37 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
             : resolve_batch_artifact_path(
                   media_path, source_dir, local_out_dir,
                   options.output_format, options.visibility);
+
+    const bool requires_contained_output =
+        options.output_format == BatchOutputFormat::embedded_svpi &&
+        !options.overwrite_sources;
+    std::string containment_error;
+    if (requires_contained_output && !batch_artifact_is_contained(
+            file_result.artifact_path, out_dir, containment_error)) {
+      file_result.status = BatchFileStatus::failed;
+      file_result.error_message = containment_error;
+      item_sink->emit(make_stage_completed(
+          ProgressStageId::batch_item, media_path.filename().string()));
+      result.results[index] = std::move(file_result);
+      return;
+    }
+
+    std::error_code directory_error;
     std::filesystem::create_directories(
-        file_result.artifact_path.parent_path());
+        file_result.artifact_path.parent_path(), directory_error);
+    if (directory_error ||
+        (requires_contained_output && !batch_artifact_is_contained(
+            file_result.artifact_path, out_dir, containment_error))) {
+      file_result.status = BatchFileStatus::failed;
+      file_result.error_message = directory_error
+          ? "Could not create the batch artifact directory: " +
+                directory_error.message()
+          : containment_error;
+      item_sink->emit(make_stage_completed(
+          ProgressStageId::batch_item, media_path.filename().string()));
+      result.results[index] = std::move(file_result);
+      return;
+    }
 
     const auto staging_dir = batch_item_staging_dir(
         options.staging_dir, file_result.source_relative_path);

@@ -4,6 +4,7 @@
 #include "embedded_svpi_box.hpp"
 #include "isobmff_top_level.hpp"
 #include "svp/package/embedded_svpi_transport_profile.hpp"
+#include "svp/package/package_layout.hpp"
 
 #include <filesystem>
 #include <limits>
@@ -194,6 +195,9 @@ void test_envelope_version_length_and_hash_errors() {
   overwrite_byte(hash, base.embeddings.front().payload_offset, 0xff);
   inspection = inspect_embedded_svpi(hash, true);
   CHECK_EMBEDDED(has_issue(inspection, EmbeddedSvpiIssueCode::payload_hash_mismatch));
+  const auto layout = read_package_layout(hash);
+  CHECK_EMBEDDED(!layout.has_value());
+  CHECK_EMBEDDED(layout.error_message().find("BLAKE3") != std::string::npos);
 
   const auto truncated = fixture.root.path / "truncated-envelope.mp4";
   std::filesystem::copy_file(fixture.embedded, truncated);

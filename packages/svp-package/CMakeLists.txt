@@ -10,6 +10,7 @@ add_library(svp-package
   src/package_contract.cpp
   src/package_layout.cpp
   src/package_source.cpp
+  src/embedded_package_session.cpp
   src/package_probe.cpp
   src/package_summary.cpp
   src/isobmff_top_level.cpp

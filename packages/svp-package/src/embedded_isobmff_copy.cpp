@@ -13,8 +13,10 @@ namespace {
 bool write_uuid_box(std::ofstream& output,
                     const std::filesystem::path& svpi_path,
                     std::uint64_t payload_size,
-                    const std::array<std::uint8_t, 32>& payload_hash) {
-  const auto box_header = make_svpi_uuid_box_header(payload_size);
+                    const std::array<std::uint8_t, 32>& payload_hash,
+                    std::uint64_t compact_box_size_limit) {
+  const auto box_header = make_svpi_uuid_box_header(
+      payload_size, compact_box_size_limit);
   output.write(reinterpret_cast<const char*>(box_header.data()),
                static_cast<std::streamsize>(box_header.size()));
 
@@ -45,6 +47,21 @@ bool copy_iso_bmff_with_embedding_change(
     const std::filesystem::path* svpi_path,
     std::uint64_t payload_size,
     const std::array<std::uint8_t, 32>& payload_hash) {
+  return copy_iso_bmff_with_embedding_change(
+      input_path, scan, embeddings, output, insertion_offset, svpi_path,
+      payload_size, payload_hash, kIsoBmffMaxCompactBoxSize);
+}
+
+bool copy_iso_bmff_with_embedding_change(
+    const std::filesystem::path& input_path,
+    const TopLevelScan& scan,
+    const std::vector<EmbeddedSvpiInfo>& embeddings,
+    std::ofstream& output,
+    std::uint64_t insertion_offset,
+    const std::filesystem::path* svpi_path,
+    std::uint64_t payload_size,
+    const std::array<std::uint8_t, 32>& payload_hash,
+    std::uint64_t compact_box_size_limit) {
   std::ifstream input(input_path, std::ios::binary);
   if (!input) {
     return false;
@@ -52,7 +69,8 @@ bool copy_iso_bmff_with_embedding_change(
   bool inserted = false;
   for (const auto& box : scan.boxes) {
     if (!inserted && box.offset == insertion_offset && svpi_path != nullptr) {
-      if (!write_uuid_box(output, *svpi_path, payload_size, payload_hash)) {
+      if (!write_uuid_box(output, *svpi_path, payload_size, payload_hash,
+                          compact_box_size_limit)) {
         return false;
       }
       inserted = true;
@@ -66,7 +84,8 @@ bool copy_iso_bmff_with_embedding_change(
     }
   }
   if (!inserted && insertion_offset == scan.file_size && svpi_path != nullptr) {
-    return write_uuid_box(output, *svpi_path, payload_size, payload_hash);
+    return write_uuid_box(output, *svpi_path, payload_size, payload_hash,
+                          compact_box_size_limit);
   }
   return output.good();
 }

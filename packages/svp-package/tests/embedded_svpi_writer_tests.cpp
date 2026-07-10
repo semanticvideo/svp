@@ -1,8 +1,15 @@
 #include "embedded_svpi_test_declarations.hpp"
 #include "embedded_svpi_test_support.hpp"
 
+#include "embedded_file_io.hpp"
+#include "embedded_isobmff_copy.hpp"
+#include "isobmff_top_level.hpp"
+#include "svp/package/embedded_svpi_transport_profile.hpp"
+
 #include <algorithm>
+#include <array>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace {
@@ -162,6 +169,58 @@ void test_failures_leave_no_partial_output() {
   }
 }
 
+void test_extended_uuid_box_full_lifecycle_with_synthetic_limit() {
+  TempDirectory root;
+  const auto original = root.path / "original.mp4";
+  const auto svpi = root.path / "large-for-synthetic-limit.svpi";
+  const auto embedded = root.path / "embedded.mp4";
+  const auto extracted = root.path / "extracted.svpi";
+  const auto stripped = root.path / "stripped.mp4";
+  write_test_iso_bmff(original, true);
+  std::vector<std::uint8_t> payload(257);
+  for (std::size_t index = 0; index < payload.size(); ++index) {
+    payload[index] = static_cast<std::uint8_t>(index % 251);
+  }
+  write_bytes(svpi, payload);
+
+  const auto scan = svp::package::detail::scan_top_level_boxes(original);
+  CHECK_EMBEDDED(scan.valid);
+  std::uint64_t payload_size = 0;
+  std::array<std::uint8_t, 32> payload_hash{};
+  CHECK_EMBEDDED(svp::package::detail::hash_file(
+      svpi, payload_size, payload_hash));
+  constexpr std::uint64_t synthetic_compact_box_limit =
+      24 + svp::package::kEmbeddedSvpiEnvelopeSize + 256;
+  CHECK_EMBEDDED(payload_size + 24 +
+                     svp::package::kEmbeddedSvpiEnvelopeSize >
+                 synthetic_compact_box_limit);
+
+  std::ofstream output(embedded, std::ios::binary | std::ios::trunc);
+  CHECK_EMBEDDED(svp::package::detail::copy_iso_bmff_with_embedding_change(
+      original, scan, {}, output, scan.file_size, &svpi, payload_size,
+      payload_hash, synthetic_compact_box_limit));
+  output.close();
+  CHECK_EMBEDDED(output.good());
+
+  const auto inspection = inspect_embedded_svpi(embedded, true);
+  CHECK_EMBEDDED(inspection.has_single_valid_embedding());
+  CHECK_EMBEDDED(inspection.embeddings.front().hash_verified);
+  CHECK_EMBEDDED(inspection.embeddings.front().hash_matches);
+  const auto embedded_bytes = read_bytes(embedded);
+  const auto box_offset = static_cast<std::size_t>(
+      inspection.embeddings.front().box_offset);
+  CHECK_EMBEDDED(svp::package::detail::read_be32(
+      embedded_bytes.data() + box_offset) == 1);
+  CHECK_EMBEDDED(svp::package::detail::read_be64(
+      embedded_bytes.data() + box_offset + 8) ==
+      inspection.embeddings.front().box_size);
+
+  CHECK_EMBEDDED(extract_embedded_svpi(embedded, extracted).success);
+  CHECK_EMBEDDED(strip_embedded_svpi(embedded, stripped).success);
+  CHECK_EMBEDDED(read_bytes(extracted) == payload);
+  CHECK_EMBEDDED(read_bytes(stripped) == read_bytes(original));
+}
+
 }  // namespace
 
 void run_embedded_svpi_writer_tests() {
@@ -172,4 +231,5 @@ void run_embedded_svpi_writer_tests() {
   test_existing_embedding_requires_explicit_replacement();
   test_ambiguous_fragment_tail_layouts_are_rejected();
   test_failures_leave_no_partial_output();
+  test_extended_uuid_box_full_lifecycle_with_synthetic_limit();
 }
