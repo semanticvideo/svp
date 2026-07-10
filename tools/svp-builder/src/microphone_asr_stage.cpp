@@ -319,8 +319,10 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
       "removed as bleed only when time-aligned turns share transcript content, "
       "local diarization fingerprints provide no strong contrary evidence, and another "
       "microphone has stronger time-local speech SNR. Missing fingerprint evidence "
-      "preserves both sources. Diarization was not allowed to reassign microphone "
-      "ownership.";
+      "preserves both sources. Decoder-residual words are removed only after sustained "
+      "transcript, voice, shared-timing, and source-quality agreement; matching voice "
+      "spans and stronger local SNR provide additional word-local support. Diarization was not "
+      "allowed to reassign microphone ownership.";
   result.boundary.diarization_blockers = fingerprint_blockers;
   result.boundary.asr_status = svp::audio::AsrStatus::ran;
 
@@ -352,14 +354,16 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
        reconciliation_policy.minimum_duplicate_aligned_token_count},
       {"maximum_duplicate_word_time_delta_us",
        reconciliation_policy.maximum_duplicate_word_time_delta_us},
-      {"minimum_fully_explained_voice_ratio",
-       reconciliation_policy.minimum_fully_explained_voice_ratio},
-      {"minimum_fully_explained_duplicate_word_ratio",
-       reconciliation_policy.minimum_fully_explained_duplicate_word_ratio},
+      {"minimum_explained_duplicate_word_ratio",
+       reconciliation_policy.minimum_explained_duplicate_word_ratio},
+      {"minimum_explained_voice_ratio",
+       reconciliation_policy.minimum_explained_voice_ratio},
+      {"minimum_explained_shared_speech_ratio",
+       reconciliation_policy.minimum_explained_shared_speech_ratio},
       {"primary_selection_policy",
        "stronger_time_local_snr_wins_only_after_local_content_and_fingerprint_agreement"},
       {"source_grouping_policy",
-       "microphone_sources_remain_independent_unless_sustained_voice_coverage_and_majority_word_local_duplicate_proof_fully_explain_a_weaker_source"},
+       "microphone_sources_remain_independent_unless_a_supermajority_of_words_are_exact_duplicates_and_voice_timing_snr_and_asr_confidence_establish_bleed"},
       {"ranking_policy", "descending_deduplicated_word_count_then_stream_order"},
   };
   nlohmann::json voice_matches = nlohmann::json::array();

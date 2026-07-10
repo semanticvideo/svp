@@ -110,7 +110,20 @@ std::vector<std::string> original_stream_arguments(
   };
 }
 
-std::vector<std::string> analysis_audio_arguments(
+std::vector<std::string> single_stream_analysis_audio_arguments(
+    const std::filesystem::path& ffmpeg_path,
+    const std::filesystem::path& source_path,
+    const svp::media::AudioStreamProbe& stream,
+    const std::string& output_ref) {
+  return {
+      ffmpeg_path.string(), "-hide_banner", "-nostdin", "-nostats", "-v",
+      "error", "-y", "-i", source_path.string(), "-map",
+      "0:" + std::to_string(stream.index), "-vn", "-ac", "1", "-ar",
+      "16000", "-c:a", "pcm_s16le", output_ref,
+  };
+}
+
+std::vector<std::string> microphone_analysis_audio_arguments(
     const std::filesystem::path& ffmpeg_path,
     const std::filesystem::path& source_path,
     const svp::media::AudioStreamProbe& stream,
@@ -274,11 +287,9 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
         stream_timeline_duration_us(stream, *presentation_origin);
     plan.analysis_audio.arguments =
         ffmpeg_available
-            ? analysis_audio_arguments(ffmpeg_path,
-                                       source_path,
-                                       stream,
-                                       plan.analysis_audio.source_start_us,
-                                       plan.analysis_audio.output_ref)
+            ? single_stream_analysis_audio_arguments(
+                  ffmpeg_path, source_path, stream,
+                  plan.analysis_audio.output_ref)
             : std::vector<std::string>{};
   } else if (probe.audio_streams.size() > 1) {
     plan.analysis_audio.task_id = "task.audio.analysis.canonical_mix";
@@ -305,9 +316,9 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
       microphone.output_ref = microphone_analysis_output_ref(index);
       microphone.arguments =
           ffmpeg_available
-              ? analysis_audio_arguments(ffmpeg_path, source_path, stream,
-                                         microphone.source_start_us,
-                                         microphone.output_ref)
+              ? microphone_analysis_audio_arguments(
+                    ffmpeg_path, source_path, stream,
+                    microphone.source_start_us, microphone.output_ref)
               : std::vector<std::string>{};
       plan.microphone_analysis_streams.push_back(std::move(microphone));
     }

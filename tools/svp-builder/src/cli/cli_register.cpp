@@ -89,8 +89,7 @@ void register_cli(CLI::App& app, CliContext& context) {
       ->required();
   diarize_replay->add_option("--model-dir",
                              context.diarize_replay_opts.model_dir,
-                             "Sherpa diarization model directory")
-      ->required();
+                             "Sherpa diarization model directory");
   diarize_replay->add_option("--sherpa-lib",
                              context.diarize_replay_opts.sherpa_lib_path,
                              "Explicit path to libsherpa-onnx-c-api.dylib");

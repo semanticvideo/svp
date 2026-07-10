@@ -64,6 +64,11 @@ void test_audio_extraction_plan_documents_ffmpeg_commands_when_available() {
   assert(extraction["analysis_audio"]["selected_source_audio_stream_id"] == "astream_0001");
   assert(extraction["analysis_audio"]["output_ref"] == "media/audio/analysis_mono_16k.wav");
   assert(extraction["analysis_audio"]["command_available"] == true);
+  const auto single_analysis_arguments =
+      extraction["analysis_audio"]["arguments"].get<std::vector<std::string>>();
+  assert(std::find(single_analysis_arguments.begin(),
+                   single_analysis_arguments.end(), "-af") ==
+         single_analysis_arguments.end());
   assert(extraction["audio_absence"]["output_ref"] == "media/audio/audio_absence.json");
   assert(extraction["audio_absence"]["processor_id"] ==
          "proc_audio_absence_foundation_0001");

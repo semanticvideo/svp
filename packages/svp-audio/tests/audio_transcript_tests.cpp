@@ -84,6 +84,7 @@ int main() {
   test_weaker_bleed_chain_attaches_upward_without_becoming_a_speaker();
   test_cross_anchor_duplicate_content_uses_time_local_snr_ownership();
   test_cross_anchor_ownership_does_not_switch_inside_an_utterance();
+  test_cross_anchor_deduplication_preserves_unmatched_turn_words();
   test_microphone_silent_inputs_are_omitted_and_ties_use_stream_order();
   return 0;
 }

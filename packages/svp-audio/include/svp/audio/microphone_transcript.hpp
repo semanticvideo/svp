@@ -41,14 +41,14 @@ struct MicrophoneDeduplicationPolicy {
   // tolerance permits small decoder timing drift while still requiring local,
   // not chunk-wide, agreement between microphone captures.
   std::int64_t maximum_duplicate_word_time_delta_us = 1500000;
-  // A source may be classified as fully explained bleed only when sustained
-  // matching voice evidence covers at least 95% of both its diarized voice and
-  // its simultaneous diarized speech. This is deliberately much stronger than
-  // the evidence used for an individual word.
-  double minimum_fully_explained_voice_ratio = 0.95;
-  // A majority of the source words must first be removed by word-local content,
-  // fingerprint, and SNR proof before ASR-divergent residue can be suppressed.
-  double minimum_fully_explained_duplicate_word_ratio = 0.50;
+  // Source-level bleed classification requires a supermajority of words to
+  // have already passed exact word-local duplicate proof. Voice, timing, SNR,
+  // and ASR-confidence gates below must independently agree.
+  double minimum_explained_duplicate_word_ratio = 2.0 / 3.0;
+  // Nearly all of the weaker source's voice and simultaneous speech must match
+  // before unmatched ASR residue can be evaluated as bleed.
+  double minimum_explained_voice_ratio = 0.95;
+  double minimum_explained_shared_speech_ratio = 0.95;
   // Words from one microphone separated by at most 750 ms remain one speaker
   // segment, matching the transcript writer's existing utterance-gap policy.
   std::int64_t maximum_speaker_segment_gap_us = 750000;
@@ -166,6 +166,8 @@ struct MicrophoneWordOwnershipResult {
   std::vector<MicrophoneChunkContentEvidence> chunk_content_evidence;
   std::size_t discarded_cross_anchor_bleed_word_count = 0;
   std::map<std::size_t, std::size_t> discarded_word_count_by_source;
+  std::map<std::size_t, std::map<std::size_t, std::size_t>>
+      discarded_word_count_by_source_pair;
 };
 
 struct MicrophoneTranscriptResult {
@@ -183,6 +185,8 @@ struct MicrophoneTranscriptResult {
   std::size_t discarded_ambiguous_word_count = 0;
   std::size_t discarded_cross_anchor_bleed_word_count = 0;
   std::size_t collapsed_microphone_stream_count = 0;
+  std::map<std::size_t, std::map<std::size_t, std::size_t>>
+      discarded_word_count_by_source_pair;
 };
 
 [[nodiscard]] std::vector<double> measure_word_signal_db(

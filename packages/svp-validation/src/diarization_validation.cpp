@@ -140,8 +140,18 @@ void validate_microphone_provenance(
           input_stream["source_audio_stream_id"].is_string() &&
           input_stream.contains("input_ref") &&
           input_stream["input_ref"].is_string()) {
-        processor_source_ids.insert(
-            input_stream["source_audio_stream_id"].get<std::string>());
+        const std::string source_id =
+            input_stream["source_audio_stream_id"].get<std::string>();
+        const std::string input_ref =
+            input_stream["input_ref"].get<std::string>();
+        if (source_id.empty() || input_ref.empty() ||
+            !processor_input_refs.contains(input_ref) ||
+            !processor_source_ids.insert(source_id).second) {
+          add_microphone_provenance_error(
+              report, registry, "/provenance/processors.jsonl",
+              "Each microphone input_stream must uniquely map a source ID to a processor input_ref.");
+          break;
+        }
       }
     }
   }
@@ -153,14 +163,18 @@ void validate_microphone_provenance(
   if (transcript.contains("speaker_sources") &&
       transcript["speaker_sources"].is_array()) {
     for (const auto& source : transcript["speaker_sources"]) {
-      if (source.contains("source_audio_stream_id") &&
-          source["source_audio_stream_id"].is_string() &&
-          !processor_source_ids.contains(
-              source["source_audio_stream_id"].get<std::string>())) {
-        add_microphone_provenance_error(
-            report, registry, "/transcript/transcript.json/speaker_sources",
-            "A microphone speaker source does not resolve through processor input_streams.");
-        break;
+      if (!source.contains("source_audio_stream_ids") ||
+          !source["source_audio_stream_ids"].is_array()) {
+        continue;
+      }
+      for (const auto& grouped_source : source["source_audio_stream_ids"]) {
+        if (!grouped_source.is_string() ||
+            !processor_source_ids.contains(grouped_source.get<std::string>())) {
+          add_microphone_provenance_error(
+              report, registry, "/transcript/transcript.json/speaker_sources",
+              "Every grouped microphone speaker source must resolve through processor input_streams.");
+          return;
+        }
       }
     }
   }

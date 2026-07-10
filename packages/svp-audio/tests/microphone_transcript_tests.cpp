@@ -61,7 +61,8 @@ void test_microphone_bleed_deduplication_and_word_count_ranking() {
   assert(result.speakers[0].source_audio_stream_id == "astream_0001");
   assert(result.speakers[0].speaker_id == "speaker_0001");
   assert(result.speakers[0].word_count == 3);
-  assert(result.speakers[0].source_audio_stream_ids.size() == 1);
+  assert(result.speakers[0].source_audio_stream_ids.size() == 2);
+  assert(result.speakers[0].source_audio_stream_ids[1] == "astream_0002");
   assert(result.words.front().text == "Hello");
   assert(std::all_of(result.word_speaker_assignments.begin(),
                      result.word_speaker_assignments.end(),
@@ -402,6 +403,45 @@ void test_cross_anchor_ownership_does_not_switch_inside_an_utterance() {
   assert(result.speakers.size() == 2);
   assert(result.words.size() == 6);
   assert(result.discarded_cross_anchor_bleed_word_count == 0);
+}
+
+void test_cross_anchor_deduplication_preserves_unmatched_turn_words() {
+  svp::audio::MicrophoneTranscript direct;
+  direct.source_audio_stream_id = "astream_0001";
+  direct.source_ordinal = 0;
+  direct.words = {
+      word("shared", 0, 500000),
+      word("phrase", 500000, 1000000),
+      word("anchor.", 1000000, 1500000),
+  };
+  direct.word_signal_db = {-10.0, -10.0, -10.0};
+  direct.signal_profile.noise_floor_db = -50.0;
+  direct.signal_profile.frames = {{{0, 1500000}, -10.0}};
+  direct.voice_tracks = {voice_track({1.0f, 0.0f}, 0, 1000000)};
+
+  svp::audio::MicrophoneTranscript other;
+  other.source_audio_stream_id = "astream_0002";
+  other.source_ordinal = 1;
+  other.words = {
+      word("shared", 0, 500000),
+      word("phrase", 500000, 1000000),
+      word("legitimate.", 1000000, 1500000),
+  };
+  other.word_signal_db = {-30.0, -30.0, -30.0};
+  other.signal_profile.noise_floor_db = -50.0;
+  other.signal_profile.frames = {{{0, 1500000}, -30.0}};
+  other.voice_tracks = {voice_track({1.0f, 0.0f}, 0, 1000000)};
+
+  const auto result =
+      svp::audio::reconcile_microphone_transcripts({direct, other});
+
+  assert(result.discarded_cross_anchor_bleed_word_count == 2);
+  assert(result.collapsed_microphone_stream_count == 0);
+  assert(result.speakers.size() == 2);
+  assert(std::any_of(result.words.begin(), result.words.end(),
+                     [](const svp::audio::AsrWord& candidate) {
+                       return candidate.text == "legitimate.";
+                     }));
 }
 
 void test_microphone_silent_inputs_are_omitted_and_ties_use_stream_order() {

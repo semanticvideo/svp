@@ -5,7 +5,6 @@
 #include <iomanip>
 #include <limits>
 #include <map>
-#include <set>
 #include <sstream>
 #include <unordered_map>
 
@@ -165,6 +164,56 @@ std::optional<double> median_speech_snr_db(
   const double signal_db = median_signal_db(transcript);
   if (!std::isfinite(signal_db)) return std::nullopt;
   return signal_db - *transcript.signal_profile.noise_floor_db;
+}
+
+std::optional<double> local_snr_db(const MicrophoneTranscript& transcript,
+                                   const TimeSpan& timing) {
+  if (!transcript.signal_profile.noise_floor_db.has_value()) return std::nullopt;
+  std::vector<double> levels;
+  for (const MicrophoneSignalFrame& frame : transcript.signal_profile.frames) {
+    if (frame.timing.start_us >= timing.end_us) break;
+    if (std::min(frame.timing.end_us, timing.end_us) >
+        std::max(frame.timing.start_us, timing.start_us)) {
+      levels.push_back(frame.signal_db);
+    }
+  }
+  if (levels.empty()) return std::nullopt;
+  std::sort(levels.begin(), levels.end());
+  const std::size_t middle = levels.size() / 2;
+  const double median = (levels.size() & 1U) != 0U
+                            ? levels[middle]
+                            : (levels[middle - 1] + levels[middle]) / 2.0;
+  return median - *transcript.signal_profile.noise_floor_db;
+}
+
+std::vector<TimeSpan> matching_voice_spans(
+    const MicrophoneTranscript& left,
+    const MicrophoneTranscript& right,
+    const MicrophoneDeduplicationPolicy& policy) {
+  std::vector<TimeSpan> spans;
+  for (const auto& left_track : left.voice_tracks) {
+    for (const auto& right_track : right.voice_tracks) {
+      if (fingerprint_similarity(left_track.fingerprint,
+                                 right_track.fingerprint) <
+          policy.minimum_voice_fingerprint_similarity) {
+        continue;
+      }
+      const auto intersections = intersect_spans(
+          merge_spans(left_track.speech_segments),
+          merge_spans(right_track.speech_segments));
+      spans.insert(spans.end(), intersections.begin(), intersections.end());
+    }
+  }
+  return merge_spans(std::move(spans));
+}
+
+bool midpoint_is_covered(const TimeSpan& timing,
+                         const std::vector<TimeSpan>& spans) {
+  const std::int64_t midpoint =
+      timing.start_us + (timing.end_us - timing.start_us) / 2;
+  return std::any_of(spans.begin(), spans.end(), [&](const TimeSpan& span) {
+    return midpoint >= span.start_us && midpoint < span.end_us;
+  });
 }
 
 std::string speaker_id_for_rank(std::size_t rank) {
@@ -357,80 +406,162 @@ MicrophoneTranscriptResult reconcile_microphone_transcripts(
   result.discarded_cross_anchor_bleed_word_count =
       ownership.discarded_cross_anchor_bleed_word_count;
 
-  std::vector<std::size_t> source_quality_order;
-  for (std::size_t index = 0; index < transcripts.size(); ++index) {
-    if (!transcripts[index].words.empty()) source_quality_order.push_back(index);
-  }
-  std::sort(source_quality_order.begin(), source_quality_order.end(),
-            [&](std::size_t left, std::size_t right) {
-              const double left_snr =
-                  median_speech_snr_db(transcripts[left]).value_or(
-                      -std::numeric_limits<double>::infinity());
-              const double right_snr =
-                  median_speech_snr_db(transcripts[right]).value_or(
-                      -std::numeric_limits<double>::infinity());
-              if (left_snr != right_snr) return left_snr > right_snr;
-              return transcripts[left].source_ordinal <
-                     transcripts[right].source_ordinal;
-            });
-  std::set<std::size_t> fully_explained_sources;
-  for (std::size_t order = 0; order < source_quality_order.size(); ++order) {
-    const std::size_t source_index = source_quality_order[order];
-    const auto& source = transcripts[source_index];
-    const std::size_t proven_duplicate_words =
-        ownership.discarded_word_count_by_source[source.source_ordinal];
-    const double duplicate_word_ratio = source.words.empty()
-        ? 0.0
-        : static_cast<double>(proven_duplicate_words) /
-              static_cast<double>(source.words.size());
-    if (duplicate_word_ratio <
-        policy.minimum_fully_explained_duplicate_word_ratio) {
+  // Exact transcript matches establish which stronger source can explain a
+  // weaker microphone. Residual decoder differences are removed only when the
+  // source-level match is sustained across a supermajority of words, voice spans,
+  // shared timing, and channel-relative quality. Matching voice spans and
+  // stronger time-local SNR provide additional word-level support.
+  std::map<std::size_t, std::size_t> residual_anchor_by_source;
+  for (const auto& source : transcripts) {
+    if (source.words.empty()) continue;
+    const auto pair_counts =
+        ownership.discarded_word_count_by_source_pair.find(source.source_ordinal);
+    if (pair_counts == ownership.discarded_word_count_by_source_pair.end() ||
+        pair_counts->second.empty()) {
       continue;
     }
-    std::optional<std::size_t> explaining_source_ordinal;
-    for (std::size_t stronger_order = 0; stronger_order < order;
-         ++stronger_order) {
-      const auto& stronger = transcripts[source_quality_order[stronger_order]];
-      if (fully_explained_sources.contains(stronger.source_ordinal)) continue;
-      for (const auto& evidence : result.voice_match_evidence) {
-        const bool same_pair =
-            (evidence.left_source_ordinal == source.source_ordinal &&
-             evidence.right_source_ordinal == stronger.source_ordinal) ||
-            (evidence.right_source_ordinal == source.source_ordinal &&
-             evidence.left_source_ordinal == stronger.source_ordinal);
-        if (same_pair && evidence.aligned_voice_coverage_ratio >=
-                             policy.minimum_fully_explained_voice_ratio &&
-            evidence.aligned_voice_match_ratio >=
-                policy.minimum_fully_explained_voice_ratio) {
-          explaining_source_ordinal = stronger.source_ordinal;
-          break;
-        }
-      }
-      if (explaining_source_ordinal.has_value()) break;
+    std::size_t discarded_source_words = 0;
+    for (const auto& [anchor, count] : pair_counts->second) {
+      (void)anchor;
+      discarded_source_words += count;
     }
-    if (!explaining_source_ordinal.has_value()) continue;
-
-    const std::size_t prior_size = candidates.size();
+    const double explained_word_ratio =
+        static_cast<double>(discarded_source_words) /
+        static_cast<double>(source.words.size());
+    if (explained_word_ratio < policy.minimum_explained_duplicate_word_ratio) {
+      continue;
+    }
+    const auto source_snr = median_speech_snr_db(source);
+    if (!source_snr.has_value()) continue;
+    const MicrophoneTranscript* explaining = nullptr;
+    double best_voice_match_ratio = -1.0;
+    for (const auto& candidate_anchor : transcripts) {
+      if (candidate_anchor.source_ordinal == source.source_ordinal) continue;
+      const auto anchor_snr = median_speech_snr_db(candidate_anchor);
+      if (!anchor_snr.has_value() || *anchor_snr <= *source_snr ||
+          mean_confidence(candidate_anchor) <= mean_confidence(source)) {
+        continue;
+      }
+      const auto evidence = std::find_if(
+          result.voice_match_evidence.begin(), result.voice_match_evidence.end(),
+          [&](const auto& match) {
+            return (match.left_source_ordinal == source.source_ordinal &&
+                    match.right_source_ordinal ==
+                        candidate_anchor.source_ordinal) ||
+                   (match.right_source_ordinal == source.source_ordinal &&
+                    match.left_source_ordinal ==
+                        candidate_anchor.source_ordinal);
+          });
+      if (evidence == result.voice_match_evidence.end() ||
+          evidence->aligned_voice_coverage_ratio <
+              policy.minimum_explained_voice_ratio ||
+          evidence->aligned_voice_match_ratio <
+              policy.minimum_explained_voice_ratio ||
+          evidence->shared_speech_overlap_ratio <
+              policy.minimum_explained_shared_speech_ratio) {
+        continue;
+      }
+      if (evidence->aligned_voice_match_ratio > best_voice_match_ratio) {
+        explaining = &candidate_anchor;
+        best_voice_match_ratio = evidence->aligned_voice_match_ratio;
+      }
+    }
+    if (explaining == nullptr) continue;
+    residual_anchor_by_source[source.source_ordinal] =
+        explaining->source_ordinal;
+    std::vector<std::pair<const MicrophoneTranscript*, std::vector<TimeSpan>>>
+        local_anchors;
+    for (const auto& candidate_anchor : transcripts) {
+      if (candidate_anchor.source_ordinal == source.source_ordinal) continue;
+      const auto anchor_snr = median_speech_snr_db(candidate_anchor);
+      if (!anchor_snr.has_value() || *anchor_snr <= *source_snr ||
+          mean_confidence(candidate_anchor) <= mean_confidence(source)) {
+        continue;
+      }
+      auto spans = matching_voice_spans(source, candidate_anchor, policy);
+      if (!spans.empty()) {
+        local_anchors.emplace_back(&candidate_anchor, std::move(spans));
+      }
+    }
     candidates.erase(
         std::remove_if(candidates.begin(), candidates.end(),
                        [&](const MicrophoneOwnedWordCandidate& candidate) {
-                         return candidate.source_ordinal == source.source_ordinal;
+                         if (candidate.source_ordinal != source.source_ordinal ||
+                             local_anchors.empty()) {
+                           return false;
+                         }
+                         const auto candidate_snr = local_snr_db(
+                             source, {candidate.word.start_us,
+                                      candidate.word.end_us});
+                         if (!candidate_snr.has_value()) return false;
+                         const MicrophoneTranscript* local_anchor = nullptr;
+                         for (const auto& [anchor, spans] : local_anchors) {
+                           if (!midpoint_is_covered(
+                                   {candidate.word.start_us,
+                                    candidate.word.end_us},
+                                   spans)) {
+                             continue;
+                           }
+                           const auto anchor_snr = local_snr_db(
+                               *anchor, {candidate.word.start_us,
+                                         candidate.word.end_us});
+                           if (anchor_snr.has_value() &&
+                               *anchor_snr > *candidate_snr) {
+                             local_anchor = anchor;
+                             break;
+                           }
+                         }
+                         // The source has already met the strict source-level
+                         // transcript, voice, timing, and quality gates above.
+                         // Local evidence selects provenance when available;
+                         // sparse decoder residue may still be discarded.
+                         if (local_anchor == nullptr) local_anchor = explaining;
+                         ++result.discarded_cross_anchor_bleed_word_count;
+                         ++ownership.discarded_word_count_by_source[
+                             source.source_ordinal];
+                         ++ownership.discarded_word_count_by_source_pair
+                               [source.source_ordinal]
+                               [local_anchor->source_ordinal];
+                         return true;
                        }),
         candidates.end());
-    const std::size_t removed_residue = prior_size - candidates.size();
-    result.discarded_cross_anchor_bleed_word_count += removed_residue;
-    fully_explained_sources.insert(source.source_ordinal);
+  }
+
+  std::map<std::size_t, std::size_t> collapsed_source_anchors;
+  for (const auto& source : transcripts) {
+    if (source.words.empty() ||
+        ownership.discarded_word_count_by_source[source.source_ordinal] !=
+            source.words.size()) {
+      continue;
+    }
+    std::optional<std::size_t> anchor_source_ordinal;
+    const auto residual_anchor =
+        residual_anchor_by_source.find(source.source_ordinal);
+    if (residual_anchor != residual_anchor_by_source.end()) {
+      anchor_source_ordinal = residual_anchor->second;
+    } else {
+      const auto pair_counts = ownership.discarded_word_count_by_source_pair.find(
+          source.source_ordinal);
+      if (pair_counts != ownership.discarded_word_count_by_source_pair.end() &&
+          pair_counts->second.size() == 1 &&
+          pair_counts->second.begin()->second == source.words.size()) {
+        anchor_source_ordinal = pair_counts->second.begin()->first;
+      }
+    }
+    if (!anchor_source_ordinal.has_value()) continue;
+    collapsed_source_anchors[source.source_ordinal] = *anchor_source_ordinal;
     ++result.collapsed_microphone_stream_count;
     for (auto& assignment : result.source_assignment_evidence) {
       if (assignment.source_ordinal == source.source_ordinal) {
         assignment.decision = "fully_explained_bleed_source";
-        assignment.anchor_source_ordinal = explaining_source_ordinal;
-        assignment.matched_stronger_source_ordinals = {
-            *explaining_source_ordinal};
+        assignment.anchor_source_ordinal = *anchor_source_ordinal;
+        assignment.matched_stronger_source_ordinals = {*anchor_source_ordinal};
         break;
       }
     }
   }
+  result.discarded_word_count_by_source_pair =
+      ownership.discarded_word_count_by_source_pair;
 
   std::map<std::size_t, std::size_t> word_counts;
   for (const MicrophoneOwnedWordCandidate& candidate : candidates) {
@@ -452,6 +583,19 @@ MicrophoneTranscriptResult reconcile_microphone_transcripts(
     for (const std::size_t member : members) {
       summary.source_audio_stream_ids.push_back(
           transcripts[member].source_audio_stream_id);
+    }
+    for (const auto& [collapsed_source, anchor_source] :
+         collapsed_source_anchors) {
+      if (anchor_source != summary.source_ordinal) continue;
+      const auto collapsed = std::find_if(
+          transcripts.begin(), transcripts.end(),
+          [&](const MicrophoneTranscript& transcript) {
+            return transcript.source_ordinal == collapsed_source;
+          });
+      if (collapsed != transcripts.end()) {
+        summary.source_audio_stream_ids.push_back(
+            collapsed->source_audio_stream_id);
+      }
     }
     result.speakers.push_back(std::move(summary));
   }

@@ -237,6 +237,22 @@ int run_microphone_reconciliation_replay(
     throw std::runtime_error(
         "microphone replay requires provenance/processors.jsonl");
   }
+  const auto word_records = read_jsonl_records(words_path);
+  for (const auto& processor : read_jsonl_records(processors_path)) {
+    if (processor.value("id", "") !=
+        "proc_microphone_stream_assignment_0001") {
+      continue;
+    }
+    const auto& reconciliation = processor["reconciliation"];
+    const std::size_t input_word_count =
+        reconciliation.value("input_word_count", word_records.size());
+    if (input_word_count != word_records.size()) {
+      throw std::runtime_error(
+          "microphone replay requires pre-reconciliation per-stream words; "
+          "the staged words.jsonl has already been deduplicated");
+    }
+  }
+
   auto sources = microphone_sources_by_speaker(processors_path);
   if (sources.empty()) {
     sources = microphone_sources_from_transcript(
@@ -258,7 +274,6 @@ int run_microphone_reconciliation_replay(
     transcript.analysis_audio_ref = ref.str();
   }
 
-  const auto word_records = read_jsonl_records(words_path);
   for (const auto& record : word_records) {
     const auto found = sources.find(record.value("speaker_id", ""));
     if (found == sources.end()) continue;
@@ -310,9 +325,40 @@ int run_microphone_reconciliation_replay(
     speakers.push_back({
         {"speaker_id", speaker.speaker_id},
         {"source_audio_stream_id", speaker.source_audio_stream_id},
+        {"source_audio_stream_ids", speaker.source_audio_stream_ids},
         {"source_ordinal", speaker.source_ordinal},
         {"word_count", speaker.word_count},
     });
+  }
+  nlohmann::json voice_matches = nlohmann::json::array();
+  for (const auto& evidence : result.voice_match_evidence) {
+    voice_matches.push_back({
+        {"left_source_ordinal", evidence.left_source_ordinal},
+        {"right_source_ordinal", evidence.right_source_ordinal},
+        {"shared_speech_overlap_ratio", evidence.shared_speech_overlap_ratio},
+        {"aligned_voice_coverage_ratio",
+         evidence.aligned_voice_coverage_ratio},
+        {"aligned_voice_match_ratio", evidence.aligned_voice_match_ratio},
+    });
+  }
+  nlohmann::json source_quality = nlohmann::json::array();
+  for (const auto& evidence : result.source_quality_evidence) {
+    source_quality.push_back({
+        {"source_ordinal", evidence.source_ordinal},
+        {"median_word_signal_db", evidence.median_word_signal_db},
+        {"noise_floor_db", evidence.noise_floor_db},
+        {"median_speech_snr_db", evidence.median_speech_snr_db},
+        {"mean_asr_confidence", evidence.mean_asr_confidence},
+    });
+  }
+  nlohmann::json discarded_pairs = nlohmann::json::array();
+  for (const auto& [source, anchors] :
+       result.discarded_word_count_by_source_pair) {
+    for (const auto& [anchor, count] : anchors) {
+      discarded_pairs.push_back({{"source_ordinal", source},
+                                 {"anchor_source_ordinal", anchor},
+                                 {"word_count", count}});
+    }
   }
   nlohmann::json source_assignments = nlohmann::json::array();
   for (const auto& assignment : result.source_assignment_evidence) {
@@ -340,6 +386,9 @@ int run_microphone_reconciliation_replay(
       {"speaker_count", result.speakers.size()},
       {"speakers", speakers},
       {"source_assignments", source_assignments},
+      {"voice_matches", voice_matches},
+      {"source_quality", source_quality},
+      {"discarded_word_count_by_source_pair", discarded_pairs},
       {"out_words_jsonl", options.out_words_jsonl_path},
   }).dump(2) << "\n";
   return 0;
@@ -411,31 +460,11 @@ int run_diarize_replay_command(const DiarizeReplayCliOptions& options) {
               << staging_dir << "\n";
     return 1;
   }
-  if (!fs::exists(wav_path)) {
-    std::cerr << "svp-builder diarize-replay: analysis WAV not found: "
-              << wav_path << "\n";
-    return 1;
-  }
   if (!fs::exists(words_path)) {
     std::cerr << "svp-builder diarize-replay: words JSONL not found: "
               << words_path << "\n";
     return 1;
   }
-  if (!fs::exists(segments_path)) {
-    std::cerr << "svp-builder diarize-replay: speaker segments JSONL not found: "
-              << segments_path << "\n";
-    return 1;
-  }
-  if (!fs::exists(model_dir)) {
-    std::cerr << "svp-builder diarize-replay: model dir not found: "
-              << model_dir << "\n";
-    return 1;
-  }
-
-  if (!options.sherpa_lib_path.empty()) {
-    svp::audio::set_sherpa_lib_path(options.sherpa_lib_path);
-  }
-
   std::ostringstream diag_name;
   diag_name << "svp-diarize-replay-memory";
 #if defined(__APPLE__)
@@ -446,15 +475,38 @@ int run_diarize_replay_command(const DiarizeReplayCliOptions& options) {
   const fs::path diag_path = diag_dir / diag_name.str();
   svp::core::configure_memory_diagnostics(diag_path, replay_memory_limit_bytes());
 
-  if (!svp::audio::is_sherpa_diarization_available()) {
-    std::cerr << "svp-builder diarize-replay: sherpa-onnx not available\n";
-    return 1;
-  }
-
   try {
     if (options.microphone_reconciliation) {
+      if (!options.skip_fingerprints) {
+        if (!fs::exists(model_dir)) {
+          throw std::runtime_error("model dir not found: " +
+                                   model_dir.string());
+        }
+        if (!options.sherpa_lib_path.empty()) {
+          svp::audio::set_sherpa_lib_path(options.sherpa_lib_path);
+        }
+        if (!svp::audio::is_sherpa_diarization_available()) {
+          throw std::runtime_error("sherpa-onnx not available");
+        }
+      }
       return run_microphone_reconciliation_replay(options, staging_dir,
                                                   model_dir);
+    }
+    if (!fs::exists(wav_path)) {
+      throw std::runtime_error("analysis WAV not found: " + wav_path.string());
+    }
+    if (!fs::exists(segments_path)) {
+      throw std::runtime_error("speaker segments JSONL not found: " +
+                               segments_path.string());
+    }
+    if (!fs::exists(model_dir)) {
+      throw std::runtime_error("model dir not found: " + model_dir.string());
+    }
+    if (!options.sherpa_lib_path.empty()) {
+      svp::audio::set_sherpa_lib_path(options.sherpa_lib_path);
+    }
+    if (!svp::audio::is_sherpa_diarization_available()) {
+      throw std::runtime_error("sherpa-onnx not available");
     }
     const std::vector<nlohmann::json> word_records =
         read_jsonl_records(words_path);
