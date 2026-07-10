@@ -139,6 +139,8 @@ Version 1 structurally detects MP4, QuickTime MOV, M4V, and M4A brand families.
 Its UUID is `e2b6a23c-22ca-5636-b165-991208c837f1`. The complete binary
 contract, placement rules, validation codes, and preservation limits are in
 [`docs/svpi/Embedded_SVPI_Transport_ISO_BMFF_v1.md`](docs/svpi/Embedded_SVPI_Transport_ISO_BMFF_v1.md).
+The retained native macOS integration design is documented in
+[`docs/macos/Embedded_SVPI_System_Support.md`](docs/macos/Embedded_SVPI_System_Support.md).
 
 ## Architecture
 
@@ -335,14 +337,31 @@ the structurally detected family: `.mp4`, `.mov`, `.m4v`, or `.m4a`.
 Batch workflows are also available:
 
 ```bash
-./build/tools/svp-builder/svp-builder interlace create-batch /path/to/media-dir --recursive
+./build/tools/svp-builder/svp-builder interlace create-batch \
+  /path/to/media-dir \
+  --output-format svpi \
+  --recursive
+
+./build/tools/svp-builder/svp-builder interlace create-batch \
+  /path/to/media-dir \
+  --output-format embedded-svpi \
+  --out-dir /path/to/semantic-media \
+  --recursive
+
 ./build/tools/svp-builder/svp-builder interlace scan /path/to/media-dir --recursive
 ./build/tools/svp-builder/svp-builder interlace validate-batch /path/to/media-dir --recursive
 ./build/tools/svp-builder/svp-builder interlace complete-identity-batch /path/to/media-dir --recursive
 ```
 
 Sidecar naming modes for `create-batch` are `visible`, `hidden`, and
-`managed-dir`.
+`managed-dir`. They apply only to `--output-format svpi`. Embedded batch
+output preserves source-relative filenames and container suffixes beneath the
+required separate `--out-dir`. To intentionally replace every source in place,
+omit `--out-dir` and pass explicit `--overwrite`; each item is written,
+verified, and atomically published through the same transport writer used by
+the one-file command. `--replace-mismatched` permits rebuilding a stale or
+invalid artifact in a separate output directory but does not grant permission
+to overwrite source media.
 
 ## Validate and Inspect
 

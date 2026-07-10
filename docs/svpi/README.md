@@ -40,6 +40,7 @@ Folder-scale workflows:
 
 ```bash
 svp-builder interlace create-batch ./media --recursive
+svp-builder interlace create-batch ./media --output-format embedded-svpi --out-dir ./semantic-media
 svp-builder interlace scan ./media --recursive
 svp-builder interlace validate-batch ./media --recursive
 svp-builder interlace complete-identity-batch ./media --recursive

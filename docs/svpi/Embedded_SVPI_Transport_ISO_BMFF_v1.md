@@ -213,6 +213,20 @@ svp-builder transport embed source.mov package.svpi --out semantic.mov
 Use `--replace-existing` only to replace an existing embedding and
 `--overwrite` only to atomically replace an existing output path.
 
+Build a directory of canonical embedded outputs without exposing intermediate
+sidecars:
+
+```bash
+svp-builder interlace create-batch ./media \
+  --output-format embedded-svpi \
+  --out-dir ./semantic-media
+```
+
+The output directory preserves source-relative names and container suffixes.
+Explicit `--overwrite` with no `--out-dir` instead atomically replaces each
+source after complete transport validation. Batch output supports `svpi` and
+`embedded-svpi`; it does not produce `.svp` packages.
+
 Inspect, validate, query, extract, and strip:
 
 ```bash
