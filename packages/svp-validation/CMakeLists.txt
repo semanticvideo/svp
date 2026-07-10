@@ -9,6 +9,8 @@ add_library(svp-validation
   src/color_record_validation.cpp
   src/code_registry.cpp
   src/diarization_validation.cpp
+  src/embedded_svpi_validator.cpp
+  src/embedded_media_binding_validation.cpp
   src/index_validation.cpp
   src/json_schema_subset.cpp
   src/ocr_color_spec.cpp
@@ -49,7 +51,15 @@ if(BUILD_TESTING)
     tests/diarization_validation_tests.cpp
   )
 
+  add_executable(svp-embedded-svpi-validation-tests
+    tests/embedded_svpi_validation_tests.cpp
+  )
+
   target_compile_features(svp-diarization-validation-tests PRIVATE cxx_std_20)
+  target_compile_features(svp-embedded-svpi-validation-tests PRIVATE cxx_std_20)
+  target_compile_definitions(svp-embedded-svpi-validation-tests PRIVATE
+    SVP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
 
   target_link_libraries(svp-diarization-validation-tests
     PRIVATE
@@ -57,7 +67,15 @@ if(BUILD_TESTING)
       svp::package
   )
 
+  target_link_libraries(svp-embedded-svpi-validation-tests PRIVATE
+    svp::validation
+    svp::package
+    libzip::zip
+  )
+
   add_test(NAME svp-diarization-validation-tests
            COMMAND svp-diarization-validation-tests
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME svp-embedded-svpi-validation-tests
+           COMMAND svp-embedded-svpi-validation-tests)
 endif()

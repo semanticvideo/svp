@@ -7,6 +7,9 @@ int run_selected_command(const CliContext& context) {
       *context.interlace_opts.ii_inspect_sub ||
       *context.interlace_opts.ie_extract_sub ||
       *context.interlace_opts.ir_recombine_sub ||
+      *context.interlace_opts.em_embed_sub ||
+      *context.interlace_opts.ee_extract_sub ||
+      *context.interlace_opts.se_strip_sub ||
       *context.interlace_opts.cb_create_batch_sub ||
       *context.interlace_opts.sc_scan_sub ||
       *context.interlace_opts.vb_validate_batch_sub ||

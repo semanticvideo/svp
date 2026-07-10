@@ -2,6 +2,7 @@
 #include "cli_elapsed.hpp"
 
 #include "svp/builder/interlace.hpp"
+#include "svp/builder/embedded_interlace.hpp"
 #include "svp/builder/interlace_batch.hpp"
 #include "svp/validation/report_json.hpp"
 
@@ -136,6 +137,63 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
               << format_elapsed_duration(std::chrono::steady_clock::now() -
                                          started_at)
               << "\n";
+    return 0;
+  }
+
+  if (*opts.em_embed_sub) {
+    svp::builder::EmbedMp4Options embed_options;
+    embed_options.media_path = opts.em_media;
+    embed_options.svpi_path = opts.em_svpi;
+    embed_options.output_path = opts.em_out;
+    embed_options.ffprobe_path = opts.em_ffprobe;
+    embed_options.validation_codes_path = opts.em_codes;
+    embed_options.replace_existing = opts.em_replace;
+    embed_options.overwrite_output = opts.em_overwrite;
+    const auto result = svp::builder::interlace_embed_mp4(embed_options);
+    if (!result.success) {
+      std::cerr << "interlace embed-mp4 failed: " << result.error_message << "\n";
+      for (const auto& finding : result.validation_report.errors) {
+        std::cerr << "  " << finding.code << ": " << finding.message << "\n";
+      }
+      return 1;
+    }
+    std::cout << "Embedded MP4: " << result.output_path.string() << "\n";
+    std::cout << "Transport and embedded SVPI validation: valid\n";
+    return 0;
+  }
+
+  if (*opts.ee_extract_sub) {
+    svp::builder::ExtractEmbeddedOptions extract_options;
+    extract_options.mp4_path = opts.ee_mp4;
+    extract_options.output_path = opts.ee_out;
+    extract_options.validation_codes_path = opts.ee_codes;
+    extract_options.overwrite_output = opts.ee_overwrite;
+    const auto result = svp::builder::interlace_extract_embedded(extract_options);
+    if (!result.success) {
+      std::cerr << "interlace extract-embedded failed: " << result.error_message << "\n";
+      return 1;
+    }
+    std::cout << "Extracted SVPI: " << result.output_path.string() << "\n";
+    std::cout << "Embedded package validation: "
+              << (result.package_valid ? "valid" : "invalid") << "\n";
+    if (!result.package_valid) {
+      std::cerr << result.error_message << "\n";
+      return 1;
+    }
+    return 0;
+  }
+
+  if (*opts.se_strip_sub) {
+    svp::builder::StripEmbeddedOptions strip_options;
+    strip_options.mp4_path = opts.se_mp4;
+    strip_options.output_path = opts.se_out;
+    strip_options.overwrite_output = opts.se_overwrite;
+    const auto result = svp::builder::interlace_strip_embedded(strip_options);
+    if (!result.success) {
+      std::cerr << "interlace strip-embedded failed: " << result.error_message << "\n";
+      return 1;
+    }
+    std::cout << "Clean MP4: " << result.output_path.string() << "\n";
     return 0;
   }
 

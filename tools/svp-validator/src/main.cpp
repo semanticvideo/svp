@@ -1,5 +1,8 @@
 #include "svp/core/version.hpp"
+#include "svp/package/package_probe.hpp"
+#include "svp/validation/embedded_svpi_validator.hpp"
 #include "svp/validation/report_json.hpp"
+#include "svp/validation/svpi_validator.hpp"
 #include "svp/validation/validator.hpp"
 
 #include <CLI/CLI.hpp>
@@ -16,6 +19,19 @@ void print_human_report(const svp::validation::ValidationReport& report) {
             << "\n";
   std::cout << "Authenticity: "
             << svp::validation::to_string(report.authenticity_status) << "\n";
+  if (report.embedding_transport.present) {
+    const auto& transport = report.embedding_transport;
+    std::cout << "Embedding transport: " << transport.status << "\n";
+    std::cout << "Embedded package: "
+              << transport.embedded_package_status << "\n";
+    std::cout << "  profile_version: " << transport.profile_version << "\n";
+    std::cout << "  uuid: " << transport.uuid << "\n";
+    std::cout << "  box_offset: " << transport.box_offset << "\n";
+    std::cout << "  box_size: " << transport.box_size << "\n";
+    std::cout << "  payload_offset: " << transport.payload_offset << "\n";
+    std::cout << "  payload_size: " << transport.payload_size << "\n";
+    std::cout << "  payload_hash: " << transport.payload_hash_status << "\n";
+  }
 
   const auto print_bucket = [](std::string_view label,
                                const std::vector<svp::validation::ValidationFinding>& findings) {
@@ -42,7 +58,7 @@ void print_human_report(const svp::validation::ValidationReport& report) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  CLI::App app{"SVP package validator"};
+  CLI::App app{"SVP, SVPI, and embedded-SVPI MP4 validator"};
   app.set_version_flag("--version",
                        svp::core::tool_version_label("svp-validator"));
   app.require_subcommand(0, 1);
@@ -51,8 +67,8 @@ int main(int argc, char** argv) {
   bool json_output = false;
   std::string validation_codes_path = "spec/registries/validation-codes.json";
 
-  auto* validate = app.add_subcommand("validate", "Validate an SVP package");
-  validate->add_option("package", package_path, "Path to a .svp package")->required();
+  auto* validate = app.add_subcommand("validate", "Validate an SVP, SVPI, or embedded MP4");
+  validate->add_option("package", package_path, "Path to a .svp, .svpi, or .mp4 input")->required();
   validate->add_flag("--json", json_output, "Emit a machine-readable validation report");
   validate->add_option("--validation-codes", validation_codes_path,
                        "Path to the validation-code registry");
@@ -60,11 +76,24 @@ int main(int argc, char** argv) {
   CLI11_PARSE(app, argc, argv);
 
   if (*validate) {
-    const auto report = svp::validation::validate_package(
-        package_path,
-        svp::validation::ValidatorOptions{
-            .validation_codes_path = validation_codes_path,
-        });
+    const auto probe = svp::package::probe_package(package_path);
+    const auto report = probe.has_mp4_extension
+        ? svp::validation::validate_embedded_svpi_mp4(
+              package_path,
+              svp::validation::EmbeddedSvpiValidatorOptions{
+                  .validation_codes_path = validation_codes_path,
+              })
+        : probe.has_svpi_extension
+              ? svp::validation::validate_svpi_package(
+                    package_path,
+                    svp::validation::SvpiValidatorOptions{
+                        .validation_codes_path = validation_codes_path,
+                    })
+              : svp::validation::validate_package(
+                    package_path,
+                    svp::validation::ValidatorOptions{
+                        .validation_codes_path = validation_codes_path,
+                    });
 
     if (json_output) {
       nlohmann::json json = report;

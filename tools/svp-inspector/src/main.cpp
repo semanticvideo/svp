@@ -1,5 +1,9 @@
+#include "embedded_inspection_output.hpp"
+
 #include "svp/core/version.hpp"
+#include "svp/package/embedded_svpi.hpp"
 #include "svp/package/package_layout.hpp"
+#include "svp/package/package_probe.hpp"
 #include "svp/package/package_summary.hpp"
 #include "svp/query/query_ops.hpp"
 #include "svp/query/query_reader.hpp"
@@ -1022,8 +1026,10 @@ int main(int argc, char** argv) {
   app.require_subcommand(0, 1);
 
   std::string package_path;
+  bool inspect_json = false;
   auto* inspect = app.add_subcommand("inspect", "Print a concise SVP/SVPI package summary");
-  inspect->add_option("package", package_path, "Path to a .svp or .svpi package")->required();
+  inspect->add_option("package", package_path, "Path to a .svp, .svpi, or embedded .mp4")->required();
+  inspect->add_flag("--json", inspect_json, "Emit stable structured JSON output");
 
   std::string dump_package_path;
   std::string dump_section = "manifest";
@@ -1081,8 +1087,49 @@ int main(int argc, char** argv) {
   CLI11_PARSE(app, argc, argv);
 
   if (*inspect) {
+    const auto probe = svp::package::probe_package(package_path);
+    if (probe.has_mp4_extension) {
+      const auto embedding = svp::package::inspect_embedded_svpi(package_path, true);
+      if (embedding.embeddings.empty()) {
+        if (inspect_json) {
+          std::cout << nlohmann::json{{"embedding", embedded_inspection_output::embedding_json(embedding)}}.dump(2)
+                    << "\n";
+        } else {
+          embedded_inspection_output::print_embedding(embedding);
+        }
+        return embedding.mp4_structure_valid ? 0 : 1;
+      }
+      const auto summary = svp::package::read_package_summary(package_path);
+      if (inspect_json) {
+        std::cout << nlohmann::json{
+            {"embedding", embedded_inspection_output::embedding_json(embedding)},
+            {"package", embedded_inspection_output::package_summary_json(summary)},
+            {"semantic", embedded_inspection_output::semantic_summary_json(package_path)},
+        }.dump(2) << "\n";
+      } else {
+        embedded_inspection_output::print_embedding(embedding);
+        std::cout << "\n";
+        print_summary(summary);
+        embedded_inspection_output::print_semantic_summary(package_path);
+      }
+      return embedding.has_single_valid_embedding() &&
+                     embedding.embeddings.front().hash_verified &&
+                     embedding.embeddings.front().hash_matches &&
+                     summary.layout_readable
+                 ? 0
+                 : 1;
+    }
     const auto summary = svp::package::read_package_summary(package_path);
-    print_summary(summary);
+    if (inspect_json) {
+      std::cout << nlohmann::json{
+          {"package", embedded_inspection_output::package_summary_json(summary)},
+          {"semantic", embedded_inspection_output::semantic_summary_json(package_path)},
+      }.dump(2)
+                << "\n";
+    } else {
+      print_summary(summary);
+      embedded_inspection_output::print_semantic_summary(package_path);
+    }
     return summary.layout_readable ? 0 : 1;
   }
 

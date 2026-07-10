@@ -19,6 +19,10 @@ add_library(svp-builder-lib
   src/interlace/interlace_inspect.cpp
   src/interlace/interlace_extract.cpp
   src/interlace/interlace_recombine.cpp
+  src/interlace/interlace_embed_mp4.cpp
+  src/interlace/interlace_extract_embedded.cpp
+  src/interlace/interlace_strip_embedded.cpp
+  src/interlace/replacement_binding_media.cpp
   src/interlace/interlace_batch_discovery.cpp
   src/interlace/interlace_batch_sidecar.cpp
   src/interlace/interlace_batch_create.cpp
@@ -60,6 +64,7 @@ add_executable(svp-builder
   src/cli/cli_progress.cpp
   src/cli/probe_command.cpp
   src/cli/build_command.cpp
+  src/cli/build_interlace_output.cpp
   src/cli/diarize_command.cpp
   src/cli/diarize_replay_command.cpp
   src/cli/interlace_commands.cpp

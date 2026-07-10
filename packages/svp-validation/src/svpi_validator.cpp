@@ -56,7 +56,8 @@ std::filesystem::path schema_root_for(const SvpiValidatorOptions& options,
 
 bool add_input_findings(ValidationReport& report,
                         const ValidationCodeRegistry& registry,
-                        const svp::package::PackageProbe& probe) {
+                        const svp::package::PackageProbe& probe,
+                        bool allow_embedded_mp4) {
   if (!probe.exists) {
     add_finding(report, make_runtime_finding(kTempCodeInputMissing,
                                              package_path_for_report(probe.path),
@@ -73,7 +74,7 @@ bool add_input_findings(ValidationReport& report,
     return false;
   }
 
-  if (!probe.has_svpi_extension) {
+  if (!probe.has_svpi_extension && !(allow_embedded_mp4 && probe.has_mp4_extension)) {
     add_finding(report, make_runtime_finding(kTempCodeWrongExtension,
                                              package_path_for_report(probe.path),
                                              "Input file must use the .svpi extension."));
@@ -460,7 +461,7 @@ ValidationReport validate_svpi_package(
   }
 
   const auto probe = svp::package::probe_package(package_path);
-  if (!add_input_findings(report, registry, probe)) {
+  if (!add_input_findings(report, registry, probe, options.allow_embedded_mp4)) {
     return report;
   }
 

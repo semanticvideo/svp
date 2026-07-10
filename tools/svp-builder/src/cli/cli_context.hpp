@@ -43,6 +43,7 @@ struct BuildCliOptions {
   std::string ffprobe_path = "ffprobe";
   std::string ffmpeg_path = "ffmpeg";
   std::string output_path;
+  std::string output_format = "svp";
   std::string staging_dir;
   std::string model_cache_dir;
   std::string stop_after = "package";
@@ -54,6 +55,7 @@ struct BuildCliOptions {
   std::string progress_mode = "auto";
   bool quiet = false;
   bool verbose = false;
+  bool overwrite = false;
 };
 
 struct InterlaceCliOptions {
@@ -105,6 +107,26 @@ struct InterlaceCliOptions {
   std::string ir_codes = "spec/registries/validation-codes.json";
   std::string ir_progress_mode = "auto";
   bool ir_quiet = false;
+
+  // interlace embed-mp4
+  std::string em_media;
+  std::string em_svpi;
+  std::string em_out;
+  std::string em_ffprobe = "ffprobe";
+  std::string em_codes = "spec/registries/validation-codes.json";
+  bool em_replace = false;
+  bool em_overwrite = false;
+
+  // interlace extract-embedded
+  std::string ee_mp4;
+  std::string ee_out;
+  std::string ee_codes = "spec/registries/validation-codes.json";
+  bool ee_overwrite = false;
+
+  // interlace strip-embedded
+  std::string se_mp4;
+  std::string se_out;
+  bool se_overwrite = false;
 
   // interlace create-batch
   std::string cb_source_dir;
@@ -167,6 +189,9 @@ struct InterlaceCliOptions {
   CLI::App* ii_inspect_sub = nullptr;
   CLI::App* ie_extract_sub = nullptr;
   CLI::App* ir_recombine_sub = nullptr;
+  CLI::App* em_embed_sub = nullptr;
+  CLI::App* ee_extract_sub = nullptr;
+  CLI::App* se_strip_sub = nullptr;
   CLI::App* cb_create_batch_sub = nullptr;
   CLI::App* sc_scan_sub = nullptr;
   CLI::App* vb_validate_batch_sub = nullptr;
@@ -193,6 +218,9 @@ struct CliContext {
   CLI::App* ii_inspect = nullptr;
   CLI::App* ie_extract = nullptr;
   CLI::App* ir_recombine = nullptr;
+  CLI::App* em_embed = nullptr;
+  CLI::App* ee_extract = nullptr;
+  CLI::App* se_strip = nullptr;
   CLI::App* cb_create_batch = nullptr;
   CLI::App* sc_scan = nullptr;
   CLI::App* vb_validate_batch = nullptr;

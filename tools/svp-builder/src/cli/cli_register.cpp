@@ -37,8 +37,13 @@ void register_cli(CLI::App& app, CliContext& context) {
   build->add_option("--ffprobe", build_opts.ffprobe_path, "ffprobe executable path");
   build->add_option("--ffmpeg", build_opts.ffmpeg_path, "ffmpeg executable path");
   build->add_option("--out", build_opts.output_path,
-                    "Output .svp package path")
+                    "Output artifact path")
       ->required();
+  build->add_option("--output-format", build_opts.output_format,
+                    "Output representation: svp, svpi, or embedded-mp4")
+      ->check(CLI::IsMember({"svp", "svpi", "embedded-mp4"}));
+  build->add_flag("--overwrite", build_opts.overwrite,
+                  "Explicitly allow replacing a non-SVP output path atomically");
   build->add_option("--staging-dir", build_opts.staging_dir,
                     "Directory for staged builder outputs");
   build->add_option("--model-cache", build_opts.model_cache_dir,
@@ -101,7 +106,7 @@ void register_cli(CLI::App& app, CliContext& context) {
 
   // --- interlace subcommand ---
   auto* interlace = app.add_subcommand(
-      "interlace", "SVPI sidecar operations: create, validate, inspect, extract, recombine");
+      "interlace", "SVPI sidecar and embedded-MP4 transport operations");
   context.interlace_subcommand = interlace;
 
   // interlace create
@@ -188,6 +193,41 @@ void register_cli(CLI::App& app, CliContext& context) {
       "Suppress progress output; print only final success/failure");
   context.ir_recombine = ir_recombine;
   opts.ir_recombine_sub = ir_recombine;
+
+  auto* em_embed = interlace->add_subcommand(
+      "embed-mp4", "Embed one complete canonical SVPI in an MP4 without transcoding");
+  em_embed->add_option("media", opts.em_media, "Source MP4 path")->required();
+  em_embed->add_option("svpi", opts.em_svpi, "Canonical SVPI path")->required();
+  em_embed->add_option("--out", opts.em_out, "Output embedded MP4 path")->required();
+  em_embed->add_option("--ffprobe", opts.em_ffprobe, "ffprobe executable path");
+  em_embed->add_option("--validation-codes", opts.em_codes,
+                       "Validation codes registry path");
+  em_embed->add_flag("--replace-existing", opts.em_replace,
+                     "Replace existing embedded SVPI and produce exactly one box");
+  em_embed->add_flag("--overwrite", opts.em_overwrite,
+                     "Explicitly allow replacing the output path atomically");
+  context.em_embed = em_embed;
+  opts.em_embed_sub = em_embed;
+
+  auto* ee_extract = interlace->add_subcommand(
+      "extract-embedded", "Extract the exact embedded SVPI byte stream from an MP4");
+  ee_extract->add_option("mp4", opts.ee_mp4, "Embedded MP4 path")->required();
+  ee_extract->add_option("--out", opts.ee_out, "Output .svpi path")->required();
+  ee_extract->add_option("--validation-codes", opts.ee_codes,
+                         "Validation codes registry path");
+  ee_extract->add_flag("--overwrite", opts.ee_overwrite,
+                       "Explicitly allow replacing the output path atomically");
+  context.ee_extract = ee_extract;
+  opts.ee_extract_sub = ee_extract;
+
+  auto* se_strip = interlace->add_subcommand(
+      "strip-embedded", "Remove the SVPI UUID box and reconstruct the clean MP4");
+  se_strip->add_option("mp4", opts.se_mp4, "Embedded MP4 path")->required();
+  se_strip->add_option("--out", opts.se_out, "Output clean MP4 path")->required();
+  se_strip->add_flag("--overwrite", opts.se_overwrite,
+                     "Explicitly allow replacing the output path atomically");
+  context.se_strip = se_strip;
+  opts.se_strip_sub = se_strip;
 
   // interlace create-batch
   auto* cb_create_batch = interlace->add_subcommand(
