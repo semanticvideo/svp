@@ -145,6 +145,30 @@ void test_validator_allows_ran_with_zero_speakers() {
   std::filesystem::remove_all(package_path.parent_path());
 }
 
+void test_validator_allows_microphone_assignment_with_zero_speakers() {
+  nlohmann::json transcript = {
+    {"diarization", {{"status", "microphone_stream_assignment"}}},
+    {"speaker_count", 0}
+  };
+
+  const auto package_path = create_test_package(
+      "svp-diar-validation-microphone-assignment-zero", transcript);
+  const std::filesystem::path repo_root =
+      std::filesystem::current_path().parent_path().parent_path();
+
+  svp::validation::ValidatorOptions options;
+  options.validation_codes_path =
+      repo_root / "spec" / "registries" / "validation-codes.json";
+  options.registry_root_path = repo_root / "spec" / "registries";
+  options.schema_root_path = repo_root / "spec" / "schemas";
+
+  const svp::validation::ValidationReport report =
+      svp::validation::validate_package(package_path, options);
+  assert(!has_finding_with_code(report, "ERR_DIARIZATION_UNAVAILABLE"));
+
+  std::filesystem::remove_all(package_path.parent_path());
+}
+
 void test_validator_emits_error_for_unparsable_transcript() {
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "svp-diar-validation-unparsable";
@@ -196,6 +220,7 @@ int main() {
   test_validator_emits_warning_for_fallback_diarization();
   test_validator_emits_error_for_unavailable_diarization();
   test_validator_allows_ran_with_zero_speakers();
+  test_validator_allows_microphone_assignment_with_zero_speakers();
   test_validator_emits_error_for_unparsable_transcript();
   return 0;
 }

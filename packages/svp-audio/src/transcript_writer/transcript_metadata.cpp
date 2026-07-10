@@ -1,5 +1,8 @@
 #include "internal.hpp"
 
+#include <iomanip>
+#include <sstream>
+
 namespace svp::audio::transcript_writer_internal {
 namespace {
 
@@ -11,6 +14,10 @@ nlohmann::json diarization_provenance_json(const AsrExecutionBoundary& boundary)
     } else {
       note = "Diarization model ran and produced speaker segments.";
     }
+  } else if (boundary.diarization_status == "microphone_stream_assignment") {
+    note = boundary.diarization_note.empty()
+             ? "Speaker identity is locked to camera microphone inputs; diarization did not reassign ownership."
+             : boundary.diarization_note;
   } else if (boundary.diarization_status == "user_declared_single_speaker") {
     note = boundary.diarization_note.empty()
          ? "User requested single-speaker mode; diarization was intentionally skipped."
@@ -53,7 +60,9 @@ nlohmann::json blocked_transcript_json(const AsrExecutionBoundary& boundary) {
       {"duration_us", boundary.chunk_plan.total_duration_us},
       {"word_count", 0},
       {"speaker_count", 0},
-      {"source_audio_id", "astream_analysis_0001"},
+      {"source_audio_id", boundary.diarization_status == "microphone_stream_assignment"
+                              ? "camera_microphone_streams"
+                              : "astream_analysis_0001"},
       {"processor_id", boundary.processor_id},
       {"asr_status", asr_status_string(boundary.asr_status)},
       {"one_speaker_mode", boundary.one_speaker_mode},
@@ -82,25 +91,52 @@ nlohmann::json ran_transcript_json(const AsrExecutionBoundary& boundary,
            ? "one_speaker_fallback"
            : (boundary.diarization_status == "user_declared_single_speaker"
                 ? "user_declared_single_speaker"
-                : "diarization_assigned")},
+                : (boundary.diarization_status == "microphone_stream_assignment"
+                     ? "camera_microphone_stream_locked"
+                     : "diarization_assigned"))},
       {"speaker_note", boundary.diarization_status == "fallback_one_speaker"
            ? "Single speaker assigned without diarization. All words have speaker_id speaker_0001. This is fallback behavior, not speaker recognition."
            : (boundary.diarization_status == "user_declared_single_speaker"
                 ? "User requested single-speaker mode. All words have speaker_id speaker_0001. Diarization was intentionally skipped."
-                : "Speaker IDs assigned by max interval overlap with nearest-segment fallback (500ms tolerance). Sustained non-dominant speaker evidence may be expanded across the current ASR utterance. Words outside all segments and tolerance are marked speaker_unknown.")},
+                : (boundary.diarization_status == "microphone_stream_assignment"
+                     ? "Microphone inputs collapse only when time-aligned diarization voice tracks match across sustained speech coverage. Same-time fingerprint mismatches preserve distinct voices. The input with stronger speech relative to its own noise floor is primary. Duplicate anchor chunks require a strict majority of aligned token content, and punctuation-bounded turns remain on the anchor with stronger time-local SNR. Diarization cannot reassign words between voice groups."
+                     : "Speaker IDs assigned by max interval overlap with nearest-segment fallback (500ms tolerance). Sustained non-dominant speaker evidence may be expanded across the current ASR utterance. Words outside all segments and tolerance are marked speaker_unknown."))},
   };
+
+  nlohmann::json speaker_sources = nlohmann::json::array();
+  if (boundary.diarization_status == "microphone_stream_assignment") {
+    for (std::size_t i = 0;
+         i < boundary.speaker_source_audio_stream_ids.size(); ++i) {
+      std::ostringstream speaker_id;
+      speaker_id << "speaker_" << std::setw(4) << std::setfill('0') << i + 1;
+      speaker_sources.push_back({
+          {"speaker_id", speaker_id.str()},
+          {"source_audio_stream_id",
+           boundary.speaker_source_audio_stream_ids[i]},
+          {"source_audio_stream_ids",
+           i < boundary.speaker_source_audio_stream_groups.size()
+               ? nlohmann::json(
+                     boundary.speaker_source_audio_stream_groups[i])
+               : nlohmann::json::array(
+                     {boundary.speaker_source_audio_stream_ids[i]})},
+      });
+    }
+  }
 
   return {
       {"language", language},
       {"duration_us", boundary.chunk_plan.total_duration_us},
       {"word_count", word_count},
       {"speaker_count", speaker_count},
-      {"source_audio_id", "astream_analysis_0001"},
+      {"source_audio_id", boundary.diarization_status == "microphone_stream_assignment"
+                              ? "camera_microphone_streams"
+                              : "astream_analysis_0001"},
       {"processor_id", boundary.processor_id},
       {"asr_status", asr_status_string(boundary.asr_status)},
       {"one_speaker_mode", boundary.one_speaker_mode},
       {"diarization", diarization_provenance_json(boundary)},
       {"asr_limitations", asr_limitations},
+      {"speaker_sources", speaker_sources},
   };
 }
 
@@ -113,6 +149,8 @@ nlohmann::json chunk_provenance_json(const AsrChunkPlan& chunk,
     speaker_mode = "one_speaker_fallback";
   } else if (diarization_status == "user_declared_single_speaker") {
     speaker_mode = "user_declared_single_speaker";
+  } else if (diarization_status == "microphone_stream_assignment") {
+    speaker_mode = "camera_microphone_stream_locked";
   }
   nlohmann::json asr_limitations = {
       {"timestamp_method", "whisper_timestamp_token_segments"},
