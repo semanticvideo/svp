@@ -97,6 +97,13 @@ void register_cli(CLI::App& app, CliContext& context) {
   diarize_replay->add_option("--out-words-jsonl",
                              context.diarize_replay_opts.out_words_jsonl_path,
                              "Write replayed words JSONL with updated speaker_id values");
+  diarize_replay->add_flag(
+      "--microphone-reconciliation",
+      context.diarize_replay_opts.microphone_reconciliation,
+      "Replay multitrack microphone reconciliation from staged microphone WAVs and words");
+  diarize_replay->add_flag(
+      "--skip-fingerprints", context.diarize_replay_opts.skip_fingerprints,
+      "Replay conservative multitrack behavior with fingerprint support unavailable");
   context.diarize_replay_subcommand = diarize_replay;
 
   // --- interlace subcommand ---

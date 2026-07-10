@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -19,16 +20,35 @@ struct MicrophoneDeduplicationPolicy {
   // Matches the existing diarization fingerprint threshold. Fingerprint match
   // alone is insufficient; shared speech timing below must also pass.
   double minimum_voice_fingerprint_similarity = 0.60;
+  // Similarity at or below this bound is strong contrary identity evidence.
+  // Values between this and the positive-match threshold are inconclusive and
+  // must be combined with local transcript and SNR evidence.
+  double maximum_contrary_voice_fingerprint_similarity = 0.20;
   // A matching voice must cover most of the smaller microphone's diarized
   // speech. This prevents a short incidental bleed match from merging inputs.
   double minimum_aligned_voice_coverage_ratio = 0.60;
   // Most time where both microphones contain diarized speech must agree on the
   // voice fingerprint. A mismatch at the same time is contrary identity evidence.
   double minimum_aligned_voice_match_ratio = 0.60;
-  // Cross-anchor ASR chunks are duplicate captures when a strict majority of
-  // their combined normalized token mass aligns. Dissimilar simultaneous
-  // speech remains on both microphones.
+  // Time-local turns/windows require a strict majority of their combined
+  // normalized token mass to align. Whole ASR chunks are never treated as
+  // duplicate captures.
   double minimum_duplicate_chunk_token_alignment_ratio = 0.50;
+  // At least two aligned words are required so a common isolated token cannot
+  // delete legitimate simultaneous speech.
+  std::size_t minimum_duplicate_aligned_token_count = 2;
+  // Whisper timestamps are segment-derived rather than force-aligned. This
+  // tolerance permits small decoder timing drift while still requiring local,
+  // not chunk-wide, agreement between microphone captures.
+  std::int64_t maximum_duplicate_word_time_delta_us = 1500000;
+  // A source may be classified as fully explained bleed only when sustained
+  // matching voice evidence covers at least 95% of both its diarized voice and
+  // its simultaneous diarized speech. This is deliberately much stronger than
+  // the evidence used for an individual word.
+  double minimum_fully_explained_voice_ratio = 0.95;
+  // A majority of the source words must first be removed by word-local content,
+  // fingerprint, and SNR proof before ASR-divergent residue can be suppressed.
+  double minimum_fully_explained_duplicate_word_ratio = 0.50;
   // Words from one microphone separated by at most 750 ms remain one speaker
   // segment, matching the transcript writer's existing utterance-gap policy.
   std::int64_t maximum_speaker_segment_gap_us = 750000;
@@ -136,6 +156,8 @@ struct MicrophoneChunkContentEvidence {
   std::size_t right_token_count = 0;
   std::size_t aligned_token_count = 0;
   double token_alignment_ratio = 0.0;
+  bool time_aligned = false;
+  bool local_fingerprint_not_contrary = false;
   bool duplicate_capture_proven = false;
 };
 
@@ -143,6 +165,7 @@ struct MicrophoneWordOwnershipResult {
   std::vector<MicrophoneOwnedWordCandidate> words;
   std::vector<MicrophoneChunkContentEvidence> chunk_content_evidence;
   std::size_t discarded_cross_anchor_bleed_word_count = 0;
+  std::map<std::size_t, std::size_t> discarded_word_count_by_source;
 };
 
 struct MicrophoneTranscriptResult {

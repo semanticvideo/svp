@@ -1,18 +1,21 @@
 #include "cli_context.hpp"
 
 #include "svp/audio/sherpa_diarization.hpp"
+#include "svp/audio/microphone_transcript.hpp"
 #include "svp/core/memory_diagnostics.hpp"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -70,9 +73,276 @@ std::vector<svp::audio::AsrWord> parse_words(
     word.text = record.value("text", "");
     word.start_us = record.value("start_us", static_cast<std::int64_t>(0));
     word.end_us = record.value("end_us", static_cast<std::int64_t>(0));
+    word.confidence = record.value("confidence", 0.0);
+    word.chunk_ordinal =
+        record.value("chunk_ordinal", static_cast<std::int64_t>(0));
     words.push_back(std::move(word));
   }
   return words;
+}
+
+std::vector<float> aggregate_voice_fingerprint(
+    const svp::audio::SherpaDiarizationResult& diarization) {
+  std::map<int32_t, double> duration_by_speaker;
+  for (const auto& segment : diarization.segments) {
+    if (segment.speaker_id >= 0) {
+      duration_by_speaker[segment.speaker_id] +=
+          std::max(0.0f, segment.end_sec - segment.start_sec);
+    }
+  }
+  std::vector<float> aggregate;
+  double total_weight = 0.0;
+  for (const auto& [speaker, duration] : duration_by_speaker) {
+    if (duration <= 0.0 || static_cast<std::size_t>(speaker) >=
+                               diarization.final_speaker_fingerprints.size()) {
+      continue;
+    }
+    const auto& fingerprint =
+        diarization.final_speaker_fingerprints[static_cast<std::size_t>(speaker)];
+    if (fingerprint.empty()) continue;
+    if (aggregate.empty()) aggregate.assign(fingerprint.size(), 0.0f);
+    if (aggregate.size() != fingerprint.size()) continue;
+    for (std::size_t index = 0; index < fingerprint.size(); ++index) {
+      aggregate[index] += fingerprint[index] * static_cast<float>(duration);
+    }
+    total_weight += duration;
+  }
+  if (aggregate.empty() || total_weight <= 0.0) return {};
+  double norm_squared = 0.0;
+  for (float value : aggregate) norm_squared += value * value;
+  const double norm = std::sqrt(norm_squared);
+  if (norm <= 0.0) return {};
+  for (float& value : aggregate) value /= static_cast<float>(norm);
+  return aggregate;
+}
+
+std::vector<svp::audio::MicrophoneVoiceTrack> replay_voice_tracks(
+    const svp::audio::SherpaDiarizationResult& diarization) {
+  std::vector<svp::audio::MicrophoneVoiceTrack> tracks;
+  for (int32_t speaker = 0; speaker < diarization.final_speaker_count;
+       ++speaker) {
+    if (static_cast<std::size_t>(speaker) >=
+        diarization.final_speaker_fingerprints.size()) {
+      continue;
+    }
+    const auto& fingerprint =
+        diarization.final_speaker_fingerprints[static_cast<std::size_t>(speaker)];
+    if (fingerprint.empty()) continue;
+    svp::audio::MicrophoneVoiceTrack track;
+    track.track_ordinal = static_cast<std::size_t>(speaker);
+    track.fingerprint = fingerprint;
+    for (const auto& segment : diarization.segments) {
+      if (segment.speaker_id == speaker && segment.end_sec > segment.start_sec) {
+        track.speech_segments.push_back({
+            static_cast<std::int64_t>(std::llround(segment.start_sec * 1000000.0)),
+            static_cast<std::int64_t>(std::llround(segment.end_sec * 1000000.0)),
+        });
+      }
+    }
+    if (!track.speech_segments.empty()) tracks.push_back(std::move(track));
+  }
+  return tracks;
+}
+
+std::vector<svp::audio::TimeSpan> replay_speech_spans(
+    const std::vector<svp::audio::MicrophoneVoiceTrack>& tracks) {
+  std::vector<svp::audio::TimeSpan> spans;
+  for (const auto& track : tracks) {
+    spans.insert(spans.end(), track.speech_segments.begin(),
+                 track.speech_segments.end());
+  }
+  return spans;
+}
+
+std::map<std::string, std::pair<std::string, std::size_t>>
+microphone_sources_by_speaker(const std::filesystem::path& processors_path) {
+  std::map<std::string, std::pair<std::string, std::size_t>> sources;
+  for (const auto& processor : read_jsonl_records(processors_path)) {
+    if (processor.value("id", "") !=
+        "proc_microphone_stream_assignment_0001") {
+      continue;
+    }
+    const auto& speakers = processor["reconciliation"]["speakers"];
+    for (const auto& speaker : speakers) {
+      sources[speaker.value("speaker_id", "")] = {
+          speaker.value("source_audio_stream_id", ""),
+          speaker.value("source_ordinal", static_cast<std::size_t>(0))};
+    }
+  }
+  return sources;
+}
+
+std::size_t source_ordinal_from_id(const std::string& source_id) {
+  if (source_id.rfind("astream_", 0) != 0) {
+    throw std::runtime_error("unsupported microphone source id: " + source_id);
+  }
+  const std::size_t one_based =
+      static_cast<std::size_t>(std::stoul(source_id.substr(8)));
+  if (one_based == 0) {
+    throw std::runtime_error("microphone source id must be one-based");
+  }
+  return one_based - 1;
+}
+
+std::map<std::string, std::pair<std::string, std::size_t>>
+microphone_sources_from_transcript(
+    const std::filesystem::path& transcript_path) {
+  std::ifstream input(transcript_path);
+  if (!input) {
+    throw std::runtime_error("unable to open transcript metadata: " +
+                             transcript_path.string());
+  }
+  nlohmann::json transcript = nlohmann::json::parse(input);
+  std::map<std::string, std::pair<std::string, std::size_t>> sources;
+  for (const auto& source : transcript["speaker_sources"]) {
+    const std::string source_id =
+        source.value("source_audio_stream_id", "");
+    sources[source.value("speaker_id", "")] = {
+        source_id, source_ordinal_from_id(source_id)};
+  }
+  return sources;
+}
+
+void write_microphone_replay_words(
+    const std::filesystem::path& path,
+    const svp::audio::MicrophoneTranscriptResult& result) {
+  if (path.has_parent_path()) {
+    std::filesystem::create_directories(path.parent_path());
+  }
+  std::ofstream output(path);
+  if (!output) {
+    throw std::runtime_error("unable to write microphone replay words JSONL: " +
+                             path.string());
+  }
+  for (std::size_t index = 0; index < result.words.size(); ++index) {
+    const auto& word = result.words[index];
+    output << nlohmann::json({
+        {"text", word.text}, {"start_us", word.start_us},
+        {"end_us", word.end_us}, {"confidence", word.confidence},
+        {"chunk_ordinal", word.chunk_ordinal},
+        {"speaker_id", result.word_speaker_assignments[index]},
+    }).dump() << "\n";
+  }
+}
+
+int run_microphone_reconciliation_replay(
+    const DiarizeReplayCliOptions& options,
+    const std::filesystem::path& staging_dir,
+    const std::filesystem::path& model_dir) {
+  const std::filesystem::path words_path =
+      staging_dir / "transcript" / "words.jsonl";
+  const std::filesystem::path processors_path =
+      staging_dir / "provenance" / "processors.jsonl";
+  if (!std::filesystem::exists(processors_path)) {
+    throw std::runtime_error(
+        "microphone replay requires provenance/processors.jsonl");
+  }
+  auto sources = microphone_sources_by_speaker(processors_path);
+  if (sources.empty()) {
+    sources = microphone_sources_from_transcript(
+        staging_dir / "transcript" / "transcript.json");
+  }
+  if (sources.empty()) {
+    throw std::runtime_error(
+        "microphone replay found no staged microphone source mappings");
+  }
+
+  std::map<std::size_t, svp::audio::MicrophoneTranscript> by_source;
+  for (const auto& [speaker_id, source] : sources) {
+    auto& transcript = by_source[source.second];
+    transcript.source_audio_stream_id = source.first;
+    transcript.source_ordinal = source.second;
+    std::ostringstream ref;
+    ref << "media/audio/analysis_stream_" << std::setw(3)
+        << std::setfill('0') << source.second << "_mono_16k.wav";
+    transcript.analysis_audio_ref = ref.str();
+  }
+
+  const auto word_records = read_jsonl_records(words_path);
+  for (const auto& record : word_records) {
+    const auto found = sources.find(record.value("speaker_id", ""));
+    if (found == sources.end()) continue;
+    svp::audio::AsrWord word;
+    word.text = record.value("text", "");
+    word.start_us = record.value("start_us", static_cast<std::int64_t>(0));
+    word.end_us = record.value("end_us", static_cast<std::int64_t>(0));
+    word.confidence = record.value("confidence", 0.0);
+    word.chunk_ordinal =
+        record.value("chunk_ordinal", static_cast<std::int64_t>(0));
+    by_source[found->second.second].words.push_back(std::move(word));
+  }
+
+  std::vector<svp::audio::MicrophoneTranscript> transcripts;
+  for (auto& [source_ordinal, transcript] : by_source) {
+    const std::filesystem::path wav_path =
+        staging_dir / transcript.analysis_audio_ref;
+    if (!std::filesystem::exists(wav_path)) {
+      throw std::runtime_error("microphone replay WAV not found: " +
+                               wav_path.string());
+    }
+    if (!options.skip_fingerprints) {
+      const svp::audio::SherpaDiarizationResult diarization =
+          svp::audio::run_sherpa_diarization(wav_path, model_dir);
+      if (!diarization.ran) {
+        throw std::runtime_error("microphone replay diarization failed for " +
+                                 wav_path.string());
+      }
+      transcript.voice_fingerprint =
+          aggregate_voice_fingerprint(diarization);
+      transcript.voice_tracks = replay_voice_tracks(diarization);
+    }
+    transcript.word_signal_db =
+        svp::audio::measure_word_signal_db(wav_path, transcript.words);
+    transcript.signal_profile =
+        svp::audio::measure_microphone_signal_profile(
+            wav_path, replay_speech_spans(transcript.voice_tracks));
+    transcripts.push_back(std::move(transcript));
+  }
+
+  const svp::audio::MicrophoneTranscriptResult result =
+      svp::audio::reconcile_microphone_transcripts(transcripts);
+  if (!options.out_words_jsonl_path.empty()) {
+    write_microphone_replay_words(options.out_words_jsonl_path, result);
+  }
+
+  nlohmann::json speakers = nlohmann::json::array();
+  for (const auto& speaker : result.speakers) {
+    speakers.push_back({
+        {"speaker_id", speaker.speaker_id},
+        {"source_audio_stream_id", speaker.source_audio_stream_id},
+        {"source_ordinal", speaker.source_ordinal},
+        {"word_count", speaker.word_count},
+    });
+  }
+  nlohmann::json source_assignments = nlohmann::json::array();
+  for (const auto& assignment : result.source_assignment_evidence) {
+    source_assignments.push_back({
+        {"source_ordinal", assignment.source_ordinal},
+        {"decision", assignment.decision},
+        {"anchor_source_ordinal",
+         assignment.anchor_source_ordinal.has_value()
+             ? nlohmann::json(*assignment.anchor_source_ordinal)
+             : nlohmann::json(nullptr)},
+        {"matched_stronger_source_ordinals",
+         assignment.matched_stronger_source_ordinals},
+    });
+  }
+  std::cout << nlohmann::json({
+      {"ran", true},
+      {"mode", "microphone_reconciliation"},
+      {"asr_ran", false},
+      {"fingerprints_available", !options.skip_fingerprints},
+      {"input_microphone_count", transcripts.size()},
+      {"input_word_count", result.input_word_count},
+      {"output_word_count", result.words.size()},
+      {"discarded_cross_anchor_bleed_word_count",
+       result.discarded_cross_anchor_bleed_word_count},
+      {"speaker_count", result.speakers.size()},
+      {"speakers", speakers},
+      {"source_assignments", source_assignments},
+      {"out_words_jsonl", options.out_words_jsonl_path},
+  }).dump(2) << "\n";
+  return 0;
 }
 
 svp::audio::SherpaDiarizationResult parse_diarization_result(
@@ -182,6 +452,10 @@ int run_diarize_replay_command(const DiarizeReplayCliOptions& options) {
   }
 
   try {
+    if (options.microphone_reconciliation) {
+      return run_microphone_reconciliation_replay(options, staging_dir,
+                                                  model_dir);
+    }
     const std::vector<nlohmann::json> word_records =
         read_jsonl_records(words_path);
     const std::vector<nlohmann::json> segment_records =

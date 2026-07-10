@@ -35,6 +35,8 @@ struct DiarizeReplayCliOptions {
   std::string model_dir;
   std::string sherpa_lib_path;
   std::string out_words_jsonl_path;
+  bool microphone_reconciliation = false;
+  bool skip_fingerprints = false;
 };
 
 struct BuildCliOptions {

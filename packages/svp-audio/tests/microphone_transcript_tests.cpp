@@ -32,34 +32,37 @@ void test_microphone_bleed_deduplication_and_word_count_ranking() {
   microphone_0.voice_fingerprint = {1.0f, 0.0f, 0.0f};
   microphone_0.voice_tracks = {
       voice_track({1.0f, 0.0f, 0.0f}, 1000000, 6400000)};
+  microphone_0.signal_profile.noise_floor_db = -50.0;
+  microphone_0.signal_profile.frames = {{{1000000, 1900000}, -10.0}};
 
   svp::audio::MicrophoneTranscript microphone_1;
   microphone_1.source_audio_stream_id = "astream_0002";
   microphone_1.source_ordinal = 1;
   microphone_1.words = {
       word("hello", 1050000, 1450000, 0.80),
-      word("beta", 1500000, 1900000, 0.90),
-      word("gamma", 4000000, 4400000, 0.90),
-      word("delta", 5000000, 5400000, 0.90),
+      word("alpha", 1500000, 1900000, 0.90),
   };
-  microphone_1.word_signal_db = {-24.0, -10.0, -10.0, -10.0};
+  microphone_1.word_signal_db = {-24.0, -24.0};
   microphone_1.voice_fingerprint = {0.99f, 0.01f, 0.0f};
   microphone_1.voice_tracks = {
-      voice_track({0.99f, 0.01f, 0.0f}, 1050000, 5400000)};
+      voice_track({0.99f, 0.01f, 0.0f}, 1050000, 1900000)};
+  microphone_1.signal_profile.noise_floor_db = -42.0;
+  microphone_1.signal_profile.frames = {{{1050000, 1900000}, -24.0}};
 
   const auto result = svp::audio::reconcile_microphone_transcripts(
       {microphone_0, microphone_1});
 
-  assert(result.input_word_count == 7);
-  assert(result.duplicate_word_count == 2);
-  assert(result.words.size() == 5);
+  assert(result.input_word_count == 5);
+  assert(result.duplicate_word_count == 0);
+  assert(result.discarded_cross_anchor_bleed_word_count == 2);
+  assert(result.words.size() == 3);
   assert(result.speakers.size() == 1);
   assert(result.collapsed_microphone_stream_count == 1);
-  assert(result.speakers[0].source_audio_stream_id == "astream_0002");
+  assert(result.speakers[0].source_audio_stream_id == "astream_0001");
   assert(result.speakers[0].speaker_id == "speaker_0001");
-  assert(result.speakers[0].word_count == 5);
-  assert(result.speakers[0].source_audio_stream_ids.size() == 2);
-  assert(result.words.front().text == "hello");
+  assert(result.speakers[0].word_count == 3);
+  assert(result.speakers[0].source_audio_stream_ids.size() == 1);
+  assert(result.words.front().text == "Hello");
   assert(std::all_of(result.word_speaker_assignments.begin(),
                      result.word_speaker_assignments.end(),
                      [](const std::string& id) { return id == "speaker_0001"; }));
@@ -153,12 +156,15 @@ void test_microphone_primary_selection_prefers_acoustic_strength() {
   const auto result =
       svp::audio::reconcile_microphone_transcripts({strong, weak});
 
-  assert(result.speakers.size() == 1);
-  assert(result.speakers[0].source_audio_stream_id == "astream_0001");
-  assert(result.speakers[0].word_count == 1);
-  assert(result.words.size() == 1);
-  assert(result.words[0].text == "complete");
-  assert(result.duplicate_word_count == 3);
+  assert(result.speakers.size() == 2);
+  assert(result.speakers[0].source_audio_stream_id == "astream_0002");
+  assert(result.speakers[0].word_count == 3);
+  assert(result.words.size() == 4);
+  assert(std::any_of(result.words.begin(), result.words.end(),
+                     [](const svp::audio::AsrWord& candidate) {
+                       return candidate.text == "complete";
+                     }));
+  assert(result.duplicate_word_count == 0);
   assert(result.source_quality_evidence[0].median_speech_snr_db == 42.0);
   assert(result.source_quality_evidence[1].median_speech_snr_db == 14.0);
 }
@@ -212,14 +218,14 @@ void test_time_aligned_diarization_preserves_two_speakers_and_collapses_bleed() 
   const auto result = svp::audio::reconcile_microphone_transcripts(
       {direct_a, direct_b, bleed_a});
 
-  assert(result.speakers.size() == 2);
-  assert(result.collapsed_microphone_stream_count == 1);
+  assert(result.speakers.size() == 3);
+  assert(result.collapsed_microphone_stream_count == 0);
   assert(result.speakers[0].source_audio_stream_id == "astream_0002");
-  assert(result.speakers[0].source_audio_stream_ids.size() == 2);
+  assert(result.speakers[0].source_audio_stream_ids.size() == 1);
   assert(result.speakers[0].source_audio_stream_ids[0] == "astream_0002");
-  assert(result.speakers[0].source_audio_stream_ids[1] == "astream_0004");
-  assert(result.speakers[1].source_audio_stream_id == "astream_0003");
-  assert(result.words.size() == 7);
+  assert(result.speakers[1].source_audio_stream_id == "astream_0004");
+  assert(result.speakers[2].source_audio_stream_id == "astream_0003");
+  assert(result.words.size() == 11);
 
   bool direct_voices_preserved = false;
   bool bleed_matched = false;
@@ -290,15 +296,16 @@ void test_weaker_bleed_chain_attaches_upward_without_becoming_a_speaker() {
   const auto result = svp::audio::reconcile_microphone_transcripts(
       {direct, bridge, weakest});
 
-  assert(result.speakers.size() == 1);
+  assert(result.speakers.size() == 3);
   assert(result.speakers[0].source_audio_stream_id == "astream_0001");
-  assert(result.speakers[0].source_audio_stream_ids.size() == 3);
-  assert(result.collapsed_microphone_stream_count == 2);
-  assert(result.source_assignment_evidence[0].decision == "speaker_anchor");
+  assert(result.speakers[0].source_audio_stream_ids.size() == 1);
+  assert(result.collapsed_microphone_stream_count == 0);
+  assert(result.source_assignment_evidence[0].decision ==
+         "independent_microphone_source");
   assert(result.source_assignment_evidence[1].decision ==
-         "attached_to_stronger_source");
+         "independent_microphone_source");
   assert(result.source_assignment_evidence[2].decision ==
-         "attached_to_stronger_source");
+         "independent_microphone_source");
 }
 
 void test_cross_anchor_duplicate_content_uses_time_local_snr_ownership() {
@@ -338,13 +345,17 @@ void test_cross_anchor_duplicate_content_uses_time_local_snr_ownership() {
       {microphone_a, microphone_b});
 
   assert(result.speakers.size() == 2);
-  assert(result.words.size() == 2);
-  assert(result.discarded_cross_anchor_bleed_word_count == 2);
-  assert(result.chunk_content_evidence.size() == 1);
-  assert(result.chunk_content_evidence[0].duplicate_capture_proven);
+  assert(result.words.size() == 4);
+  assert(result.discarded_cross_anchor_bleed_word_count == 0);
+  assert(!result.chunk_content_evidence.empty());
+  assert(std::none_of(result.chunk_content_evidence.begin(),
+                      result.chunk_content_evidence.end(),
+                      [](const auto& evidence) {
+                        return evidence.duplicate_capture_proven;
+                      }));
   assert(result.words[0].text == "alpha.");
   assert(result.word_speaker_assignments[0] == "speaker_0001");
-  assert(result.words[1].text == "beta");
+  assert(result.words[1].text == "alpha.");
   assert(result.word_speaker_assignments[1] == "speaker_0002");
 }
 
@@ -388,14 +399,9 @@ void test_cross_anchor_ownership_does_not_switch_inside_an_utterance() {
   const auto result = svp::audio::reconcile_microphone_transcripts(
       {microphone_a, microphone_b});
 
-  assert(result.speakers.size() == 1);
-  assert(result.words.size() == 3);
-  assert(result.discarded_cross_anchor_bleed_word_count == 3);
-  assert(std::all_of(result.word_speaker_assignments.begin(),
-                     result.word_speaker_assignments.end(),
-                     [](const std::string& speaker) {
-                       return speaker == "speaker_0001";
-                     }));
+  assert(result.speakers.size() == 2);
+  assert(result.words.size() == 6);
+  assert(result.discarded_cross_anchor_bleed_word_count == 0);
 }
 
 void test_microphone_silent_inputs_are_omitted_and_ties_use_stream_order() {
