@@ -1,6 +1,6 @@
 #include "svp/core/version.hpp"
 #include "svp/package/package_probe.hpp"
-#include "svp/validation/embedded_svpi_validator.hpp"
+#include "svp/validation/embedded_svpi_transport_validator.hpp"
 #include "svp/validation/report_json.hpp"
 #include "svp/validation/svpi_validator.hpp"
 #include "svp/validation/validator.hpp"
@@ -22,6 +22,12 @@ void print_human_report(const svp::validation::ValidationReport& report) {
   if (report.embedding_transport.present) {
     const auto& transport = report.embedding_transport;
     std::cout << "Embedding transport: " << transport.status << "\n";
+    std::cout << "  container_kind: " << transport.container_kind << "\n";
+    std::cout << "  major_brand: " << transport.major_brand << "\n";
+    std::cout << "  container_supported: "
+              << (transport.container_supported ? "yes" : "no") << "\n";
+    std::cout << "  embedding_detected: "
+              << (transport.embedding_detected ? "yes" : "no") << "\n";
     std::cout << "Embedded package: "
               << transport.embedded_package_status << "\n";
     std::cout << "  profile_version: " << transport.profile_version << "\n";
@@ -58,7 +64,7 @@ void print_human_report(const svp::validation::ValidationReport& report) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  CLI::App app{"SVP, SVPI, and embedded-SVPI MP4 validator"};
+  CLI::App app{"SVP, SVPI, and Embedded SVPI Transport validator"};
   app.set_version_flag("--version",
                        svp::core::tool_version_label("svp-validator"));
   app.require_subcommand(0, 1);
@@ -67,8 +73,11 @@ int main(int argc, char** argv) {
   bool json_output = false;
   std::string validation_codes_path = "spec/registries/validation-codes.json";
 
-  auto* validate = app.add_subcommand("validate", "Validate an SVP, SVPI, or embedded MP4");
-  validate->add_option("package", package_path, "Path to a .svp, .svpi, or .mp4 input")->required();
+  auto* validate = app.add_subcommand(
+      "validate", "Validate an SVP, SVPI, or Embedded SVPI Transport");
+  validate->add_option(
+      "package", package_path,
+      "Path to an SVP, SVPI, or ISO BMFF media container")->required();
   validate->add_flag("--json", json_output, "Emit a machine-readable validation report");
   validate->add_option("--validation-codes", validation_codes_path,
                        "Path to the validation-code registry");
@@ -77,10 +86,12 @@ int main(int argc, char** argv) {
 
   if (*validate) {
     const auto probe = svp::package::probe_package(package_path);
-    const auto report = probe.has_mp4_extension
-        ? svp::validation::validate_embedded_svpi_mp4(
+    const auto report = (probe.iso_bmff.signature_present ||
+                         (!probe.has_svp_extension &&
+                          !probe.has_svpi_extension))
+        ? svp::validation::validate_embedded_svpi_transport(
               package_path,
-              svp::validation::EmbeddedSvpiValidatorOptions{
+              svp::validation::EmbeddedSvpiTransportValidatorOptions{
                   .validation_codes_path = validation_codes_path,
               })
         : probe.has_svpi_extension

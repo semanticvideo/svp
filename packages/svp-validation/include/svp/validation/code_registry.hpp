@@ -89,19 +89,21 @@ inline constexpr std::string_view kCodeSvpiMissingProvenance = "ERR_SVPI_MISSING
 inline constexpr std::string_view kCodeSvpiMissingIndex = "ERR_SVPI_MISSING_INDEX";
 inline constexpr std::string_view kCodeSvpiWrongBindingContract = "ERR_SVPI_WRONG_BINDING_CONTRACT";
 inline constexpr std::string_view kCodeSvpiLegacyManifestName = "ERR_SVPI_LEGACY_MANIFEST_NAME";
-inline constexpr std::string_view kCodeMp4BoxStructureInvalid = "ERR_MP4_BOX_STRUCTURE_INVALID";
-inline constexpr std::string_view kCodeMp4UuidBoxTruncated = "ERR_MP4_UUID_BOX_TRUNCATED";
-inline constexpr std::string_view kCodeMp4SvpiProfileUnsupported = "ERR_MP4_SVPI_PROFILE_UNSUPPORTED";
-inline constexpr std::string_view kCodeMp4SvpiEnvelopeInvalid = "ERR_MP4_SVPI_ENVELOPE_INVALID";
-inline constexpr std::string_view kCodeMp4SvpiPayloadBounds = "ERR_MP4_SVPI_PAYLOAD_BOUNDS";
-inline constexpr std::string_view kCodeMp4SvpiPayloadLengthMismatch = "ERR_MP4_SVPI_PAYLOAD_LENGTH_MISMATCH";
-inline constexpr std::string_view kCodeMp4SvpiPayloadHashMismatch = "ERR_MP4_SVPI_PAYLOAD_HASH_MISMATCH";
-inline constexpr std::string_view kCodeMp4SvpiDuplicate = "ERR_MP4_SVPI_DUPLICATE";
-inline constexpr std::string_view kCodeMp4SvpiNotFound = "ERR_MP4_SVPI_NOT_FOUND";
-inline constexpr std::string_view kCodeMp4EmbeddedSvpiInvalid = "ERR_MP4_EMBEDDED_SVPI_INVALID";
-inline constexpr std::string_view kCodeMp4UnsafeTailLayout = "ERR_MP4_UNSAFE_TAIL_LAYOUT";
-inline constexpr std::string_view kCodeMp4ZeroSizedBox = "ERR_MP4_ZERO_SIZED_TOP_LEVEL_BOX";
-inline constexpr std::string_view kCodeMp4SvpiMediaBindingMismatch = "ERR_MP4_SVPI_MEDIA_BINDING_MISMATCH";
+inline constexpr std::string_view kCodeIsoBmffBoxStructureInvalid = "ERR_ISOBMFF_BOX_STRUCTURE_INVALID";
+inline constexpr std::string_view kCodeIsoBmffUnsupportedContainer =
+    "ERR_ISOBMFF_UNSUPPORTED_CONTAINER";
+inline constexpr std::string_view kCodeIsoBmffUuidBoxTruncated = "ERR_ISOBMFF_UUID_BOX_TRUNCATED";
+inline constexpr std::string_view kCodeIsoBmffSvpiProfileUnsupported = "ERR_ISOBMFF_SVPI_PROFILE_UNSUPPORTED";
+inline constexpr std::string_view kCodeIsoBmffSvpiEnvelopeInvalid = "ERR_ISOBMFF_SVPI_ENVELOPE_INVALID";
+inline constexpr std::string_view kCodeIsoBmffSvpiPayloadBounds = "ERR_ISOBMFF_SVPI_PAYLOAD_BOUNDS";
+inline constexpr std::string_view kCodeIsoBmffSvpiPayloadLengthMismatch = "ERR_ISOBMFF_SVPI_PAYLOAD_LENGTH_MISMATCH";
+inline constexpr std::string_view kCodeIsoBmffSvpiPayloadHashMismatch = "ERR_ISOBMFF_SVPI_PAYLOAD_HASH_MISMATCH";
+inline constexpr std::string_view kCodeIsoBmffSvpiDuplicate = "ERR_ISOBMFF_SVPI_DUPLICATE";
+inline constexpr std::string_view kCodeIsoBmffSvpiNotFound = "ERR_ISOBMFF_SVPI_NOT_FOUND";
+inline constexpr std::string_view kCodeIsoBmffEmbeddedSvpiInvalid = "ERR_ISOBMFF_EMBEDDED_SVPI_INVALID";
+inline constexpr std::string_view kCodeIsoBmffUnsafeTailLayout = "ERR_ISOBMFF_UNSAFE_TAIL_LAYOUT";
+inline constexpr std::string_view kCodeIsoBmffZeroSizedBox = "ERR_ISOBMFF_ZERO_SIZED_TOP_LEVEL_BOX";
+inline constexpr std::string_view kCodeIsoBmffSvpiMediaBindingMismatch = "ERR_ISOBMFF_SVPI_MEDIA_BINDING_MISMATCH";
 
 struct ValidationCode {
   std::string code;

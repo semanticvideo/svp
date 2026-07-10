@@ -4,12 +4,13 @@
 #include "svp/validation/report.hpp"
 
 #include <filesystem>
+#include <memory>
 #include <string>
 
 namespace svp::builder {
 
-struct EmbedMp4Options {
-  std::filesystem::path media_path;
+struct EmbeddedTransportEmbedOptions {
+  std::filesystem::path container_path;
   std::filesystem::path svpi_path;
   std::filesystem::path output_path;
   std::filesystem::path validation_codes_path =
@@ -20,25 +21,25 @@ struct EmbedMp4Options {
   std::shared_ptr<BuildProgressSink> progress_sink;
 };
 
-struct EmbedMp4Result {
+struct EmbeddedTransportEmbedResult {
   bool success = false;
   std::filesystem::path output_path;
   svp::validation::ValidationReport validation_report;
   std::string error_message;
 };
 
-[[nodiscard]] EmbedMp4Result interlace_embed_mp4(
-    const EmbedMp4Options& options);
+[[nodiscard]] EmbeddedTransportEmbedResult embed_svpi_transport(
+    const EmbeddedTransportEmbedOptions& options);
 
-struct ExtractEmbeddedOptions {
-  std::filesystem::path mp4_path;
+struct EmbeddedTransportExtractOptions {
+  std::filesystem::path container_path;
   std::filesystem::path output_path;
   std::filesystem::path validation_codes_path =
       "spec/registries/validation-codes.json";
   bool overwrite_output = false;
 };
 
-struct ExtractEmbeddedResult {
+struct EmbeddedTransportExtractResult {
   bool success = false;
   bool package_valid = false;
   std::filesystem::path output_path;
@@ -46,22 +47,22 @@ struct ExtractEmbeddedResult {
   std::string error_message;
 };
 
-[[nodiscard]] ExtractEmbeddedResult interlace_extract_embedded(
-    const ExtractEmbeddedOptions& options);
+[[nodiscard]] EmbeddedTransportExtractResult extract_svpi_transport(
+    const EmbeddedTransportExtractOptions& options);
 
-struct StripEmbeddedOptions {
-  std::filesystem::path mp4_path;
+struct EmbeddedTransportStripOptions {
+  std::filesystem::path container_path;
   std::filesystem::path output_path;
   bool overwrite_output = false;
 };
 
-struct StripEmbeddedResult {
+struct EmbeddedTransportStripResult {
   bool success = false;
   std::filesystem::path output_path;
   std::string error_message;
 };
 
-[[nodiscard]] StripEmbeddedResult interlace_strip_embedded(
-    const StripEmbeddedOptions& options);
+[[nodiscard]] EmbeddedTransportStripResult strip_svpi_transport(
+    const EmbeddedTransportStripOptions& options);
 
 }  // namespace svp::builder

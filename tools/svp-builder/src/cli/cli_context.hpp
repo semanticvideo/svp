@@ -108,26 +108,6 @@ struct InterlaceCliOptions {
   std::string ir_progress_mode = "auto";
   bool ir_quiet = false;
 
-  // interlace embed-mp4
-  std::string em_media;
-  std::string em_svpi;
-  std::string em_out;
-  std::string em_ffprobe = "ffprobe";
-  std::string em_codes = "spec/registries/validation-codes.json";
-  bool em_replace = false;
-  bool em_overwrite = false;
-
-  // interlace extract-embedded
-  std::string ee_mp4;
-  std::string ee_out;
-  std::string ee_codes = "spec/registries/validation-codes.json";
-  bool ee_overwrite = false;
-
-  // interlace strip-embedded
-  std::string se_mp4;
-  std::string se_out;
-  bool se_overwrite = false;
-
   // interlace create-batch
   std::string cb_source_dir;
   std::string cb_out_dir;
@@ -189,9 +169,6 @@ struct InterlaceCliOptions {
   CLI::App* ii_inspect_sub = nullptr;
   CLI::App* ie_extract_sub = nullptr;
   CLI::App* ir_recombine_sub = nullptr;
-  CLI::App* em_embed_sub = nullptr;
-  CLI::App* ee_extract_sub = nullptr;
-  CLI::App* se_strip_sub = nullptr;
   CLI::App* cb_create_batch_sub = nullptr;
   CLI::App* sc_scan_sub = nullptr;
   CLI::App* vb_validate_batch_sub = nullptr;
@@ -199,10 +176,34 @@ struct InterlaceCliOptions {
   CLI::App* cib_complete_batch_sub = nullptr;
 };
 
+struct TransportCliOptions {
+  std::string embed_container;
+  std::string embed_svpi;
+  std::string embed_out;
+  std::string embed_ffprobe = "ffprobe";
+  std::string embed_codes = "spec/registries/validation-codes.json";
+  bool embed_replace = false;
+  bool embed_overwrite = false;
+
+  std::string extract_container;
+  std::string extract_out;
+  std::string extract_codes = "spec/registries/validation-codes.json";
+  bool extract_overwrite = false;
+
+  std::string strip_container;
+  std::string strip_out;
+  bool strip_overwrite = false;
+
+  CLI::App* embed_sub = nullptr;
+  CLI::App* extract_sub = nullptr;
+  CLI::App* strip_sub = nullptr;
+};
+
 struct CliContext {
   ProbeCliOptions probe_opts;
   BuildCliOptions build_opts;
   InterlaceCliOptions interlace_opts;
+  TransportCliOptions transport_opts;
 
   DiarizeCliOptions diarize_opts;
   DiarizeReplayCliOptions diarize_replay_opts;
@@ -212,15 +213,16 @@ struct CliContext {
   CLI::App* diarize_subcommand = nullptr;
   CLI::App* diarize_replay_subcommand = nullptr;
   CLI::App* interlace_subcommand = nullptr;
+  CLI::App* transport_subcommand = nullptr;
 
   CLI::App* ic_create = nullptr;
   CLI::App* iv_validate = nullptr;
   CLI::App* ii_inspect = nullptr;
   CLI::App* ie_extract = nullptr;
   CLI::App* ir_recombine = nullptr;
-  CLI::App* em_embed = nullptr;
-  CLI::App* ee_extract = nullptr;
-  CLI::App* se_strip = nullptr;
+  CLI::App* transport_embed = nullptr;
+  CLI::App* transport_extract = nullptr;
+  CLI::App* transport_strip = nullptr;
   CLI::App* cb_create_batch = nullptr;
   CLI::App* sc_scan = nullptr;
   CLI::App* vb_validate_batch = nullptr;
@@ -244,6 +246,7 @@ int run_diarize_command(const DiarizeCliOptions& options);
 int run_diarize_replay_command(const DiarizeReplayCliOptions& options);
 
 int run_interlace_command(const InterlaceCliOptions& options);
+int run_transport_command(const TransportCliOptions& options);
 
 int run_selected_command(const CliContext& context);
 

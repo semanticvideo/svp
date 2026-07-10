@@ -34,7 +34,7 @@ constexpr StageCatalogEntry stage_catalog[] = {
     {ProgressStageId::index, "index", "Index"},
     {ProgressStageId::package_write, "package_write", "Package Write"},
     {ProgressStageId::svpi_write, "svpi_write", "SVPI Write"},
-    {ProgressStageId::mp4_embed, "mp4_embed", "MP4 Embedding"},
+    {ProgressStageId::transport_embed, "transport_embed", "SVPI Transport Embed"},
     {ProgressStageId::embedded_validate, "embedded_validate", "Embedded Validation"},
     {ProgressStageId::validate, "validate", "Validation"},
     {ProgressStageId::validation_report, "validation_report", "Validation Report"},

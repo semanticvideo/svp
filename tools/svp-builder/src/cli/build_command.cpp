@@ -1,6 +1,6 @@
 #include "cli_context.hpp"
 #include "cli_elapsed.hpp"
-#include "build_interlace_output.hpp"
+#include "build_selected_output.hpp"
 
 #include "svp/builder/build_pipeline.hpp"
 #include "svp/builder/progress_renderer.hpp"
@@ -50,7 +50,7 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
       *resolved_mode, std::cerr, stderr_is_tty, fileno(stderr));
 
   if (options.output_format != "svp") {
-    return run_interlace_output_build(options, progress_sink);
+    return run_selected_output_build(options, progress_sink);
   }
 
   svp::builder::BuildPipelineOptions pipeline_options;

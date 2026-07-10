@@ -1,15 +1,17 @@
-#include "svp/validation/embedded_svpi_validator.hpp"
+#include "svp/validation/embedded_svpi_transport_validator.hpp"
 
 #include "svp/core/version.hpp"
 #include "svp/package/embedded_svpi.hpp"
-#include "svp/package/svpi_embedding_profile.hpp"
+#include "svp/package/embedded_svpi_transport_profile.hpp"
 #include "svp/validation/code_registry.hpp"
 #include "svp/validation/svpi_validator.hpp"
 
 #include "embedded_media_binding_validation.hpp"
 
 #include <exception>
+#include <string>
 #include <string_view>
+#include <system_error>
 
 namespace svp::validation {
 namespace {
@@ -19,34 +21,36 @@ std::string_view issue_validation_code(svp::package::EmbeddedSvpiIssueCode code)
   switch (code) {
     case Issue::input_unreadable:
     case Issue::invalid_box_structure:
-      return kCodeMp4BoxStructureInvalid;
+      return kCodeIsoBmffBoxStructureInvalid;
+    case Issue::unsupported_container:
+      return kCodeIsoBmffUnsupportedContainer;
     case Issue::truncated_uuid_box:
-      return kCodeMp4UuidBoxTruncated;
+      return kCodeIsoBmffUuidBoxTruncated;
     case Issue::unsupported_profile_version:
-      return kCodeMp4SvpiProfileUnsupported;
+      return kCodeIsoBmffSvpiProfileUnsupported;
     case Issue::invalid_envelope_size:
     case Issue::unsupported_flags:
     case Issue::invalid_envelope_magic:
-      return kCodeMp4SvpiEnvelopeInvalid;
+      return kCodeIsoBmffSvpiEnvelopeInvalid;
     case Issue::payload_outside_file:
-      return kCodeMp4SvpiPayloadBounds;
+      return kCodeIsoBmffSvpiPayloadBounds;
     case Issue::payload_length_mismatch:
-      return kCodeMp4SvpiPayloadLengthMismatch;
+      return kCodeIsoBmffSvpiPayloadLengthMismatch;
     case Issue::payload_hash_mismatch:
-      return kCodeMp4SvpiPayloadHashMismatch;
+      return kCodeIsoBmffSvpiPayloadHashMismatch;
     case Issue::duplicate_embeddings:
-      return kCodeMp4SvpiDuplicate;
+      return kCodeIsoBmffSvpiDuplicate;
     case Issue::no_embedding:
-      return kCodeMp4SvpiNotFound;
+      return kCodeIsoBmffSvpiNotFound;
     case Issue::unsafe_tail_layout:
-      return kCodeMp4UnsafeTailLayout;
+      return kCodeIsoBmffUnsafeTailLayout;
     case Issue::zero_sized_top_level_box:
-      return kCodeMp4ZeroSizedBox;
+      return kCodeIsoBmffZeroSizedBox;
     case Issue::output_exists:
     case Issue::output_write_failed:
-      return kCodeMp4BoxStructureInvalid;
+      return kCodeIsoBmffBoxStructureInvalid;
   }
-  return kCodeMp4BoxStructureInvalid;
+  return kCodeIsoBmffBoxStructureInvalid;
 }
 
 void merge_findings(ValidationReport& destination,
@@ -62,6 +66,22 @@ void merge_findings(ValidationReport& destination,
                                   source.authenticity.end());
 }
 
+std::string transport_status(const svp::package::EmbeddedSvpiInspection& inspection) {
+  if (!inspection.container.signature_present) {
+    return "unsupported_container";
+  }
+  if (!inspection.container.structure_valid) {
+    return "malformed_container";
+  }
+  if (!inspection.container.supported) {
+    return "unsupported_container";
+  }
+  if (inspection.embeddings.empty()) {
+    return "no_embedded_svpi";
+  }
+  return "invalid_embedding";
+}
+
 }  // namespace
 
 std::string_view validation_code_for_embedded_issue(
@@ -69,19 +89,20 @@ std::string_view validation_code_for_embedded_issue(
   return issue_validation_code(code);
 }
 
-ValidationReport validate_embedded_svpi_mp4(
-    const std::filesystem::path& mp4_path,
-    const EmbeddedSvpiValidatorOptions& options) {
+ValidationReport validate_embedded_svpi_transport(
+    const std::filesystem::path& container_path,
+    const EmbeddedSvpiTransportValidatorOptions& options) {
   ValidationReport report;
   report.validator = {
       .name = "svp-validator",
       .version = std::string{svp::core::kToolVersion},
   };
-  report.package_path = mp4_path.string();
+  report.package_path = container_path.string();
   report.embedding_transport.present = true;
   report.embedding_transport.profile =
-      std::string{svp::package::kSvpiMp4ProfileName};
-  report.embedding_transport.uuid = std::string{svp::package::kSvpiMp4UuidText};
+      std::string{svp::package::kEmbeddedSvpiTransportProfileName};
+  report.embedding_transport.uuid =
+      std::string{svp::package::kEmbeddedSvpiTransportUuidText};
 
   ValidationCodeRegistry registry;
   try {
@@ -96,7 +117,36 @@ ValidationReport validate_embedded_svpi_mp4(
     return report;
   }
 
-  const auto inspection = svp::package::inspect_embedded_svpi(mp4_path, true);
+  std::error_code filesystem_error;
+  const auto status = std::filesystem::status(
+      container_path, filesystem_error);
+  if (filesystem_error || !std::filesystem::exists(status)) {
+    add_finding(report, make_runtime_finding(
+        kTempCodeInputMissing, container_path.string(),
+        "Input file does not exist."));
+    report.status = ValidationStatus::unreadable;
+    report.core_status = ValidationStatus::unreadable;
+    report.embedding_transport.status = "unreadable";
+    return report;
+  }
+  if (!std::filesystem::is_regular_file(status)) {
+    add_finding(report, make_runtime_finding(
+        kTempCodeInputNotRegularFile, container_path.string(),
+        "Input path is not a regular file."));
+    report.status = ValidationStatus::unreadable;
+    report.core_status = ValidationStatus::unreadable;
+    report.embedding_transport.status = "unreadable";
+    return report;
+  }
+
+  const auto inspection = svp::package::inspect_embedded_svpi(container_path, true);
+  report.embedding_transport.embedding_detected = !inspection.embeddings.empty();
+  report.embedding_transport.container_supported = inspection.container.supported;
+  report.embedding_transport.container_kind =
+      svp::package::to_string(inspection.container.kind);
+  report.embedding_transport.major_brand = inspection.container.major_brand;
+  report.embedding_transport.compatible_brands =
+      inspection.container.compatible_brands;
   if (!inspection.embeddings.empty()) {
     const auto& embedding = inspection.embeddings.front();
     auto& transport = report.embedding_transport;
@@ -115,14 +165,14 @@ ValidationReport validate_embedded_svpi_mp4(
   for (const auto& issue : inspection.issues) {
     add_finding(report, make_finding(
         registry, validation_code_for_embedded_issue(issue.code),
-        "/mp4/offset/" + std::to_string(issue.offset), issue.message));
+        "/iso_bmff/offset/" + std::to_string(issue.offset), issue.message));
   }
 
   const bool transport_valid = inspection.has_single_valid_embedding() &&
       inspection.embeddings.front().hash_verified &&
       inspection.embeddings.front().hash_matches && inspection.issues.empty();
   if (!transport_valid) {
-    report.embedding_transport.status = "invalid";
+    report.embedding_transport.status = transport_status(inspection);
     recompute_status(report);
     return report;
   }
@@ -132,19 +182,19 @@ ValidationReport validate_embedded_svpi_mp4(
   svpi_options.validation_codes_path = options.validation_codes_path;
   svpi_options.registry_root_path = options.registry_root_path;
   svpi_options.schema_root_path = options.schema_root_path;
-  svpi_options.allow_embedded_mp4 = true;
-  const auto embedded_report = validate_svpi_package(mp4_path, svpi_options);
+  svpi_options.allow_embedded_transport = true;
+  const auto embedded_report = validate_svpi_package(container_path, svpi_options);
   report.embedding_transport.embedded_package_status =
       to_string(embedded_report.status);
   merge_findings(report, embedded_report);
   if (embedded_report.core_status == ValidationStatus::invalid ||
       embedded_report.status == ValidationStatus::unreadable) {
     add_finding(report, make_finding(
-        registry, kCodeMp4EmbeddedSvpiInvalid, "/embedded_svpi",
+        registry, kCodeIsoBmffEmbeddedSvpiInvalid, "/embedded_svpi",
         "The transport envelope is valid, but the embedded SVPI package is invalid."));
   }
   add_embedded_media_binding_finding(
-      report, registry, mp4_path, inspection.embeddings.front());
+      report, registry, container_path, inspection.embeddings.front());
   recompute_status(report);
   return report;
 }

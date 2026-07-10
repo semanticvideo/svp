@@ -1,8 +1,8 @@
-#include "build_interlace_output.hpp"
+#include "build_selected_output.hpp"
 
 #include "cli_context.hpp"
 
-#include "svp/builder/embedded_interlace.hpp"
+#include "svp/builder/embedded_svpi_transport.hpp"
 #include "svp/builder/interlace.hpp"
 
 #include <cstdlib>
@@ -64,7 +64,7 @@ svp::builder::InterlaceCreateOptions make_create_options(
 
 }  // namespace
 
-int run_interlace_output_build(
+int run_selected_output_build(
     const BuildCliOptions& options,
     const std::shared_ptr<svp::builder::BuildProgressSink>& progress_sink) {
   if (options.stop_after != "package") {
@@ -101,18 +101,20 @@ int run_interlace_output_build(
     return 1;
   }
 
-  svp::builder::EmbedMp4Options embed;
-  embed.media_path = options.source_path;
+  svp::builder::EmbeddedTransportEmbedOptions embed;
+  embed.container_path = options.source_path;
   embed.svpi_path = temporary_svpi;
   embed.output_path = options.output_path;
   embed.ffprobe_path = options.ffprobe_path;
   embed.overwrite_output = options.overwrite;
   embed.progress_sink = progress_sink;
-  const auto result = svp::builder::interlace_embed_mp4(embed);
+  const auto result = svp::builder::embed_svpi_transport(embed);
   if (!result.success) {
-    std::cerr << "embedded MP4 build failed: " << result.error_message << "\n";
+    std::cerr << "embedded SVPI transport build failed: "
+              << result.error_message << "\n";
     return 1;
   }
-  std::cout << "Embedded MP4 created: " << result.output_path.string() << "\n";
+  std::cout << "Embedded SVPI transport created: "
+            << result.output_path.string() << "\n";
   return 0;
 }

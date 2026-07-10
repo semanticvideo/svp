@@ -39,6 +39,11 @@ struct ValidatorIdentity {
 
 struct EmbeddingTransportSummary {
   bool present = false;
+  bool embedding_detected = false;
+  bool container_supported = false;
+  std::string container_kind;
+  std::string major_brand;
+  std::vector<std::string> compatible_brands;
   std::string profile;
   std::string uuid;
   std::string status;

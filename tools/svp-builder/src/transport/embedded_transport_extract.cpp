@@ -1,4 +1,4 @@
-#include "svp/builder/embedded_interlace.hpp"
+#include "svp/builder/embedded_svpi_transport.hpp"
 
 #include "svp/package/embedded_svpi.hpp"
 #include "svp/core/path.hpp"
@@ -6,18 +6,16 @@
 
 namespace svp::builder {
 
-ExtractEmbeddedResult interlace_extract_embedded(
-    const ExtractEmbeddedOptions& options) {
-  ExtractEmbeddedResult result;
+EmbeddedTransportExtractResult extract_svpi_transport(
+    const EmbeddedTransportExtractOptions& options) {
+  EmbeddedTransportExtractResult result;
   result.output_path = options.output_path;
-  if (!svp::core::has_extension(options.mp4_path, ".mp4") ||
-      !svp::core::has_extension(options.output_path, ".svpi")) {
-    result.error_message =
-        "extract-embedded requires .mp4 input and .svpi output paths.";
+  if (!svp::core::has_extension(options.output_path, ".svpi")) {
+    result.error_message = "Transport extract requires a .svpi output path.";
     return result;
   }
   const auto extracted = svp::package::extract_embedded_svpi(
-      options.mp4_path, options.output_path, options.overwrite_output);
+      options.container_path, options.output_path, options.overwrite_output);
   if (!extracted.success) {
     result.error_message = extracted.error_message;
     return result;

@@ -10,7 +10,7 @@ struct SvpiValidatorOptions {
   std::filesystem::path validation_codes_path;
   std::filesystem::path registry_root_path;
   std::filesystem::path schema_root_path;
-  bool allow_embedded_mp4 = false;
+  bool allow_embedded_transport = false;
 };
 
 [[nodiscard]] ValidationReport validate_svpi_package(

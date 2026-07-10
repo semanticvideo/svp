@@ -6,7 +6,7 @@
 #include <nlohmann/json.hpp>
 #include <filesystem>
 
-namespace embedded_inspection_output {
+namespace embedded_transport_output {
 
 [[nodiscard]] nlohmann::json embedding_json(
     const svp::package::EmbeddedSvpiInspection& inspection);
@@ -17,4 +17,4 @@ void print_embedding(const svp::package::EmbeddedSvpiInspection& inspection);
     const std::filesystem::path& package_path);
 void print_semantic_summary(const std::filesystem::path& package_path);
 
-}  // namespace embedded_inspection_output
+}  // namespace embedded_transport_output

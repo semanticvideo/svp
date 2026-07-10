@@ -49,7 +49,7 @@ BindingMediaResult prepare_binding_media(
   }
   if (!replace_existing) {
     result.error_message =
-        "MP4 already contains embedded SVPI; use --replace-existing.";
+        "Container already contains embedded SVPI; use --replace-existing.";
     return result;
   }
 
@@ -63,12 +63,13 @@ BindingMediaResult prepare_binding_media(
     return result;
   }
   result.candidate.temporary_directory = writable.data();
-  result.candidate.path = result.candidate.temporary_directory / "clean.mp4";
+  result.candidate.path = result.candidate.temporary_directory /
+                          ("clean" + media_path.extension().string());
   const auto stripped = svp::package::strip_embedded_svpi(
       media_path, result.candidate.path);
   if (!stripped.success) {
     result.error_message =
-        "Unable to reconstruct clean MP4 for replacement binding verification: " +
+        "Unable to reconstruct the clean container for binding verification: " +
         stripped.error_message;
     return result;
   }

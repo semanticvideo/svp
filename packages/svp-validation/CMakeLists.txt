@@ -9,7 +9,7 @@ add_library(svp-validation
   src/color_record_validation.cpp
   src/code_registry.cpp
   src/diarization_validation.cpp
-  src/embedded_svpi_validator.cpp
+  src/embedded_svpi_transport_validator.cpp
   src/embedded_media_binding_validation.cpp
   src/index_validation.cpp
   src/json_schema_subset.cpp

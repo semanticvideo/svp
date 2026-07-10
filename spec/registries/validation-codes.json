@@ -604,134 +604,144 @@
       "introduced": "svpi-0.1"
     },
     {
-      "code": "ERR_MP4_BOX_STRUCTURE_INVALID",
+      "code": "ERR_ISOBMFF_UNSUPPORTED_CONTAINER",
       "severity": "error",
       "report_bucket": "errors",
       "affects_core_status": true,
       "status_effect": "invalid",
-      "section": "svpi-mp4-v1-5",
+      "section": "embedded-svpi-isobmff-v1-5",
+      "description": "The input is not a supported ISO BMFF media container or uses an unsupported brand family.",
+      "introduced": "embedded-svpi-isobmff-1"
+    },
+    {
+      "code": "ERR_ISOBMFF_BOX_STRUCTURE_INVALID",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "embedded-svpi-isobmff-v1-5",
       "description": "The top-level ISO BMFF box structure is truncated, impossible, or outside file bounds.",
-      "introduced": "svpi-mp4-1"
+      "introduced": "embedded-svpi-isobmff-1"
     },
     {
-      "code": "ERR_MP4_UUID_BOX_TRUNCATED",
+      "code": "ERR_ISOBMFF_UUID_BOX_TRUNCATED",
       "severity": "error",
       "report_bucket": "errors",
       "affects_core_status": true,
       "status_effect": "invalid",
-      "section": "svpi-mp4-v1-4",
+      "section": "embedded-svpi-isobmff-v1-4",
       "description": "The SVPI UUID box cannot contain its required user type and envelope.",
-      "introduced": "svpi-mp4-1"
+      "introduced": "embedded-svpi-isobmff-1"
     },
     {
-      "code": "ERR_MP4_SVPI_PROFILE_UNSUPPORTED",
+      "code": "ERR_ISOBMFF_SVPI_PROFILE_UNSUPPORTED",
       "severity": "error",
       "report_bucket": "errors",
       "affects_core_status": true,
       "status_effect": "invalid",
-      "section": "svpi-mp4-v1-4",
+      "section": "embedded-svpi-isobmff-v1-4",
       "description": "The SVPI embedding profile version is unsupported.",
-      "introduced": "svpi-mp4-1"
+      "introduced": "embedded-svpi-isobmff-1"
     },
     {
-      "code": "ERR_MP4_SVPI_ENVELOPE_INVALID",
+      "code": "ERR_ISOBMFF_SVPI_ENVELOPE_INVALID",
       "severity": "error",
       "report_bucket": "errors",
       "affects_core_status": true,
       "status_effect": "invalid",
-      "section": "svpi-mp4-v1-4",
+      "section": "embedded-svpi-isobmff-v1-4",
       "description": "The SVPI embedding envelope has invalid magic, size, flags, or reserved fields.",
-      "introduced": "svpi-mp4-1"
+      "introduced": "embedded-svpi-isobmff-1"
     },
     {
-      "code": "ERR_MP4_SVPI_PAYLOAD_BOUNDS",
+      "code": "ERR_ISOBMFF_SVPI_PAYLOAD_BOUNDS",
       "severity": "error",
       "report_bucket": "errors",
       "affects_core_status": true,
       "status_effect": "invalid",
-      "section": "svpi-mp4-v1-4",
+      "section": "embedded-svpi-isobmff-v1-4",
       "description": "The embedded SVPI payload range falls outside its UUID box or the physical file.",
-      "introduced": "svpi-mp4-1"
+      "introduced": "embedded-svpi-isobmff-1"
     },
     {
-      "code": "ERR_MP4_SVPI_PAYLOAD_LENGTH_MISMATCH",
+      "code": "ERR_ISOBMFF_SVPI_PAYLOAD_LENGTH_MISMATCH",
       "severity": "error",
       "report_bucket": "errors",
       "affects_core_status": true,
       "status_effect": "invalid",
-      "section": "svpi-mp4-v1-4",
+      "section": "embedded-svpi-isobmff-v1-4",
       "description": "The envelope payload length does not equal the bytes remaining in the UUID box.",
-      "introduced": "svpi-mp4-1"
+      "introduced": "embedded-svpi-isobmff-1"
     },
     {
-      "code": "ERR_MP4_SVPI_PAYLOAD_HASH_MISMATCH",
+      "code": "ERR_ISOBMFF_SVPI_PAYLOAD_HASH_MISMATCH",
       "severity": "error",
       "report_bucket": "errors",
       "affects_core_status": true,
       "status_effect": "invalid",
-      "section": "svpi-mp4-v1-7",
+      "section": "embedded-svpi-isobmff-v1-7",
       "description": "The BLAKE3 hash of the exact embedded SVPI bytes does not match the envelope.",
-      "introduced": "svpi-mp4-1"
+      "introduced": "embedded-svpi-isobmff-1"
     },
     {
-      "code": "ERR_MP4_SVPI_DUPLICATE",
+      "code": "ERR_ISOBMFF_SVPI_DUPLICATE",
       "severity": "error",
       "report_bucket": "errors",
       "affects_core_status": true,
       "status_effect": "invalid",
-      "section": "svpi-mp4-v1-6",
-      "description": "The MP4 contains more than one active SVPI embedding UUID box.",
-      "introduced": "svpi-mp4-1"
+      "section": "embedded-svpi-isobmff-v1-6",
+      "description": "The ISO BMFF container contains more than one active SVPI embedding UUID box.",
+      "introduced": "embedded-svpi-isobmff-1"
     },
     {
-      "code": "ERR_MP4_SVPI_NOT_FOUND",
+      "code": "ERR_ISOBMFF_SVPI_NOT_FOUND",
       "severity": "error",
       "report_bucket": "errors",
       "affects_core_status": true,
       "status_effect": "invalid",
-      "section": "svpi-mp4-v1-5",
+      "section": "embedded-svpi-isobmff-v1-5",
       "description": "No top-level SVPI embedding UUID box is present.",
-      "introduced": "svpi-mp4-1"
+      "introduced": "embedded-svpi-isobmff-1"
     },
     {
-      "code": "ERR_MP4_EMBEDDED_SVPI_INVALID",
+      "code": "ERR_ISOBMFF_EMBEDDED_SVPI_INVALID",
       "severity": "error",
       "report_bucket": "errors",
       "affects_core_status": true,
       "status_effect": "invalid",
-      "section": "svpi-mp4-v1-8",
+      "section": "embedded-svpi-isobmff-v1-8",
       "description": "The outer transport is valid but the bounded embedded SVPI package is invalid.",
-      "introduced": "svpi-mp4-1"
+      "introduced": "embedded-svpi-isobmff-1"
     },
     {
-      "code": "ERR_MP4_UNSAFE_TAIL_LAYOUT",
+      "code": "ERR_ISOBMFF_UNSAFE_TAIL_LAYOUT",
       "severity": "error",
       "report_bucket": "errors",
       "affects_core_status": true,
       "status_effect": "invalid",
-      "section": "svpi-mp4-v1-5",
-      "description": "The MP4 tail layout cannot be transformed without risking container validity.",
-      "introduced": "svpi-mp4-1"
+      "section": "embedded-svpi-isobmff-v1-5",
+      "description": "The ISO BMFF tail layout cannot be transformed without risking container validity.",
+      "introduced": "embedded-svpi-isobmff-1"
     },
     {
-      "code": "ERR_MP4_ZERO_SIZED_TOP_LEVEL_BOX",
+      "code": "ERR_ISOBMFF_ZERO_SIZED_TOP_LEVEL_BOX",
       "severity": "error",
       "report_bucket": "errors",
       "affects_core_status": true,
       "status_effect": "invalid",
-      "section": "svpi-mp4-v1-5",
+      "section": "embedded-svpi-isobmff-v1-5",
       "description": "A top-level size-zero box extends to EOF and prevents safe insertion.",
-      "introduced": "svpi-mp4-1"
+      "introduced": "embedded-svpi-isobmff-1"
     },
     {
-      "code": "ERR_MP4_SVPI_MEDIA_BINDING_MISMATCH",
+      "code": "ERR_ISOBMFF_SVPI_MEDIA_BINDING_MISMATCH",
       "severity": "error",
       "report_bucket": "errors",
       "affects_core_status": true,
       "status_effect": "invalid",
-      "section": "svpi-mp4-v1-9",
-      "description": "The embedded SVPI media binding does not match the clean MP4 bytes represented by the transport.",
-      "introduced": "svpi-mp4-1"
+      "section": "embedded-svpi-isobmff-v1-9",
+      "description": "The embedded SVPI media binding does not match the clean ISO BMFF bytes represented by the transport.",
+      "introduced": "embedded-svpi-isobmff-1"
     }
   ]
 }

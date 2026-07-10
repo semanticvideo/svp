@@ -17,8 +17,8 @@ namespace svp::validation {
 namespace {
 
 std::optional<std::string> expected_full_file_hash(
-    const std::filesystem::path& mp4_path) {
-  const auto entry = svp::package::read_package_entry(mp4_path, "media_binding.json");
+    const std::filesystem::path& container_path) {
+  const auto entry = svp::package::read_package_entry(container_path, "media_binding.json");
   if (!entry.has_value()) {
     return std::nullopt;
   }
@@ -69,7 +69,7 @@ bool hash_range(std::ifstream& input, blake3_hasher& hasher,
   return size == 0;
 }
 
-std::optional<std::string> clean_mp4_hash(
+std::optional<std::string> clean_container_hash(
     const std::filesystem::path& path,
     const svp::package::EmbeddedSvpiInfo& embedding) {
   std::error_code error;
@@ -106,17 +106,17 @@ std::optional<std::string> clean_mp4_hash(
 void add_embedded_media_binding_finding(
     ValidationReport& report,
     const ValidationCodeRegistry& registry,
-    const std::filesystem::path& mp4_path,
+    const std::filesystem::path& container_path,
     const svp::package::EmbeddedSvpiInfo& embedding) {
-  const auto expected = expected_full_file_hash(mp4_path);
+  const auto expected = expected_full_file_hash(container_path);
   if (!expected.has_value()) {
     return;
   }
-  const auto actual = clean_mp4_hash(mp4_path, embedding);
+  const auto actual = clean_container_hash(container_path, embedding);
   if (!actual.has_value() || *actual != *expected) {
     add_finding(report, make_finding(
-        registry, kCodeMp4SvpiMediaBindingMismatch, "/media_binding.json",
-        "Embedded SVPI full-file BLAKE3 does not match the clean MP4 bytes."));
+        registry, kCodeIsoBmffSvpiMediaBindingMismatch, "/media_binding.json",
+        "Embedded SVPI full-file BLAKE3 does not match the clean container bytes."));
   }
 }
 

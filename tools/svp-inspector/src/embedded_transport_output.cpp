@@ -1,11 +1,11 @@
-#include "embedded_inspection_output.hpp"
+#include "embedded_transport_output.hpp"
 
-#include "svp/package/svpi_embedding_profile.hpp"
+#include "svp/package/embedded_svpi_transport_profile.hpp"
 #include "svp/query/query_ops.hpp"
 
 #include <iostream>
 
-namespace embedded_inspection_output {
+namespace embedded_transport_output {
 
 nlohmann::json embedding_json(
     const svp::package::EmbeddedSvpiInspection& inspection) {
@@ -19,9 +19,16 @@ nlohmann::json embedding_json(
   }
   nlohmann::json result = {
       {"detected", !inspection.embeddings.empty()},
-      {"profile", std::string{svp::package::kSvpiMp4ProfileName}},
-      {"uuid", std::string{svp::package::kSvpiMp4UuidText}},
-      {"mp4_structure_valid", inspection.mp4_structure_valid},
+      {"profile", std::string{svp::package::kEmbeddedSvpiTransportProfileName}},
+      {"uuid", std::string{svp::package::kEmbeddedSvpiTransportUuidText}},
+      {"container", {
+          {"kind", svp::package::to_string(inspection.container.kind)},
+          {"major_brand", inspection.container.major_brand},
+          {"minor_version", inspection.container.minor_version},
+          {"compatible_brands", inspection.container.compatible_brands},
+          {"supported", inspection.container.supported},
+          {"structure_valid", inspection.container_structure_valid},
+      }},
       {"top_level_box_count", inspection.top_level_box_count},
       {"scanner_bytes_read", inspection.scanner_bytes_read},
       {"issues", std::move(issues)},
@@ -72,15 +79,25 @@ nlohmann::json package_summary_json(
 }
 
 void print_embedding(const svp::package::EmbeddedSvpiInspection& inspection) {
-  std::cout << "Embedded SVPI transport\n";
+  std::cout << "Embedded SVPI Transport\n";
   std::cout << "  detected: " << (!inspection.embeddings.empty() ? "yes" : "no") << "\n";
-  std::cout << "  mp4_structure_valid: "
-            << (inspection.mp4_structure_valid ? "yes" : "no") << "\n";
+  std::cout << "  container_kind: "
+            << svp::package::to_string(inspection.container.kind) << "\n";
+  std::cout << "  major_brand: " << inspection.container.major_brand << "\n";
+  std::cout << "  compatible_brands:";
+  for (const auto& brand : inspection.container.compatible_brands) {
+    std::cout << " " << brand;
+  }
+  std::cout << "\n";
+  std::cout << "  container_supported: "
+            << (inspection.container.supported ? "yes" : "no") << "\n";
+  std::cout << "  container_structure_valid: "
+            << (inspection.container_structure_valid ? "yes" : "no") << "\n";
   std::cout << "  scanner_bytes_read: " << inspection.scanner_bytes_read << "\n";
   if (!inspection.embeddings.empty()) {
     const auto& info = inspection.embeddings.front();
     std::cout << "  profile_version: " << info.profile_version << "\n";
-    std::cout << "  uuid: " << svp::package::kSvpiMp4UuidText << "\n";
+    std::cout << "  uuid: " << svp::package::kEmbeddedSvpiTransportUuidText << "\n";
     std::cout << "  box_offset: " << info.box_offset << "\n";
     std::cout << "  box_size: " << info.box_size << "\n";
     std::cout << "  payload_offset: " << info.payload_offset << "\n";
@@ -138,4 +155,4 @@ void print_semantic_summary(const std::filesystem::path& package_path) {
   }
 }
 
-}  // namespace embedded_inspection_output
+}  // namespace embedded_transport_output

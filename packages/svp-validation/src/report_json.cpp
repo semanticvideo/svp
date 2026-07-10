@@ -33,6 +33,11 @@ void to_json(nlohmann::json& json, const ValidationReport& report) {
   if (report.embedding_transport.present) {
     const auto& transport = report.embedding_transport;
     json["embedding_transport"] = {
+        {"embedding_detected", transport.embedding_detected},
+        {"container_supported", transport.container_supported},
+        {"container_kind", transport.container_kind},
+        {"major_brand", transport.major_brand},
+        {"compatible_brands", transport.compatible_brands},
         {"profile", transport.profile},
         {"uuid", transport.uuid},
         {"status", transport.status},

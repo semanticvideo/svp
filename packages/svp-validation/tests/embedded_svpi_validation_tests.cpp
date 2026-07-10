@@ -1,6 +1,6 @@
 #include "svp/package/embedded_svpi.hpp"
 #include "svp/validation/code_registry.hpp"
-#include "svp/validation/embedded_svpi_validator.hpp"
+#include "svp/validation/embedded_svpi_transport_validator.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -25,9 +25,15 @@ void write_u32(std::ostream& output, std::uint32_t value) {
   output.write(bytes, sizeof(bytes));
 }
 
-void write_test_mp4(const std::filesystem::path& path) {
+void write_test_container(const std::filesystem::path& path,
+                          std::string_view brand = "isom") {
   std::ofstream output(path, std::ios::binary);
-  for (const char* type : {"ftyp", "moov", "mdat"}) {
+  write_u32(output, 20);
+  output.write("ftyp", 4);
+  output.write(brand.data(), 4);
+  write_u32(output, 0);
+  output.write(brand.data(), 4);
+  for (const char* type : {"moov", "mdat"}) {
     write_u32(output, 8);
     output.write(type, 4);
   }
@@ -72,22 +78,59 @@ int main() {
   const auto clean = root / "clean.mp4";
   const auto payload = root / "payload.svpi";
   const auto embedded = root / "embedded.mp4";
-  write_test_mp4(clean);
+  write_test_container(clean);
   write_payload(payload);
 
-  svp::validation::EmbeddedSvpiValidatorOptions options;
+  svp::validation::EmbeddedSvpiTransportValidatorOptions options;
   options.validation_codes_path =
       std::filesystem::path(SVP_SOURCE_DIR) /
       "spec/registries/validation-codes.json";
 
-  auto report = svp::validation::validate_embedded_svpi_mp4(clean, options);
-  require(has_code(report, svp::validation::kCodeMp4SvpiNotFound));
+  auto report = svp::validation::validate_embedded_svpi_transport(clean, options);
+  require(has_code(report, svp::validation::kCodeIsoBmffSvpiNotFound));
+  require(report.embedding_transport.status == "no_embedded_svpi");
+  require(report.embedding_transport.container_kind == "mp4");
 
-  require(svp::package::embed_svpi_in_mp4(clean, payload, embedded).success);
-  report = svp::validation::validate_embedded_svpi_mp4(embedded, options);
+  const auto unsupported = root / "unsupported.avif";
+  write_test_container(unsupported, "avif");
+  report = svp::validation::validate_embedded_svpi_transport(
+      unsupported, options);
+  require(has_code(
+      report, svp::validation::kCodeIsoBmffUnsupportedContainer));
+  require(report.embedding_transport.status == "unsupported_container");
+
+  const auto non_bmff = root / "unsupported.mkv";
+  {
+    std::ofstream file(non_bmff, std::ios::binary);
+    file.write("not an ISO BMFF container", 25);
+  }
+  report = svp::validation::validate_embedded_svpi_transport(
+      non_bmff, options);
+  require(has_code(
+      report, svp::validation::kCodeIsoBmffUnsupportedContainer));
+  require(!has_code(
+      report, svp::validation::kCodeIsoBmffBoxStructureInvalid));
+  require(report.embedding_transport.status == "unsupported_container");
+
+  const auto malformed = root / "malformed.mov";
+  write_test_container(malformed, "qt  ");
+  {
+    std::fstream file(
+        malformed, std::ios::binary | std::ios::in | std::ios::out);
+    file.seekp(28);
+    write_u32(file, 1024);
+  }
+  report = svp::validation::validate_embedded_svpi_transport(
+      malformed, options);
+  require(has_code(
+      report, svp::validation::kCodeIsoBmffBoxStructureInvalid));
+  require(report.embedding_transport.status == "malformed_container");
+
+  require(svp::package::embed_svpi_in_iso_bmff(clean, payload, embedded).success);
+  report = svp::validation::validate_embedded_svpi_transport(embedded, options);
   require(report.embedding_transport.status == "valid");
-  require(has_code(report, svp::validation::kCodeMp4EmbeddedSvpiInvalid));
-  require(has_code(report, svp::validation::kCodeMp4SvpiMediaBindingMismatch));
+  require(has_code(report, svp::validation::kCodeIsoBmffEmbeddedSvpiInvalid));
+  require(has_code(report, svp::validation::kCodeIsoBmffSvpiMediaBindingMismatch));
 
   const auto inspection = svp::package::inspect_embedded_svpi(embedded);
   std::fstream tamper(embedded, std::ios::binary | std::ios::in | std::ios::out);
@@ -95,8 +138,8 @@ int main() {
       inspection.embeddings.front().payload_offset));
   tamper.put('X');
   tamper.close();
-  report = svp::validation::validate_embedded_svpi_mp4(embedded, options);
-  require(has_code(report, svp::validation::kCodeMp4SvpiPayloadHashMismatch));
+  report = svp::validation::validate_embedded_svpi_transport(embedded, options);
+  require(has_code(report, svp::validation::kCodeIsoBmffSvpiPayloadHashMismatch));
 
   std::error_code ignored;
   std::filesystem::remove_all(root, ignored);

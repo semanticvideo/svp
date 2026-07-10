@@ -17,6 +17,7 @@ void register_cli(CLI::App& app, CliContext& context) {
   auto& probe_opts = context.probe_opts;
   auto& build_opts = context.build_opts;
   auto& opts = context.interlace_opts;
+  auto& transport_opts = context.transport_opts;
 
   // --- probe subcommand ---
   auto* probe = app.add_subcommand(
@@ -40,8 +41,8 @@ void register_cli(CLI::App& app, CliContext& context) {
                     "Output artifact path")
       ->required();
   build->add_option("--output-format", build_opts.output_format,
-                    "Output representation: svp, svpi, or embedded-mp4")
-      ->check(CLI::IsMember({"svp", "svpi", "embedded-mp4"}));
+                    "Output representation: svp, svpi, or embedded-svpi")
+      ->check(CLI::IsMember({"svp", "svpi", "embedded-svpi"}));
   build->add_flag("--overwrite", build_opts.overwrite,
                   "Explicitly allow replacing a non-SVP output path atomically");
   build->add_option("--staging-dir", build_opts.staging_dir,
@@ -106,7 +107,7 @@ void register_cli(CLI::App& app, CliContext& context) {
 
   // --- interlace subcommand ---
   auto* interlace = app.add_subcommand(
-      "interlace", "SVPI sidecar and embedded-MP4 transport operations");
+      "interlace", "SVPI sidecar operations");
   context.interlace_subcommand = interlace;
 
   // interlace create
@@ -193,41 +194,6 @@ void register_cli(CLI::App& app, CliContext& context) {
       "Suppress progress output; print only final success/failure");
   context.ir_recombine = ir_recombine;
   opts.ir_recombine_sub = ir_recombine;
-
-  auto* em_embed = interlace->add_subcommand(
-      "embed-mp4", "Embed one complete canonical SVPI in an MP4 without transcoding");
-  em_embed->add_option("media", opts.em_media, "Source MP4 path")->required();
-  em_embed->add_option("svpi", opts.em_svpi, "Canonical SVPI path")->required();
-  em_embed->add_option("--out", opts.em_out, "Output embedded MP4 path")->required();
-  em_embed->add_option("--ffprobe", opts.em_ffprobe, "ffprobe executable path");
-  em_embed->add_option("--validation-codes", opts.em_codes,
-                       "Validation codes registry path");
-  em_embed->add_flag("--replace-existing", opts.em_replace,
-                     "Replace existing embedded SVPI and produce exactly one box");
-  em_embed->add_flag("--overwrite", opts.em_overwrite,
-                     "Explicitly allow replacing the output path atomically");
-  context.em_embed = em_embed;
-  opts.em_embed_sub = em_embed;
-
-  auto* ee_extract = interlace->add_subcommand(
-      "extract-embedded", "Extract the exact embedded SVPI byte stream from an MP4");
-  ee_extract->add_option("mp4", opts.ee_mp4, "Embedded MP4 path")->required();
-  ee_extract->add_option("--out", opts.ee_out, "Output .svpi path")->required();
-  ee_extract->add_option("--validation-codes", opts.ee_codes,
-                         "Validation codes registry path");
-  ee_extract->add_flag("--overwrite", opts.ee_overwrite,
-                       "Explicitly allow replacing the output path atomically");
-  context.ee_extract = ee_extract;
-  opts.ee_extract_sub = ee_extract;
-
-  auto* se_strip = interlace->add_subcommand(
-      "strip-embedded", "Remove the SVPI UUID box and reconstruct the clean MP4");
-  se_strip->add_option("mp4", opts.se_mp4, "Embedded MP4 path")->required();
-  se_strip->add_option("--out", opts.se_out, "Output clean MP4 path")->required();
-  se_strip->add_flag("--overwrite", opts.se_overwrite,
-                     "Explicitly allow replacing the output path atomically");
-  context.se_strip = se_strip;
-  opts.se_strip_sub = se_strip;
 
   // interlace create-batch
   auto* cb_create_batch = interlace->add_subcommand(
@@ -324,4 +290,65 @@ void register_cli(CLI::App& app, CliContext& context) {
       "Suppress progress output; print only final success/failure");
   context.cib_complete_batch = cib_complete_batch;
   opts.cib_complete_batch_sub = cib_complete_batch;
+
+  auto* transport = app.add_subcommand(
+      "transport", "Embedded SVPI Transport operations for ISO BMFF media");
+  context.transport_subcommand = transport;
+
+  auto* transport_embed = transport->add_subcommand(
+      "embed", "Embed one complete canonical SVPI without remuxing media");
+  transport_embed->add_option(
+      "container", transport_opts.embed_container,
+      "Source ISO BMFF media container")->required();
+  transport_embed->add_option(
+      "svpi", transport_opts.embed_svpi,
+      "Canonical SVPI path")->required();
+  transport_embed->add_option(
+      "--out", transport_opts.embed_out,
+      "Output ISO BMFF media container")->required();
+  transport_embed->add_option(
+      "--ffprobe", transport_opts.embed_ffprobe,
+      "ffprobe executable path");
+  transport_embed->add_option(
+      "--validation-codes", transport_opts.embed_codes,
+      "Validation codes registry path");
+  transport_embed->add_flag(
+      "--replace-existing", transport_opts.embed_replace,
+      "Replace existing embedded SVPI and produce exactly one UUID box");
+  transport_embed->add_flag(
+      "--overwrite", transport_opts.embed_overwrite,
+      "Explicitly allow replacing the output path atomically");
+  context.transport_embed = transport_embed;
+  transport_opts.embed_sub = transport_embed;
+
+  auto* transport_extract = transport->add_subcommand(
+      "extract", "Extract the exact embedded SVPI byte stream");
+  transport_extract->add_option(
+      "container", transport_opts.extract_container,
+      "Embedded ISO BMFF media container")->required();
+  transport_extract->add_option(
+      "--out", transport_opts.extract_out,
+      "Output .svpi path")->required();
+  transport_extract->add_option(
+      "--validation-codes", transport_opts.extract_codes,
+      "Validation codes registry path");
+  transport_extract->add_flag(
+      "--overwrite", transport_opts.extract_overwrite,
+      "Explicitly allow replacing the output path atomically");
+  context.transport_extract = transport_extract;
+  transport_opts.extract_sub = transport_extract;
+
+  auto* transport_strip = transport->add_subcommand(
+      "strip", "Remove embedded SVPI and reconstruct the original container");
+  transport_strip->add_option(
+      "container", transport_opts.strip_container,
+      "Embedded ISO BMFF media container")->required();
+  transport_strip->add_option(
+      "--out", transport_opts.strip_out,
+      "Output clean ISO BMFF media container")->required();
+  transport_strip->add_flag(
+      "--overwrite", transport_opts.strip_overwrite,
+      "Explicitly allow replacing the output path atomically");
+  context.transport_strip = transport_strip;
+  transport_opts.strip_sub = transport_strip;
 }
