@@ -1,9 +1,9 @@
 {
-  "schema_version": "svp-mp4-embedding-profile-registry-v1",
+  "schema_version": "embedded-svpi-transport-profile-registry-v1",
   "profiles": [
     {
-      "id": "svpi-embedded-mp4-v1",
-      "name": "SVPI Embedded in ISO Base Media File Format / MP4, Version 1",
+      "id": "embedded-svpi-isobmff-v1",
+      "name": "Embedded SVPI Transport for ISO Base Media File Format, Version 1",
       "box_type": "uuid",
       "uuid": "e2b6a23c-22ca-5636-b165-991208c837f1",
       "uuid_derivation": {
@@ -18,7 +18,8 @@
       "payload_hash": "BLAKE3-256",
       "byte_order": "big-endian",
       "multiplicity": "exactly-one-active",
-      "specification": "docs/svpi/SVPI_Embedded_MP4_Profile_v1.md"
+      "supported_container_kinds": ["mp4", "quicktime", "m4v", "m4a"],
+      "specification": "docs/svpi/Embedded_SVPI_Transport_ISO_BMFF_v1.md"
     }
   ]
 }

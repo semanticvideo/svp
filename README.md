@@ -122,22 +122,23 @@ The SVPI draft spec lives at:
 docs/svpi/SVPI_v0.1_Draft_Specification.md
 ```
 
-## Embedded SVPI in MP4
+## Embedded SVPI Transport
 
-An SVPI can also be transported inside an ordinary MP4 without changing its
-semantic meaning. The MP4 profile stores one complete, unmodified canonical
-SVPI in a registered top-level `uuid` box. It does not transcode media or split
-semantic sections into MP4-native boxes.
+An SVPI can also be transported inside a supported ISO Base Media File Format
+container without changing its semantic meaning. The transport stores one
+complete, unmodified canonical SVPI in a registered top-level `uuid` box. It
+does not transcode media or split semantic sections into container-native
+boxes.
 
 ```text
-sidecar:      video.mp4 + video.svpi
-single file:  video-with-semantics.mp4 = original MP4 bytes + canonical SVPI
+sidecar:      media.mov + media.svpi
+single file:  media-with-semantics.mov = original container bytes + canonical SVPI
 ```
 
-The Version 1 UUID is `e2b6a23c-22ca-5636-b165-991208c837f1`. The complete
-binary contract, placement rules, validation codes, and preservation limits
-are documented in
-[`docs/svpi/SVPI_Embedded_MP4_Profile_v1.md`](docs/svpi/SVPI_Embedded_MP4_Profile_v1.md).
+Version 1 structurally detects MP4, QuickTime MOV, M4V, and M4A brand families.
+Its UUID is `e2b6a23c-22ca-5636-b165-991208c837f1`. The complete binary
+contract, placement rules, validation codes, and preservation limits are in
+[`docs/svpi/Embedded_SVPI_Transport_ISO_BMFF_v1.md`](docs/svpi/Embedded_SVPI_Transport_ISO_BMFF_v1.md).
 
 ## Architecture
 
@@ -152,7 +153,7 @@ flowchart TD
     Vision --> Models
     Package --> SVP[".svp package"]
     Package --> SVPI[".svpi sidecar"]
-    Package --> Embedded["MP4 + embedded SVPI"]
+    Package --> Embedded["Embedded SVPI Transport"]
     SVP --> Validator["svp-validator"]
     SVPI --> Interlace["svp-builder interlace"]
     Embedded --> Validator
@@ -296,13 +297,14 @@ Recombine source media plus SVPI into a full `.svp`:
   --out /path/to/recombined.svp
 ```
 
-Build a complete embedded MP4 directly through the normal build command:
+Build a complete Embedded SVPI Transport directly through the normal build
+command:
 
 ```bash
 ./build/tools/svp-builder/svp-builder build \
-  /path/to/video.mp4 \
-  --out /path/to/video-with-semantics.mp4 \
-  --output-format embedded-mp4 \
+  /path/to/video.mov \
+  --out /path/to/video-with-semantics.mov \
+  --output-format embedded-svpi \
   --model-cache /path/to/svp-model-cache \
   --sherpa-lib /path/to/libsherpa-onnx-c-api.dylib
 ```
@@ -310,24 +312,25 @@ Build a complete embedded MP4 directly through the normal build command:
 The same command accepts `--output-format svp` (the default) and
 `--output-format svpi`.
 
-Embed an existing SVPI, extract it exactly, or reconstruct the clean MP4:
+Embed an existing SVPI, extract it exactly, or reconstruct the clean container:
 
 ```bash
-./build/tools/svp-builder/svp-builder interlace embed-mp4 \
-  /path/to/video.mp4 /path/to/video.svpi \
-  --out /path/to/video-with-semantics.mp4
+./build/tools/svp-builder/svp-builder transport embed \
+  /path/to/video.mov /path/to/video.svpi \
+  --out /path/to/video-with-semantics.mov
 
-./build/tools/svp-builder/svp-builder interlace extract-embedded \
-  /path/to/video-with-semantics.mp4 \
+./build/tools/svp-builder/svp-builder transport extract \
+  /path/to/video-with-semantics.mov \
   --out /path/to/extracted.svpi
 
-./build/tools/svp-builder/svp-builder interlace strip-embedded \
-  /path/to/video-with-semantics.mp4 \
-  --out /path/to/clean.mp4
+./build/tools/svp-builder/svp-builder transport strip \
+  /path/to/video-with-semantics.mov \
+  --out /path/to/clean.mov
 ```
 
 Existing embeddings require `--replace-existing`; existing output paths
-require explicit `--overwrite`.
+require explicit `--overwrite`. User-facing outputs must retain the suffix for
+the structurally detected family: `.mp4`, `.mov`, `.m4v`, or `.m4a`.
 
 Batch workflows are also available:
 
@@ -343,11 +346,11 @@ Sidecar naming modes for `create-batch` are `visible`, `hidden`, and
 
 ## Validate and Inspect
 
-Validate an SVP, SVPI, or embedded MP4:
+Validate an SVP, SVPI, or Embedded SVPI Transport:
 
 ```bash
 ./build/tools/svp-validator/svp-validator validate build/local-intro/intro.svp
-./build/tools/svp-validator/svp-validator validate /path/to/video-with-semantics.mp4 --json
+./build/tools/svp-validator/svp-validator validate /path/to/video-with-semantics.mov --json
 ```
 
 Emit machine-readable validation JSON:
@@ -360,18 +363,19 @@ Print a concise package summary:
 
 ```bash
 ./build/tools/svp-inspector/svp-inspector inspect build/local-intro/intro.svp
-./build/tools/svp-inspector/svp-inspector inspect /path/to/video-with-semantics.mp4 --json
+./build/tools/svp-inspector/svp-inspector inspect /path/to/video-with-semantics.mov --json
 ```
 
-`svp-inspector` can inspect and query `.svpi` packages and embedded MP4s through
-the same bounded package reader. Embedded validation compares a present SVPI
-full-file BLAKE3 binding with the logical clean MP4 bytes.
+`svp-inspector` can inspect and query `.svpi` packages and Embedded SVPI
+Transport files through the same bounded package reader. Embedded validation
+compares a present SVPI full-file BLAKE3 binding with the logical clean
+container bytes.
 
 List package layers:
 
 ```bash
 ./build/tools/svp-inspector/svp-inspector query build/local-intro/intro.svp --mode layers
-./build/tools/svp-inspector/svp-inspector query /path/to/video-with-semantics.mp4 --mode layers
+./build/tools/svp-inspector/svp-inspector query /path/to/video-with-semantics.mov --mode layers
 ```
 
 Query transcript words:

@@ -1,29 +1,37 @@
-# SVPI Embedded in ISO Base Media File Format / MP4, Version 1
+# Embedded SVPI Transport for ISO Base Media File Format, Version 1
 
 Status: production transport profile
 
-Profile ID: `svpi-embedded-mp4-v1`
+Profile ID: `embedded-svpi-isobmff-v1`
 
 Byte order: big-endian (network order)
 
 ## 1. Purpose and format relationship
 
-This profile stores one complete canonical SVPI inside an ordinary ISO Base
-Media File Format / MP4 file. It is a transport for SVPI, not an MP4-native
-semantic format:
+This profile stores one complete canonical SVPI inside a supported ISO Base
+Media File Format container. It is a transport for SVPI, not a
+container-native semantic format:
 
 ```text
-MP4 + embedded canonical SVPI
+ISO BMFF media + embedded canonical SVPI
 ```
 
 SVPI remains the independently versioned source of truth for semantic
 observations, indexes, provenance, and media binding. The profile does not
 duplicate transcript, OCR, numeric text, colors, entities, relationships,
-embeddings, index data, or media identity in MP4 boxes. The raw SVPI payload is
-identical to the sidecar form and is not compressed by this transport.
+embeddings, index data, or media identity in container boxes. The raw SVPI
+payload is identical to the sidecar form and is not compressed by this
+transport.
 
 SVP remains the self-contained representation containing primary media and
-semantics. Embedded MP4 remains playable without SVP-aware software.
+semantics. The containing media remains usable without SVP-aware software.
+
+Version 1 supports structurally detected MP4 (`isom`, ISO family, `mp41`,
+`mp42`, `avc1`, CMAF brands), QuickTime (`qt  `), M4V (`M4V `), and M4A
+(`M4A `) brand families. Filename suffixes do not control input detection.
+CLI outputs use `.mp4`, `.mov`, `.m4v`, or `.m4a` consistently with the
+detected family because some operating-system media frameworks consult the
+suffix when opening a file.
 
 ## 2. Registered UUID
 
@@ -40,9 +48,12 @@ The UUID is deterministic UUIDv5 using the standard URL namespace UUID
 https://semanticvideo.org/spec/svpi-embedded-mp4/v1
 ```
 
-The value and derivation are permanently registered in
-`spec/registries/mp4-embedding-profiles.json`. Implementations must use the
-registered constant rather than independent anonymous literals.
+The UUID was originally derived while MP4 was the first implemented ISO BMFF
+profile. Its derivation name is retained because changing the name would
+produce a different UUID. The value now identifies the container-independent
+Embedded SVPI Transport and is permanently registered in
+`spec/registries/embedded-svpi-transport-profiles.json`. Implementations must
+use the registered constant rather than independent anonymous literals.
 
 ## 3. UUID box layout
 
@@ -92,11 +103,13 @@ The raw SVPI begins immediately after the declared envelope. Version 1
 requires the declared payload length to equal all bytes remaining in the UUID
 box. Readers must verify bounds before following the range. The BLAKE3 value
 protects only the embedded SVPI bytes; this profile does not hash the resulting
-MP4 and does not create a circular media identity.
+container and does not create a circular media identity.
 
 ## 5. Discovery
 
-Readers walk only top-level box headers from offset zero to EOF:
+Readers first require a structurally valid leading `ftyp`, parse its major and
+compatible brands, and classify the container family. They then walk only
+top-level box headers from offset zero to EOF:
 
 1. Read the 8-byte box header.
 2. Read `largesize` only when `size == 1`.
@@ -113,9 +126,9 @@ and validation code is reused.
 
 ## 6. Placement and preservation
 
-For a supported non-fragmented MP4, the canonical writer appends the UUID box
-at EOF. This leaves all original bytes and all existing absolute media offsets
-unchanged.
+For a supported container, the canonical writer appends the UUID box at EOF.
+This leaves all original bytes and all existing absolute media offsets
+unchanged. Brand classification does not rewrite `ftyp`.
 
 When the terminal top-level box is `mfra`, the writer inserts the UUID box
 immediately before `mfra`. `mfra` offsets refer to earlier media fragments, so
@@ -129,8 +142,11 @@ Malformed or ambiguous top-level layouts are rejected; writers never guess.
 
 Embedding is a byte-level insertion, not an FFmpeg remux. Every original byte
 is copied unchanged. Stripping removes the one registered UUID box. For files
-produced from a clean MP4 by this implementation, stripping reconstructs the
-original MP4 byte-for-byte.
+produced from a clean container by this implementation, stripping reconstructs
+the original container byte-for-byte. Consequently encoded video/audio,
+sample tables, edit lists, time scales, codec configuration, color/HDR
+metadata, orientation matrices, track order, and unrelated metadata are all
+preserved as original bytes.
 
 ## 7. Multiplicity and replacement
 
@@ -144,46 +160,54 @@ This profile does not define history or generations.
 
 Validation has two separate layers:
 
-1. MP4 transport: top-level structure, UUID multiplicity, profile/envelope,
+1. ISO BMFF transport: container family, top-level structure, UUID
+   multiplicity, profile/envelope,
    bounds, exact length, and payload BLAKE3.
 2. Bounded SVPI: the existing SVPI package validator and existing Core and
    authenticity statuses.
 
+Structured reports expose `container_kind`, `major_brand`, compatible brands,
+container support, embedding detection, transport status, embedded-package
+status, Core status, and authenticity status. Transport status is one of
+`unsupported_container`, `malformed_container`, `no_embedded_svpi`,
+`invalid_embedding`, or `valid`.
+
 When `media_binding.json` contains a present full-file BLAKE3, embedded
-validation hashes the logical clean MP4 byte stream (all bytes except the SVPI
-UUID box) and compares it with that binding. Embedding does not replace SVPI's
-media identity or provenance contract.
+validation hashes the logical clean container byte stream (all bytes except
+the SVPI UUID box) and compares it with that binding. Embedding does not
+replace SVPI's media identity or provenance contract.
 
 Registered transport validation codes include:
 
-- `ERR_MP4_BOX_STRUCTURE_INVALID`
-- `ERR_MP4_UUID_BOX_TRUNCATED`
-- `ERR_MP4_SVPI_PROFILE_UNSUPPORTED`
-- `ERR_MP4_SVPI_ENVELOPE_INVALID`
-- `ERR_MP4_SVPI_PAYLOAD_BOUNDS`
-- `ERR_MP4_SVPI_PAYLOAD_LENGTH_MISMATCH`
-- `ERR_MP4_SVPI_PAYLOAD_HASH_MISMATCH`
-- `ERR_MP4_SVPI_DUPLICATE`
-- `ERR_MP4_SVPI_NOT_FOUND`
-- `ERR_MP4_EMBEDDED_SVPI_INVALID`
-- `ERR_MP4_UNSAFE_TAIL_LAYOUT`
-- `ERR_MP4_ZERO_SIZED_TOP_LEVEL_BOX`
-- `ERR_MP4_SVPI_MEDIA_BINDING_MISMATCH`
+- `ERR_ISOBMFF_UNSUPPORTED_CONTAINER`
+- `ERR_ISOBMFF_BOX_STRUCTURE_INVALID`
+- `ERR_ISOBMFF_UUID_BOX_TRUNCATED`
+- `ERR_ISOBMFF_SVPI_PROFILE_UNSUPPORTED`
+- `ERR_ISOBMFF_SVPI_ENVELOPE_INVALID`
+- `ERR_ISOBMFF_SVPI_PAYLOAD_BOUNDS`
+- `ERR_ISOBMFF_SVPI_PAYLOAD_LENGTH_MISMATCH`
+- `ERR_ISOBMFF_SVPI_PAYLOAD_HASH_MISMATCH`
+- `ERR_ISOBMFF_SVPI_DUPLICATE`
+- `ERR_ISOBMFF_SVPI_NOT_FOUND`
+- `ERR_ISOBMFF_EMBEDDED_SVPI_INVALID`
+- `ERR_ISOBMFF_UNSAFE_TAIL_LAYOUT`
+- `ERR_ISOBMFF_ZERO_SIZED_TOP_LEVEL_BOX`
+- `ERR_ISOBMFF_SVPI_MEDIA_BINDING_MISMATCH`
 
 ## 9. CLI
 
 Build any supported output representation from media:
 
 ```bash
-svp-builder build source.mp4 --out package.svp --output-format svp
-svp-builder build source.mp4 --out package.svpi --output-format svpi
-svp-builder build source.mp4 --out semantic.mp4 --output-format embedded-mp4
+svp-builder build source.mov --out package.svp --output-format svp
+svp-builder build source.mov --out package.svpi --output-format svpi
+svp-builder build source.mov --out semantic.mov --output-format embedded-svpi
 ```
 
 Embed an existing canonical SVPI:
 
 ```bash
-svp-builder interlace embed-mp4 source.mp4 package.svpi --out semantic.mp4
+svp-builder transport embed source.mov package.svpi --out semantic.mov
 ```
 
 Use `--replace-existing` only to replace an existing embedding and
@@ -192,11 +216,11 @@ Use `--replace-existing` only to replace an existing embedding and
 Inspect, validate, query, extract, and strip:
 
 ```bash
-svp-inspector inspect semantic.mp4 --json
-svp-validator validate semantic.mp4 --json
-svp-inspector query semantic.mp4 --mode transcript --json
-svp-builder interlace extract-embedded semantic.mp4 --out package.svpi
-svp-builder interlace strip-embedded semantic.mp4 --out clean.mp4
+svp-inspector inspect semantic.mov --json
+svp-validator validate semantic.mov --json
+svp-inspector query semantic.mov --mode transcript --json
+svp-builder transport extract semantic.mov --out package.svpi
+svp-builder transport strip semantic.mov --out clean.mov
 ```
 
 Extraction validates the envelope and payload hash, then writes the exact SVPI
@@ -209,13 +233,13 @@ Existing SVP conversions compose through the canonical artifacts rather than
 using a reduced embedded representation:
 
 ```text
-SVP -> interlace extract -> clean MP4 + canonical SVPI -> embed-mp4
-embedded MP4 -> extract-embedded + strip-embedded -> recombine -> SVP
+SVP -> interlace extract -> clean media + canonical SVPI -> transport embed
+Embedded SVPI Transport -> transport extract + strip -> recombine -> SVP
 ```
 
 These paths reuse the existing SVP extractor/recombiner, media binding checks,
 SVPI writer, and validators. No package-building logic is duplicated in the
-MP4 transport layer.
+transport layer.
 
 ## 10. Preservation expectations and limitations
 
@@ -226,7 +250,13 @@ third-party exports preserve embedded SVPI unless that exact workflow was
 tested.
 
 Version 1 deliberately rejects ambiguous size-zero layouts, non-terminal
-`mfra`, and top-level `mfro`. It does not define an MP4-native semantic schema,
+`mfra`, and top-level `mfro`. Structurally valid ISO BMFF derivatives outside
+the registered time-based media brand families—including HEIF/AVIF, JPEG 2000,
+3GP/3G2, and unrecognized brands—are currently reported as unsupported rather
+than guessed safe. Segment-only `styp` files are not complete supported media
+containers. Legacy QuickTime files without a leading `ftyp` are also not
+accepted by Version 1 because they cannot be classified through the registered
+brand policy. The profile does not define a container-native semantic schema,
 front-of-file locator, payload compression, append-only history, or complete
-MP4 hash. It never requires media decoding for discovery and never requires a
-Python runtime or network service.
+container hash. It never requires media decoding for discovery and never
+requires a Python runtime or network service.
