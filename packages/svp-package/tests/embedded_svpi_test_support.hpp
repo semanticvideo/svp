@@ -18,12 +18,13 @@ struct TempDirectory {
 void check(bool condition, std::string_view expression,
            std::string_view file, int line);
 
-void write_test_mp4(const std::filesystem::path& path,
+void write_test_iso_bmff(const std::filesystem::path& path,
                     bool moov_before_mdat,
                     bool terminal_mfra = false,
                     bool zero_sized_mdat = false,
-                    bool unrelated_uuid = false);
-void write_sparse_test_mp4(const std::filesystem::path& path,
+                    bool unrelated_uuid = false,
+                    std::string_view major_brand = "isom");
+void write_sparse_iso_bmff(const std::filesystem::path& path,
                            std::uint64_t mdat_payload_size);
 void write_bytes(const std::filesystem::path& path,
                  const std::vector<std::uint8_t>& bytes);

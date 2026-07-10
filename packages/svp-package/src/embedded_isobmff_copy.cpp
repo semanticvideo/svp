@@ -1,8 +1,8 @@
-#include "embedded_mp4_copy.hpp"
+#include "embedded_isobmff_copy.hpp"
 
 #include "embedded_file_io.hpp"
 #include "embedded_svpi_box.hpp"
-#include "svp/package/svpi_embedding_profile.hpp"
+#include "svp/package/embedded_svpi_transport_profile.hpp"
 
 #include <algorithm>
 #include <array>
@@ -18,11 +18,11 @@ bool write_uuid_box(std::ofstream& output,
   output.write(reinterpret_cast<const char*>(box_header.data()),
                static_cast<std::streamsize>(box_header.size()));
 
-  std::array<std::uint8_t, kSvpiMp4EnvelopeSize> envelope{};
-  std::copy(kSvpiMp4EnvelopeMagic.begin(), kSvpiMp4EnvelopeMagic.end(),
+  std::array<std::uint8_t, kEmbeddedSvpiEnvelopeSize> envelope{};
+  std::copy(kEmbeddedSvpiEnvelopeMagic.begin(), kEmbeddedSvpiEnvelopeMagic.end(),
             envelope.begin());
-  write_be16(envelope.data() + 8, kSvpiMp4ProfileVersion);
-  write_be16(envelope.data() + 10, kSvpiMp4EnvelopeSize);
+  write_be16(envelope.data() + 8, kEmbeddedSvpiProfileVersion);
+  write_be16(envelope.data() + 10, kEmbeddedSvpiEnvelopeSize);
   write_be32(envelope.data() + 12, 0);
   write_be64(envelope.data() + 16, payload_size);
   std::copy(payload_hash.begin(), payload_hash.end(), envelope.begin() + 24);
@@ -36,7 +36,7 @@ bool write_uuid_box(std::ofstream& output,
 
 }  // namespace
 
-bool copy_mp4_with_embedding_change(
+bool copy_iso_bmff_with_embedding_change(
     const std::filesystem::path& input_path,
     const TopLevelScan& scan,
     const std::vector<EmbeddedSvpiInfo>& embeddings,

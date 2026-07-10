@@ -4,6 +4,7 @@
 #include "svp/package/embedded_svpi.hpp"
 #include "svp/query/query_ops.hpp"
 #include "svp/query/query_reader.hpp"
+#include "svp/query/traversal.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -29,20 +30,28 @@ void write_empty_box(std::ostream& output, const char* type) {
   output.write(type, 4);
 }
 
+void write_ftyp(std::ostream& output, const char* brand) {
+  write_u32(output, 20);
+  output.write("ftyp", 4);
+  output.write(brand, 4);
+  write_u32(output, 0);
+  output.write(brand, 4);
+}
+
 void embedded_package_queries_match_standalone_queries() {
   const auto package_path = create_semantic_test_package();
   const auto root = package_path.parent_path();
-  const auto mp4_path = root / "source-container.mp4";
-  const auto embedded_path = root / "embedded-query.mp4";
+  const auto container_path = root / "source-container.data";
+  const auto embedded_path = root / "embedded-query.mov";
   {
-    std::ofstream output(mp4_path, std::ios::binary);
-    write_empty_box(output, "ftyp");
+    std::ofstream output(container_path, std::ios::binary);
+    write_ftyp(output, "qt  ");
     write_empty_box(output, "moov");
     write_empty_box(output, "mdat");
   }
 
-  const auto embedded = svp::package::embed_svpi_in_mp4(
-      mp4_path, package_path, embedded_path);
+  const auto embedded = svp::package::embed_svpi_in_iso_bmff(
+      container_path, package_path, embedded_path);
   require(embedded.success);
 
   const auto standalone_words =
@@ -73,6 +82,25 @@ void embedded_package_queries_match_standalone_queries() {
           embedded_relationships.total_count);
   require(standalone_relationships.semantic_count ==
           embedded_relationships.semantic_count);
+
+  svp::query::TraversalOptions traversal_options;
+  traversal_options.start_id = "word_000001";
+  traversal_options.max_depth = 3;
+  const auto standalone_traversal = svp::query::traverse_relationships(
+      package_path, traversal_options);
+  const auto embedded_traversal = svp::query::traverse_relationships(
+      embedded_path, traversal_options);
+  require(standalone_traversal.error_message ==
+          embedded_traversal.error_message);
+  require(svp::query::traversal_result_to_json(standalone_traversal) ==
+          svp::query::traversal_result_to_json(embedded_traversal));
+
+  const auto standalone_health =
+      svp::query::compute_graph_health(package_path);
+  const auto embedded_health =
+      svp::query::compute_graph_health(embedded_path);
+  require(svp::query::graph_health_to_json(standalone_health) ==
+          svp::query::graph_health_to_json(embedded_health));
 }
 
 REGISTER_QUERY_TEST(embedded_package_queries_match_standalone_queries)

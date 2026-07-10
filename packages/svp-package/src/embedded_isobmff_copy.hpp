@@ -1,6 +1,6 @@
 #pragma once
 
-#include "mp4_top_level.hpp"
+#include "isobmff_top_level.hpp"
 
 #include <array>
 #include <cstdint>
@@ -10,7 +10,7 @@
 
 namespace svp::package::detail {
 
-[[nodiscard]] bool copy_mp4_with_embedding_change(
+[[nodiscard]] bool copy_iso_bmff_with_embedding_change(
     const std::filesystem::path& input_path,
     const TopLevelScan& scan,
     const std::vector<EmbeddedSvpiInfo>& embeddings,

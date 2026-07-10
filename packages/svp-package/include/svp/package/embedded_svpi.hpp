@@ -1,5 +1,7 @@
 #pragma once
 
+#include "svp/package/iso_bmff_container.hpp"
+
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -10,6 +12,7 @@ namespace svp::package {
 
 enum class EmbeddedSvpiIssueCode {
   input_unreadable,
+  unsupported_container,
   invalid_box_structure,
   truncated_uuid_box,
   unsupported_profile_version,
@@ -54,7 +57,8 @@ struct EmbeddedSvpiInspection {
   std::uint64_t top_level_box_count = 0;
   std::uint64_t scanner_bytes_read = 0;
   bool input_readable = false;
-  bool mp4_structure_valid = false;
+  bool container_structure_valid = false;
+  IsoBmffContainerInfo container;
   std::vector<EmbeddedSvpiInfo> embeddings;
   std::vector<EmbeddedSvpiIssue> issues;
 
@@ -77,19 +81,19 @@ struct EmbeddedSvpiOperationResult {
     const std::filesystem::path& path,
     bool verify_payload_hash = false);
 
-[[nodiscard]] EmbeddedSvpiOperationResult embed_svpi_in_mp4(
-    const std::filesystem::path& mp4_path,
+[[nodiscard]] EmbeddedSvpiOperationResult embed_svpi_in_iso_bmff(
+    const std::filesystem::path& container_path,
     const std::filesystem::path& svpi_path,
     const std::filesystem::path& output_path,
     const EmbeddedSvpiWriteOptions& options = {});
 
 [[nodiscard]] EmbeddedSvpiOperationResult extract_embedded_svpi(
-    const std::filesystem::path& mp4_path,
+    const std::filesystem::path& container_path,
     const std::filesystem::path& output_path,
     bool overwrite_output = false);
 
 [[nodiscard]] EmbeddedSvpiOperationResult strip_embedded_svpi(
-    const std::filesystem::path& mp4_path,
+    const std::filesystem::path& container_path,
     const std::filesystem::path& output_path,
     bool overwrite_output = false);
 

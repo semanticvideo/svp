@@ -1,19 +1,26 @@
 #include "package_source.hpp"
 
-#include "svp/core/path.hpp"
 #include "svp/package/embedded_svpi.hpp"
 
 namespace svp::package::detail {
 
 PackageByteRangeResult resolve_package_byte_range(
     const std::filesystem::path& path) {
-  if (!svp::core::has_extension(path, ".mp4")) {
+  const auto inspection = inspect_embedded_svpi(path, false);
+  if (!inspection.container.signature_present) {
     return {.success = true, .range = {}};
   }
+  if (!inspection.container.structure_valid ||
+      !inspection.container.supported) {
+    return {
+        .success = false,
+        .error_message = inspection.container.diagnostic,
+    };
+  }
 
-  const auto inspection = inspect_embedded_svpi(path, false);
   if (!inspection.has_single_valid_embedding()) {
-    std::string message = "MP4 does not contain one valid embedded SVPI";
+    std::string message =
+        "ISO BMFF container does not contain one valid embedded SVPI";
     if (!inspection.issues.empty()) {
       message += ": " + inspection.issues.front().message;
     }

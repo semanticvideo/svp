@@ -1,7 +1,8 @@
 #include "svp/package/embedded_svpi.hpp"
 
-#include "mp4_top_level.hpp"
-#include "svp/package/svpi_embedding_profile.hpp"
+#include "iso_bmff_container_internal.hpp"
+#include "isobmff_top_level.hpp"
+#include "svp/package/embedded_svpi_transport_profile.hpp"
 
 #include <blake3.h>
 
@@ -49,8 +50,7 @@ bool hash_range(const std::filesystem::path& path, std::uint64_t offset,
   return true;
 }
 
-bool parse_envelope(const std::filesystem::path& path,
-                    const detail::TopLevelBox& box,
+bool parse_envelope(const detail::TopLevelBox& box,
                     std::ifstream& input,
                     EmbeddedSvpiInspection& inspection) {
   std::array<std::uint8_t, 16> uuid{};
@@ -62,7 +62,7 @@ bool parse_envelope(const std::filesystem::path& path,
     return false;
   }
   inspection.scanner_bytes_read += uuid.size();
-  if (uuid != kSvpiMp4Uuid) {
+  if (uuid != kEmbeddedSvpiTransportUuid) {
     return false;
   }
 
@@ -72,7 +72,7 @@ bool parse_envelope(const std::filesystem::path& path,
 
   const auto envelope_offset = box.offset + box.header_size;
   const auto available = box.size - box.header_size;
-  if (available < kSvpiMp4EnvelopeSize) {
+  if (available < kEmbeddedSvpiEnvelopeSize) {
     inspection.issues.push_back(make_issue(
         EmbeddedSvpiIssueCode::truncated_uuid_box, box.offset,
         "SVPI UUID box is too small to contain the Version 1 envelope."));
@@ -80,7 +80,7 @@ bool parse_envelope(const std::filesystem::path& path,
     return true;
   }
 
-  std::array<std::uint8_t, kSvpiMp4EnvelopeSize> envelope{};
+  std::array<std::uint8_t, kEmbeddedSvpiEnvelopeSize> envelope{};
   if (!detail::read_exact_at(input, envelope_offset, envelope.data(), envelope.size())) {
     inspection.issues.push_back(make_issue(
         EmbeddedSvpiIssueCode::truncated_uuid_box, box.offset,
@@ -99,20 +99,20 @@ bool parse_envelope(const std::filesystem::path& path,
   std::copy_n(envelope.data() + 24, info.expected_hash.size(),
               info.expected_hash.begin());
 
-  if (!std::equal(kSvpiMp4EnvelopeMagic.begin(), kSvpiMp4EnvelopeMagic.end(),
+  if (!std::equal(kEmbeddedSvpiEnvelopeMagic.begin(), kEmbeddedSvpiEnvelopeMagic.end(),
                   envelope.begin())) {
     inspection.issues.push_back(make_issue(
         EmbeddedSvpiIssueCode::invalid_envelope_magic, envelope_offset,
         "SVPI embedding envelope magic is invalid."));
-  } else if (info.profile_version != kSvpiMp4ProfileVersion) {
+  } else if (info.profile_version != kEmbeddedSvpiProfileVersion) {
     inspection.issues.push_back(make_issue(
         EmbeddedSvpiIssueCode::unsupported_profile_version, envelope_offset + 8,
-        "Unsupported SVPI MP4 embedding profile version."));
-  } else if (info.envelope_size != kSvpiMp4EnvelopeSize) {
+        "Unsupported Embedded SVPI Transport profile version."));
+  } else if (info.envelope_size != kEmbeddedSvpiEnvelopeSize) {
     inspection.issues.push_back(make_issue(
         EmbeddedSvpiIssueCode::invalid_envelope_size, envelope_offset + 10,
         "Version 1 SVPI embedding envelope size must be 64 bytes."));
-  } else if ((info.flags & ~kSvpiMp4SupportedFlags) != 0) {
+  } else if ((info.flags & ~kEmbeddedSvpiSupportedFlags) != 0) {
     inspection.issues.push_back(make_issue(
         EmbeddedSvpiIssueCode::unsupported_flags, envelope_offset + 12,
         "SVPI embedding envelope contains unsupported flags."));
@@ -133,7 +133,7 @@ bool parse_envelope(const std::filesystem::path& path,
                info.payload_size > inspection.file_size - payload_offset) {
       inspection.issues.push_back(make_issue(
           EmbeddedSvpiIssueCode::payload_outside_file, payload_offset,
-          "Declared SVPI payload extends outside the MP4 file."));
+          "Declared SVPI payload extends outside the ISO BMFF container."));
     } else {
       info.envelope_valid = true;
     }
@@ -149,7 +149,8 @@ bool parse_envelope(const std::filesystem::path& path,
 }  // namespace
 
 bool EmbeddedSvpiInspection::has_single_valid_embedding() const noexcept {
-  return mp4_structure_valid && embeddings.size() == 1 &&
+  return container_structure_valid && container.supported &&
+         embeddings.size() == 1 &&
          embeddings.front().envelope_valid;
 }
 
@@ -163,16 +164,33 @@ EmbeddedSvpiInspection inspect_embedded_svpi(
   inspection.top_level_box_count = scan.boxes.size();
   inspection.scanner_bytes_read = scan.bytes_read;
   inspection.input_readable = scan.readable;
-  inspection.mp4_structure_valid = scan.valid;
+  inspection.container = detail::classify_iso_bmff_container(path, scan);
+  inspection.scanner_bytes_read += inspection.container.bytes_read;
+  inspection.container_structure_valid = inspection.container.structure_valid;
   inspection.issues = std::move(scan.issues);
+  if (!inspection.container.signature_present) {
+    if (inspection.input_readable) {
+      inspection.issues.clear();
+    }
+    inspection.issues.push_back(make_issue(
+        EmbeddedSvpiIssueCode::unsupported_container, 0,
+        inspection.container.diagnostic));
+    return inspection;
+  }
   if (!scan.valid) {
+    return inspection;
+  }
+  if (!inspection.container.supported) {
+    inspection.issues.push_back(make_issue(
+        EmbeddedSvpiIssueCode::unsupported_container, 0,
+        inspection.container.diagnostic));
     return inspection;
   }
 
   std::ifstream input(path, std::ios::binary);
   for (const auto& box : scan.boxes) {
     if (box.type == std::array<char, 4>{'u', 'u', 'i', 'd'}) {
-      parse_envelope(path, box, input, inspection);
+      parse_envelope(box, input, inspection);
     }
   }
 
@@ -186,7 +204,7 @@ EmbeddedSvpiInspection inspect_embedded_svpi(
     inspection.issues.push_back(make_issue(
         EmbeddedSvpiIssueCode::duplicate_embeddings,
         inspection.embeddings[1].box_offset,
-        "MP4 contains more than one SVPI embedding UUID box."));
+        "ISO BMFF container contains more than one SVPI embedding UUID box."));
     return inspection;
   }
 
@@ -213,6 +231,7 @@ EmbeddedSvpiInspection inspect_embedded_svpi(
 const char* to_string(EmbeddedSvpiIssueCode code) noexcept {
   switch (code) {
     case EmbeddedSvpiIssueCode::input_unreadable: return "input_unreadable";
+    case EmbeddedSvpiIssueCode::unsupported_container: return "unsupported_container";
     case EmbeddedSvpiIssueCode::invalid_box_structure: return "invalid_box_structure";
     case EmbeddedSvpiIssueCode::truncated_uuid_box: return "truncated_uuid_box";
     case EmbeddedSvpiIssueCode::unsupported_profile_version: return "unsupported_profile_version";

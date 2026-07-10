@@ -1,9 +1,9 @@
 #include "svp/package/embedded_svpi.hpp"
 
 #include "embedded_file_io.hpp"
-#include "embedded_mp4_copy.hpp"
-#include "mp4_top_level.hpp"
-#include "svp/package/svpi_embedding_profile.hpp"
+#include "embedded_isobmff_copy.hpp"
+#include "isobmff_top_level.hpp"
+#include "svp/package/embedded_svpi_transport_profile.hpp"
 
 #include <algorithm>
 #include <array>
@@ -28,7 +28,8 @@ bool validate_embedding_layout(
           .offset = box.offset,
           .message = "Embedding is rejected because a top-level size-zero box extends to EOF.",
       });
-      error_message = "Unsafe MP4 layout: top-level size-zero box extends to EOF.";
+      error_message =
+          "Unsafe ISO BMFF layout: top-level size-zero box extends to EOF.";
       return false;
     }
     if (is_type(box, {'m', 'f', 'r', 'o'})) {
@@ -37,7 +38,7 @@ bool validate_embedding_layout(
           .offset = box.offset,
           .message = "Top-level mfro is not a supported tail layout.",
       });
-      error_message = "Unsafe MP4 tail layout: top-level mfro box.";
+      error_message = "Unsafe ISO BMFF tail layout: top-level mfro box.";
       return false;
     }
   }
@@ -70,7 +71,7 @@ bool choose_insertion_offset(const detail::TopLevelScan& scan,
         .offset = mfra->offset,
         .message = "mfra is supported only as the terminal top-level box.",
     });
-    error_message = "Unsafe MP4 tail layout: non-terminal mfra box.";
+    error_message = "Unsafe ISO BMFF tail layout: non-terminal mfra box.";
     return false;
   }
   insertion_offset = mfra->offset;
@@ -81,20 +82,20 @@ bool choose_insertion_offset(const detail::TopLevelScan& scan,
 
 bool svpi_uuid_box_requires_extended_size(
     std::uint64_t svpi_payload_size) noexcept {
-  constexpr std::uint64_t compact_overhead = 24 + kSvpiMp4EnvelopeSize;
+  constexpr std::uint64_t compact_overhead = 24 + kEmbeddedSvpiEnvelopeSize;
   return svpi_payload_size > kIsoBmffMaxCompactBoxSize - compact_overhead;
 }
 
-EmbeddedSvpiOperationResult embed_svpi_in_mp4(
-    const std::filesystem::path& mp4_path,
+EmbeddedSvpiOperationResult embed_svpi_in_iso_bmff(
+    const std::filesystem::path& container_path,
     const std::filesystem::path& svpi_path,
     const std::filesystem::path& output_path,
     const EmbeddedSvpiWriteOptions& options) {
-  auto inspection = inspect_embedded_svpi(mp4_path, false);
-  if (!inspection.mp4_structure_valid) {
+  auto inspection = inspect_embedded_svpi(container_path, false);
+  if (!inspection.container_structure_valid || !inspection.container.supported) {
     return detail::failure_result(
         output_path, std::move(inspection),
-        "Input MP4 has an invalid top-level box structure.");
+        "Input is not a supported, structurally valid ISO BMFF container.");
   }
   std::string error_message;
   if (!detail::output_is_allowed(
@@ -108,7 +109,7 @@ EmbeddedSvpiOperationResult embed_svpi_in_mp4(
         output_path, std::move(inspection), error_message);
   }
 
-  const auto scan = detail::scan_top_level_boxes(mp4_path);
+  const auto scan = detail::scan_top_level_boxes(container_path);
   if (!validate_embedding_layout(scan, inspection, error_message)) {
     return detail::failure_result(
         output_path, std::move(inspection), error_message);
@@ -116,7 +117,7 @@ EmbeddedSvpiOperationResult embed_svpi_in_mp4(
   if (!inspection.embeddings.empty() && !options.replace_existing) {
     return detail::failure_result(
         output_path, std::move(inspection),
-        "MP4 already contains embedded SVPI; use explicit replacement.");
+        "Container already contains embedded SVPI; use explicit replacement.");
   }
 
   std::uint64_t insertion_offset = 0;
@@ -139,12 +140,12 @@ EmbeddedSvpiOperationResult embed_svpi_in_mp4(
         output_path, std::move(inspection), error_message);
   }
   std::ofstream output(temporary.path, std::ios::binary | std::ios::trunc);
-  if (!output || !detail::copy_mp4_with_embedding_change(
-          mp4_path, scan, inspection.embeddings, output, insertion_offset,
+  if (!output || !detail::copy_iso_bmff_with_embedding_change(
+          container_path, scan, inspection.embeddings, output, insertion_offset,
           &svpi_path, payload_size, payload_hash)) {
     return detail::failure_result(
         output_path, std::move(inspection),
-        "Failed while writing the embedded MP4.");
+        "Failed while writing the embedded SVPI transport.");
   }
   output.close();
   if (!output) {
@@ -158,7 +159,7 @@ EmbeddedSvpiOperationResult embed_svpi_in_mp4(
       !output_inspection.embeddings.front().hash_matches) {
     return detail::failure_result(
         output_path, std::move(output_inspection),
-        "Final embedded MP4 verification failed.");
+        "Final embedded SVPI transport verification failed.");
   }
   if (!detail::finalize_temporary_output(
           temporary, output_path, error_message)) {

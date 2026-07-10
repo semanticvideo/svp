@@ -43,7 +43,7 @@ void put_unrelated_uuid(std::ostream& output) {
 TempDirectory::TempDirectory() {
   const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
   path = std::filesystem::temp_directory_path() /
-         ("svp-embedded-mp4-tests-" + std::to_string(suffix));
+         ("svp-embedded-transport-tests-" + std::to_string(suffix));
   std::filesystem::create_directories(path);
 }
 
@@ -60,14 +60,18 @@ void check(bool condition, std::string_view expression,
   }
 }
 
-void write_test_mp4(const std::filesystem::path& path,
+void write_test_iso_bmff(const std::filesystem::path& path,
                     bool moov_before_mdat,
                     bool terminal_mfra,
                     bool zero_sized_mdat,
-                    bool unrelated_uuid) {
+                    bool unrelated_uuid,
+                    std::string_view major_brand) {
   std::ofstream output(path, std::ios::binary);
-  put_box(output, "ftyp", {'i', 's', 'o', 'm', 0, 0, 0, 1,
-                           'i', 's', 'o', 'm', 'm', 'p', '4', '2'});
+  std::vector<std::uint8_t> ftyp(12);
+  std::copy_n(major_brand.begin(), 4, ftyp.begin());
+  ftyp[7] = 1;
+  std::copy_n(major_brand.begin(), 4, ftyp.begin() + 8);
+  put_box(output, "ftyp", ftyp);
   if (moov_before_mdat) {
     put_box(output, "moov");
   }
@@ -89,10 +93,11 @@ void write_test_mp4(const std::filesystem::path& path,
   }
 }
 
-void write_sparse_test_mp4(const std::filesystem::path& path,
+void write_sparse_iso_bmff(const std::filesystem::path& path,
                            std::uint64_t mdat_payload_size) {
   std::ofstream output(path, std::ios::binary);
-  put_box(output, "ftyp", {'i', 's', 'o', 'm'});
+  put_box(output, "ftyp", {'i', 's', 'o', 'm', 0, 0, 0, 0,
+                           'i', 's', 'o', 'm'});
   put_be32(output, 1);
   output.write("mdat", 4);
   put_be64(output, 16 + mdat_payload_size);

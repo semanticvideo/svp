@@ -7,10 +7,10 @@
 namespace svp::package {
 
 EmbeddedSvpiOperationResult extract_embedded_svpi(
-    const std::filesystem::path& mp4_path,
+    const std::filesystem::path& container_path,
     const std::filesystem::path& output_path,
     bool overwrite_output) {
-  auto inspection = inspect_embedded_svpi(mp4_path, true);
+  auto inspection = inspect_embedded_svpi(container_path, true);
   if (!inspection.has_single_valid_embedding() ||
       !inspection.embeddings.front().hash_verified ||
       !inspection.embeddings.front().hash_matches) {
@@ -27,7 +27,7 @@ EmbeddedSvpiOperationResult extract_embedded_svpi(
   if (!detail::make_temporary_output(output_path, temporary, error_message)) {
     return detail::failure_result(output_path, std::move(inspection), error_message);
   }
-  std::ifstream input(mp4_path, std::ios::binary);
+  std::ifstream input(container_path, std::ios::binary);
   std::ofstream output(temporary.path, std::ios::binary | std::ios::trunc);
   const auto& embedding = inspection.embeddings.front();
   if (!input || !output || !detail::copy_bytes(

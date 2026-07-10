@@ -12,10 +12,11 @@ add_library(svp-package
   src/package_source.cpp
   src/package_probe.cpp
   src/package_summary.cpp
-  src/mp4_top_level.cpp
+  src/isobmff_top_level.cpp
+  src/iso_bmff_container.cpp
   src/embedded_svpi_box.cpp
   src/embedded_file_io.cpp
-  src/embedded_mp4_copy.cpp
+  src/embedded_isobmff_copy.cpp
   src/embedded_svpi_reader.cpp
   src/embedded_svpi_writer.cpp
   src/embedded_svpi_extract.cpp

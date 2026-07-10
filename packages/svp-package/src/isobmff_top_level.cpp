@@ -1,4 +1,4 @@
-#include "mp4_top_level.hpp"
+#include "isobmff_top_level.hpp"
 
 #include <array>
 #include <cstring>
@@ -7,6 +7,10 @@
 
 namespace svp::package::detail {
 namespace {
+
+// A million top-level boxes is already pathological for time-based media and
+// bounds scanner memory without constraining ordinary containers.
+constexpr std::size_t kMaximumTopLevelBoxes = 1'000'000;
 
 bool checked_add(std::uint64_t left, std::uint64_t right,
                  std::uint64_t& result) noexcept {
@@ -151,6 +155,12 @@ TopLevelScan scan_top_level_boxes(const std::filesystem::path& path) {
       box.header_size += 16;
     }
 
+    if (scan.boxes.size() >= kMaximumTopLevelBoxes) {
+      scan.issues.push_back(issue(
+          EmbeddedSvpiIssueCode::invalid_box_structure, offset,
+          "ISO BMFF top-level box count exceeds the supported bound."));
+      return scan;
+    }
     scan.boxes.push_back(box);
     offset = box_end;
     if (box.extends_to_eof) {
