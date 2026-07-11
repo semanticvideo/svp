@@ -13,8 +13,8 @@
     },
     {
       "model_id": "model_whisper_small_en",
-      "display_name": "Whisper Small (English) — sherpa-onnx ONNX int8",
-      "source_slug": "csukuangfj/sherpa-onnx-whisper-small.en",
+      "display_name": "Whisper Small English (GGML)",
+      "source_slug": "ggerganov/whisper.cpp",
       "required_for": [
         "transcript",
         "words"

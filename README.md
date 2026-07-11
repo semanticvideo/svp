@@ -174,7 +174,8 @@ The core C++ project expects:
 
 - CMake and a C++20-capable compiler.
 - FFmpeg and ffprobe for media probing/extraction.
-- ONNX Runtime for model-backed ASR/OCR/depth/embedding paths.
+- whisper.cpp for local ASR with word-level timestamps.
+- ONNX Runtime for OCR, depth, and embedding model paths.
 - A local SVP model cache for full media builds.
 - Optional sherpa-onnx C API dynamic library for real diarization.
 
@@ -420,7 +421,7 @@ Query speakers:
 Full media builds depend on model bundles in the local model cache. Current
 runtime paths include:
 
-- ONNX Whisper Small English for ASR.
+- Whisper Small English GGML weights executed by whisper.cpp for ASR.
 - PP-OCRv6 detector/recognizer ONNX bundles for visible text.
 - Depth and embedding model bundles.
 - sherpa-onnx diarization model files for speaker diarization.

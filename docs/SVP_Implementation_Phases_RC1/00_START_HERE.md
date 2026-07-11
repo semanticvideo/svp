@@ -45,7 +45,7 @@ Visible text and measured color distribution are observations, not labels. Examp
 
 ## What happens next
 
-The original phase plan got the project to a real 30-second video processing trial with valid `/text/` and `/colors/` Core sections. That milestone has now been reached in the implementation: real video packages can be validator-clean with OCR text, numeric values, color observations, depth, OCR evidence crops, OCR-derived embeddings, ONNX Whisper ASR transcript words, diarization, timeline artifacts, visual entity tracks, spatial regions, mask block streams, relationship records, SQLite index output, and stored validation reports when the local model cache and native tools are available.
+The original phase plan got the project to a real 30-second video processing trial with valid `/text/` and `/colors/` Core sections. That milestone has now been reached in the implementation: real video packages can be validator-clean with OCR text, numeric values, color observations, depth, OCR evidence crops, OCR-derived embeddings, whisper.cpp ASR transcript words, diarization, timeline artifacts, visual entity tracks, spatial regions, mask block streams, relationship records, SQLite index output, and stored validation reports when the local model cache and native tools are available.
 
 Recent hardening has also fixed ASR full-chunk coverage, decoder-derived word confidence, speaker `total_speech_us`, ONNX Runtime/CoreML include portability, sherpa-onnx library discovery, validator-visible diarization fallback behavior, and first-class unlabeled entity discovery from motion/depth evidence. `speakers.MOV` is again the 2-speaker diarization proof path when sherpa-onnx and the diarization model bundle are available.
 
