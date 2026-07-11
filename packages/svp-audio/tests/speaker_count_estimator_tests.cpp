@@ -30,6 +30,12 @@ void test_spectral_speaker_count_estimator_finds_three_clusters() {
          estimate.observation_to_speaker.at(3));
   assert(estimate.observation_to_speaker.at(4) ==
          estimate.observation_to_speaker.at(5));
+  assert(estimate.observation_to_speaker.at(0) !=
+         estimate.observation_to_speaker.at(2));
+  assert(estimate.observation_to_speaker.at(0) !=
+         estimate.observation_to_speaker.at(4));
+  assert(estimate.observation_to_speaker.at(2) !=
+         estimate.observation_to_speaker.at(4));
 }
 
 void test_spectral_speaker_count_estimator_preserves_cannot_link_pair() {

@@ -471,7 +471,8 @@ SherpaDiarizationResult run_sherpa_diarization(
 
   SpeakerCountEstimate spectral_count;
   bool used_fragmented_spectral_fallback = false;
-  if (has_fragmented_speaker_shape(
+  if (extractor && embedding_dim > 0 &&
+      has_fragmented_speaker_shape(
           result.segments, result.final_speaker_count,
           speaker_observations.size())) {
     populate_chunk_speaker_embeddings(

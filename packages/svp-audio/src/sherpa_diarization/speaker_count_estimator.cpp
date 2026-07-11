@@ -8,6 +8,10 @@
 namespace svp::audio::sherpa_diarization_internal {
 namespace {
 
+// Cannot-link coloring is a defensive fallback over sparse chunk conflicts.
+// Cap pathological graphs before backtracking can dominate diarization time.
+constexpr std::size_t kMaximumCannotLinkAssignmentAttempts = 100000;
+
 struct EigenSystem {
   std::vector<double> values;
   std::vector<double> vectors;
@@ -220,10 +224,18 @@ bool enforce_cannot_links(
   });
   const std::vector<int32_t> preferred = assignments;
   std::fill(assignments.begin(), assignments.end(), -1);
+  std::size_t assignment_attempts = 0;
+  bool assignment_budget_exhausted = false;
   const auto assign = [&](const auto& self, std::size_t position) -> bool {
+    if (assignment_budget_exhausted) return false;
     if (position == order.size()) return true;
     const std::size_t observation = order[position];
     for (std::size_t attempt = 0; attempt < cluster_count; ++attempt) {
+      if (assignment_attempts >= kMaximumCannotLinkAssignmentAttempts) {
+        assignment_budget_exhausted = true;
+        return false;
+      }
+      ++assignment_attempts;
       const int32_t candidate = attempt == 0
           ? preferred[observation]
           : static_cast<int32_t>((preferred[observation] + attempt) %
@@ -239,6 +251,7 @@ bool enforce_cannot_links(
       assignments[observation] = candidate;
       if (self(self, position + 1)) return true;
       assignments[observation] = -1;
+      if (assignment_budget_exhausted) return false;
     }
     return false;
   };

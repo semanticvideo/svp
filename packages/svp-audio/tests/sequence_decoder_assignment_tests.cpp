@@ -15,12 +15,15 @@ void test_sequence_decoder_preserves_supported_group_decision() {
   diarization.final_speaker_count = 2;
   AssignmentState state;
   state.assignments = {
-      "speaker_0001", "speaker_0001", "speaker_0002",
+      "speaker_0002", "speaker_0001", "speaker_0001",
       "speaker_0001", "speaker_0001"};
-  state.word_embedding_similarities.assign(words.size(), {});
-  state.group_decision_supported = {false, false, true, false, false};
+  state.word_embedding_similarities = {
+      {1.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f},
+      {1.0f, 0.0f}, {1.0f, 0.0f}};
+  state.group_decision_supported = {true, false, false, false, false};
 
   apply_sequence_decoder_assignments(words, diarization, state);
 
+  assert(state.assignments[0] == "speaker_0002");
   assert(state.assignments[2] == "speaker_0002");
 }
