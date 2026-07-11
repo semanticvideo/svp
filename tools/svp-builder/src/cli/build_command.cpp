@@ -1,5 +1,5 @@
 #include "cli_context.hpp"
-#include "cli_elapsed.hpp"
+#include "cli_completion.hpp"
 #include "build_selected_output.hpp"
 
 #include "svp/builder/build_pipeline.hpp"
@@ -49,8 +49,17 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
   auto progress_sink = svp::builder::make_progress_sink(
       *resolved_mode, std::cerr, stderr_is_tty, fileno(stderr));
 
+  const auto started_at = std::chrono::steady_clock::now();
   if (options.output_format != "svp") {
-    return run_selected_output_build(options, progress_sink);
+    const int exit_code = run_selected_output_build(options, progress_sink);
+    if (exit_code == 0) {
+      std::cout << format_cli_completion(
+                       build_artifact_label(options.output_format), "created",
+                       options.output_path,
+                       std::chrono::steady_clock::now() - started_at)
+                << "\n";
+    }
+    return exit_code;
   }
 
   svp::builder::BuildPipelineOptions pipeline_options;
@@ -71,14 +80,14 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
   pipeline_options.quiet = options.quiet;
   pipeline_options.verbose = options.verbose;
 
-  const auto started_at = std::chrono::steady_clock::now();
   const svp::builder::BuildPipelineResult result =
       svp::builder::BuildPipeline{}.run(pipeline_options);
   if (result.exit_code == 0 &&
       *parsed_stage == svp::builder::BuildStage::package_skeleton) {
-    std::cout << "SVP created in "
-              << format_elapsed_duration(std::chrono::steady_clock::now() -
-                                         started_at)
+    std::cout << format_cli_completion(
+                     build_artifact_label(options.output_format), "created",
+                     options.output_path,
+                     std::chrono::steady_clock::now() - started_at)
               << "\n";
   }
   return result.exit_code;

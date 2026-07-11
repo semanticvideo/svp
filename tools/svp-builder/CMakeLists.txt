@@ -67,6 +67,7 @@ add_executable(svp-builder
   src/cli/cli_register.cpp
   src/cli/cli_elapsed.cpp
   src/cli/cli_progress.cpp
+  src/cli/cli_completion.cpp
   src/cli/probe_command.cpp
   src/cli/build_command.cpp
   src/cli/build_selected_output.cpp
@@ -106,6 +107,7 @@ if(BUILD_TESTING)
 
   add_executable(svp-builder-cli-elapsed-tests
     tests/cli_elapsed_tests.cpp
+    src/cli/cli_completion.cpp
     src/cli/cli_elapsed.cpp
   )
 

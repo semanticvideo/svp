@@ -1,5 +1,5 @@
 #include "cli_context.hpp"
-#include "cli_elapsed.hpp"
+#include "cli_completion.hpp"
 
 #include "svp/builder/interlace.hpp"
 #include "svp/builder/interlace_batch.hpp"
@@ -37,12 +37,11 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
       std::cerr << "interlace create failed: " << result.error_message << "\n";
       return 1;
     }
-    std::cout << "SVPI created: " << result.svpi_path.string() << "\n";
     std::cout << "BLAKE3 state: " << result.blake3_state << "\n";
     std::cout << "Validation status: " << result.binding_state << "\n";
-    std::cout << "SVPI created in "
-              << format_elapsed_duration(std::chrono::steady_clock::now() -
-                                         started_at)
+    std::cout << format_cli_completion(
+                     kSvpiArtifactLabel, "created", result.svpi_path,
+                     std::chrono::steady_clock::now() - started_at)
               << "\n";
     return 0;
   }
@@ -82,6 +81,7 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
 
   // interlace extract
   if (*opts.ie_extract_sub) {
+    const auto started_at = std::chrono::steady_clock::now();
     auto sink = resolve_cli_progress_sink(opts.ie_progress_mode, opts.ie_quiet, opts.ie_extract_sub);
     if (!sink) return 2;
 
@@ -99,6 +99,10 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
     }
     std::cout << "Extracted media: " << result.extracted_media_path.string() << "\n";
     std::cout << "Extracted SVPI: " << result.extracted_svpi_path.string() << "\n";
+    std::cout << format_cli_completion(
+                     kInterlaceArtifactsLabel, "extracted", opts.ie_out_dir,
+                     std::chrono::steady_clock::now() - started_at)
+              << "\n";
     return 0;
   }
 
@@ -122,7 +126,6 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
       std::cerr << "interlace recombine failed: " << result.error_message << "\n";
       return 1;
     }
-    std::cout << "Recombined SVP: " << result.svp_path.string() << "\n";
     std::cout << "Binding state: " << result.binding_state_label << "\n";
     const int svp_exit = svp::validation::exit_code(result.validation_report);
     std::cout << "SVP validation exit code: " << svp_exit << "\n";
@@ -132,9 +135,9 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
         std::cout << "  " << err.code << ": " << err.message << "\n";
       }
     }
-    std::cout << "SVP created in "
-              << format_elapsed_duration(std::chrono::steady_clock::now() -
-                                         started_at)
+    std::cout << format_cli_completion(
+                     kSvpArtifactLabel, "created", result.svp_path,
+                     std::chrono::steady_clock::now() - started_at)
               << "\n";
     return 0;
   }

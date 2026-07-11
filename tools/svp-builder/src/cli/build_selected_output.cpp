@@ -53,7 +53,6 @@ int run_selected_output_build(
       std::cerr << "SVPI build failed: " << result.error_message << "\n";
       return 1;
     }
-    std::cout << "SVPI created: " << result.svpi_path.string() << "\n";
     return 0;
   }
 
@@ -68,7 +67,5 @@ int run_selected_output_build(
               << result.error_message << "\n";
     return 1;
   }
-  std::cout << "Embedded SVPI transport created: "
-            << result.output_path.string() << "\n";
   return 0;
 }

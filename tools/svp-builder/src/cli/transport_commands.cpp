@@ -1,11 +1,14 @@
 #include "cli_context.hpp"
+#include "cli_completion.hpp"
 
 #include "svp/builder/embedded_svpi_transport.hpp"
 
 #include <iostream>
+#include <chrono>
 
 int run_transport_command(const TransportCliOptions& options) {
   if (*options.embed_sub) {
+    const auto started_at = std::chrono::steady_clock::now();
     svp::builder::EmbeddedTransportEmbedOptions embed;
     embed.container_path = options.embed_container;
     embed.svpi_path = options.embed_svpi;
@@ -22,12 +25,16 @@ int run_transport_command(const TransportCliOptions& options) {
       }
       return 1;
     }
-    std::cout << "Embedded SVPI transport: "
-              << result.output_path.string() << "\n";
+    std::cout << format_cli_completion(
+                     kEmbeddedSvpiTransportArtifactLabel, "created",
+                     result.output_path,
+                     std::chrono::steady_clock::now() - started_at)
+              << "\n";
     return 0;
   }
 
   if (*options.extract_sub) {
+    const auto started_at = std::chrono::steady_clock::now();
     svp::builder::EmbeddedTransportExtractOptions extract;
     extract.container_path = options.extract_container;
     extract.output_path = options.extract_out;
@@ -38,17 +45,21 @@ int run_transport_command(const TransportCliOptions& options) {
       std::cerr << "transport extract failed: " << result.error_message << "\n";
       return 1;
     }
-    std::cout << "Extracted SVPI: " << result.output_path.string() << "\n";
     std::cout << "Embedded package validation: "
               << (result.package_valid ? "valid" : "invalid") << "\n";
     if (!result.package_valid) {
       std::cerr << result.error_message << "\n";
       return 1;
     }
+    std::cout << format_cli_completion(
+                     kSvpiArtifactLabel, "extracted", result.output_path,
+                     std::chrono::steady_clock::now() - started_at)
+              << "\n";
     return 0;
   }
 
   if (*options.strip_sub) {
+    const auto started_at = std::chrono::steady_clock::now();
     svp::builder::EmbeddedTransportStripOptions strip;
     strip.container_path = options.strip_container;
     strip.output_path = options.strip_out;
@@ -58,8 +69,11 @@ int run_transport_command(const TransportCliOptions& options) {
       std::cerr << "transport strip failed: " << result.error_message << "\n";
       return 1;
     }
-    std::cout << "Clean ISO BMFF container: "
-              << result.output_path.string() << "\n";
+    std::cout << format_cli_completion(
+                     kCleanIsoBmffContainerArtifactLabel, "created",
+                     result.output_path,
+                     std::chrono::steady_clock::now() - started_at)
+              << "\n";
     return 0;
   }
 
