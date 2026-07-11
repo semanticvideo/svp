@@ -12,11 +12,34 @@
 namespace svp::audio {
 
 using namespace sherpa_diarization_internal;
+namespace {
+
+std::size_t chunk_count_for_sample_count(std::size_t sample_count) {
+  std::size_t total_chunks = 0;
+  for (const auto& window : build_diarization_windows(sample_count)) {
+    const std::size_t window_samples =
+        window.process_end - window.process_start;
+    total_chunks +=
+        (window_samples +
+         static_cast<std::size_t>(kMaxDiarizationChunkSamples) - 1) /
+        static_cast<std::size_t>(kMaxDiarizationChunkSamples);
+  }
+  return total_chunks;
+}
+
+}  // namespace
+
+std::size_t diarization_chunk_count(
+    const std::filesystem::path& wav_path) {
+  const PcmS16MonoWavInfo wav_info = read_pcm_s16le_mono_wav_info(wav_path);
+  return chunk_count_for_sample_count(wav_info.sample_count);
+}
 
 SherpaDiarizationResult run_sherpa_diarization(
     const std::filesystem::path& wav_path,
     const std::filesystem::path& model_dir,
-    const std::vector<AsrWord>& words) {
+    const std::vector<AsrWord>& words,
+    DiarizationProgressCallback on_progress) {
   SherpaDiarizationResult result;
 
   const SherpaDiarizationApi& api = get_api();
@@ -120,6 +143,17 @@ SherpaDiarizationResult run_sherpa_diarization(
   int32_t preliminary_speakers = 0;
 
   const auto windows = build_diarization_windows(wav_info.sample_count);
+  const std::size_t total_chunks =
+      chunk_count_for_sample_count(wav_info.sample_count);
+  std::size_t completed_chunks = 0;
+  if (on_progress && total_chunks > 0) {
+    on_progress(0, total_chunks);
+  }
+  const auto complete_progress = [&]() {
+    if (on_progress && completed_chunks < total_chunks) {
+      on_progress(total_chunks, total_chunks);
+    }
+  };
   for (std::size_t wi = 0; wi < windows.size(); ++wi) {
     const auto& win = windows[wi];
     const float accepted_start_sec =
@@ -269,6 +303,10 @@ SherpaDiarizationResult run_sherpa_diarization(
               std::minmax(chunk_observation_ids[i], chunk_observation_ids[j]));
         }
       }
+      ++completed_chunks;
+      if (on_progress) {
+        on_progress(completed_chunks, total_chunks);
+      }
     }
     api.destroy(sd);
 
@@ -305,6 +343,7 @@ SherpaDiarizationResult run_sherpa_diarization(
     result.reconciliation_method =
         "windowed_sherpa_5min_overlap_2s; no_speech_detected";
     destroy_extractor();
+    complete_progress();
     return result;
   }
 
@@ -417,6 +456,7 @@ SherpaDiarizationResult run_sherpa_diarization(
       "dominant_and_fragmented_secondary_track_policy";
 
   result.ran = true;
+  complete_progress();
   return result;
 }
 

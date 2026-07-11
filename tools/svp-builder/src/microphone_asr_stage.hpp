@@ -22,6 +22,11 @@ struct MicrophoneAsrStageResult {
 using MicrophoneAsrProgressCallback =
     std::function<void(std::size_t current, std::size_t total)>;
 
+struct MicrophoneDiarizationProgressCallbacks {
+  std::function<void()> started;
+  MicrophoneAsrProgressCallback progress;
+};
+
 [[nodiscard]] MicrophoneAsrStageResult run_microphone_asr_stage(
     const svp::audio::AudioExtractionPlan& extraction_plan,
     const svp::audio::AudioExtractionRun& extraction_run,
@@ -31,6 +36,7 @@ using MicrophoneAsrProgressCallback =
     bool asr_model_verified,
     const std::filesystem::path& staging_dir,
     const std::filesystem::path& model_cache_root,
-    MicrophoneAsrProgressCallback progress = {});
+    MicrophoneAsrProgressCallback progress = {},
+    MicrophoneDiarizationProgressCallbacks diarization_progress = {});
 
 }  // namespace svp::builder

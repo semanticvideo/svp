@@ -27,8 +27,13 @@ void test_real_sherpa_diarization_speaker_count_fixtures_when_enabled() {
                                fixture.string());
     }
 
+    std::vector<std::pair<std::size_t, std::size_t>> progress;
     const svp::audio::SherpaDiarizationResult result =
-        svp::audio::run_sherpa_diarization(fixture, model_dir_env);
+        svp::audio::run_sherpa_diarization(
+            fixture, model_dir_env, {},
+            [&progress](std::size_t current, std::size_t total) {
+              progress.emplace_back(current, total);
+            });
     if (!result.ran) {
       throw std::runtime_error("Sherpa diarization did not run for fixture: " +
                                fixture.string());
@@ -42,6 +47,26 @@ void test_real_sherpa_diarization_speaker_count_fixtures_when_enabled() {
     if (result.segments.empty()) {
       throw std::runtime_error("Sherpa diarization produced no segments for fixture: " +
                                fixture.string());
+    }
+    if (progress.empty() || progress.front().first != 0 ||
+        progress.back().first != progress.back().second) {
+      throw std::runtime_error(
+          "Sherpa diarization progress did not span the complete fixture: " +
+          fixture.string());
+    }
+    if (progress.front().second !=
+        svp::audio::diarization_chunk_count(fixture)) {
+      throw std::runtime_error(
+          "Sherpa diarization progress total did not match its chunk plan: " +
+          fixture.string());
+    }
+    for (std::size_t index = 1; index < progress.size(); ++index) {
+      if (progress[index].first < progress[index - 1].first ||
+          progress[index].second != progress.front().second) {
+        throw std::runtime_error(
+            "Sherpa diarization progress was not monotonic for fixture: " +
+            fixture.string());
+      }
     }
   }
 }
