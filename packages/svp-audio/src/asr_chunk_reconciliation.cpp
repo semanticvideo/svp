@@ -37,18 +37,19 @@ ContiguousMatch longest_contiguous_match(
   for (std::size_t i = 1; i <= prior.size(); ++i) {
     std::vector<std::size_t> row(current.size() + 1, 0);
     const std::string prior_token = normalized_token(prior[i - 1].text);
-    if (prior_token.empty()) continue;
-    for (std::size_t j = 1; j <= current.size(); ++j) {
-      if (prior_token != normalized_token(current[j - 1].text)) continue;
-      row[j] = previous[j - 1] + 1;
-      const ContiguousMatch candidate = {i - row[j], j - row[j], row[j]};
-      const std::size_t candidate_current_end =
-          candidate.current_start + candidate.length;
-      const std::size_t best_current_end = best.current_start + best.length;
-      if (candidate.length > best.length ||
-          (candidate.length == best.length &&
-           candidate_current_end > best_current_end)) {
-        best = candidate;
+    if (!prior_token.empty()) {
+      for (std::size_t j = 1; j <= current.size(); ++j) {
+        if (prior_token != normalized_token(current[j - 1].text)) continue;
+        row[j] = previous[j - 1] + 1;
+        const ContiguousMatch candidate = {i - row[j], j - row[j], row[j]};
+        const std::size_t candidate_current_end =
+            candidate.current_start + candidate.length;
+        const std::size_t best_current_end = best.current_start + best.length;
+        if (candidate.length > best.length ||
+            (candidate.length == best.length &&
+             candidate_current_end > best_current_end)) {
+          best = candidate;
+        }
       }
     }
     previous = std::move(row);
@@ -91,23 +92,26 @@ std::vector<AsrWord> reconcile_overlapping_chunks(
       continue;
     }
 
-    const AsrChunkPlan& chunk = chunks[chunk_index];
-    const std::int64_t overlap_end_us =
-        chunk.source_start_us + chunk.overlap_before_us;
     std::vector<AsrWord> prior_overlap;
-    const std::int64_t prior_chunk_ordinal = result.back().chunk_ordinal;
-    for (const AsrWord& word : result) {
-      if (word.chunk_ordinal == prior_chunk_ordinal) {
-        prior_overlap.push_back(word);
-      }
-    }
     std::vector<AsrWord> current_overlap;
-    for (const AsrWord& word : current) {
-      if (word.start_us < overlap_end_us) current_overlap.push_back(word);
+    ContiguousMatch match;
+    const bool has_adjacent_predecessor =
+        chunk_index > 0 && result.back().chunk_ordinal ==
+                               static_cast<std::int64_t>(chunk_index - 1);
+    if (has_adjacent_predecessor) {
+      const AsrChunkPlan& chunk = chunks[chunk_index];
+      const std::int64_t overlap_end_us =
+          chunk.source_start_us + chunk.overlap_before_us;
+      for (const AsrWord& word : result) {
+        if (word.chunk_ordinal == static_cast<std::int64_t>(chunk_index - 1)) {
+          prior_overlap.push_back(word);
+        }
+      }
+      for (const AsrWord& word : current) {
+        if (word.start_us < overlap_end_us) current_overlap.push_back(word);
+      }
+      match = longest_contiguous_match(prior_overlap, current_overlap);
     }
-
-    const ContiguousMatch match =
-        longest_contiguous_match(prior_overlap, current_overlap);
     std::size_t append_from = 0;
     if (match.length >= kMinimumAlignedOverlapTokens) {
       append_from = match.current_start + match.length;

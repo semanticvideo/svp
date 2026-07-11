@@ -240,6 +240,55 @@ void test_overlap_reconciliation_retains_continuation_after_content_anchor() {
   }
 }
 
+void test_overlap_reconciliation_empty_token_breaks_content_anchor() {
+  const auto plan =
+      svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);
+  std::vector<std::vector<svp::audio::AsrWord>> chunk_words(2);
+  chunk_words[0] = {
+      {"one", 16000000, 16500000, 0.9, 0},
+      {"two", 16500000, 17000000, 0.9, 0},
+      {"three", 17000000, 17500000, 0.9, 0},
+      {"...", 17500000, 18000000, 0.9, 0},
+      {"four", 18000000, 18500000, 0.9, 0},
+  };
+  chunk_words[1] = {
+      {"one", 1000000, 1500000, 0.9, 1},
+      {"two", 1500000, 2000000, 0.9, 1},
+      {"three", 2000000, 2500000, 0.9, 1},
+      {"four", 3000000, 3500000, 0.9, 1},
+      {"new", 6000000, 6500000, 0.9, 1},
+  };
+
+  const auto reconciled =
+      svp::audio::reconcile_overlapping_chunks(chunk_words, plan.chunks);
+  assert(reconciled.back().text == "new");
+  assert(reconciled.back().start_us == 21000000);
+}
+
+void test_overlap_reconciliation_skips_lcs_after_empty_chunk() {
+  const auto plan =
+      svp::audio::build_asr_chunk_plan(30000000, 15000000, 2000000);
+  std::vector<std::vector<svp::audio::AsrWord>> chunk_words(3);
+  chunk_words[0] = {
+      {"same", 1000000, 1500000, 0.9, 0},
+      {"four", 1500000, 2000000, 0.9, 0},
+      {"word", 2000000, 2500000, 0.9, 0},
+      {"phrase", 2500000, 3000000, 0.9, 0},
+  };
+  chunk_words[2] = {
+      {"same", 0, 500000, 0.9, 2},
+      {"four", 500000, 1000000, 0.9, 2},
+      {"word", 1000000, 1500000, 0.9, 2},
+      {"phrase", 1500000, 2000000, 0.9, 2},
+  };
+
+  const auto reconciled =
+      svp::audio::reconcile_overlapping_chunks(chunk_words, plan.chunks);
+  assert(reconciled.size() == 8);
+  assert(reconciled[4].chunk_ordinal == 2);
+  assert(reconciled[4].start_us == plan.chunks[2].source_start_us);
+}
+
 void test_overlap_reconciliation_no_false_dedepe_outside_overlap() {
   svp::audio::AsrChunkPlanResult plan =
       svp::audio::build_asr_chunk_plan(30000000, 20000000, 5000000);

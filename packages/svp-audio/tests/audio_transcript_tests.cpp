@@ -24,6 +24,8 @@ int main() {
   test_overlap_reconciliation_word_start_equals_prior_end_at_boundary();
   test_overlap_reconciliation_shifted_token_inside_overlap();
   test_overlap_reconciliation_retains_continuation_after_content_anchor();
+  test_overlap_reconciliation_empty_token_breaks_content_anchor();
+  test_overlap_reconciliation_skips_lcs_after_empty_chunk();
   test_overlap_reconciliation_no_false_dedepe_outside_overlap();
   test_overlap_reconciliation_empty_chunks();
   test_asr_model_present_vs_verified_distinction();

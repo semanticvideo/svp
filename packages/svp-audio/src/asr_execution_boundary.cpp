@@ -280,9 +280,18 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
           slice_wav_to_temp(input_wav, context.slice_start_us,
                             context.slice_end_us, temp_slice_dir);
 
-      const WhisperInferenceResult whisper_result =
-          run_whisper_inference(chunk_wav, model_dir, chunk.chunk_id,
-                                 0, context.slice_end_us - context.slice_start_us);
+      WhisperInferenceResult whisper_result;
+      try {
+        whisper_result = run_whisper_inference(
+            chunk_wav, model_dir, chunk.chunk_id, 0,
+            context.slice_end_us - context.slice_start_us);
+      } catch (...) {
+        std::error_code cleanup_error;
+        std::filesystem::remove(chunk_wav, cleanup_error);
+        throw;
+      }
+      std::error_code cleanup_error;
+      std::filesystem::remove(chunk_wav, cleanup_error);
       if (i == 0 || ((i + 1) % 10) == 0 ||
           i + 1 == boundary.chunk_plan.chunks.size()) {
         svp::core::check_memory_limit("asr.chunk.after_inference", {

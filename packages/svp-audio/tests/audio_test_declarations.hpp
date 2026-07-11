@@ -23,6 +23,8 @@ void test_overlap_reconciliation_duplicate_in_actual_overlap_region();
 void test_overlap_reconciliation_word_start_equals_prior_end_at_boundary();
 void test_overlap_reconciliation_shifted_token_inside_overlap();
 void test_overlap_reconciliation_retains_continuation_after_content_anchor();
+void test_overlap_reconciliation_empty_token_breaks_content_anchor();
+void test_overlap_reconciliation_skips_lcs_after_empty_chunk();
 void test_overlap_reconciliation_no_false_dedepe_outside_overlap();
 void test_asr_model_present_vs_verified_distinction();
 void test_overlap_reconciliation_empty_chunks();
