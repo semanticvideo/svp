@@ -13,11 +13,11 @@ constexpr int kSampleRate = 16000;
 constexpr int kNFft = 400;
 constexpr int kNHop = 160;
 constexpr int kNMels = 80;
-constexpr int kNFrames = 3000;
-[[maybe_unused]] constexpr int kTargetSamples = kSampleRate * 30;
-constexpr int kRequiredSamples = (kNFrames - 1) * kNHop + kNFft;
+constexpr int kMaximumFrames = 3000;
 constexpr int kFftBins = kNFft / 2 + 1;
-constexpr int kTailPadding = 50;
+// sherpa-onnx's Whisper decoder requires ten seconds of normalized zero
+// feature padding to provide stable end-of-transcript context.
+constexpr int kTailPadding = 1000;
 
 struct PcmWavData {
   std::vector<float> samples;
@@ -118,19 +118,21 @@ void compute_power_spectrum(const float* frame, int n_fft, float* power, int n_b
   }
 }
 
-float hz_to_mel(float hz) {
-  return 2595.0f * std::log10(1.0f + hz / 700.0f);
+float hz_to_slaney_mel(float hz) {
+  if (hz <= 1000.0f) return hz * 3.0f / 200.0f;
+  return 15.0f + 14.545078505785561f * std::log(hz / 1000.0f);
 }
 
-float mel_to_hz(float mel) {
-  return 700.0f * (std::pow(10.0f, mel / 2595.0f) - 1.0f);
+float slaney_mel_to_hz(float mel) {
+  if (mel <= 15.0f) return 200.0f / 3.0f * mel;
+  return 1000.0f * std::exp((mel - 15.0f) * 0.06875177742094911f);
 }
 
 std::vector<std::vector<float>> create_mel_filterbank() {
   const float fmin = 0.0f;
   const float fmax = static_cast<float>(kSampleRate) / 2.0f;
-  const float mel_min = hz_to_mel(fmin);
-  const float mel_max = hz_to_mel(fmax);
+  const float mel_min = hz_to_slaney_mel(fmin);
+  const float mel_max = hz_to_slaney_mel(fmax);
 
   std::vector<float> mel_points(kNMels + 2);
   for (int i = 0; i < kNMels + 2; ++i) {
@@ -139,29 +141,24 @@ std::vector<std::vector<float>> create_mel_filterbank() {
 
   std::vector<float> hz_points(kNMels + 2);
   for (int i = 0; i < kNMels + 2; ++i) {
-    hz_points[i] = mel_to_hz(mel_points[i]);
-  }
-
-  std::vector<int> bin_points(kNMels + 2);
-  for (int i = 0; i < kNMels + 2; ++i) {
-    bin_points[i] = static_cast<int>(std::floor(hz_points[i] * kNFft / kSampleRate));
+    hz_points[i] = slaney_mel_to_hz(mel_points[i]);
   }
 
   std::vector<std::vector<float>> filterbank(kNMels, std::vector<float>(kFftBins, 0.0f));
   for (int m = 0; m < kNMels; ++m) {
-    const int left = bin_points[m];
-    const int center = bin_points[m + 1];
-    const int right = bin_points[m + 2];
-
-    for (int k = left; k < center && k < kFftBins; ++k) {
-      if (center > left) {
-        filterbank[m][k] = static_cast<float>(k - left) / (center - left);
+    const float left_hz = hz_points[m];
+    const float center_hz = hz_points[m + 1];
+    const float right_hz = hz_points[m + 2];
+    const float slaney_normalization = 2.0f / (right_hz - left_hz);
+    for (int k = 0; k < kFftBins; ++k) {
+      const float hz = static_cast<float>(k * kSampleRate) / kNFft;
+      float weight = 0.0f;
+      if (hz > left_hz && hz <= center_hz) {
+        weight = (hz - left_hz) / (center_hz - left_hz);
+      } else if (hz > center_hz && hz < right_hz) {
+        weight = (right_hz - hz) / (right_hz - center_hz);
       }
-    }
-    for (int k = center; k < right && k < kFftBins; ++k) {
-      if (right > center) {
-        filterbank[m][k] = static_cast<float>(right - k) / (right - center);
-      }
+      filterbank[m][k] = weight * slaney_normalization;
     }
   }
 
@@ -175,28 +172,26 @@ WhisperMelFeatures compute_whisper_mel_from_wav(const std::filesystem::path& wav
 
   std::vector<float> audio = std::move(wav.samples);
 
-  // Prepend a short silence so the encoder sees a speech onset boundary.
-  // Without this, chunks that start mid-speech produce low-confidence decoder
-  // logits that collapse to a near-empty timestamp segment.
-  constexpr int kLeadSilenceSamples = kSampleRate * 3 / 10;  // 0.3 seconds
-  audio.insert(audio.begin(), kLeadSilenceSamples, 0.0f);
-
-  if (static_cast<int>(audio.size()) < kRequiredSamples) {
-    audio.resize(kRequiredSamples, 0.0f);
-  } else if (static_cast<int>(audio.size()) > kRequiredSamples) {
-    audio.resize(kRequiredSamples);
-  }
-
+  if (static_cast<int>(audio.size()) < kNFft) audio.resize(kNFft, 0.0f);
+  const int audio_frames = std::min(
+      kMaximumFrames, (static_cast<int>(audio.size()) + kNHop / 2) / kNHop);
+  const int n_frames =
+      std::min(kMaximumFrames, audio_frames + kTailPadding);
   const auto filterbank = create_mel_filterbank();
 
-  std::vector<float> mel_data(kNMels * kNFrames, 0.0f);
+  std::vector<float> mel_data(kNMels * n_frames, 0.0f);
   std::vector<float> frame(kNFft, 0.0f);
   std::vector<float> power(kFftBins, 0.0f);
 
-  for (int t = 0; t < kNFrames; ++t) {
-    const int start = t * kNHop;
+  for (int t = 0; t < audio_frames; ++t) {
+    const int start = t * kNHop + kNHop / 2 - kNFft / 2;
     for (int i = 0; i < kNFft; ++i) {
-      frame[i] = audio[start + i];
+      int sample = start + i;
+      while (sample < 0 || sample >= static_cast<int>(audio.size())) {
+        sample = sample < 0 ? -sample - 1
+                            : 2 * static_cast<int>(audio.size()) - 1 - sample;
+      }
+      frame[i] = audio[static_cast<std::size_t>(sample)];
     }
     apply_hann_window(frame.data(), kNFft);
     compute_power_spectrum(frame.data(), kNFft, power.data(), kFftBins);
@@ -206,36 +201,32 @@ WhisperMelFeatures compute_whisper_mel_from_wav(const std::filesystem::path& wav
       for (int k = 0; k < kFftBins; ++k) {
         mel_val += filterbank[m][k] * power[k];
       }
-      mel_data[m * kNFrames + t] = mel_val;
+      mel_data[m * n_frames + t] = mel_val;
     }
   }
 
   float max_log = -1e10f;
   for (int m = 0; m < kNMels; ++m) {
-    for (int t = 0; t < kNFrames; ++t) {
-      float& val = mel_data[m * kNFrames + t];
+    for (int t = 0; t < audio_frames; ++t) {
+      float& val = mel_data[m * n_frames + t];
       val = std::log10(std::max(val, 1e-10f));
       if (val > max_log) max_log = val;
     }
   }
 
   const float clamp_low = max_log - 8.0f;
-  for (int i = 0; i < kNMels * kNFrames; ++i) {
-    mel_data[i] = std::max(mel_data[i], clamp_low);
-    mel_data[i] = (mel_data[i] + 4.0f) / 4.0f;
-  }
-
-  for (int t = kNFrames - kTailPadding; t < kNFrames; ++t) {
-    for (int m = 0; m < kNMels; ++m) {
-      mel_data[m * kNFrames + t] = 0.0f;
+  for (int m = 0; m < kNMels; ++m) {
+    for (int t = 0; t < audio_frames; ++t) {
+      float& value = mel_data[m * n_frames + t];
+      value = (std::max(value, clamp_low) + 4.0f) / 4.0f;
     }
   }
 
   WhisperMelFeatures result;
   result.data = std::move(mel_data);
   result.n_mels = kNMels;
-  result.n_frames = kNFrames;
-  result.lead_silence_us = static_cast<std::int64_t>(kLeadSilenceSamples) * 1000000LL / kSampleRate;
+  result.n_frames = n_frames;
+  result.lead_silence_us = 0;
   return result;
 }
 

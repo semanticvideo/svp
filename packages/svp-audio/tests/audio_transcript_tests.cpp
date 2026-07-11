@@ -17,10 +17,13 @@ int main() {
   test_asr_chunk_plan_zero_duration_produces_no_chunks();
   test_asr_chunk_plan_rejects_bad_parameters();
   test_asr_chunk_plan_exact_multiple_has_no_trailing_chunk();
+  test_asr_chunk_context_uses_declared_overlap_as_decoder_preroll();
+  test_asr_chunk_context_discards_preroll_words_and_restores_local_time();
   test_overlap_reconciliation_deduplicates_boundary_words();
   test_overlap_reconciliation_duplicate_in_actual_overlap_region();
   test_overlap_reconciliation_word_start_equals_prior_end_at_boundary();
   test_overlap_reconciliation_shifted_token_inside_overlap();
+  test_overlap_reconciliation_retains_continuation_after_content_anchor();
   test_overlap_reconciliation_no_false_dedepe_outside_overlap();
   test_overlap_reconciliation_empty_chunks();
   test_asr_model_present_vs_verified_distinction();
@@ -54,6 +57,8 @@ int main() {
   test_softmax_probability_for_token_edge_cases();
   test_aggregate_word_confidence_mean();
   test_aggregate_word_confidence_empty();
+  test_whisper_control_tokens_are_loaded_from_model_metadata();
+  test_untimestamped_whisper_words_preserve_token_confidence();
   test_speaker_total_speech_us_nonzero_for_single_speaker();
   test_speaker_total_speech_us_overlapping_not_double_counted();
   test_speaker_total_speech_us_multi_speaker();

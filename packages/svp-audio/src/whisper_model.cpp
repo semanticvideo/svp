@@ -1,4 +1,6 @@
 #include "svp/audio/whisper_model.hpp"
+#include "svp/audio/whisper_model_metadata.hpp"
+#include "svp/audio/whisper_untimestamped_words.hpp"
 
 #include "svp/core/process_stdio.hpp"
 
@@ -11,6 +13,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -100,6 +103,7 @@ struct WhisperSessions {
   std::vector<std::string> decoder_input_names;
   std::vector<std::string> decoder_output_names;
   WhisperModelDims dims;
+  WhisperControlTokens control_tokens;
 
   explicit WhisperSessions(const std::filesystem::path& model_dir) {
     const auto log_level = g_whisper_verbose.load(std::memory_order_relaxed)
@@ -131,6 +135,15 @@ struct WhisperSessions {
     }
 
     Ort::AllocatorWithDefaultOptions alloc;
+
+    std::map<std::string, std::string> metadata_values;
+    const Ort::ModelMetadata model_metadata = encoder->GetModelMetadata();
+    for (const char* key : {"sot_sequence", "eot", "no_speech",
+                            "no_timestamps", "translate", "blank_id"}) {
+      auto value = model_metadata.LookupCustomMetadataMapAllocated(key, alloc);
+      if (value) metadata_values.emplace(key, value.get());
+    }
+    control_tokens = parse_whisper_control_tokens(metadata_values);
 
     for (std::size_t i = 0; i < encoder->GetInputCount(); ++i) {
       auto name = encoder->GetInputNameAllocated(i, alloc);
@@ -326,12 +339,13 @@ int argmax(const std::vector<float>& logits) {
 }
 
 std::string decode_tokens_to_text(const std::vector<int>& token_ids,
-                                   const WhisperTokenTable& token_table) {
+                                   const WhisperTokenTable& token_table,
+                                   int timestamp_begin) {
   std::string text;
   for (int id : token_ids) {
     if (id == WhisperTokenTable::kEot) continue;
     if (id == WhisperTokenTable::kSot) continue;
-    if (id >= 50357) continue;
+    if (id >= timestamp_begin) continue;
 
     auto token_str = token_table.token_text(id);
     if (!token_str) continue;
@@ -352,8 +366,8 @@ std::vector<AsrWord> decode_tokens_to_words(const std::vector<int>& token_ids,
                                              std::int64_t chunk_start_us,
                                              std::int64_t chunk_end_us,
                                              const std::vector<double>& token_probs,
-                                             std::int64_t lead_silence_us) {
-  constexpr int kTimestampBase = 50357;
+                                             std::int64_t lead_silence_us,
+                                             int timestamp_base) {
   constexpr double kTimestampIntervalUs = 20000.0;
 
   struct TimestampSegment {
@@ -373,9 +387,9 @@ std::vector<AsrWord> decode_tokens_to_words(const std::vector<int>& token_ids,
     int id = token_ids[idx];
     if (id == WhisperTokenTable::kEot || id == WhisperTokenTable::kSot) continue;
 
-    if (id >= kTimestampBase) {
+    if (id >= timestamp_base) {
       std::int64_t ts_us = static_cast<std::int64_t>(
-          static_cast<double>(id - kTimestampBase) * kTimestampIntervalUs)
+          static_cast<double>(id - timestamp_base) * kTimestampIntervalUs)
           - lead_silence_us + chunk_start_us;
       if (ts_us < chunk_start_us) ts_us = chunk_start_us;
 
@@ -406,30 +420,9 @@ std::vector<AsrWord> decode_tokens_to_words(const std::vector<int>& token_ids,
   }
 
   if (segments.empty()) {
-    std::string text = decode_tokens_to_text(token_ids, token_table);
-    if (text.empty()) return {};
-
-    std::vector<AsrWord> words;
-    std::istringstream iss(text);
-    std::string w;
-    std::int64_t chunk_dur = chunk_end_us - chunk_start_us;
-    std::vector<std::string> all_words;
-    while (iss >> w) all_words.push_back(w);
-    if (all_words.empty()) return {};
-
-    std::int64_t per_word = chunk_dur / static_cast<std::int64_t>(all_words.size());
-    for (std::size_t i = 0; i < all_words.size(); ++i) {
-      AsrWord word;
-      word.text = all_words[i];
-      word.start_us = chunk_start_us + static_cast<std::int64_t>(i) * per_word;
-      word.end_us = (i + 1 == all_words.size())
-          ? chunk_end_us
-          : chunk_start_us + static_cast<std::int64_t>(i + 1) * per_word;
-      word.confidence = 0.0;
-      word.chunk_ordinal = 0;
-      words.push_back(word);
-    }
-    return words;
+    return decode_untimestamped_whisper_words(
+        token_ids, token_probs, token_table, chunk_start_us, chunk_end_us,
+        timestamp_base);
   }
 
   auto group_segment_tokens_into_words =
@@ -526,7 +519,9 @@ WhisperInferenceResult run_whisper_internal(
   cache.self_v.assign(static_cast<std::size_t>(d.n_self_layers) * 1 * kSelfCacheDim * static_cast<std::size_t>(d.hidden_dim), 0.0f);
   cache.offset = 0;
 
-  std::vector<std::int32_t> tokens = {WhisperTokenTable::kSot};
+  std::vector<std::int32_t> tokens(sessions.control_tokens.sot_sequence.begin(),
+                                   sessions.control_tokens.sot_sequence.end());
+  tokens.push_back(sessions.control_tokens.no_timestamps);
   std::vector<int> decoded_token_ids;
   std::vector<double> token_probs;
 
@@ -534,14 +529,23 @@ WhisperInferenceResult run_whisper_internal(
     std::vector<float> logits = run_decoder_step(sessions, tokens, cache, enc_n_frames);
 
     int next_token = argmax(logits);
-    if (next_token == WhisperTokenTable::kEot) break;
+    if (next_token == sessions.control_tokens.eot) {
+      result.termination_reason = "end_of_transcript";
+      break;
+    }
 
     decoded_token_ids.push_back(next_token);
     token_probs.push_back(softmax_probability_for_token(logits, next_token));
     tokens = {next_token};
   }
+  if (result.termination_reason.empty()) {
+    result.termination_reason = "maximum_decode_tokens";
+  }
+  result.decoded_token_ids = decoded_token_ids;
 
-  std::string text = decode_tokens_to_text(decoded_token_ids, token_table);
+  std::string text = decode_tokens_to_text(
+      decoded_token_ids, token_table,
+      sessions.control_tokens.timestamp_begin());
 
   if (!text.empty()) {
     WhisperSegment segment;
@@ -551,7 +555,8 @@ WhisperInferenceResult run_whisper_internal(
 
     segment.words = decode_tokens_to_words(decoded_token_ids, token_table,
                                             chunk_start_us, chunk_end_us,
-                                            token_probs, mel.lead_silence_us);
+                                            token_probs, mel.lead_silence_us,
+                                            sessions.control_tokens.timestamp_begin());
     result.all_words = segment.words;
 
     result.segments.push_back(std::move(segment));

@@ -1,4 +1,6 @@
 #include "audio_test_support.hpp"
+#include "svp/audio/whisper_model_metadata.hpp"
+#include "svp/audio/whisper_untimestamped_words.hpp"
 
 void test_whisper_runtime_available_reports_honestly() {
   const bool available = svp::audio::is_whisper_runtime_available();
@@ -65,21 +67,14 @@ void test_whisper_mel_30s_chunk_produces_valid_output_without_overread() {
     assert(std::isfinite(v));
   }
 
-  // The last non-tail-padded frame (t=2949) must carry signal from real
-  // audio samples. With the buffer fix, all STFT reads are in-bounds.
-  // The last 50 frames (2950-2999) are zeroed for tail padding (EOT
-  // detection), so we check frame 2949 instead of 2999.
+  // A full-length input consumes the model's complete frame capacity, so no
+  // real audio may be replaced by decoder tail padding.
   float max_last_audio_frame = -std::numeric_limits<float>::max();
   for (int m = 0; m < 80; ++m) {
     max_last_audio_frame =
-        std::max(max_last_audio_frame, features.data[m * 3000 + 2949]);
+        std::max(max_last_audio_frame, features.data[m * 3000 + 2999]);
   }
-  assert(max_last_audio_frame > 1.5f);
-
-  // Tail-padded frames must be exactly 0.0.
-  for (int m = 0; m < 80; ++m) {
-    assert(features.data[m * 3000 + 2999] == 0.0f);
-  }
+  assert(max_last_audio_frame != 0.0f);
 
   std::filesystem::remove(wav_path);
 }
@@ -105,20 +100,14 @@ void test_whisper_mel_buffer_includes_samples_for_last_stft_frame() {
     assert(std::isfinite(v));
   }
 
-  // The last non-tail-padded frame (t=2949) must carry signal.
+  // The final frame must carry signal; tail padding must never overwrite a
+  // full-length input.
   float max_last_audio_frame = -std::numeric_limits<float>::max();
   for (int m = 0; m < 80; ++m) {
     max_last_audio_frame =
-        std::max(max_last_audio_frame, features.data[m * 3000 + 2949]);
+        std::max(max_last_audio_frame, features.data[m * 3000 + 2999]);
   }
-  assert(max_last_audio_frame > 0.5f);
-
-  // Tail-padded frames (t=2950..2999) must be exactly 0.0.
-  for (int t = 2950; t < 3000; ++t) {
-    for (int m = 0; m < 80; ++m) {
-      assert(features.data[m * 3000 + t] == 0.0f);
-    }
-  }
+  assert(max_last_audio_frame != 0.0f);
 
   std::filesystem::remove(wav_path);
 }
@@ -139,7 +128,8 @@ void test_whisper_mel_uses_log10_for_compression() {
   svp::audio::WhisperMelFeatures features =
       svp::audio::compute_whisper_mel_from_wav(wav_path);
   assert(features.n_mels == 80);
-  assert(features.n_frames == 3000);
+  assert(features.n_frames > 1000);
+  assert(features.n_frames < 3000);
 
   float max_val = -std::numeric_limits<float>::max();
   for (float v : features.data) {
@@ -149,6 +139,11 @@ void test_whisper_mel_uses_log10_for_compression() {
   // With log10, max_val should be ≈2.0. With natural log, ≈3.3.
   // Threshold of 2.5 confirms log10 is used.
   assert(max_val < 2.5f);
+
+  for (int m = 0; m < 80; ++m) {
+    assert(features.data[m * features.n_frames +
+                         (features.n_frames - 1)] == 0.0f);
+  }
 
   std::filesystem::remove(wav_path);
 }
@@ -211,4 +206,42 @@ void test_aggregate_word_confidence_empty() {
 
   indices = {5};  // out of range
   assert(svp::audio::aggregate_word_confidence(token_probs, indices) == 0.0);
+}
+
+void test_whisper_control_tokens_are_loaded_from_model_metadata() {
+  const auto tokens = svp::audio::parse_whisper_control_tokens({
+      {"sot_sequence", "50257"},
+      {"eot", "50256"},
+      {"no_speech", "50361"},
+      {"no_timestamps", "50362"},
+      {"translate", "50357"},
+      {"blank_id", "220"},
+  });
+  assert(tokens.sot_sequence == std::vector<int>({50257}));
+  assert(tokens.no_timestamps == 50362);
+  assert(tokens.timestamp_begin() == 50363);
+}
+
+void test_untimestamped_whisper_words_preserve_token_confidence() {
+  const auto root = std::filesystem::temp_directory_path() /
+                    "svp-untimestamped-whisper-word-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+  const auto tokens_path = root / "tokens.txt";
+  {
+    std::ofstream output(tokens_path);
+    output << "IEhlbGxv 0\n";
+    output << "IHdvcmxk 1\n";
+  }
+  svp::audio::WhisperTokenTable token_table;
+  assert(token_table.load(tokens_path));
+
+  const auto words = svp::audio::decode_untimestamped_whisper_words(
+      {0, 1}, {0.8, 0.6}, token_table, 0, 1000000, 100);
+  assert(words.size() == 2);
+  assert(words[0].text == "Hello");
+  assert(std::abs(words[0].confidence - 0.8) < 1e-9);
+  assert(words[1].text == "world");
+  assert(std::abs(words[1].confidence - 0.6) < 1e-9);
+  std::filesystem::remove_all(root);
 }

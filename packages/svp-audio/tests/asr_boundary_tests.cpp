@@ -1,4 +1,5 @@
 #include "audio_test_support.hpp"
+#include "svp/audio/asr_chunk_context.hpp"
 
 void test_asr_chunk_plan_produces_correct_overlapping_chunks() {
   const svp::audio::AsrChunkPlanResult plan =
@@ -71,6 +72,44 @@ void test_asr_chunk_plan_exact_multiple_has_no_trailing_chunk() {
   assert(plan.chunks[1].source_end_us == 60000000);
   assert(plan.chunks[1].overlap_before_us == 0);
   assert(plan.chunks[1].overlap_after_us == 0);
+}
+
+void test_asr_chunk_context_uses_declared_overlap_as_decoder_preroll() {
+  const auto plan =
+      svp::audio::build_asr_chunk_plan(30000000, 15000000, 2000000);
+  assert(plan.chunks.size() == 3);
+
+  const auto first = svp::audio::plan_asr_chunk_context(plan.chunks[0]);
+  assert(first.slice_start_us == 0);
+  assert(first.slice_end_us == 15000000);
+  assert(first.nominal_start_offset_us == 0);
+
+  const auto second = svp::audio::plan_asr_chunk_context(plan.chunks[1]);
+  assert(second.slice_start_us == 11000000);
+  assert(second.slice_end_us == 28000000);
+  assert(second.nominal_start_offset_us == 2000000);
+}
+
+void test_asr_chunk_context_discards_preroll_words_and_restores_local_time() {
+  const auto plan =
+      svp::audio::build_asr_chunk_plan(30000000, 15000000, 2000000);
+  const auto context = svp::audio::plan_asr_chunk_context(plan.chunks[1]);
+  const std::vector<svp::audio::AsrWord> decoded = {
+      {"context", 500000, 1500000, 0.8, 0},
+      {"crossing", 1800000, 2400000, 0.9, 0},
+      {"retained", 3000000, 3500000, 0.9, 0},
+  };
+
+  const auto retained = svp::audio::retain_nominal_chunk_words(
+      decoded, context, plan.chunks[1], 1);
+  assert(retained.size() == 2);
+  assert(retained[0].text == "crossing");
+  assert(retained[0].start_us == 0);
+  assert(retained[0].end_us == 400000);
+  assert(retained[0].chunk_ordinal == 1);
+  assert(retained[1].text == "retained");
+  assert(retained[1].start_us == 1000000);
+  assert(retained[1].end_us == 1500000);
 }
 
 void test_overlap_reconciliation_deduplicates_boundary_words() {
@@ -165,6 +204,40 @@ void test_overlap_reconciliation_shifted_token_inside_overlap() {
   assert(reconciled[0].start_us == 17000000);
   assert(reconciled[1].text == "after");
   assert(reconciled[1].start_us == 21000000);
+}
+
+void test_overlap_reconciliation_retains_continuation_after_content_anchor() {
+  const auto plan =
+      svp::audio::build_asr_chunk_plan(30000000, 15000000, 2000000);
+  std::vector<std::vector<svp::audio::AsrWord>> chunk_words(3);
+  chunk_words[0] = {
+      {"service", 12000000, 12500000, 0.9, 0},
+      {"strategy", 12500000, 13000000, 0.9, 0},
+      {"by", 13500000, 14000000, 0.9, 0},
+      {"sub", 14000000, 14500000, 0.9, 0},
+      {"renovate", 14500000, 15000000, 0.9, 0},
+  };
+  chunk_words[1] = {
+      {"service", 0, 400000, 0.9, 1},
+      {"strategy", 400000, 800000, 0.9, 1},
+      {"by", 800000, 1000000, 0.9, 1},
+      {"sub", 1000000, 1200000, 0.9, 1},
+      {"rent", 1200000, 1400000, 0.9, 1},
+      {"it", 1400000, 1600000, 0.9, 1},
+      {"out", 1600000, 1800000, 0.9, 1},
+      {"refinance", 1800000, 2300000, 0.9, 1},
+  };
+
+  const auto reconciled =
+      svp::audio::reconcile_overlapping_chunks(chunk_words, plan.chunks);
+  assert(reconciled.size() == 9);
+  assert(reconciled[5].text == "rent");
+  assert(reconciled[6].text == "it");
+  assert(reconciled[7].text == "out");
+  assert(reconciled[8].text == "refinance");
+  for (std::size_t i = 1; i < reconciled.size(); ++i) {
+    assert(reconciled[i].start_us >= reconciled[i - 1].end_us);
+  }
 }
 
 void test_overlap_reconciliation_no_false_dedepe_outside_overlap() {

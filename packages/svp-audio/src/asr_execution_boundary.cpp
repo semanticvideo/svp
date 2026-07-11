@@ -1,4 +1,5 @@
 #include "svp/audio/asr_execution_boundary.hpp"
+#include "svp/audio/asr_chunk_context.hpp"
 #include "svp/audio/transcript_records.hpp"
 #include "svp/audio/whisper_mel.hpp"
 #include "svp/audio/whisper_model.hpp"
@@ -273,13 +274,14 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
         on_chunk_progress(i, boundary.chunk_plan.chunks.size());
       }
 
+      const AsrChunkContextPlan context = plan_asr_chunk_context(chunk);
       const std::filesystem::path chunk_wav =
-          slice_wav_to_temp(input_wav, chunk.source_start_us,
-                            chunk.source_end_us, temp_slice_dir);
+          slice_wav_to_temp(input_wav, context.slice_start_us,
+                            context.slice_end_us, temp_slice_dir);
 
       const WhisperInferenceResult whisper_result =
           run_whisper_inference(chunk_wav, model_dir, chunk.chunk_id,
-                                 0, chunk.source_end_us - chunk.source_start_us);
+                                 0, context.slice_end_us - context.slice_start_us);
       if (i == 0 || ((i + 1) % 10) == 0 ||
           i + 1 == boundary.chunk_plan.chunks.size()) {
         svp::core::check_memory_limit("asr.chunk.after_inference", {
@@ -301,13 +303,9 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
         continue;
       }
 
-      std::vector<AsrWord> words;
-      for (const AsrWord& w : whisper_result.all_words) {
-        AsrWord adjusted = w;
-        adjusted.chunk_ordinal = static_cast<std::int64_t>(i);
-        words.push_back(adjusted);
-      }
-      chunk_words.push_back(std::move(words));
+      chunk_words.push_back(retain_nominal_chunk_words(
+          whisper_result.all_words, context, chunk,
+          static_cast<std::int64_t>(i)));
     }
     svp::core::check_memory_limit("asr.boundary.after_chunks", {
         {"chunk_count", std::to_string(boundary.chunk_plan.chunks.size())},

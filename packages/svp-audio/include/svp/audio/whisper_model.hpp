@@ -23,6 +23,8 @@ struct WhisperInferenceResult {
   bool ran = false;
   std::vector<WhisperSegment> segments;
   std::vector<AsrWord> all_words;
+  std::vector<int> decoded_token_ids;
+  std::string termination_reason;
   std::vector<std::string> blockers;
 };
 

@@ -8,7 +8,9 @@ else()
 endif()
 
 add_library(svp-audio
+  src/asr_chunk_context.cpp
   src/asr_chunk_planner.cpp
+  src/asr_chunk_reconciliation.cpp
   src/asr_execution_boundary.cpp
   src/audio_extraction_executor.cpp
   src/audio_extraction_plan.cpp
@@ -56,7 +58,9 @@ add_library(svp-audio
   src/waveform_envelope.cpp
   src/whisper_mel.cpp
   src/whisper_model.cpp
+  src/whisper_model_metadata.cpp
   src/whisper_token_table.cpp
+  src/whisper_untimestamped_words.cpp
 )
 
 add_library(svp::audio ALIAS svp-audio)
