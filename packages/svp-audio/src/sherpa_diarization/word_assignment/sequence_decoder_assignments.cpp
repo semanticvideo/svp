@@ -21,6 +21,7 @@ void apply_sequence_decoder_assignments(
   if (decoded.size() != state.assignments.size()) return;
 
   for (std::size_t i = 0; i < state.assignments.size(); ++i) {
+    if (state.group_decision_supported[i]) continue;
     if (decoded[i] >= 0) {
       state.assignments[i] = speaker_id_for_index(decoded[i]);
     }

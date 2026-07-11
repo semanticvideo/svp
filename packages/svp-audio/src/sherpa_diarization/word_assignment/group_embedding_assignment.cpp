@@ -98,8 +98,15 @@ void assign_group_by_embedding(
   if (selected_speaker < 0) return;
 
   const std::string speaker_id = speaker_id_for_index(selected_speaker);
+  const bool strong_short_contrary_decision =
+      !selected_from_segment_evidence &&
+      local_evidence_speaker >= 0 &&
+      selected_speaker != local_evidence_speaker &&
+      last_word - first_word + 1 <= kFingerprintShortContraryMaxWords &&
+      margin >= kFingerprintShortContraryMinMargin;
   const bool group_decision_is_supported =
-      state.similar_voice_fingerprints &&
+      (state.similar_voice_fingerprints ||
+       strong_short_contrary_decision) &&
       (selected_from_segment_evidence ||
        margin >= kFingerprintUpdateMinMargin) &&
       margin >= kSelectiveWordLocalUnstableGroupMargin;

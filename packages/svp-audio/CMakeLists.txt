@@ -95,8 +95,11 @@ if(BUILD_TESTING)
     tests/diarization_boundary_tests.cpp
     tests/diarization_reconciliation_tests.cpp
     tests/microphone_transcript_tests.cpp
+    tests/punctuated_segment_island_tests.cpp
     tests/audio_transcript_tests.cpp
     tests/real_diarization_fixture_tests.cpp
+    tests/sequence_decoder_assignment_tests.cpp
+    tests/strong_segment_lock_tests.cpp
     tests/transcript_record_tests.cpp
     tests/transcript_speaker_summary_tests.cpp
     tests/transcript_word_assignment_tests.cpp

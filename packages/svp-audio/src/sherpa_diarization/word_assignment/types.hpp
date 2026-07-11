@@ -29,6 +29,9 @@ inline constexpr std::size_t kFingerprintLocalEvidenceMinWords = 2;
 inline constexpr float kFingerprintUpdateMinMargin = 0.06f;
 inline constexpr std::size_t kFingerprintUpdateMaxEmbeddings = 8;
 inline constexpr float kSelectiveWordLocalUnstableGroupMargin = 0.10f;
+inline constexpr std::size_t kFingerprintShortContraryMaxWords = 2;
+inline constexpr float kFingerprintShortContraryMinMargin =
+    2.0f * kUtteranceEmbeddingMinSimilarity;
 inline constexpr std::size_t kSelectiveWordLocalBoundaryRadiusWords = 4;
 inline constexpr std::int64_t kSelectiveWordLocalBoundaryRadiusUs = 1500000;
 inline constexpr float kMultiSpeakerStrongSegmentOverlapLock = 0.60f;
