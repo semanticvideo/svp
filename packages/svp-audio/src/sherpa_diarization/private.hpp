@@ -29,6 +29,11 @@ inline constexpr float kFragmentedSecondaryDominantMinShare = 0.75f;
 inline constexpr float kFragmentedSecondaryDominantMaxShare = 0.90f;
 inline constexpr float kFragmentedSecondaryMinMinorityShare = 0.08f;
 inline constexpr float kFragmentedSecondaryMaxSingleMinorityShare = 0.15f;
+// Collapsing many tracks into one secondary speaker overrides Sherpa's local
+// cluster identities. Require stronger voice agreement than ordinary
+// same-speaker attribution between the two tracks carrying the most minority
+// speech before applying that destructive reconciliation.
+inline constexpr float kFragmentedSecondaryStrongVoiceSimilarity = 0.80f;
 inline constexpr float kSingleDominantCollapseSpeechShare = 0.95f;
 inline constexpr float kSherpaLocalClusteringThreshold = 0.90f;
 inline constexpr int64_t kDiarizationWindowSamples =
@@ -188,6 +193,11 @@ bool clip_segment_to_range(SherpaDiarizationSegment& seg,
 std::map<int32_t, int32_t> cluster_speaker_observations(
     const std::vector<SpeakerObservation>& observations,
     const std::set<std::pair<int32_t, int32_t>>& cannot_link_observations);
+std::vector<std::vector<float>> build_reconciled_speaker_embeddings(
+    const std::vector<SpeakerObservation>& observations,
+    const std::vector<SherpaDiarizationSegment>& preliminary_segments,
+    const std::vector<SherpaDiarizationSegment>& reconciled_segments,
+    int32_t final_speaker_count);
 void stitch_dominant_non_overlapping_tracks(
     std::vector<SherpaDiarizationSegment>& segments,
     int32_t& final_speaker_count,
@@ -195,7 +205,8 @@ void stitch_dominant_non_overlapping_tracks(
 void collapse_fragmented_secondary_tracks(
     std::vector<SherpaDiarizationSegment>& segments,
     int32_t& final_speaker_count,
-    std::size_t observation_count);
+    std::size_t observation_count,
+    const std::vector<std::vector<float>>& final_speaker_embeddings = {});
 void collapse_single_dominant_track(std::vector<SherpaDiarizationSegment>& segments,
                                     int32_t& final_speaker_count);
 

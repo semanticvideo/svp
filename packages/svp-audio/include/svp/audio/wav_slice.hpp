@@ -1,21 +1,9 @@
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <vector>
 
 namespace svp::audio {
-
-struct WhisperMelFeatures {
-  std::vector<float> data;
-  int n_mels = 80;
-  int n_frames = 3000;
-  std::int64_t lead_silence_us = 0;
-};
-
-[[nodiscard]] WhisperMelFeatures compute_whisper_mel_from_wav(
-    const std::filesystem::path& wav_path);
 
 [[nodiscard]] std::filesystem::path slice_wav_to_temp(
     const std::filesystem::path& input_wav,

@@ -2,7 +2,7 @@
 
 ## Phase purpose
 
-Use implementation results to identify true spec bugs, validator gaps, builder issues, and remaining reference-implementation gaps. This phase now starts after the repository has produced validator-clean real-video packages with OCR, color, depth, embeddings, evidence crops, visual entity tracks, spatial regions, mask block streams, and ONNX Whisper ASR. Phase 12 decides what must be completed for full RC2/reference conformance versus what belongs in post-RC2 quality hardening.
+Use implementation results to identify true spec bugs, validator gaps, builder issues, and remaining reference-implementation gaps. This phase now starts after the repository has produced validator-clean real-video packages with OCR, color, depth, embeddings, evidence crops, visual entity tracks, spatial regions, mask block streams, and whisper.cpp ASR. Phase 12 decides what must be completed for full RC2/reference conformance versus what belongs in post-RC2 quality hardening.
 
 ## Prerequisites
 

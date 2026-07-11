@@ -58,7 +58,6 @@ void assign_group_by_embedding(
   int32_t local_evidence_speaker = -1;
   std::size_t local_evidence_count = 0;
   for (int32_t speaker = 0; speaker < diar_result.final_speaker_count; ++speaker) {
-    if (speaker == state.dominant_speaker) continue;
     const std::size_t count = local_counts[static_cast<std::size_t>(speaker)];
     if (count > local_evidence_count) {
       local_evidence_speaker = speaker;
@@ -68,6 +67,7 @@ void assign_group_by_embedding(
 
   const float margin = best_similarity - second_similarity;
   int32_t selected_speaker = -1;
+  bool selected_from_segment_evidence = false;
   if (local_evidence_speaker >= 0 &&
       local_evidence_count >= kFingerprintLocalEvidenceMinWords &&
       similarities[static_cast<std::size_t>(local_evidence_speaker)] >=
@@ -76,6 +76,7 @@ void assign_group_by_embedding(
           similarities[static_cast<std::size_t>(local_evidence_speaker)] <=
           kFingerprintLocalEvidenceMaxContraryMargin) {
     selected_speaker = local_evidence_speaker;
+    selected_from_segment_evidence = true;
   } else if (best_speaker >= 0 &&
              best_similarity >= kUtteranceEmbeddingMinSimilarity &&
              margin >= kUtteranceEmbeddingMinMargin) {
@@ -97,8 +98,16 @@ void assign_group_by_embedding(
   if (selected_speaker < 0) return;
 
   const std::string speaker_id = speaker_id_for_index(selected_speaker);
+  const bool group_decision_is_supported =
+      state.similar_voice_fingerprints &&
+      (selected_from_segment_evidence ||
+       margin >= kFingerprintUpdateMinMargin) &&
+      margin >= kSelectiveWordLocalUnstableGroupMargin;
   for (std::size_t i = first_word; i <= last_word; ++i) {
     state.assignments[i] = speaker_id;
+    if (group_decision_is_supported) {
+      state.group_decision_supported[i] = true;
+    }
   }
   if (margin < kSelectiveWordLocalUnstableGroupMargin) {
     for (std::size_t i = first_word; i <= last_word; ++i) {

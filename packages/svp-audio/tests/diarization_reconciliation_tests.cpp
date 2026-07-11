@@ -102,7 +102,9 @@ void test_fragmented_secondary_policy_collapses_to_two_speakers() {
   segments.push_back(test_diarization_segment(260.0f, 0.5f, 9));
 
   int32_t speaker_count = 10;
-  collapse_fragmented_secondary_tracks(segments, speaker_count, 35);
+  std::vector<std::vector<float>> embeddings(10, {0.0f, 1.0f});
+  embeddings[0] = {1.0f, 0.0f};
+  collapse_fragmented_secondary_tracks(segments, speaker_count, 35, embeddings);
 
   assert(speaker_count == 2);
   assert(segments.front().speaker_id == 0);
@@ -133,6 +135,49 @@ void test_fragmented_secondary_policy_leaves_flatter_multi_speaker_case() {
   for (std::size_t i = 0; i < segments.size(); ++i) {
     assert(segments[i].speaker_id == static_cast<int32_t>(i));
   }
+}
+
+void test_fragmented_secondary_policy_preserves_distinct_minority_voices() {
+  using svp::audio::sherpa_diarization_internal::collapse_fragmented_secondary_tracks;
+
+  std::vector<svp::audio::SherpaDiarizationSegment> segments;
+  segments.push_back(test_diarization_segment(0.0f, 78.0f, 0));
+  segments.push_back(test_diarization_segment(100.0f, 11.0f, 1));
+  segments.push_back(test_diarization_segment(120.0f, 5.0f, 2));
+  segments.push_back(test_diarization_segment(140.0f, 3.0f, 3));
+  segments.push_back(test_diarization_segment(160.0f, 1.0f, 4));
+  segments.push_back(test_diarization_segment(180.0f, 0.8f, 5));
+  segments.push_back(test_diarization_segment(200.0f, 0.6f, 6));
+  segments.push_back(test_diarization_segment(220.0f, 0.5f, 7));
+  segments.push_back(test_diarization_segment(240.0f, 0.6f, 8));
+  segments.push_back(test_diarization_segment(260.0f, 0.5f, 9));
+
+  int32_t speaker_count = 10;
+  std::vector<std::vector<float>> embeddings(10, {0.0f, 1.0f});
+  embeddings[0] = {1.0f, 0.0f};
+  embeddings[1] = {0.0f, 1.0f};
+  embeddings[2] = {1.0f, 0.0f};
+  collapse_fragmented_secondary_tracks(segments, speaker_count, 35, embeddings);
+
+  assert(speaker_count == 10);
+  for (std::size_t i = 0; i < segments.size(); ++i) {
+    assert(segments[i].speaker_id == static_cast<int32_t>(i));
+  }
+}
+
+void test_fragmented_secondary_policy_collapses_single_minority_track() {
+  using svp::audio::sherpa_diarization_internal::collapse_fragmented_secondary_tracks;
+
+  std::vector<svp::audio::SherpaDiarizationSegment> segments = {
+      test_diarization_segment(0.0f, 86.0f, 0),
+      test_diarization_segment(100.0f, 14.0f, 1),
+  };
+  int32_t speaker_count = 5;
+  collapse_fragmented_secondary_tracks(segments, speaker_count, 35);
+
+  assert(speaker_count == 2);
+  assert(segments[0].speaker_id == 0);
+  assert(segments[1].speaker_id == 1);
 }
 
 void test_reconcile_clusters_still_works_after_lib_discovery() {

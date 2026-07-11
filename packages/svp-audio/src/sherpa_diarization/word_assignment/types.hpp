@@ -49,6 +49,8 @@ struct AssignmentState {
   std::vector<std::string> assignments;
   std::vector<std::vector<float>> word_embedding_similarities;
   std::vector<bool> word_local_required;
+  std::vector<bool> group_decision_supported;
+  bool similar_voice_fingerprints = false;
   int32_t dominant_speaker = -1;
 };
 

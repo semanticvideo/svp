@@ -23,7 +23,7 @@ enum class AsrStatus {
 struct AsrExecutionBoundary {
   std::string processor_id = "proc_whisper_asr_0001";
   std::string model_id = "model_whisper_small_en";
-  std::string runtime = "onnxruntime";
+  std::string runtime = "whisper.cpp";
   std::string execution_provider = "cpu";
   AsrChunkPlanResult chunk_plan;
   std::vector<std::string> input_refs;

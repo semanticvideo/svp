@@ -13,6 +13,7 @@ void initialize_segment_assignments(
       std::vector<float>(
           static_cast<std::size_t>(diar_result.final_speaker_count), -2.0f));
   state.word_local_required.assign(words.size(), false);
+  state.group_decision_supported.assign(words.size(), false);
 
   for (std::size_t i = 0; i < words.size(); ++i) {
     const int32_t segment_speaker =

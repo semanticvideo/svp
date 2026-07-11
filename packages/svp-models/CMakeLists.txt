@@ -6,8 +6,16 @@ find_library(BLAKE3_LIBRARY NAMES blake3 REQUIRED)
 # ONNX Runtime is optional. When found, SVP_MODEL_ONNX_RUNTIME_AVAILABLE is defined
 # and the runtime layer links against onnxruntime. When not found, the runtime
 # layer gracefully reports ONNX Runtime as unavailable.
+# ONNX Runtime's vcpkg config requests lowercase `protobuf`, while CMake's
+# module publishes `Protobuf_FOUND`. Bridge that package-name mismatch so the
+# config continues loading its exported targets on every supported platform.
+find_package(Protobuf QUIET)
+if(Protobuf_FOUND)
+  set(protobuf_FOUND TRUE)
+endif()
+find_package(utf8_range CONFIG QUIET)
 find_package(onnxruntime CONFIG QUIET)
-if(onnxruntime_FOUND)
+if(TARGET onnxruntime::onnxruntime)
   set(SVP_MODEL_ONNX_RUNTIME_AVAILABLE TRUE)
   # The Debug ONNX static archive trips its schema-registry assertion when
   # loaded through ONNX Runtime; keep Debug app builds on the Release archives.

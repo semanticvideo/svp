@@ -309,6 +309,92 @@ void test_weaker_bleed_chain_attaches_upward_without_becoming_a_speaker() {
          "independent_microphone_source");
 }
 
+void test_collapsed_bleed_chain_resolves_to_authoritative_root() {
+  svp::audio::MicrophoneTranscript direct;
+  direct.source_audio_stream_id = "astream_0001";
+  direct.source_ordinal = 0;
+  direct.words = {word("same", 0, 500000, 0.9),
+                  word("speech.", 500000, 1000000, 0.9)};
+  direct.word_signal_db = {-10.0, -10.0};
+  direct.signal_profile.noise_floor_db = -50.0;
+  direct.signal_profile.frames = {{{0, 1000000}, -10.0}};
+  direct.voice_tracks = {voice_track({1.0f, 0.0f}, 0, 1000000)};
+
+  svp::audio::MicrophoneTranscript bridge = direct;
+  bridge.source_audio_stream_id = "astream_0002";
+  bridge.source_ordinal = 1;
+  bridge.word_signal_db = {-30.0, -30.0};
+  bridge.signal_profile.frames = {{{0, 1000000}, -30.0}};
+  bridge.voice_tracks = {voice_track({0.8f, 0.6f}, 0, 1000000)};
+
+  svp::audio::MicrophoneTranscript weakest = direct;
+  weakest.source_audio_stream_id = "astream_0003";
+  weakest.source_ordinal = 2;
+  weakest.word_signal_db = {-40.0, -40.0};
+  weakest.signal_profile.frames = {{{0, 1000000}, -40.0}};
+  weakest.voice_tracks = {voice_track({0.0f, 1.0f}, 0, 1000000)};
+
+  const auto result = svp::audio::reconcile_microphone_transcripts(
+      {direct, bridge, weakest});
+
+  assert(result.speakers.size() == 1);
+  assert(result.collapsed_microphone_stream_count == 2);
+  assert(result.speakers[0].source_audio_stream_id == "astream_0001");
+  assert(result.speakers[0].source_audio_stream_ids.size() == 3);
+  assert(result.source_assignment_evidence[1].anchor_source_ordinal == 0);
+  assert(result.source_assignment_evidence[2].anchor_source_ordinal == 0);
+  assert(result.discarded_word_evidence.size() ==
+         result.discarded_cross_anchor_bleed_word_count);
+  std::size_t discarded_pair_count = 0;
+  for (const auto& [source, anchor_counts] :
+       result.discarded_word_count_by_source_pair) {
+    (void)source;
+    for (const auto& [anchor, count] : anchor_counts) {
+      (void)anchor;
+      discarded_pair_count += count;
+    }
+  }
+  assert(discarded_pair_count ==
+         result.discarded_cross_anchor_bleed_word_count);
+}
+
+void test_evidence_combination_collapses_decoder_residue_at_half_content_gate() {
+  svp::audio::MicrophoneTranscript direct;
+  direct.source_audio_stream_id = "astream_0001";
+  direct.source_ordinal = 0;
+  direct.words = {word("one", 0, 200000, 0.9),
+                  word("two", 200000, 400000, 0.9),
+                  word("three", 400000, 600000, 0.9),
+                  word("direct", 600000, 800000, 0.9),
+                  word("source.", 800000, 1000000, 0.9)};
+  direct.word_signal_db = {-10.0, -10.0, -10.0, -10.0, -10.0};
+  direct.signal_profile.noise_floor_db = -50.0;
+  direct.signal_profile.frames = {{{0, 1000000}, -10.0}};
+  direct.voice_tracks = {voice_track({1.0f, 0.0f}, 0, 1000000)};
+
+  svp::audio::MicrophoneTranscript bleed;
+  bleed.source_audio_stream_id = "astream_0002";
+  bleed.source_ordinal = 1;
+  bleed.words = {word("one", 0, 200000, 0.7),
+                 word("two", 200000, 400000, 0.7),
+                 word("three", 400000, 600000, 0.7),
+                 word("decoder", 600000, 800000, 0.7),
+                 word("residue.", 800000, 1000000, 0.7)};
+  bleed.word_signal_db = {-30.0, -30.0, -30.0, -30.0, -30.0};
+  bleed.signal_profile.noise_floor_db = -50.0;
+  bleed.signal_profile.frames = {{{0, 1000000}, -30.0}};
+  bleed.voice_tracks = {voice_track({1.0f, 0.0f}, 0, 1000000)};
+
+  const auto result =
+      svp::audio::reconcile_microphone_transcripts({direct, bleed});
+
+  assert(result.speakers.size() == 1);
+  assert(result.collapsed_microphone_stream_count == 1);
+  assert(result.speakers[0].source_audio_stream_id == "astream_0001");
+  assert(result.speakers[0].source_audio_stream_ids.size() == 2);
+  assert(result.words.size() == 5);
+}
+
 void test_cross_anchor_duplicate_content_uses_time_local_snr_ownership() {
   svp::audio::MicrophoneTranscript microphone_a;
   microphone_a.source_audio_stream_id = "astream_0001";

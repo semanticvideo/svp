@@ -82,10 +82,10 @@ nlohmann::json ran_transcript_json(const AsrExecutionBoundary& boundary,
   };
 
   nlohmann::json asr_limitations = {
-      {"timestamp_method", "whisper_timestamp_token_segments"},
-      {"timestamp_precision", "words_distributed_evenly_within_segment"},
-      {"timestamp_note", "Word start_us/end_us are derived from Whisper decoder timestamp tokens (50357+). Words are distributed evenly within each timestamp segment, not cross-attention aligned."},
-      {"confidence_status", "decoder_token_softmax_mean"},
+      {"timestamp_method", "whisper_cpp_token_timestamps"},
+      {"timestamp_precision", "centisecond_token_boundaries"},
+      {"timestamp_note", "Word start_us/end_us are derived from whisper.cpp token timestamps and converted from centiseconds to integer microseconds."},
+      {"confidence_status", "whisper_cpp_token_probability_mean"},
       {"confidence_note", "Per-word confidence is the mean of selected-token decoder softmax probabilities for the word's constituent tokens. This is uncalibrated model confidence, not a calibrated probability."},
       {"speaker_mode", boundary.diarization_status == "fallback_one_speaker"
            ? "one_speaker_fallback"
@@ -99,7 +99,7 @@ nlohmann::json ran_transcript_json(const AsrExecutionBoundary& boundary,
            : (boundary.diarization_status == "user_declared_single_speaker"
                 ? "User requested single-speaker mode. All words have speaker_id speaker_0001. Diarization was intentionally skipped."
                 : (boundary.diarization_status == "microphone_stream_assignment"
-                     ? "Each microphone remains an authoritative source. Exact time-local duplicate words require transcript agreement, matching local fingerprints, and stronger channel-relative SNR on another microphone. Decoder residue is removed only after a supermajority of words are exact duplicates and sustained voice, shared-timing, SNR, and ASR-confidence evidence establishes bleed."
+                     ? "Each microphone remains an authoritative source. Exact time-local duplicate words require transcript agreement, matching local fingerprints, and stronger channel-relative SNR on another microphone. Decoder residue is removed only after at least half the words are exact duplicates and sustained voice, shared-timing, SNR, and ASR-confidence evidence establishes bleed."
                      : "Speaker IDs assigned by max interval overlap with nearest-segment fallback (500ms tolerance). Sustained non-dominant speaker evidence may be expanded across the current ASR utterance. Words outside all segments and tolerance are marked speaker_unknown."))},
   };
 
@@ -153,9 +153,9 @@ nlohmann::json chunk_provenance_json(const AsrChunkPlan& chunk,
     speaker_mode = "camera_microphone_stream_locked";
   }
   nlohmann::json asr_limitations = {
-      {"timestamp_method", "whisper_timestamp_token_segments"},
-      {"timestamp_precision", "words_distributed_evenly_within_segment"},
-      {"confidence_status", "decoder_token_softmax_mean"},
+      {"timestamp_method", "whisper_cpp_token_timestamps"},
+      {"timestamp_precision", "centisecond_token_boundaries"},
+      {"confidence_status", "whisper_cpp_token_probability_mean"},
       {"speaker_mode", speaker_mode},
   };
 

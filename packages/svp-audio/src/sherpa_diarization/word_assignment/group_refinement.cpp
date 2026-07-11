@@ -3,6 +3,19 @@
 namespace svp::audio::sherpa_diarization_internal::word_assignment {
 namespace {
 
+bool short_boundary_token_starts_following_phrase(
+    const std::vector<AsrWord>& words,
+    std::size_t current_word) {
+  if (current_word + 2 >= words.size()) return false;
+  const auto& next = words[current_word + 1];
+  const auto& after_next = words[current_word + 2];
+  const std::int64_t pause_before_next = next.start_us - words[current_word].end_us;
+  const std::int64_t next_duration = next.end_us - next.start_us;
+  const std::int64_t pause_after_next = after_next.start_us - next.end_us;
+  return pause_before_next > next_duration &&
+         pause_after_next <= next_duration;
+}
+
 bool group_has_non_dominant_local_evidence(
     const std::vector<AsrWord>& words,
     const SherpaDiarizationResult& diar_result,
@@ -58,8 +71,9 @@ void refine_groups_by_embedding(
       std::size_t sub_end = sub_start;
       while (sub_end < last_word &&
              sub_end - sub_start + 1 < kFingerprintSubUtteranceMaxWords &&
-             words[sub_end + 1].end_us - words[sub_start].start_us <=
-                 kFingerprintSubUtteranceMaxDurationUs) {
+             ((state.similar_voice_fingerprints && sub_end == sub_start) ||
+              words[sub_end + 1].end_us - words[sub_start].start_us <=
+                  kFingerprintSubUtteranceMaxDurationUs)) {
         ++sub_end;
       }
       assign_group_by_embedding(
@@ -75,7 +89,11 @@ void refine_groups_by_embedding(
     const bool gap_after =
         !last_word &&
         words[i + 1].start_us - words[i].end_us > kUtteranceGapThresholdUs;
-    if (last_word || gap_after || ends_utterance(words[i].text)) {
+    const bool following_phrase_boundary =
+        state.similar_voice_fingerprints && !last_word &&
+        short_boundary_token_starts_following_phrase(words, i);
+    if (last_word || gap_after || following_phrase_boundary ||
+        ends_utterance(words[i].text)) {
       assign_group_or_subgroups(group_start, i);
       group_start = i + 1;
     }

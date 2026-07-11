@@ -30,6 +30,13 @@ std::vector<std::string> assign_word_speakers_with_extractor(
   for (const auto& fingerprint : state.fingerprints) {
     if (!has_embedding_signal(fingerprint.prototype)) return {};
   }
+  if (state.fingerprints.size() == 2) {
+    const float fingerprint_similarity = cosine_similarity(
+        state.fingerprints[0].prototype,
+        state.fingerprints[1].prototype);
+    state.similar_voice_fingerprints =
+        fingerprint_similarity >= kUtteranceEmbeddingMinSimilarity;
+  }
   state.dominant_speaker =
       dominant_speaker_from_segments(diar_result.segments,
                                      diar_result.final_speaker_count);

@@ -335,7 +335,8 @@ void test_transcript_confidence_provenance_is_decoder_token_softmax_mean() {
 
   std::ifstream input(root / "transcript/transcript.json");
   const nlohmann::json transcript = nlohmann::json::parse(input);
-  assert(transcript["asr_limitations"]["confidence_status"] == "decoder_token_softmax_mean");
+  assert(transcript["asr_limitations"]["confidence_status"] ==
+         "whisper_cpp_token_probability_mean");
   std::string note = transcript["asr_limitations"]["confidence_note"];
   assert(note.find("uncalibrated") != std::string::npos);
 

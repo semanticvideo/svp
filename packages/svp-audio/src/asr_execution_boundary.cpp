@@ -1,6 +1,7 @@
 #include "svp/audio/asr_execution_boundary.hpp"
+#include "svp/audio/asr_chunk_context.hpp"
 #include "svp/audio/transcript_records.hpp"
-#include "svp/audio/whisper_mel.hpp"
+#include "svp/audio/wav_slice.hpp"
 #include "svp/audio/whisper_model.hpp"
 #include "svp/core/memory_diagnostics.hpp"
 #include "svp/models/manifest.hpp"
@@ -101,9 +102,9 @@ nlohmann::json chunk_provenance_record(const AsrChunkPlan& chunk,
                                        const std::string& processor_id,
                                        const std::string& asr_status) {
   nlohmann::json asr_limitations = {
-      {"timestamp_method", "whisper_timestamp_token_segments"},
-      {"timestamp_precision", "words_distributed_evenly_within_segment"},
-      {"confidence_status", "decoder_token_softmax_mean"},
+      {"timestamp_method", "whisper_cpp_token_timestamps"},
+      {"timestamp_precision", "centisecond_token_boundaries"},
+      {"confidence_status", "whisper_cpp_token_probability_mean"},
       {"speaker_mode", "one_speaker_fallback"},
   };
 
@@ -203,7 +204,8 @@ AsrExecutionBoundary build_asr_execution_boundary(const AsrChunkPlanResult& chun
     boundary.blockers.push_back("analysis audio is not staged for ASR execution");
   }
   if (!model_runtime_available) {
-    boundary.blockers.push_back("ONNX Runtime is not available for ASR execution");
+    boundary.blockers.push_back(
+        "whisper.cpp runtime is not available for ASR execution");
   }
   if (!model_available) {
     boundary.blockers.push_back("Whisper ASR model is not available in model cache");
@@ -273,13 +275,23 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
         on_chunk_progress(i, boundary.chunk_plan.chunks.size());
       }
 
+      const AsrChunkContextPlan context = plan_asr_chunk_context(chunk);
       const std::filesystem::path chunk_wav =
-          slice_wav_to_temp(input_wav, chunk.source_start_us,
-                            chunk.source_end_us, temp_slice_dir);
+          slice_wav_to_temp(input_wav, context.slice_start_us,
+                            context.slice_end_us, temp_slice_dir);
 
-      const WhisperInferenceResult whisper_result =
-          run_whisper_inference(chunk_wav, model_dir, chunk.chunk_id,
-                                 0, chunk.source_end_us - chunk.source_start_us);
+      WhisperInferenceResult whisper_result;
+      try {
+        whisper_result = run_whisper_inference(
+            chunk_wav, model_dir, chunk.chunk_id, 0,
+            context.slice_end_us - context.slice_start_us);
+      } catch (...) {
+        std::error_code cleanup_error;
+        std::filesystem::remove(chunk_wav, cleanup_error);
+        throw;
+      }
+      std::error_code cleanup_error;
+      std::filesystem::remove(chunk_wav, cleanup_error);
       if (i == 0 || ((i + 1) % 10) == 0 ||
           i + 1 == boundary.chunk_plan.chunks.size()) {
         svp::core::check_memory_limit("asr.chunk.after_inference", {
@@ -301,13 +313,9 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
         continue;
       }
 
-      std::vector<AsrWord> words;
-      for (const AsrWord& w : whisper_result.all_words) {
-        AsrWord adjusted = w;
-        adjusted.chunk_ordinal = static_cast<std::int64_t>(i);
-        words.push_back(adjusted);
-      }
-      chunk_words.push_back(std::move(words));
+      chunk_words.push_back(retain_nominal_chunk_words(
+          whisper_result.all_words, context, chunk,
+          static_cast<std::int64_t>(i)));
     }
     svp::core::check_memory_limit("asr.boundary.after_chunks", {
         {"chunk_count", std::to_string(boundary.chunk_plan.chunks.size())},
@@ -360,9 +368,9 @@ nlohmann::json asr_execution_boundary_to_json(const AsrExecutionBoundary& bounda
   }
 
   nlohmann::json asr_limitations = {
-      {"timestamp_method", "whisper_timestamp_token_segments"},
-      {"timestamp_precision", "words_distributed_evenly_within_segment"},
-      {"confidence_status", "decoder_token_softmax_mean"},
+      {"timestamp_method", "whisper_cpp_token_timestamps"},
+      {"timestamp_precision", "centisecond_token_boundaries"},
+      {"confidence_status", "whisper_cpp_token_probability_mean"},
       {"confidence_note", "Per-word confidence is the mean of selected-token decoder softmax probabilities for the word's constituent tokens. This is uncalibrated model confidence, not a calibrated probability."},
       {"speaker_mode", boundary.diarization_status == "fallback_one_speaker"
            ? "one_speaker_fallback"

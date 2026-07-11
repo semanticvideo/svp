@@ -102,6 +102,7 @@ nlohmann::json asr_chunk_to_json(const AsrChunkPlan& chunk) {
       {"source_end_us", chunk.source_end_us},
       {"overlap_before_us", chunk.overlap_before_us},
       {"overlap_after_us", chunk.overlap_after_us},
+      {"decoder_context_before_us", chunk.overlap_before_us},
       {"input_ref", chunk.input_ref},
       {"output_ref", chunk.output_ref},
       {"model_id", chunk.model_id},
@@ -124,81 +125,6 @@ nlohmann::json asr_chunk_plan_to_json(const AsrChunkPlanResult& plan) {
       {"total_duration_us", plan.total_duration_us},
       {"blockers", plan.blockers},
   };
-}
-
-std::vector<AsrWord> reconcile_overlapping_chunks(
-    const std::vector<std::vector<AsrWord>>& chunk_words,
-    const std::vector<AsrChunkPlan>& chunks) {
-  if (chunk_words.size() != chunks.size()) {
-    throw std::invalid_argument(
-        "chunk_words size must match chunks size for reconciliation");
-  }
-
-  if (chunks.empty()) {
-    return {};
-  }
-
-  struct AnnotatedWord {
-    AsrWord word;
-    std::int64_t source_start_us;
-    std::int64_t source_end_us;
-    std::int64_t overlap_before_us;
-  };
-
-  std::vector<AnnotatedWord> annotated;
-  for (std::size_t i = 0; i < chunk_words.size(); ++i) {
-    const AsrChunkPlan& chunk = chunks[i];
-    for (const AsrWord& word : chunk_words[i]) {
-      AnnotatedWord aw;
-      aw.word = word;
-      aw.word.start_us += chunk.source_start_us;
-      aw.word.end_us += chunk.source_start_us;
-      aw.source_start_us = chunk.source_start_us;
-      aw.source_end_us = chunk.source_end_us;
-      aw.overlap_before_us = chunk.overlap_before_us;
-      annotated.push_back(std::move(aw));
-    }
-  }
-
-  std::sort(annotated.begin(), annotated.end(),
-            [](const AnnotatedWord& a, const AnnotatedWord& b) {
-              if (a.word.start_us != b.word.start_us) {
-                return a.word.start_us < b.word.start_us;
-              }
-              return a.word.end_us < b.word.end_us;
-            });
-
-  std::vector<AsrWord> result;
-  std::int64_t last_end_us = -1;
-
-  for (const AnnotatedWord& aw : annotated) {
-    const std::int64_t word_start = aw.word.start_us;
-    const std::int64_t word_end = aw.word.end_us;
-
-    if (word_end <= word_start) {
-      continue;
-    }
-
-    if (last_end_us >= 0 && word_start < last_end_us) {
-      const std::int64_t overlap_zone_start = aw.source_start_us;
-      const std::int64_t overlap_zone_end =
-          aw.source_start_us + aw.overlap_before_us;
-
-      if (aw.overlap_before_us > 0 &&
-          word_start >= overlap_zone_start && word_start < overlap_zone_end) {
-        continue;
-      }
-    }
-
-    if (last_end_us >= 0 && word_start < last_end_us) {
-      continue;
-    }
-
-    result.push_back(aw.word);
-    last_end_us = word_end;
-  }
-
-  return result;
 }
 
 }  // namespace svp::audio

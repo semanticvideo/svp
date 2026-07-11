@@ -180,6 +180,49 @@ struct SpeakerTrackStats {
   bool seen = false;
 };
 
+std::vector<std::vector<float>> build_reconciled_speaker_embeddings(
+    const std::vector<SpeakerObservation>& observations,
+    const std::vector<SherpaDiarizationSegment>& preliminary_segments,
+    const std::vector<SherpaDiarizationSegment>& reconciled_segments,
+    int32_t final_speaker_count) {
+  std::map<int32_t, int32_t> observation_to_current_speaker;
+  for (std::size_t index = 0;
+       index < preliminary_segments.size() && index < reconciled_segments.size();
+       ++index) {
+    observation_to_current_speaker[preliminary_segments[index].speaker_id] =
+        reconciled_segments[index].speaker_id;
+  }
+
+  std::vector<std::vector<float>> embeddings(
+      static_cast<std::size_t>(std::max(0, final_speaker_count)));
+  std::vector<int32_t> counts(embeddings.size(), 0);
+  for (const auto& observation : observations) {
+    const auto current =
+        observation_to_current_speaker.find(observation.observation_id);
+    if (current == observation_to_current_speaker.end() ||
+        current->second < 0 || current->second >= final_speaker_count ||
+        !has_embedding_signal(observation.embedding)) {
+      continue;
+    }
+    auto& prototype = embeddings[static_cast<std::size_t>(current->second)];
+    if (prototype.empty()) prototype.assign(observation.embedding.size(), 0.0f);
+    if (prototype.size() != observation.embedding.size()) continue;
+    for (std::size_t dimension = 0;
+         dimension < observation.embedding.size(); ++dimension) {
+      prototype[dimension] += observation.embedding[dimension];
+    }
+    ++counts[static_cast<std::size_t>(current->second)];
+  }
+  for (std::size_t speaker = 0; speaker < embeddings.size(); ++speaker) {
+    if (counts[speaker] <= 0) continue;
+    for (float& value : embeddings[speaker]) {
+      value /= static_cast<float>(counts[speaker]);
+    }
+    normalize_embedding(embeddings[speaker]);
+  }
+  return embeddings;
+}
+
 void stitch_dominant_non_overlapping_tracks(
     std::vector<SherpaDiarizationSegment>& segments,
     int32_t& final_speaker_count,
@@ -276,7 +319,8 @@ void stitch_dominant_non_overlapping_tracks(
 void collapse_fragmented_secondary_tracks(
     std::vector<SherpaDiarizationSegment>& segments,
     int32_t& final_speaker_count,
-    std::size_t observation_count) {
+    std::size_t observation_count,
+    const std::vector<std::vector<float>>& final_speaker_embeddings) {
   if (final_speaker_count < kFragmentedSecondaryMinFinalSpeakers ||
       observation_count < kFragmentedSecondaryMinObservations ||
       segments.empty()) {
@@ -305,8 +349,10 @@ void collapse_fragmented_secondary_tracks(
 
   int32_t dominant_speaker = -1;
   int32_t largest_minority_speaker = -1;
+  int32_t second_largest_minority_speaker = -1;
   std::int64_t dominant_speech_us = 0;
   std::int64_t largest_minority_speech_us = 0;
+  std::int64_t second_largest_minority_speech_us = 0;
   std::int64_t minority_speech_us = 0;
   float earliest_minority_start_sec = 0.0f;
   bool saw_minority = false;
@@ -332,8 +378,13 @@ void collapse_fragmented_secondary_tracks(
           std::min(earliest_minority_start_sec, st.first_start_sec);
     }
     if (st.speech_us > largest_minority_speech_us) {
+      second_largest_minority_speaker = largest_minority_speaker;
+      second_largest_minority_speech_us = largest_minority_speech_us;
       largest_minority_speaker = sid;
       largest_minority_speech_us = st.speech_us;
+    } else if (st.speech_us > second_largest_minority_speech_us) {
+      second_largest_minority_speaker = sid;
+      second_largest_minority_speech_us = st.speech_us;
     }
   }
   if (!saw_minority || largest_minority_speaker < 0) return;
@@ -350,6 +401,37 @@ void collapse_fragmented_secondary_tracks(
       minority_share < kFragmentedSecondaryMinMinorityShare ||
       largest_minority_share > kFragmentedSecondaryMaxSingleMinorityShare) {
     return;
+  }
+
+  float strongest_minority_similarity = 1.0f;
+  if (second_largest_minority_speaker >= 0) {
+    if (static_cast<std::size_t>(largest_minority_speaker) >=
+            final_speaker_embeddings.size() ||
+        static_cast<std::size_t>(second_largest_minority_speaker) >=
+            final_speaker_embeddings.size() ||
+        !has_embedding_signal(
+            final_speaker_embeddings[largest_minority_speaker]) ||
+        !has_embedding_signal(
+            final_speaker_embeddings[second_largest_minority_speaker])) {
+      return;
+    }
+    strongest_minority_similarity = cosine_similarity(
+        final_speaker_embeddings[largest_minority_speaker],
+        final_speaker_embeddings[second_largest_minority_speaker]);
+    if (strongest_minority_similarity <
+        kFragmentedSecondaryStrongVoiceSimilarity) {
+      svp::core::trace_memory_event(
+          "diarization.fragmented_secondary_collapse.rejected", {
+              {"reason", "strongest_minority_tracks_disagree"},
+              {"largest_minority_speaker",
+               std::to_string(largest_minority_speaker)},
+              {"second_largest_minority_speaker",
+               std::to_string(second_largest_minority_speaker)},
+              {"strongest_minority_similarity",
+               std::to_string(strongest_minority_similarity)}
+          });
+      return;
+    }
   }
 
   const bool dominant_starts_first =
@@ -371,6 +453,8 @@ void collapse_fragmented_secondary_tracks(
       {"dominant_share", std::to_string(dominant_share)},
       {"minority_share", std::to_string(minority_share)},
       {"largest_minority_share", std::to_string(largest_minority_share)},
+      {"strongest_minority_similarity",
+       std::to_string(strongest_minority_similarity)},
       {"final_speaker_count", std::to_string(final_speaker_count)}
   });
 }

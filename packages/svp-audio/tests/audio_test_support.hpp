@@ -11,7 +11,6 @@
 #include "svp/audio/vad_execution_boundary.hpp"
 #include "svp/audio/vad_task_plan.hpp"
 #include "svp/audio/waveform_envelope.hpp"
-#include "svp/audio/whisper_mel.hpp"
 #include "svp/audio/whisper_model.hpp"
 #include "../src/sherpa_diarization/private.hpp"
 

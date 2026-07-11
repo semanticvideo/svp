@@ -28,6 +28,13 @@ struct DuplicateTurnMatch {
   bool duplicate_capture_proven = false;
 };
 
+struct SuppressionContinuation {
+  std::size_t weaker_group = 0;
+  std::size_t stronger_group = 0;
+  std::int64_t chunk_ordinal = 0;
+  std::int64_t current_end_us = 0;
+};
+
 std::string normalized_token(const std::string& text) {
   std::string normalized;
   normalized.reserve(text.size());
@@ -91,6 +98,13 @@ std::optional<double> local_snr_db(const MicrophoneTranscript& transcript,
                             ? levels[middle]
                             : (levels[middle - 1] + levels[middle]) / 2.0;
   return median - *transcript.signal_profile.noise_floor_db;
+}
+
+double mean_transcript_confidence(const MicrophoneTranscript& transcript) {
+  if (transcript.words.empty()) return 0.0;
+  double total = 0.0;
+  for (const AsrWord& word : transcript.words) total += word.confidence;
+  return total / static_cast<double>(transcript.words.size());
 }
 
 bool terminal_punctuation(const std::string& text) {
@@ -218,10 +232,42 @@ bool local_fingerprint_not_contrary(
          policy.maximum_contrary_voice_fingerprint_similarity;
 }
 
+bool local_fingerprint_matches(
+    const MicrophoneTranscript& left,
+    const MicrophoneTranscript& right,
+    const TimeSpan& left_timing,
+    const TimeSpan& right_timing,
+    const MicrophoneDeduplicationPolicy& policy) {
+  const MicrophoneVoiceTrack* left_track =
+      dominant_track_at_timing(left, left_timing);
+  const MicrophoneVoiceTrack* right_track =
+      dominant_track_at_timing(right, right_timing);
+  if (left_track == nullptr || right_track == nullptr) return false;
+  return fingerprint_similarity(left_track->fingerprint,
+                                right_track->fingerprint) >=
+         policy.minimum_voice_fingerprint_similarity;
+}
+
 bool word_in_turn(const AsrWord& word, const OwnershipTurn& turn) {
   return word.chunk_ordinal == turn.chunk_ordinal &&
          word.start_us >= turn.timing.start_us &&
          word.end_us <= turn.timing.end_us;
+}
+
+std::vector<std::string> tokens_in_window(
+    const MicrophoneTranscript& transcript,
+    std::int64_t chunk_ordinal,
+    const TimeSpan& window) {
+  std::vector<std::string> tokens;
+  for (const AsrWord& word : transcript.words) {
+    if (word.chunk_ordinal != chunk_ordinal ||
+        word.start_us >= window.end_us || word.end_us <= window.start_us) {
+      continue;
+    }
+    std::string token = normalized_token(word.text);
+    if (!token.empty()) tokens.push_back(std::move(token));
+  }
+  return tokens;
 }
 
 const AsrWord* aligned_word(const DuplicateTurnMatch& match,
@@ -337,6 +383,32 @@ MicrophoneWordOwnershipResult reconcile_cross_anchor_word_ownership(
     }
   }
 
+  std::vector<SuppressionContinuation> continuations;
+  for (const DuplicateTurnMatch& match : matches) {
+    if (!match.duplicate_capture_proven) continue;
+    const MicrophoneTranscript& left =
+        transcripts.at(transcript_by_group.at(match.left_group));
+    const MicrophoneTranscript& right =
+        transcripts.at(transcript_by_group.at(match.right_group));
+    if (!local_fingerprint_not_contrary(left, right, match.left.timing,
+                                        match.right.timing, policy)) {
+      continue;
+    }
+    const auto left_snr = local_snr_db(left, match.left.timing);
+    const auto right_snr = local_snr_db(right, match.right.timing);
+    if (!left_snr.has_value() || !right_snr.has_value() ||
+        *left_snr == *right_snr) {
+      continue;
+    }
+    const bool left_is_weaker = *left_snr < *right_snr;
+    continuations.push_back({
+        left_is_weaker ? match.left_group : match.right_group,
+        left_is_weaker ? match.right_group : match.left_group,
+        match.left.chunk_ordinal,
+        left_is_weaker ? match.left.timing.end_us : match.right.timing.end_us,
+    });
+  }
+
   for (const MicrophoneOwnedWordCandidate& candidate : words) {
     const auto own_found = transcript_by_group.find(candidate.voice_group);
     if (own_found == transcript_by_group.end()) continue;
@@ -344,6 +416,7 @@ MicrophoneWordOwnershipResult reconcile_cross_anchor_word_ownership(
         transcripts.at(own_found->second);
     bool loses_duplicate_capture = false;
     std::optional<std::size_t> stronger_source_ordinal;
+    std::string suppression_reason;
     for (const DuplicateTurnMatch& match : matches) {
       if (!match.duplicate_capture_proven) continue;
       const bool own_is_left = match.left_group == candidate.voice_group;
@@ -358,26 +431,131 @@ MicrophoneWordOwnershipResult reconcile_cross_anchor_word_ownership(
           transcripts.at(transcript_by_group.at(other_group));
       const AsrWord* other_word =
           aligned_word(match, candidate.word, own_is_left, policy);
-      if (other_word == nullptr) continue;
-      const bool fingerprint_agreement = local_fingerprint_not_contrary(
-          own_transcript, other_transcript,
-          {candidate.word.start_us, candidate.word.end_us},
-          {other_word->start_us, other_word->end_us}, policy);
+      const OwnershipTurn& other_turn = own_is_left ? match.right : match.left;
+      const TimeSpan own_timing{candidate.word.start_us,
+                                candidate.word.end_us};
+      const TimeSpan other_timing = other_word != nullptr
+                                        ? TimeSpan{other_word->start_us,
+                                                   other_word->end_us}
+                                        : own_timing;
+      const bool fingerprint_agreement =
+          other_word != nullptr
+              ? local_fingerprint_not_contrary(
+                    own_transcript, other_transcript, own_timing,
+                    other_timing, policy)
+              : local_fingerprint_matches(
+                    own_transcript, other_transcript, own_timing,
+                    other_timing, policy);
       if (!fingerprint_agreement) continue;
       const std::optional<double> own_snr =
-          local_snr_db(own_transcript,
-                       {candidate.word.start_us, candidate.word.end_us});
+          local_snr_db(own_transcript, own_turn.timing);
       const std::optional<double> other_snr =
-          local_snr_db(other_transcript,
-                       {other_word->start_us, other_word->end_us});
+          local_snr_db(other_transcript, other_turn.timing);
       if (own_snr.has_value() && other_snr.has_value() &&
           *other_snr > *own_snr) {
         loses_duplicate_capture = true;
         stronger_source_ordinal = other_transcript.source_ordinal;
+        suppression_reason = other_word != nullptr
+                                 ? "aligned_turn_duplicate"
+                                 : "fingerprinted_turn_residue";
+        break;
+      }
+    }
+    if (!loses_duplicate_capture) {
+      const std::int64_t center_us =
+          candidate.word.start_us +
+          (candidate.word.end_us - candidate.word.start_us) / 2;
+      const TimeSpan local_window = {
+          std::max<std::int64_t>(
+              0, center_us - policy.maximum_residual_window_radius_us),
+          center_us + policy.maximum_residual_window_radius_us,
+      };
+      const auto own_tokens = tokens_in_window(
+          own_transcript, candidate.word.chunk_ordinal, local_window);
+      for (const MicrophoneSpeakerAnchor& other_anchor : anchors) {
+        if (other_anchor.voice_group == candidate.voice_group) continue;
+        const MicrophoneTranscript& other_transcript =
+            transcripts.at(other_anchor.transcript_index);
+        const auto other_tokens = tokens_in_window(
+            other_transcript, candidate.word.chunk_ordinal, local_window);
+        const auto aligned = lcs_tokens(own_tokens, other_tokens);
+        const std::size_t token_total = own_tokens.size() + other_tokens.size();
+        const double alignment_ratio = token_total > 0
+            ? 2.0 * static_cast<double>(aligned.size()) /
+                  static_cast<double>(token_total)
+            : 0.0;
+        const TimeSpan word_timing{candidate.word.start_us,
+                                   candidate.word.end_us};
+        if (aligned.size() < policy.minimum_duplicate_aligned_token_count ||
+            alignment_ratio <=
+                policy.minimum_duplicate_chunk_token_alignment_ratio ||
+            !local_fingerprint_not_contrary(own_transcript, other_transcript,
+                                            word_timing, word_timing, policy)) {
+          continue;
+        }
+        const auto own_snr = local_snr_db(own_transcript, local_window);
+        const auto other_snr = local_snr_db(other_transcript, local_window);
+        if (own_snr.has_value() && other_snr.has_value() &&
+            *other_snr > *own_snr) {
+          loses_duplicate_capture = true;
+          stronger_source_ordinal = other_transcript.source_ordinal;
+          suppression_reason = "local_window_duplicate";
+          break;
+        }
+      }
+    }
+    if (!loses_duplicate_capture) {
+      const TimeSpan word_timing{candidate.word.start_us,
+                                 candidate.word.end_us};
+      for (SuppressionContinuation& continuation : continuations) {
+        if (continuation.weaker_group != candidate.voice_group ||
+            continuation.chunk_ordinal != candidate.word.chunk_ordinal ||
+            candidate.word.start_us >
+                continuation.current_end_us +
+                    policy.maximum_speaker_segment_gap_us) {
+          continue;
+        }
+        const bool reverse_continuation_active = std::any_of(
+            continuations.begin(), continuations.end(),
+            [&](const SuppressionContinuation& reverse) {
+              return reverse.weaker_group == continuation.stronger_group &&
+                     reverse.stronger_group == continuation.weaker_group &&
+                     reverse.chunk_ordinal == continuation.chunk_ordinal &&
+                     candidate.word.start_us <=
+                         reverse.current_end_us +
+                             policy.maximum_speaker_segment_gap_us;
+            });
+        if (reverse_continuation_active) continue;
+        const MicrophoneTranscript& stronger = transcripts.at(
+            transcript_by_group.at(continuation.stronger_group));
+        if (!local_fingerprint_matches(own_transcript, stronger, word_timing,
+                                       word_timing, policy)) {
+          continue;
+        }
+        const auto own_snr = local_snr_db(own_transcript, word_timing);
+        const auto stronger_snr = local_snr_db(stronger, word_timing);
+        if (!own_snr.has_value() || !stronger_snr.has_value() ||
+            *stronger_snr <= *own_snr) {
+          continue;
+        }
+        continuation.current_end_us =
+            std::max(continuation.current_end_us, candidate.word.end_us);
+        loses_duplicate_capture = true;
+        stronger_source_ordinal = stronger.source_ordinal;
+        suppression_reason = "duplicate_turn_continuation";
         break;
       }
     }
     if (loses_duplicate_capture) {
+      result.discarded_word_evidence.push_back({
+          candidate.word.text,
+          candidate.word.start_us,
+          candidate.word.end_us,
+          candidate.word.chunk_ordinal,
+          candidate.source_ordinal,
+          stronger_source_ordinal,
+          suppression_reason,
+      });
       ++result.discarded_cross_anchor_bleed_word_count;
       ++result.discarded_word_count_by_source[candidate.source_ordinal];
       if (stronger_source_ordinal.has_value()) {

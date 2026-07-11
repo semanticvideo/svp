@@ -330,8 +330,12 @@ SherpaDiarizationResult run_sherpa_diarization(
                                : final_speakers.size());
   stitch_dominant_non_overlapping_tracks(
       result.segments, result.final_speaker_count, speaker_observations.size());
+  const auto current_speaker_embeddings = build_reconciled_speaker_embeddings(
+      speaker_observations, preliminary_segments, result.segments,
+      result.final_speaker_count);
   collapse_fragmented_secondary_tracks(
-      result.segments, result.final_speaker_count, speaker_observations.size());
+      result.segments, result.final_speaker_count, speaker_observations.size(),
+      current_speaker_embeddings);
   collapse_single_dominant_track(result.segments, result.final_speaker_count);
 
   result.final_speaker_fingerprints.assign(

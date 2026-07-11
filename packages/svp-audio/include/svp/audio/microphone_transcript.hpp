@@ -41,10 +41,16 @@ struct MicrophoneDeduplicationPolicy {
   // tolerance permits small decoder timing drift while still requiring local,
   // not chunk-wide, agreement between microphone captures.
   std::int64_t maximum_duplicate_word_time_delta_us = 1500000;
-  // Source-level bleed classification requires a supermajority of words to
-  // have already passed exact word-local duplicate proof. Voice, timing, SNR,
-  // and ASR-confidence gates below must independently agree.
-  double minimum_explained_duplicate_word_ratio = 2.0 / 3.0;
+  // Residual ASR tokens use a symmetric window twice the word-pair tolerance
+  // so differently segmented decoders can still establish local agreement.
+  std::int64_t maximum_residual_window_radius_us = 3000000;
+  // Source-level bleed classification requires at least half of the words to
+  // have already passed exact word-local duplicate proof. This is only an
+  // initial content gate: voice, timing, SNR, and ASR-confidence gates below
+  // must independently agree before decoder residue can be removed.
+  // Sparse decoder residue is removable only after nearly all source words
+  // have already been explained as exact, time-aligned duplicate capture.
+  double minimum_explained_duplicate_word_ratio = 0.95;
   // Nearly all of the weaker source's voice and simultaneous speech must match
   // before unmatched ASR residue can be evaluated as bleed.
   double minimum_explained_voice_ratio = 0.95;
@@ -161,9 +167,20 @@ struct MicrophoneChunkContentEvidence {
   bool duplicate_capture_proven = false;
 };
 
+struct MicrophoneDiscardedWordEvidence {
+  std::string text;
+  std::int64_t start_us = 0;
+  std::int64_t end_us = 0;
+  std::int64_t chunk_ordinal = 0;
+  std::size_t source_ordinal = 0;
+  std::optional<std::size_t> stronger_source_ordinal;
+  std::string reason;
+};
+
 struct MicrophoneWordOwnershipResult {
   std::vector<MicrophoneOwnedWordCandidate> words;
   std::vector<MicrophoneChunkContentEvidence> chunk_content_evidence;
+  std::vector<MicrophoneDiscardedWordEvidence> discarded_word_evidence;
   std::size_t discarded_cross_anchor_bleed_word_count = 0;
   std::map<std::size_t, std::size_t> discarded_word_count_by_source;
   std::map<std::size_t, std::map<std::size_t, std::size_t>>
@@ -180,6 +197,7 @@ struct MicrophoneTranscriptResult {
   std::vector<MicrophoneSourceQualityEvidence> source_quality_evidence;
   std::vector<MicrophoneSourceAssignmentEvidence> source_assignment_evidence;
   std::vector<MicrophoneChunkContentEvidence> chunk_content_evidence;
+  std::vector<MicrophoneDiscardedWordEvidence> discarded_word_evidence;
   std::size_t input_word_count = 0;
   std::size_t duplicate_word_count = 0;
   std::size_t discarded_ambiguous_word_count = 0;
