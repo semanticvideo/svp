@@ -528,12 +528,8 @@ MicrophoneWordOwnershipResult reconcile_cross_anchor_word_ownership(
         if (reverse_continuation_active) continue;
         const MicrophoneTranscript& stronger = transcripts.at(
             transcript_by_group.at(continuation.stronger_group));
-        const bool local_voice_available =
-            dominant_track_at_timing(own_transcript, word_timing) != nullptr ||
-            dominant_track_at_timing(stronger, word_timing) != nullptr;
-        if (!local_voice_available &&
-            mean_transcript_confidence(stronger) <=
-                mean_transcript_confidence(own_transcript)) {
+        if (!local_fingerprint_matches(own_transcript, stronger, word_timing,
+                                       word_timing, policy)) {
           continue;
         }
         const auto own_snr = local_snr_db(own_transcript, word_timing);

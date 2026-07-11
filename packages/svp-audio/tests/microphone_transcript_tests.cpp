@@ -343,6 +343,19 @@ void test_collapsed_bleed_chain_resolves_to_authoritative_root() {
   assert(result.speakers[0].source_audio_stream_ids.size() == 3);
   assert(result.source_assignment_evidence[1].anchor_source_ordinal == 0);
   assert(result.source_assignment_evidence[2].anchor_source_ordinal == 0);
+  assert(result.discarded_word_evidence.size() ==
+         result.discarded_cross_anchor_bleed_word_count);
+  std::size_t discarded_pair_count = 0;
+  for (const auto& [source, anchor_counts] :
+       result.discarded_word_count_by_source_pair) {
+    (void)source;
+    for (const auto& [anchor, count] : anchor_counts) {
+      (void)anchor;
+      discarded_pair_count += count;
+    }
+  }
+  assert(discarded_pair_count ==
+         result.discarded_cross_anchor_bleed_word_count);
 }
 
 void test_evidence_combination_collapses_decoder_residue_at_half_content_gate() {

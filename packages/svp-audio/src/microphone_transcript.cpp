@@ -397,7 +397,6 @@ MicrophoneTranscriptResult reconcile_microphone_transcripts(
   for (const auto& [group, primary] : primary_by_group) {
     anchors.push_back({group, primary});
   }
-  const std::vector<MicrophoneOwnedWordCandidate> all_candidates = candidates;
   MicrophoneWordOwnershipResult ownership =
       reconcile_cross_anchor_word_ownership(candidates, transcripts, anchors,
                                             policy);
@@ -582,7 +581,7 @@ MicrophoneTranscriptResult reconcile_microphone_transcripts(
   }
   if (!collapsed_source_anchors.empty()) {
     std::vector<MicrophoneOwnedWordCandidate> retained_source_candidates;
-    for (const auto& candidate : all_candidates) {
+    for (const auto& candidate : candidates) {
       if (!collapsed_source_anchors.contains(candidate.source_ordinal)) {
         retained_source_candidates.push_back(candidate);
       }
@@ -604,8 +603,17 @@ MicrophoneTranscriptResult reconcile_microphone_transcripts(
         result.chunk_content_evidence.end(),
         retained_ownership.chunk_content_evidence.begin(),
         retained_ownership.chunk_content_evidence.end());
-    result.discarded_word_evidence =
-        std::move(retained_ownership.discarded_word_evidence);
+    result.discarded_word_evidence.insert(
+        result.discarded_word_evidence.end(),
+        retained_ownership.discarded_word_evidence.begin(),
+        retained_ownership.discarded_word_evidence.end());
+    for (const auto& [source_ordinal, anchor_counts] :
+         retained_ownership.discarded_word_count_by_source_pair) {
+      for (const auto& [anchor_ordinal, count] : anchor_counts) {
+        ownership.discarded_word_count_by_source_pair[source_ordinal]
+                                                     [anchor_ordinal] += count;
+      }
+    }
     result.discarded_cross_anchor_bleed_word_count =
         result.input_word_count - candidates.size();
   }
