@@ -68,6 +68,11 @@ int main() {
   test_set_sherpa_lib_path_with_invalid_path_leaves_unavailable();
   test_multi_candidate_search_does_not_crash_when_no_candidate_exists();
   test_reconcile_clusters_still_works_after_lib_discovery();
+  test_spectral_speaker_count_estimator_finds_three_clusters();
+  test_spectral_speaker_count_estimator_preserves_cannot_link_pair();
+  test_fragmented_speaker_fallback_accepts_dominant_fragment_shape();
+  test_fragmented_speaker_fallback_rejects_balanced_tracks();
+  test_fragmented_speaker_fallback_rejects_dense_observation_history();
   test_sequence_decoder_preserves_supported_group_decision();
   test_strong_segment_lock_preserves_supported_group_decision();
   test_punctuated_segment_repair_preserves_supported_group_decision();
