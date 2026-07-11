@@ -149,6 +149,11 @@ SherpaDiarizationResult run_sherpa_diarization(
   if (on_progress && total_chunks > 0) {
     on_progress(0, total_chunks);
   }
+  const auto complete_progress = [&]() {
+    if (on_progress && completed_chunks < total_chunks) {
+      on_progress(total_chunks, total_chunks);
+    }
+  };
   for (std::size_t wi = 0; wi < windows.size(); ++wi) {
     const auto& win = windows[wi];
     const float accepted_start_sec =
@@ -338,6 +343,7 @@ SherpaDiarizationResult run_sherpa_diarization(
     result.reconciliation_method =
         "windowed_sherpa_5min_overlap_2s; no_speech_detected";
     destroy_extractor();
+    complete_progress();
     return result;
   }
 
@@ -450,6 +456,7 @@ SherpaDiarizationResult run_sherpa_diarization(
       "dominant_and_fragmented_secondary_track_policy";
 
   result.ran = true;
+  complete_progress();
   return result;
 }
 

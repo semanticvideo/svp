@@ -213,7 +213,7 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
         // The inference call below owns WAV-read failure reporting.
       }
     }
-    if (total_fingerprint_chunks > 0 && diarization_progress.started) {
+    if (diarization_progress.started) {
       diarization_progress.started();
     }
   }
