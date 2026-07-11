@@ -232,7 +232,15 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
       std::move(diar_boundary), context.staging_dir, model_cache_root,
       context.options.allow_fallback_diarization,
       context.options.force_single_speaker,
-      executed_asr_boundary.reconciled_words);
+      executed_asr_boundary.reconciled_words,
+      [&context](std::size_t current, std::size_t total) {
+        if (total > 0) {
+          emit_stage_progress(
+              context, ProgressStageId::diarization,
+              static_cast<std::uint64_t>(current),
+              static_cast<std::uint64_t>(total), "chunks");
+        }
+      });
   emit_stage_completed(context, ProgressStageId::diarization);
 
   if (context.stage_plan.run_audio &&

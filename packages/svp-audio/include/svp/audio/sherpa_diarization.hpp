@@ -4,11 +4,15 @@
 #include "svp/audio/transcript_records.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
 
 namespace svp::audio {
+
+using DiarizationProgressCallback =
+    std::function<void(std::size_t current, std::size_t total)>;
 
 struct SherpaDiarizationSegment {
   float start_sec = 0.0f;
@@ -55,7 +59,8 @@ struct ReconciliationResult {
 [[nodiscard]] SherpaDiarizationResult run_sherpa_diarization(
     const std::filesystem::path& wav_path,
     const std::filesystem::path& model_dir,
-    const std::vector<AsrWord>& words = {});
+    const std::vector<AsrWord>& words = {},
+    DiarizationProgressCallback on_progress = {});
 
 [[nodiscard]] std::vector<std::string> refine_word_speakers_by_embedding(
     const std::filesystem::path& wav_path,

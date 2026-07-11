@@ -16,7 +16,8 @@ using namespace sherpa_diarization_internal;
 SherpaDiarizationResult run_sherpa_diarization(
     const std::filesystem::path& wav_path,
     const std::filesystem::path& model_dir,
-    const std::vector<AsrWord>& words) {
+    const std::vector<AsrWord>& words,
+    DiarizationProgressCallback on_progress) {
   SherpaDiarizationResult result;
 
   const SherpaDiarizationApi& api = get_api();
@@ -120,6 +121,19 @@ SherpaDiarizationResult run_sherpa_diarization(
   int32_t preliminary_speakers = 0;
 
   const auto windows = build_diarization_windows(wav_info.sample_count);
+  std::size_t total_chunks = 0;
+  for (const auto& window : windows) {
+    const std::size_t window_samples =
+        window.process_end - window.process_start;
+    total_chunks +=
+        (window_samples +
+         static_cast<std::size_t>(kMaxDiarizationChunkSamples) - 1) /
+        static_cast<std::size_t>(kMaxDiarizationChunkSamples);
+  }
+  std::size_t completed_chunks = 0;
+  if (on_progress && total_chunks > 0) {
+    on_progress(0, total_chunks);
+  }
   for (std::size_t wi = 0; wi < windows.size(); ++wi) {
     const auto& win = windows[wi];
     const float accepted_start_sec =
@@ -268,6 +282,10 @@ SherpaDiarizationResult run_sherpa_diarization(
           cannot_link_observations.insert(
               std::minmax(chunk_observation_ids[i], chunk_observation_ids[j]));
         }
+      }
+      ++completed_chunks;
+      if (on_progress) {
+        on_progress(completed_chunks, total_chunks);
       }
     }
     api.destroy(sd);

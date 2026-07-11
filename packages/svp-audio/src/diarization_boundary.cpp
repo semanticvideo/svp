@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace svp::audio {
 namespace {
@@ -127,7 +128,8 @@ DiarizationExecutionBoundary execute_diarization_boundary(
     const std::filesystem::path& model_cache_root,
     bool allow_fallback,
     bool force_single_speaker,
-    const std::vector<AsrWord>& words) {
+    const std::vector<AsrWord>& words,
+    DiarizationProgressCallback on_progress) {
   if (force_single_speaker) {
     SpeakerSegment single_segment;
     single_segment.id = segment_id_for_ordinal(0);
@@ -217,7 +219,8 @@ DiarizationExecutionBoundary execute_diarization_boundary(
   }
 
   SherpaDiarizationResult diar_result =
-      run_sherpa_diarization(wav_path, model_dir, words);
+      run_sherpa_diarization(wav_path, model_dir, words,
+                             std::move(on_progress));
 
   if (!diar_result.ran) {
     for (const auto& blocker : diar_result.blockers) {

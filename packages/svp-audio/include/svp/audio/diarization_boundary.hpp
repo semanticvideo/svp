@@ -64,7 +64,8 @@ struct DiarizationExecutionBoundary {
     const std::filesystem::path& model_cache_root,
     bool allow_fallback = false,
     bool force_single_speaker = false,
-    const std::vector<AsrWord>& words = {});
+    const std::vector<AsrWord>& words = {},
+    DiarizationProgressCallback on_progress = {});
 
 [[nodiscard]] std::string diarization_status_to_string(DiarizationStatus status);
 
