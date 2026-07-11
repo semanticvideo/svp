@@ -56,6 +56,7 @@ struct RealAsrFixtureCase {
   std::string filename;
   std::int64_t duration_us;
   std::vector<ExpectedSpeechBlock> blocks;
+  bool require_uniform_block_attribution = false;
 };
 
 void assert_real_asr_fixture_word_attribution(
@@ -161,13 +162,24 @@ void assert_real_asr_fixture_word_attribution(
     for (std::size_t i = 0; i < asr_boundary.reconciled_words.size(); ++i) {
       const svp::audio::AsrWord& word = asr_boundary.reconciled_words[i];
       const std::int64_t midpoint_us = word.start_us + ((word.end_us - word.start_us) / 2);
-      if (midpoint_us >= block.start_us && midpoint_us < block.end_us) {
+      const bool inside_block = fixture_case.require_uniform_block_attribution
+                                    ? word.start_us >= block.start_us &&
+                                          word.end_us <= block.end_us
+                                    : midpoint_us >= block.start_us &&
+                                          midpoint_us < block.end_us;
+      if (inside_block) {
         ++speaker_counts[final_word_speaker_ids[i]];
       }
     }
     if (speaker_counts.empty()) {
       throw std::runtime_error("no ASR words landed in expected block for fixture: " +
                                fixture_case.filename);
+    }
+    if (fixture_case.require_uniform_block_attribution &&
+        speaker_counts.size() != 1) {
+      throw std::runtime_error(
+          "fixture speaker block contains mixed attribution for " +
+          fixture_case.filename);
     }
 
     const auto majority =
@@ -225,6 +237,15 @@ void test_real_asr_diarization_word_attribution_fixtures_when_enabled() {
         {48000000, 58000000, "A"},
         {64000000, 74000000, "B"},
         {80000000, 90000000, "C"}}},
+      {"similar-timbre-two-speaker.wav",
+       16800000,
+       {{240000, 2820000, "A"},
+        {3030000, 6040000, "B"},
+        {6120000, 11860000, "A"},
+        {11940000, 13060000, "B"},
+        {13140000, 14510000, "A"},
+        {14590000, 16590000, "B"}},
+       true},
   };
 
   for (const RealAsrFixtureCase& fixture_case : cases) {

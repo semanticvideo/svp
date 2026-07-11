@@ -19,6 +19,7 @@ void refine_word_local_assignments(
   std::size_t word_local_embedding_requests = 0;
   for (std::size_t word_index = 0; word_index < words.size(); ++word_index) {
     if (!state.word_local_required[word_index]) continue;
+    if (state.group_decision_supported[word_index]) continue;
     const std::int64_t start_us =
         std::max<std::int64_t>(0, words[word_index].start_us -
                                       kFingerprintWordWindowPaddingUs);

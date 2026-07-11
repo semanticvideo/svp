@@ -50,6 +50,7 @@ int main() {
   test_reconcile_three_cluster_min_gap_merges_all_to_one();
   test_fragmented_secondary_policy_collapses_to_two_speakers();
   test_fragmented_secondary_policy_leaves_flatter_multi_speaker_case();
+  test_fragmented_secondary_policy_preserves_distinct_minority_voices();
   test_speaker_total_speech_us_nonzero_for_single_speaker();
   test_speaker_total_speech_us_overlapping_not_double_counted();
   test_speaker_total_speech_us_multi_speaker();
