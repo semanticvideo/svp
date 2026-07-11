@@ -441,7 +441,7 @@ MicrophoneTranscriptResult reconcile_microphone_transcripts(
       if (candidate_anchor.source_ordinal == source.source_ordinal) continue;
       const auto anchor_snr = median_speech_snr_db(candidate_anchor);
       if (!anchor_snr.has_value() || *anchor_snr <= *source_snr ||
-          mean_confidence(candidate_anchor) <= mean_confidence(source)) {
+          mean_confidence(candidate_anchor) <= 0.0) {
         continue;
       }
       const auto evidence = std::find_if(
@@ -477,7 +477,7 @@ MicrophoneTranscriptResult reconcile_microphone_transcripts(
       if (candidate_anchor.source_ordinal == source.source_ordinal) continue;
       const auto anchor_snr = median_speech_snr_db(candidate_anchor);
       if (!anchor_snr.has_value() || *anchor_snr <= *source_snr ||
-          mean_confidence(candidate_anchor) <= mean_confidence(source)) {
+          mean_confidence(candidate_anchor) <= 0.0) {
         continue;
       }
       auto spans = matching_voice_spans(source, candidate_anchor, policy);

@@ -48,7 +48,9 @@ struct MicrophoneDeduplicationPolicy {
   // have already passed exact word-local duplicate proof. This is only an
   // initial content gate: voice, timing, SNR, and ASR-confidence gates below
   // must independently agree before decoder residue can be removed.
-  double minimum_explained_duplicate_word_ratio = 0.50;
+  // Sparse decoder residue is removable only after nearly all source words
+  // have already been explained as exact, time-aligned duplicate capture.
+  double minimum_explained_duplicate_word_ratio = 0.95;
   // Nearly all of the weaker source's voice and simultaneous speech must match
   // before unmatched ASR residue can be evaluated as bleed.
   double minimum_explained_voice_ratio = 0.95;
