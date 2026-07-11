@@ -29,6 +29,9 @@ add_library(svp-audio
   src/sherpa_diarization/reconciliation.cpp
   src/sherpa_diarization/runner.cpp
   src/sherpa_diarization/sequence_decoder.cpp
+  src/sherpa_diarization/speaker_count_estimator.cpp
+  src/sherpa_diarization/fragmented_speaker_fallback.cpp
+  src/sherpa_diarization/chunk_embedding_pass.cpp
   src/sherpa_diarization/wav_reader.cpp
   src/sherpa_diarization/windowing.cpp
   src/sherpa_diarization/word_assignment/delayed_segment_handoff_repair.cpp
@@ -94,9 +97,14 @@ if(BUILD_TESTING)
     tests/audio_stage_tests.cpp
     tests/diarization_boundary_tests.cpp
     tests/diarization_reconciliation_tests.cpp
+    tests/fragmented_speaker_fallback_tests.cpp
     tests/microphone_transcript_tests.cpp
+    tests/punctuated_segment_island_tests.cpp
     tests/audio_transcript_tests.cpp
     tests/real_diarization_fixture_tests.cpp
+    tests/sequence_decoder_assignment_tests.cpp
+    tests/speaker_count_estimator_tests.cpp
+    tests/strong_segment_lock_tests.cpp
     tests/transcript_record_tests.cpp
     tests/transcript_speaker_summary_tests.cpp
     tests/transcript_word_assignment_tests.cpp

@@ -9,6 +9,7 @@ void apply_strong_segment_locks(
     AssignmentState& state) {
   std::size_t strong_segment_locks_applied = 0;
   for (std::size_t i = 0; i < state.assignments.size(); ++i) {
+    if (state.group_decision_supported[i]) continue;
     if (state.strong_segment_assignments[i] < 0) continue;
     const std::string segment_speaker_id =
         speaker_id_for_index(state.strong_segment_assignments[i]);

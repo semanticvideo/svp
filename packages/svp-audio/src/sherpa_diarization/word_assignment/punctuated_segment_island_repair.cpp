@@ -38,6 +38,10 @@ void repair_punctuated_segment_islands(
         int32_t segment_speaker = -1;
         bool all_words_match_segment = true;
         for (std::size_t i = run_start; i <= run_end; ++i) {
+          if (state.group_decision_supported[i]) {
+            all_words_match_segment = false;
+            break;
+          }
           const SegmentOverlap overlap =
               best_segment_overlap_for_word(words[i], diar_result.segments);
           if (overlap.speaker < 0 ||
