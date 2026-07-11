@@ -54,6 +54,12 @@ void test_real_sherpa_diarization_speaker_count_fixtures_when_enabled() {
           "Sherpa diarization progress did not span the complete fixture: " +
           fixture.string());
     }
+    if (progress.front().second !=
+        svp::audio::diarization_chunk_count(fixture)) {
+      throw std::runtime_error(
+          "Sherpa diarization progress total did not match its chunk plan: " +
+          fixture.string());
+    }
     for (std::size_t index = 1; index < progress.size(); ++index) {
       if (progress[index].first < progress[index - 1].first ||
           progress[index].second != progress.front().second) {

@@ -115,6 +115,7 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
   svp::audio::AsrExecutionBoundary executed_asr_boundary;
   nlohmann::json microphone_asr_json = nlohmann::json::array();
   if (microphone_stream_mode) {
+    bool microphone_diarization_started = false;
     MicrophoneAsrStageResult microphone_result = run_microphone_asr_stage(
         audio_plan.extraction_plan, extraction_run, media_duration_us,
         asr_runtime_available, asr_model_available, asr_model_verified,
@@ -123,6 +124,19 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
           emit_stage_progress(context, ProgressStageId::asr,
                               static_cast<std::uint64_t>(current),
                               static_cast<std::uint64_t>(total), "chunks");
+        },
+        {
+            [&context, &microphone_diarization_started]() {
+              emit_stage_completed(context, ProgressStageId::asr);
+              emit_stage_started(context, ProgressStageId::diarization);
+              microphone_diarization_started = true;
+            },
+            [&context](std::size_t current, std::size_t total) {
+              emit_stage_progress(
+                  context, ProgressStageId::diarization,
+                  static_cast<std::uint64_t>(current),
+                  static_cast<std::uint64_t>(total), "chunks");
+            },
         });
     executed_asr_boundary = std::move(microphone_result.boundary);
     microphone_asr_json = std::move(microphone_result.stream_results);
@@ -136,6 +150,11 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
     if (!microphone_result.reconciliation.empty()) {
       audio_json["microphone_transcript_reconciliation"] =
           std::move(microphone_result.reconciliation);
+    }
+    if (microphone_diarization_started) {
+      emit_stage_completed(context, ProgressStageId::diarization);
+    } else {
+      emit_stage_completed(context, ProgressStageId::asr);
     }
   } else {
     const svp::audio::AsrChunkPlanResult asr_chunk_plan =
@@ -156,7 +175,9 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
         });
     svp::audio::release_whisper_cpp_model();
   }
-  emit_stage_completed(context, ProgressStageId::asr);
+  if (!microphone_stream_mode) {
+    emit_stage_completed(context, ProgressStageId::asr);
+  }
 
   audio_json["microphone_asr"] = std::move(microphone_asr_json);
 

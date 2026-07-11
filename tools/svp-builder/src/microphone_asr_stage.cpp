@@ -108,7 +108,8 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
     bool asr_model_verified,
     const std::filesystem::path& staging_dir,
     const std::filesystem::path& model_cache_root,
-    MicrophoneAsrProgressCallback progress) {
+    MicrophoneAsrProgressCallback progress,
+    MicrophoneDiarizationProgressCallbacks diarization_progress) {
   MicrophoneAsrStageResult result;
   std::vector<svp::audio::AsrExecutionBoundary> boundaries;
   std::vector<svp::audio::MicrophoneTranscript> transcripts;
@@ -196,7 +197,31 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
       speech_positive_streams > 1 &&
       std::filesystem::exists(fingerprint_model_dir) &&
       svp::audio::is_sherpa_diarization_available();
-  for (auto& transcript : transcripts) {
+
+  std::vector<std::size_t> fingerprint_chunks_by_source(transcripts.size(), 0);
+  std::size_t total_fingerprint_chunks = 0;
+  if (fingerprint_runtime_available) {
+    for (std::size_t index = 0; index < transcripts.size(); ++index) {
+      const auto& transcript = transcripts[index];
+      if (transcript.words.empty()) continue;
+      try {
+        fingerprint_chunks_by_source[index] =
+            svp::audio::diarization_chunk_count(
+                staging_dir / transcript.analysis_audio_ref);
+        total_fingerprint_chunks += fingerprint_chunks_by_source[index];
+      } catch (const std::exception&) {
+        // The inference call below owns WAV-read failure reporting.
+      }
+    }
+    if (total_fingerprint_chunks > 0 && diarization_progress.started) {
+      diarization_progress.started();
+    }
+  }
+
+  std::size_t completed_fingerprint_chunks = 0;
+  for (std::size_t transcript_index = 0;
+       transcript_index < transcripts.size(); ++transcript_index) {
+    auto& transcript = transcripts[transcript_index];
     nlohmann::json& stream_result =
         result.stream_results[transcript.source_ordinal];
     if (transcript.words.empty()) {
@@ -214,7 +239,16 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
       const svp::audio::SherpaDiarizationResult diarization =
           svp::audio::run_sherpa_diarization(
               staging_dir / transcript.analysis_audio_ref,
-              fingerprint_model_dir);
+              fingerprint_model_dir, {},
+              [diarization_progress, completed_fingerprint_chunks,
+               total_fingerprint_chunks](std::size_t current, std::size_t) {
+                if (diarization_progress.progress &&
+                    total_fingerprint_chunks > 0) {
+                  diarization_progress.progress(
+                      completed_fingerprint_chunks + current,
+                      total_fingerprint_chunks);
+                }
+              });
       transcript.voice_fingerprint =
           microphone_voice_fingerprint(diarization);
       transcript.voice_tracks = microphone_voice_tracks(diarization);
@@ -235,6 +269,8 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
                : nlohmann::json(nullptr)},
           {"blockers", diarization.blockers},
       };
+      completed_fingerprint_chunks +=
+          fingerprint_chunks_by_source[transcript_index];
     } else {
       stream_result["voice_fingerprint"] = {
           {"status", "unavailable"},

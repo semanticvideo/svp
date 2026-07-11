@@ -14,6 +14,9 @@ namespace svp::audio {
 using DiarizationProgressCallback =
     std::function<void(std::size_t current, std::size_t total)>;
 
+[[nodiscard]] std::size_t diarization_chunk_count(
+    const std::filesystem::path& wav_path);
+
 struct SherpaDiarizationSegment {
   float start_sec = 0.0f;
   float end_sec = 0.0f;

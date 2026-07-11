@@ -12,6 +12,28 @@
 namespace svp::audio {
 
 using namespace sherpa_diarization_internal;
+namespace {
+
+std::size_t chunk_count_for_sample_count(std::size_t sample_count) {
+  std::size_t total_chunks = 0;
+  for (const auto& window : build_diarization_windows(sample_count)) {
+    const std::size_t window_samples =
+        window.process_end - window.process_start;
+    total_chunks +=
+        (window_samples +
+         static_cast<std::size_t>(kMaxDiarizationChunkSamples) - 1) /
+        static_cast<std::size_t>(kMaxDiarizationChunkSamples);
+  }
+  return total_chunks;
+}
+
+}  // namespace
+
+std::size_t diarization_chunk_count(
+    const std::filesystem::path& wav_path) {
+  const PcmS16MonoWavInfo wav_info = read_pcm_s16le_mono_wav_info(wav_path);
+  return chunk_count_for_sample_count(wav_info.sample_count);
+}
 
 SherpaDiarizationResult run_sherpa_diarization(
     const std::filesystem::path& wav_path,
@@ -121,15 +143,8 @@ SherpaDiarizationResult run_sherpa_diarization(
   int32_t preliminary_speakers = 0;
 
   const auto windows = build_diarization_windows(wav_info.sample_count);
-  std::size_t total_chunks = 0;
-  for (const auto& window : windows) {
-    const std::size_t window_samples =
-        window.process_end - window.process_start;
-    total_chunks +=
-        (window_samples +
-         static_cast<std::size_t>(kMaxDiarizationChunkSamples) - 1) /
-        static_cast<std::size_t>(kMaxDiarizationChunkSamples);
-  }
+  const std::size_t total_chunks =
+      chunk_count_for_sample_count(wav_info.sample_count);
   std::size_t completed_chunks = 0;
   if (on_progress && total_chunks > 0) {
     on_progress(0, total_chunks);
