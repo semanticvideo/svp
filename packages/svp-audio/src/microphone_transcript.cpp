@@ -404,6 +404,7 @@ MicrophoneTranscriptResult reconcile_microphone_transcripts(
   candidates = std::move(ownership.words);
   result.chunk_content_evidence =
       std::move(ownership.chunk_content_evidence);
+  result.discarded_word_evidence = ownership.discarded_word_evidence;
   result.discarded_cross_anchor_bleed_word_count =
       ownership.discarded_cross_anchor_bleed_word_count;
 
@@ -603,6 +604,8 @@ MicrophoneTranscriptResult reconcile_microphone_transcripts(
         result.chunk_content_evidence.end(),
         retained_ownership.chunk_content_evidence.begin(),
         retained_ownership.chunk_content_evidence.end());
+    result.discarded_word_evidence =
+        std::move(retained_ownership.discarded_word_evidence);
     result.discarded_cross_anchor_bleed_word_count =
         result.input_word_count - candidates.size();
   }

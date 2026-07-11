@@ -165,9 +165,20 @@ struct MicrophoneChunkContentEvidence {
   bool duplicate_capture_proven = false;
 };
 
+struct MicrophoneDiscardedWordEvidence {
+  std::string text;
+  std::int64_t start_us = 0;
+  std::int64_t end_us = 0;
+  std::int64_t chunk_ordinal = 0;
+  std::size_t source_ordinal = 0;
+  std::optional<std::size_t> stronger_source_ordinal;
+  std::string reason;
+};
+
 struct MicrophoneWordOwnershipResult {
   std::vector<MicrophoneOwnedWordCandidate> words;
   std::vector<MicrophoneChunkContentEvidence> chunk_content_evidence;
+  std::vector<MicrophoneDiscardedWordEvidence> discarded_word_evidence;
   std::size_t discarded_cross_anchor_bleed_word_count = 0;
   std::map<std::size_t, std::size_t> discarded_word_count_by_source;
   std::map<std::size_t, std::map<std::size_t, std::size_t>>
@@ -184,6 +195,7 @@ struct MicrophoneTranscriptResult {
   std::vector<MicrophoneSourceQualityEvidence> source_quality_evidence;
   std::vector<MicrophoneSourceAssignmentEvidence> source_assignment_evidence;
   std::vector<MicrophoneChunkContentEvidence> chunk_content_evidence;
+  std::vector<MicrophoneDiscardedWordEvidence> discarded_word_evidence;
   std::size_t input_word_count = 0;
   std::size_t duplicate_word_count = 0;
   std::size_t discarded_ambiguous_word_count = 0;

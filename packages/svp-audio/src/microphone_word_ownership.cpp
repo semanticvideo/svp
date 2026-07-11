@@ -416,6 +416,7 @@ MicrophoneWordOwnershipResult reconcile_cross_anchor_word_ownership(
         transcripts.at(own_found->second);
     bool loses_duplicate_capture = false;
     std::optional<std::size_t> stronger_source_ordinal;
+    std::string suppression_reason;
     for (const DuplicateTurnMatch& match : matches) {
       if (!match.duplicate_capture_proven) continue;
       const bool own_is_left = match.left_group == candidate.voice_group;
@@ -454,6 +455,9 @@ MicrophoneWordOwnershipResult reconcile_cross_anchor_word_ownership(
           *other_snr > *own_snr) {
         loses_duplicate_capture = true;
         stronger_source_ordinal = other_transcript.source_ordinal;
+        suppression_reason = other_word != nullptr
+                                 ? "aligned_turn_duplicate"
+                                 : "fingerprinted_turn_residue";
         break;
       }
     }
@@ -495,6 +499,7 @@ MicrophoneWordOwnershipResult reconcile_cross_anchor_word_ownership(
             *other_snr > *own_snr) {
           loses_duplicate_capture = true;
           stronger_source_ordinal = other_transcript.source_ordinal;
+          suppression_reason = "local_window_duplicate";
           break;
         }
       }
@@ -510,6 +515,17 @@ MicrophoneWordOwnershipResult reconcile_cross_anchor_word_ownership(
                     policy.maximum_speaker_segment_gap_us) {
           continue;
         }
+        const bool reverse_continuation_active = std::any_of(
+            continuations.begin(), continuations.end(),
+            [&](const SuppressionContinuation& reverse) {
+              return reverse.weaker_group == continuation.stronger_group &&
+                     reverse.stronger_group == continuation.weaker_group &&
+                     reverse.chunk_ordinal == continuation.chunk_ordinal &&
+                     candidate.word.start_us <=
+                         reverse.current_end_us +
+                             policy.maximum_speaker_segment_gap_us;
+            });
+        if (reverse_continuation_active) continue;
         const MicrophoneTranscript& stronger = transcripts.at(
             transcript_by_group.at(continuation.stronger_group));
         const bool local_voice_available =
@@ -530,10 +546,20 @@ MicrophoneWordOwnershipResult reconcile_cross_anchor_word_ownership(
             std::max(continuation.current_end_us, candidate.word.end_us);
         loses_duplicate_capture = true;
         stronger_source_ordinal = stronger.source_ordinal;
+        suppression_reason = "duplicate_turn_continuation";
         break;
       }
     }
     if (loses_duplicate_capture) {
+      result.discarded_word_evidence.push_back({
+          candidate.word.text,
+          candidate.word.start_us,
+          candidate.word.end_us,
+          candidate.word.chunk_ordinal,
+          candidate.source_ordinal,
+          stronger_source_ordinal,
+          suppression_reason,
+      });
       ++result.discarded_cross_anchor_bleed_word_count;
       ++result.discarded_word_count_by_source[candidate.source_ordinal];
       if (stronger_source_ordinal.has_value()) {

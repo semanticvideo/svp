@@ -360,6 +360,21 @@ int run_microphone_reconciliation_replay(
                                  {"word_count", count}});
     }
   }
+  nlohmann::json discarded_words = nlohmann::json::array();
+  for (const auto& evidence : result.discarded_word_evidence) {
+    discarded_words.push_back({
+        {"text", evidence.text},
+        {"start_us", evidence.start_us},
+        {"end_us", evidence.end_us},
+        {"chunk_ordinal", evidence.chunk_ordinal},
+        {"source_ordinal", evidence.source_ordinal},
+        {"stronger_source_ordinal",
+         evidence.stronger_source_ordinal.has_value()
+             ? nlohmann::json(*evidence.stronger_source_ordinal)
+             : nlohmann::json(nullptr)},
+        {"reason", evidence.reason},
+    });
+  }
   nlohmann::json source_assignments = nlohmann::json::array();
   for (const auto& assignment : result.source_assignment_evidence) {
     source_assignments.push_back({
@@ -389,6 +404,7 @@ int run_microphone_reconciliation_replay(
       {"voice_matches", voice_matches},
       {"source_quality", source_quality},
       {"discarded_word_count_by_source_pair", discarded_pairs},
+      {"discarded_words", discarded_words},
       {"out_words_jsonl", options.out_words_jsonl_path},
   }).dump(2) << "\n";
   return 0;
