@@ -403,33 +403,35 @@ void collapse_fragmented_secondary_tracks(
     return;
   }
 
-  if (second_largest_minority_speaker < 0 ||
-      static_cast<std::size_t>(largest_minority_speaker) >=
-          final_speaker_embeddings.size() ||
-      static_cast<std::size_t>(second_largest_minority_speaker) >=
-          final_speaker_embeddings.size() ||
-      !has_embedding_signal(
-          final_speaker_embeddings[largest_minority_speaker]) ||
-      !has_embedding_signal(
-          final_speaker_embeddings[second_largest_minority_speaker])) {
-    return;
-  }
-  const float strongest_minority_similarity = cosine_similarity(
-      final_speaker_embeddings[largest_minority_speaker],
-      final_speaker_embeddings[second_largest_minority_speaker]);
-  if (strongest_minority_similarity <
-      kFragmentedSecondaryStrongVoiceSimilarity) {
-    svp::core::trace_memory_event(
-        "diarization.fragmented_secondary_collapse.rejected", {
-            {"reason", "strongest_minority_tracks_disagree"},
-            {"largest_minority_speaker",
-             std::to_string(largest_minority_speaker)},
-            {"second_largest_minority_speaker",
-             std::to_string(second_largest_minority_speaker)},
-            {"strongest_minority_similarity",
-             std::to_string(strongest_minority_similarity)}
-        });
-    return;
+  float strongest_minority_similarity = 1.0f;
+  if (second_largest_minority_speaker >= 0) {
+    if (static_cast<std::size_t>(largest_minority_speaker) >=
+            final_speaker_embeddings.size() ||
+        static_cast<std::size_t>(second_largest_minority_speaker) >=
+            final_speaker_embeddings.size() ||
+        !has_embedding_signal(
+            final_speaker_embeddings[largest_minority_speaker]) ||
+        !has_embedding_signal(
+            final_speaker_embeddings[second_largest_minority_speaker])) {
+      return;
+    }
+    strongest_minority_similarity = cosine_similarity(
+        final_speaker_embeddings[largest_minority_speaker],
+        final_speaker_embeddings[second_largest_minority_speaker]);
+    if (strongest_minority_similarity <
+        kFragmentedSecondaryStrongVoiceSimilarity) {
+      svp::core::trace_memory_event(
+          "diarization.fragmented_secondary_collapse.rejected", {
+              {"reason", "strongest_minority_tracks_disagree"},
+              {"largest_minority_speaker",
+               std::to_string(largest_minority_speaker)},
+              {"second_largest_minority_speaker",
+               std::to_string(second_largest_minority_speaker)},
+              {"strongest_minority_similarity",
+               std::to_string(strongest_minority_similarity)}
+          });
+      return;
+    }
   }
 
   const bool dominant_starts_first =

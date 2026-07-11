@@ -101,7 +101,8 @@ void assign_group_by_embedding(
   const bool group_decision_is_supported =
       state.similar_voice_fingerprints &&
       (selected_from_segment_evidence ||
-       margin >= kFingerprintUpdateMinMargin);
+       margin >= kFingerprintUpdateMinMargin) &&
+      margin >= kSelectiveWordLocalUnstableGroupMargin;
   for (std::size_t i = first_word; i <= last_word; ++i) {
     state.assignments[i] = speaker_id;
     if (group_decision_is_supported) {

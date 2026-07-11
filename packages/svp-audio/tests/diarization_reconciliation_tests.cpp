@@ -165,6 +165,21 @@ void test_fragmented_secondary_policy_preserves_distinct_minority_voices() {
   }
 }
 
+void test_fragmented_secondary_policy_collapses_single_minority_track() {
+  using svp::audio::sherpa_diarization_internal::collapse_fragmented_secondary_tracks;
+
+  std::vector<svp::audio::SherpaDiarizationSegment> segments = {
+      test_diarization_segment(0.0f, 86.0f, 0),
+      test_diarization_segment(100.0f, 14.0f, 1),
+  };
+  int32_t speaker_count = 5;
+  collapse_fragmented_secondary_tracks(segments, speaker_count, 35);
+
+  assert(speaker_count == 2);
+  assert(segments[0].speaker_id == 0);
+  assert(segments[1].speaker_id == 1);
+}
+
 void test_reconcile_clusters_still_works_after_lib_discovery() {
   std::vector<std::vector<float>> sim_matrix = {
       {1.0f, 0.3f},

@@ -52,6 +52,7 @@ void test_reconcile_three_cluster_min_gap_merges_all_to_one();
 void test_fragmented_secondary_policy_collapses_to_two_speakers();
 void test_fragmented_secondary_policy_leaves_flatter_multi_speaker_case();
 void test_fragmented_secondary_policy_preserves_distinct_minority_voices();
+void test_fragmented_secondary_policy_collapses_single_minority_track();
 void test_speaker_total_speech_us_nonzero_for_single_speaker();
 void test_speaker_total_speech_us_overlapping_not_double_counted();
 void test_speaker_total_speech_us_multi_speaker();
