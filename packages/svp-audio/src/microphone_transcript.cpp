@@ -397,6 +397,7 @@ MicrophoneTranscriptResult reconcile_microphone_transcripts(
   for (const auto& [group, primary] : primary_by_group) {
     anchors.push_back({group, primary});
   }
+  const std::vector<MicrophoneOwnedWordCandidate> all_candidates = candidates;
   MicrophoneWordOwnershipResult ownership =
       reconcile_cross_anchor_word_ownership(candidates, transcripts, anchors,
                                             policy);
@@ -408,7 +409,7 @@ MicrophoneTranscriptResult reconcile_microphone_transcripts(
 
   // Exact transcript matches establish which stronger source can explain a
   // weaker microphone. Residual decoder differences are removed only when the
-  // source-level match is sustained across a supermajority of words, voice spans,
+  // source-level match is sustained across at least half the words, voice spans,
   // shared timing, and channel-relative quality. Matching voice spans and
   // stronger time-local SNR provide additional word-level support.
   std::map<std::size_t, std::size_t> residual_anchor_by_source;
@@ -559,6 +560,51 @@ MicrophoneTranscriptResult reconcile_microphone_transcripts(
         break;
       }
     }
+  }
+  for (auto& [collapsed_source, anchor_source] : collapsed_source_anchors) {
+    std::size_t root_anchor = anchor_source;
+    for (std::size_t depth = 0; depth < collapsed_source_anchors.size(); ++depth) {
+      const auto next = collapsed_source_anchors.find(root_anchor);
+      if (next == collapsed_source_anchors.end() ||
+          next->second == root_anchor || next->second == collapsed_source) {
+        break;
+      }
+      root_anchor = next->second;
+    }
+    anchor_source = root_anchor;
+    for (auto& assignment : result.source_assignment_evidence) {
+      if (assignment.source_ordinal != collapsed_source) continue;
+      assignment.anchor_source_ordinal = root_anchor;
+      assignment.matched_stronger_source_ordinals = {root_anchor};
+      break;
+    }
+  }
+  if (!collapsed_source_anchors.empty()) {
+    std::vector<MicrophoneOwnedWordCandidate> retained_source_candidates;
+    for (const auto& candidate : all_candidates) {
+      if (!collapsed_source_anchors.contains(candidate.source_ordinal)) {
+        retained_source_candidates.push_back(candidate);
+      }
+    }
+    std::vector<MicrophoneSpeakerAnchor> retained_source_anchors;
+    for (const auto& anchor : anchors) {
+      const std::size_t source_ordinal =
+          transcripts.at(anchor.transcript_index).source_ordinal;
+      if (!collapsed_source_anchors.contains(source_ordinal)) {
+        retained_source_anchors.push_back(anchor);
+      }
+    }
+    MicrophoneWordOwnershipResult retained_ownership =
+        reconcile_cross_anchor_word_ownership(
+            retained_source_candidates, transcripts, retained_source_anchors,
+            policy);
+    candidates = std::move(retained_ownership.words);
+    result.chunk_content_evidence.insert(
+        result.chunk_content_evidence.end(),
+        retained_ownership.chunk_content_evidence.begin(),
+        retained_ownership.chunk_content_evidence.end());
+    result.discarded_cross_anchor_bleed_word_count =
+        result.input_word_count - candidates.size();
   }
   result.discarded_word_count_by_source_pair =
       ownership.discarded_word_count_by_source_pair;

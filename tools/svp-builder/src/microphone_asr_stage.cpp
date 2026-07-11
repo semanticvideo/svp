@@ -354,6 +354,8 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
        reconciliation_policy.minimum_duplicate_aligned_token_count},
       {"maximum_duplicate_word_time_delta_us",
        reconciliation_policy.maximum_duplicate_word_time_delta_us},
+      {"maximum_residual_window_radius_us",
+       reconciliation_policy.maximum_residual_window_radius_us},
       {"minimum_explained_duplicate_word_ratio",
        reconciliation_policy.minimum_explained_duplicate_word_ratio},
       {"minimum_explained_voice_ratio",
@@ -363,7 +365,7 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
       {"primary_selection_policy",
        "stronger_time_local_snr_wins_only_after_local_content_and_fingerprint_agreement"},
       {"source_grouping_policy",
-       "microphone_sources_remain_independent_unless_a_supermajority_of_words_are_exact_duplicates_and_voice_timing_snr_and_asr_confidence_establish_bleed"},
+       "microphone_sources_remain_independent_unless_at_least_half_of_words_are_exact_duplicates_and_voice_timing_snr_and_asr_confidence_establish_bleed"},
       {"ranking_policy", "descending_deduplicated_word_count_then_stream_order"},
   };
   nlohmann::json voice_matches = nlohmann::json::array();

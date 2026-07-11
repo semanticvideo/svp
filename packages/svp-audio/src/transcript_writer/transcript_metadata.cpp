@@ -99,7 +99,7 @@ nlohmann::json ran_transcript_json(const AsrExecutionBoundary& boundary,
            : (boundary.diarization_status == "user_declared_single_speaker"
                 ? "User requested single-speaker mode. All words have speaker_id speaker_0001. Diarization was intentionally skipped."
                 : (boundary.diarization_status == "microphone_stream_assignment"
-                     ? "Each microphone remains an authoritative source. Exact time-local duplicate words require transcript agreement, matching local fingerprints, and stronger channel-relative SNR on another microphone. Decoder residue is removed only after a supermajority of words are exact duplicates and sustained voice, shared-timing, SNR, and ASR-confidence evidence establishes bleed."
+                     ? "Each microphone remains an authoritative source. Exact time-local duplicate words require transcript agreement, matching local fingerprints, and stronger channel-relative SNR on another microphone. Decoder residue is removed only after at least half the words are exact duplicates and sustained voice, shared-timing, SNR, and ASR-confidence evidence establishes bleed."
                      : "Speaker IDs assigned by max interval overlap with nearest-segment fallback (500ms tolerance). Sustained non-dominant speaker evidence may be expanded across the current ASR utterance. Words outside all segments and tolerance are marked speaker_unknown."))},
   };
 
