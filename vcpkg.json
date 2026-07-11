@@ -14,10 +14,18 @@
     "zstd",
     "onnxruntime",
     {
+      "name": "whisper-cpp",
+      "features": ["metal"],
+      "platform": "osx"
+    },
+    {
+      "name": "whisper-cpp",
+      "platform": "!osx"
+    },
+    {
       "name": "opencv4",
       "version>=": "4.8.0",
       "features": ["contrib"]
     }
   ]
 }
-

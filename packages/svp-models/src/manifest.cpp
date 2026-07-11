@@ -20,6 +20,7 @@ const std::set<std::string_view> kRuntimeValues = {
 };
 
 const std::set<std::string_view> kFormatValues = {
+    "ggml",
     "onnx",
     "ort",
     "gguf",
@@ -31,6 +32,8 @@ const std::set<std::string_view> kExecutionProviderValues = {
     "coreml",
     "cuda",
     "directml",
+    "metal",
+    "vulkan",
     "winml",
 };
 

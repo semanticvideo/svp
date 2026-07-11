@@ -290,9 +290,9 @@ void test_asr_model_present_vs_verified_distinction() {
              << R"("model_bundle_id":"model_whisper_small_en@v1+blake3_000000000000",)"
              << R"("model_id":")" << model_id << R"(","model_version":"v1",)"
              << R"("bundle_blake3":"blake3:0000000000000000000000000000000000000000000000000000000000000000",)"
-             << R"("runtime":"onnxruntime","format":"onnx","license":"MIT",)"
+             << R"("runtime":"whisper.cpp","format":"ggml","license":"MIT",)"
              << R"("supported_execution_providers":["cpu"],)"
-             << R"("files":[{"path":"model.onnx","role":"model",)"
+             << R"("files":[{"path":"ggml-small.en.bin","role":"weights",)"
              << R"("blake3":"blake3:0000000000000000000000000000000000000000000000000000000000000000"}],)"
              << R"("input_contract":{},"output_contract":{},)"
              << R"("preprocessor_contract":{},"postprocessor_contract":{}})";
@@ -302,7 +302,8 @@ void test_asr_model_present_vs_verified_distinction() {
   assert(svp::audio::verify_asr_model_files(model_id, root) == false);
 
   {
-    std::ofstream model_file(root / "model_whisper_small_en" / "model.onnx");
+    std::ofstream model_file(root / "model_whisper_small_en" /
+                             "ggml-small.en.bin");
     model_file << "dummy";
   }
 
@@ -358,7 +359,8 @@ void test_asr_execution_boundary_json_reports_decoder_token_softmax_mean() {
   const nlohmann::json encoded =
       svp::audio::asr_execution_boundary_to_json(boundary);
 
-  assert(encoded["asr_limitations"]["confidence_status"] == "decoder_token_softmax_mean");
+  assert(encoded["asr_limitations"]["confidence_status"] ==
+         "whisper_cpp_token_probability_mean");
   std::string note = encoded["asr_limitations"]["confidence_note"];
   assert(note.find("uncalibrated") != std::string::npos);
 }

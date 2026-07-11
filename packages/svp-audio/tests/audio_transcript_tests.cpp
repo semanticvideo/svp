@@ -50,15 +50,6 @@ int main() {
   test_reconcile_three_cluster_min_gap_merges_all_to_one();
   test_fragmented_secondary_policy_collapses_to_two_speakers();
   test_fragmented_secondary_policy_leaves_flatter_multi_speaker_case();
-  test_whisper_mel_30s_chunk_produces_valid_output_without_overread();
-  test_whisper_mel_buffer_includes_samples_for_last_stft_frame();
-  test_whisper_mel_uses_log10_for_compression();
-  test_softmax_probability_for_token_basic();
-  test_softmax_probability_for_token_edge_cases();
-  test_aggregate_word_confidence_mean();
-  test_aggregate_word_confidence_empty();
-  test_whisper_control_tokens_are_loaded_from_model_metadata();
-  test_untimestamped_whisper_words_preserve_token_confidence();
   test_speaker_total_speech_us_nonzero_for_single_speaker();
   test_speaker_total_speech_us_overlapping_not_double_counted();
   test_speaker_total_speech_us_multi_speaker();

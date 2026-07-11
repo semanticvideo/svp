@@ -3,6 +3,7 @@
 #include "svp/audio/asr_chunk_planner.hpp"
 #include "svp/audio/microphone_transcript.hpp"
 #include "svp/audio/sherpa_diarization.hpp"
+#include "svp/audio/whisper_cpp_backend.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -180,6 +181,7 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
     boundaries.push_back(std::move(executed));
     completed_chunks_before_stream += chunks_by_stream[stream_ordinal];
   }
+  svp::audio::release_whisper_cpp_model();
 
   std::size_t speech_positive_streams = 0;
   for (const auto& transcript : transcripts) {

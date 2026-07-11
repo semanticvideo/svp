@@ -38,7 +38,7 @@ inline constexpr std::int64_t kDefaultAsrChunkOverlapUs = 2000000;
     std::int64_t overlap_us = kDefaultAsrChunkOverlapUs,
     const std::string& input_ref = "media/audio/analysis_mono_16k.wav",
     const std::string& model_id = "model_whisper_small_en",
-    const std::string& runtime = "onnxruntime");
+    const std::string& runtime = "whisper.cpp");
 
 [[nodiscard]] nlohmann::json asr_chunk_plan_to_json(const AsrChunkPlanResult& plan);
 

@@ -1,10 +1,14 @@
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(whisper CONFIG QUIET)
 
-find_package(onnxruntime CONFIG QUIET)
-if(onnxruntime_FOUND)
-  set(SVP_AUDIO_ONNX_RUNTIME_AVAILABLE TRUE)
+if(TARGET whisper::whisper)
+  set(SVP_AUDIO_WHISPER_CPP_AVAILABLE TRUE)
+  set(SVP_AUDIO_WHISPER_CPP_TARGET whisper::whisper)
+elseif(TARGET whisper)
+  set(SVP_AUDIO_WHISPER_CPP_AVAILABLE TRUE)
+  set(SVP_AUDIO_WHISPER_CPP_TARGET whisper)
 else()
-  set(SVP_AUDIO_ONNX_RUNTIME_AVAILABLE FALSE)
+  set(SVP_AUDIO_WHISPER_CPP_AVAILABLE FALSE)
 endif()
 
 add_library(svp-audio
@@ -56,11 +60,11 @@ add_library(svp-audio
   src/vad_execution_boundary.cpp
   src/vad_task_plan.cpp
   src/waveform_envelope.cpp
-  src/whisper_mel.cpp
+  src/wav_slice.cpp
   src/whisper_model.cpp
-  src/whisper_model_metadata.cpp
-  src/whisper_token_table.cpp
-  src/whisper_untimestamped_words.cpp
+  src/whisper_cpp_backend.cpp
+  src/whisper_cpp_model.cpp
+  src/whisper_pcm_reader.cpp
 )
 
 add_library(svp::audio ALIAS svp-audio)
@@ -72,8 +76,9 @@ target_include_directories(svp-audio
 
 target_compile_features(svp-audio PUBLIC cxx_std_20)
 
-if(SVP_AUDIO_ONNX_RUNTIME_AVAILABLE)
-  target_compile_definitions(svp-audio PUBLIC SVP_AUDIO_ONNX_RUNTIME_AVAILABLE=1)
+if(SVP_AUDIO_WHISPER_CPP_AVAILABLE)
+  target_compile_definitions(svp-audio PUBLIC SVP_AUDIO_WHISPER_CPP_AVAILABLE=1)
+  target_link_libraries(svp-audio PRIVATE ${SVP_AUDIO_WHISPER_CPP_TARGET})
 endif()
 
 target_link_libraries(svp-audio

@@ -65,6 +65,7 @@
       "enum": [
         "onnx",
         "ort",
+        "ggml",
         "gguf",
         "native"
       ]
@@ -83,6 +84,8 @@
           "coreml",
           "cuda",
           "directml",
+          "metal",
+          "vulkan",
           "winml"
         ]
       }

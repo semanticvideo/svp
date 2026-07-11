@@ -9,6 +9,8 @@
 #include "svp/audio/sherpa_diarization.hpp"
 #include "svp/audio/transcript_writer.hpp"
 #include "svp/audio/vad_execution_boundary.hpp"
+#include "svp/audio/whisper_model.hpp"
+#include "svp/audio/whisper_cpp_backend.hpp"
 #include "svp/media/canonical_timing.hpp"
 
 #include <algorithm>
@@ -104,6 +106,8 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
       asr_model_available &&
       svp::audio::verify_asr_model_files(
           "model_whisper_small_en", model_cache_root);
+  const bool asr_runtime_available =
+      svp::audio::is_whisper_runtime_available();
 
   emit_stage_started(context, ProgressStageId::asr);
   const bool microphone_stream_mode =
@@ -113,7 +117,7 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
   if (microphone_stream_mode) {
     MicrophoneAsrStageResult microphone_result = run_microphone_asr_stage(
         audio_plan.extraction_plan, extraction_run, media_duration_us,
-        context.model_runtime_available, asr_model_available, asr_model_verified,
+        asr_runtime_available, asr_model_available, asr_model_verified,
         context.staging_dir, model_cache_root,
         [&context](std::size_t current, std::size_t total) {
           emit_stage_progress(context, ProgressStageId::asr,
@@ -139,7 +143,7 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
     const svp::audio::AsrExecutionBoundary asr_boundary =
         svp::audio::build_asr_execution_boundary(
             asr_chunk_plan, extraction_run.analysis_audio_written,
-            context.model_runtime_available, asr_model_available,
+            asr_runtime_available, asr_model_available,
             asr_model_verified);
     executed_asr_boundary = svp::audio::execute_asr_boundary(
         asr_boundary, context.staging_dir, model_cache_root,
@@ -150,6 +154,7 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
                                 static_cast<std::uint64_t>(total), "chunks");
           }
         });
+    svp::audio::release_whisper_cpp_model();
   }
   emit_stage_completed(context, ProgressStageId::asr);
 
