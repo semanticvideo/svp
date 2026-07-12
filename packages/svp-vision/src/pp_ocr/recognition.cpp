@@ -5,6 +5,23 @@
 #include <cstdint>
 
 namespace svp::vision::pp_ocr_internal {
+namespace {
+
+// PP-OCRv6 is exported around a 3x48x320 recognition canvas while permitting
+// wider dynamic inputs for unusually long text. Keep ordinary crops at the
+// model's native width and grow in convolution-friendly blocks only as needed.
+constexpr int kRecognitionBaseWidth = 320;
+constexpr int kRecognitionWidthAlignment = 32;
+
+int aligned_recognition_width(int resized_width, int max_width) {
+  const int aligned =
+      ((resized_width + kRecognitionWidthAlignment - 1) /
+       kRecognitionWidthAlignment) * kRecognitionWidthAlignment;
+  return std::clamp(
+      aligned, std::min(kRecognitionBaseWidth, max_width), max_width);
+}
+
+}  // namespace
 
 RecInput preprocess_recognition(
     const ColorRasterFrame& frame,
@@ -23,11 +40,13 @@ RecInput preprocess_recognition(
   double scale = static_cast<double>(target_height) / crop_h;
   int resized_w = std::min(static_cast<int>(crop_w * scale), max_width);
   if (resized_w < 1) resized_w = 1;
+  const int input_width = aligned_recognition_width(resized_w, max_width);
 
   RecInput input;
   input.height = target_height;
-  input.width = max_width;
-  input.data.resize(static_cast<std::size_t>(3) * target_height * max_width, 0.0f);
+  input.width = input_width;
+  input.data.resize(
+      static_cast<std::size_t>(3) * target_height * input_width, 0.0f);
 
   for (int c = 0; c < 3; ++c) {
     const int src_c = (c == 0) ? 2 : (c == 1) ? 1 : 0;
@@ -37,7 +56,7 @@ RecInput preprocess_recognition(
         const int src_x = std::min(static_cast<int>(x / scale), crop_w - 1);
         const auto& px = frame.pixels[(y1 + src_y) * frame.width + x1 + src_x];
         const uint8_t val = (src_c == 0) ? px.r : (src_c == 1) ? px.g : px.b;
-        input.data[c * target_height * max_width + y * max_width + x] =
+        input.data[c * target_height * input_width + y * input_width + x] =
             static_cast<float>(val) / 255.0f;
       }
     }
