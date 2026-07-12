@@ -6,6 +6,36 @@ This note records OCR performance experiments for the SVP builder. The goal is t
 
 The best proven CPU path is bounded recognition parallelism.
 
+Recognition input canvases now stay at the model's native 320-pixel width for
+ordinary text and expand in aligned steps only when the crop requires it,
+bounded by the existing 3200-pixel long-text limit. This removed unnecessary
+padding, reduced the measured CPU path from 42.37 seconds and 878 MB peak RSS
+to 27.32 seconds and 702 MB peak RSS, and improved obvious text reads in the
+measured sample.
+
+Both measurements used `/Users/domesposito/Projects/samples/test-30.mp4`, a
+34-frame OCR sampling pass over 3840x2160 source media, on an Apple M4 Max with
+48 GB unified memory. The builder used the default `background` OCR profile:
+two recognition workers with the parallel threshold left at 16 boxes. The
+baseline was the parent implementation, which padded every recognition crop to
+48x3200; the comparison used this branch's aligned dynamic-width canvases. Each
+revision was measured with the same command, changing only the output and
+diagnostic paths between runs:
+
+```sh
+SVP_BUILDER_DIAG_LOG=/tmp/svp-ocr-width.jsonl \
+SVP_BUILDER_MEMORY_LIMIT_MB=2048 \
+/usr/bin/time -l ./build/tools/svp-builder/svp-builder build \
+  /Users/domesposito/Projects/samples/test-30.mp4 \
+  --out /tmp/svp-ocr-width.svp \
+  --staging-dir /tmp/svp-ocr-width-stage \
+  --model-cache /Users/domesposito/Projects/svp-model-cache \
+  --ffmpeg /opt/homebrew/bin/ffmpeg \
+  --ffprobe /opt/homebrew/bin/ffprobe \
+  --stop-after foundation-ocr \
+  --progress none
+```
+
 - Workers 6 is the conservative fast candidate:
   - About 35.5% faster than the default heavy-frame control.
   - Peak RSS about 1.50 GB on the `ultimate-2.mp4` heavy-frame sweep.

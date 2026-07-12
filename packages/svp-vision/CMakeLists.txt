@@ -310,4 +310,20 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-vision-progress-callback-tests
            COMMAND svp-vision-progress-callback-tests)
+
+  add_executable(svp-vision-pp-ocr-recognition-tests
+    tests/pp_ocr_recognition_tests.cpp
+  )
+
+  target_compile_features(svp-vision-pp-ocr-recognition-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-pp-ocr-recognition-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-pp-ocr-recognition-tests
+           COMMAND svp-vision-pp-ocr-recognition-tests)
 endif()
