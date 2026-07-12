@@ -132,6 +132,86 @@ std::vector<float> bilinear_resize_depth(
 
 }  // namespace
 
+DepthInferenceRuntime load_depth_inference_runtime(
+    const std::filesystem::path& model_cache_root,
+    const std::string& model_id,
+    const std::string& execution_provider) {
+  DepthInferenceRuntime runtime;
+  runtime.model_id = model_id;
+  runtime.execution_provider = execution_provider;
+  if (!svp::models::OnnxSession::is_available()) {
+    runtime.blocker = "ONNX Runtime is not available in this build";
+    return runtime;
+  }
+
+  const auto cache_root = model_cache_root.empty()
+      ? svp::models::model_cache_root()
+      : model_cache_root;
+  const auto bundle_dir = find_model_bundle_dir(cache_root, model_id);
+  if (!bundle_dir) {
+    runtime.blocker = "Depth model bundle not found in cache: " + model_id;
+    return runtime;
+  }
+
+  try {
+    const auto manifest = svp::models::load_model_bundle_manifest(
+        *bundle_dir / "model.svpmodel.json");
+    runtime.model_bundle_id = manifest.model_bundle_id;
+    const auto verification =
+        svp::models::verify_manifest_files(manifest, *bundle_dir);
+    if (!verification.ok()) {
+      runtime.blocker = "Depth model bundle file verification failed";
+      return runtime;
+    }
+    svp::models::OnnxSessionOptions session_options;
+    session_options.execution_provider = execution_provider;
+    auto session = svp::models::OnnxSession::load(
+        manifest, *bundle_dir, session_options);
+    runtime.session =
+        std::make_unique<svp::models::OnnxSession>(std::move(session));
+  } catch (const std::exception& error) {
+    runtime.blocker =
+        std::string("Failed to load depth inference runtime: ") + error.what();
+  }
+  return runtime;
+}
+
+std::vector<std::uint16_t> infer_depth_frame(
+    DepthInferenceRuntime& runtime,
+    const ColorRasterFrame& frame) {
+  if (!runtime.session || frame.width <= 0 || frame.height <= 0 ||
+      frame.pixels.size() !=
+          static_cast<std::size_t>(frame.width) * frame.height) {
+    return {};
+  }
+
+  auto input = frame_to_normalized_chw(frame);
+  auto output = runtime.session->run_depth(
+      input.data(), input.size(),
+      static_cast<std::uint32_t>(frame.width),
+      static_cast<std::uint32_t>(frame.height));
+  const std::uint32_t output_height =
+      14u * static_cast<std::uint32_t>(frame.height / 14);
+  const std::uint32_t output_width =
+      14u * static_cast<std::uint32_t>(frame.width / 14);
+  if (output_width > 0 && output_height > 0 &&
+      output.size() ==
+          static_cast<std::size_t>(output_width) * output_height &&
+      (output_width != static_cast<std::uint32_t>(frame.width) ||
+       output_height != static_cast<std::uint32_t>(frame.height))) {
+    output = bilinear_resize_depth(
+        output,
+        output_width,
+        output_height,
+        static_cast<std::uint32_t>(frame.width),
+        static_cast<std::uint32_t>(frame.height));
+  }
+  return float_depth_to_uint16(
+      output,
+      static_cast<std::uint32_t>(frame.width),
+      static_cast<std::uint32_t>(frame.height));
+}
+
 // Convert float depth output to uint16 relative inverse depth payload.
 //
 // RC2 normalization contract:

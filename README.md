@@ -423,6 +423,7 @@ runtime paths include:
 
 - Whisper Small English GGML weights executed by whisper.cpp for ASR.
 - PP-OCRv6 detector/recognizer ONNX bundles for visible text.
+- RF-DETR Nano FP32 ONNX weights for visual entity proposals.
 - Depth and embedding model bundles.
 - sherpa-onnx diarization model files for speaker diarization.
 

@@ -1,0 +1,25 @@
+{
+  "intro.mp4": {
+    "duration_us": 17660000,
+    "references": [
+      {"id": "opening_text_region", "kind": "overlay_region", "entity_tracking": false, "intervals": [[0, 1040000]]},
+      {"id": "gray_green_person", "kind": "persistent_entity", "entity_tracking": true, "intervals": [[0, 1040000], [2360000, 13360000]], "checkpoints": [{"pts_us": 500000, "box_norm": [0.15, 0.00, 0.90, 1.00]}, {"pts_us": 3000000, "box_norm": [0.20, 0.00, 0.80, 1.00]}, {"pts_us": 7000000, "box_norm": [0.20, 0.00, 0.82, 1.00]}, {"pts_us": 10500000, "box_norm": [0.18, 0.00, 0.78, 1.00]}]},
+      {"id": "creative_finance_slide", "kind": "graphic_region", "entity_tracking": false, "intervals": [[1080000, 2360000]]},
+      {"id": "falling_bills", "kind": "dynamic_group", "entity_tracking": true, "intervals": [[2640000, 6720000]], "checkpoints": [{"pts_us": 3000000, "box_norm": [0.00, 0.00, 1.00, 1.00]}, {"pts_us": 5000000, "box_norm": [0.00, 0.00, 1.00, 1.00]}]},
+      {"id": "get_paid_text_region", "kind": "overlay_region", "entity_tracking": false, "intervals": [[6480000, 9400000]]},
+      {"id": "every_time_text_region", "kind": "overlay_region", "entity_tracking": false, "intervals": [[9840000, 12120000]]},
+      {"id": "logo_sting", "kind": "graphic_region", "entity_tracking": false, "intervals": [[13360000, 17160000]]},
+      {"id": "upper_camera_view", "kind": "composite_region", "entity_tracking": true, "intervals": [[17160000, 17660000]], "checkpoints": [{"pts_us": 17400000, "box_norm": [0.80, 0.00, 0.93, 0.20]}]}
+    ]
+  },
+  "test-30.mp4": {
+    "duration_us": 32566667,
+    "references": [
+      {"id": "green_shirt_person", "kind": "persistent_entity", "entity_tracking": true, "intervals": [[0, 10466667], [17900000, 23666667]], "checkpoints": [{"pts_us": 2000000, "box_norm": [0.00, 0.00, 0.55, 1.00]}, {"pts_us": 7000000, "box_norm": [0.00, 0.00, 0.72, 1.00]}, {"pts_us": 20000000, "box_norm": [0.18, 0.00, 0.70, 1.00]}]},
+      {"id": "text_sign", "kind": "persistent_entity", "entity_tracking": true, "intervals": [[0, 5533333]], "checkpoints": [{"pts_us": 2000000, "box_norm": [0.43, 0.15, 0.88, 0.88]}]},
+      {"id": "smartphone", "kind": "persistent_entity", "entity_tracking": true, "intervals": [[5566667, 10433333]], "checkpoints": [{"pts_us": 7000000, "box_norm": [0.62, 0.05, 1.00, 0.90]}]},
+      {"id": "color_picker", "kind": "interface_region", "entity_tracking": true, "intervals": [[10433333, 13466667], [13466667, 16033333], [16033333, 17900000]], "checkpoints": [{"pts_us": 11500000, "box_norm": [0.70, 0.44, 0.95, 0.86]}, {"pts_us": 14500000, "box_norm": [0.70, 0.44, 0.95, 0.86]}, {"pts_us": 16500000, "box_norm": [0.70, 0.44, 0.95, 0.90]}]},
+      {"id": "shelf_objects", "kind": "dynamic_group", "entity_tracking": true, "intervals": [[23733333, 32566667]], "checkpoints": [{"pts_us": 26000000, "box_norm": [0.00, 0.00, 1.00, 1.00]}, {"pts_us": 31000000, "box_norm": [0.00, 0.00, 1.00, 1.00]}]}
+    ]
+  }
+}

@@ -522,7 +522,8 @@ EntityWriteSummary write_entity_artifacts(
 
 EntityWriteSummary write_visual_entity_artifacts(
     const std::filesystem::path& staging_dir,
-    const svp::vision::EntityTrackResult& tracker_result) {
+    const svp::vision::EntityTrackResult& tracker_result,
+    const std::vector<svp::vision::MaskWriteEntry>* preencoded_masks) {
   EntityWriteSummary summary;
 
   const std::filesystem::path entities_dir = staging_dir / "entities";
@@ -607,24 +608,28 @@ EntityWriteSummary write_visual_entity_artifacts(
   summary.region_count = region_records.size();
 
   // Write masks via mask_writer
-  std::vector<svp::vision::MaskWriteEntry> mask_entries;
-  for (const auto& region : tracker_result.regions) {
-    if (region.mask_pixels.empty() || region.mask_width <= 0 || region.mask_height <= 0) {
-      continue;
+  std::vector<svp::vision::MaskWriteEntry> generated_masks;
+  if (preencoded_masks == nullptr) {
+    for (const auto& region : tracker_result.regions) {
+      if (region.mask_pixels.empty() || region.mask_width <= 0 || region.mask_height <= 0) {
+        continue;
+      }
+      svp::vision::MaskWriteEntry entry;
+      entry.mask_id = "mask_" + region.region_id;
+      entry.entity_id = region.entity_id;
+      entry.track_id = region.track_id;
+      entry.region_id = region.region_id;
+      entry.frame_id = region.frame_id;
+      entry.timestamp_us = region.timestamp_us;
+      entry.width = region.mask_width;
+      entry.height = region.mask_height;
+      entry.rle_data = svp::vision::encode_mask_rle(
+          region.mask_pixels.data(), region.mask_width, region.mask_height);
+      generated_masks.push_back(std::move(entry));
     }
-    svp::vision::MaskWriteEntry entry;
-    entry.mask_id = "mask_" + region.region_id;
-    entry.entity_id = region.entity_id;
-    entry.track_id = region.track_id;
-    entry.region_id = region.region_id;
-    entry.frame_id = region.frame_id;
-    entry.timestamp_us = region.timestamp_us;
-    entry.width = region.mask_width;
-    entry.height = region.mask_height;
-    entry.rle_data = svp::vision::encode_mask_rle(
-        region.mask_pixels.data(), region.mask_width, region.mask_height);
-    mask_entries.push_back(entry);
   }
+  const auto& mask_entries =
+      preencoded_masks != nullptr ? *preencoded_masks : generated_masks;
 
   auto mask_summary = svp::vision::write_masks(staging_dir, mask_entries);
   summary.masks_written = !mask_entries.empty();

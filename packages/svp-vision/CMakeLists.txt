@@ -30,7 +30,16 @@ add_library(svp-vision
   src/real_frame_color_sampling.cpp
   src/scene_segmentation.cpp
   src/text_tokenizer.cpp
+  src/visual_entity_pipeline.cpp
+  src/visual_entity_depth_proposals.cpp
+  src/visual_entity_depth_schedule.cpp
+  src/visual_entity_cut_detection.cpp
+  src/visual_entity_frame_decoder.cpp
+  src/visual_entity_detector.cpp
+  src/visual_entity_motion_policy.cpp
+  src/visual_entity_sampling.cpp
   src/visual_entity_tracker.cpp
+  src/visual_entity_window_assembler.cpp
   src/mask_writer.cpp
   src/noise_suppression.cpp
 )
@@ -59,7 +68,131 @@ target_link_libraries(svp-vision
     opencv_calib3d
 )
 
+add_executable(svp-visual-entity-diagnostic
+  tools/visual_entity_diagnostic.cpp
+)
+
+add_executable(svp-visual-entity-fixture-score
+  tools/visual_entity_fixture_score.cpp
+)
+
+add_executable(svp-visual-entity-detector-diagnostic
+  tools/visual_entity_detector_diagnostic.cpp
+)
+
+target_compile_features(svp-visual-entity-detector-diagnostic PRIVATE cxx_std_20)
+
+target_link_libraries(svp-visual-entity-detector-diagnostic
+  PRIVATE
+    svp::vision
+)
+
+target_compile_features(svp-visual-entity-fixture-score PRIVATE cxx_std_20)
+
+target_link_libraries(svp-visual-entity-fixture-score
+  PRIVATE
+    nlohmann_json::nlohmann_json
+)
+
+target_compile_features(svp-visual-entity-diagnostic PRIVATE cxx_std_20)
+
+target_link_libraries(svp-visual-entity-diagnostic
+  PRIVATE
+    svp::vision
+)
+
 if(BUILD_TESTING)
+  add_executable(svp-vision-visual-entity-sampling-tests
+    tests/visual_entity_sampling_tests.cpp
+  )
+
+  target_compile_features(svp-vision-visual-entity-sampling-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-visual-entity-sampling-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-visual-entity-sampling-tests
+           COMMAND svp-vision-visual-entity-sampling-tests)
+
+  add_executable(svp-vision-visual-entity-window-assembler-tests
+    tests/visual_entity_window_assembler_tests.cpp
+  )
+
+  target_compile_features(svp-vision-visual-entity-window-assembler-tests
+    PRIVATE
+      cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-visual-entity-window-assembler-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-visual-entity-window-assembler-tests
+           COMMAND svp-vision-visual-entity-window-assembler-tests)
+
+  add_executable(svp-vision-visual-entity-depth-proposal-tests
+    tests/visual_entity_depth_proposal_tests.cpp
+  )
+
+  target_compile_features(svp-vision-visual-entity-depth-proposal-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-visual-entity-depth-proposal-tests
+    PRIVATE
+      svp::vision
+      opencv_core
+  )
+
+  add_test(NAME svp-vision-visual-entity-depth-proposal-tests
+           COMMAND svp-vision-visual-entity-depth-proposal-tests)
+
+  add_executable(svp-vision-visual-entity-motion-policy-tests
+    tests/visual_entity_motion_policy_tests.cpp
+  )
+
+  target_compile_features(svp-vision-visual-entity-motion-policy-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-visual-entity-motion-policy-tests
+    PRIVATE
+      svp::vision
+      opencv_core
+  )
+
+  add_test(NAME svp-vision-visual-entity-motion-policy-tests
+           COMMAND svp-vision-visual-entity-motion-policy-tests)
+
+  add_executable(svp-vision-visual-entity-depth-schedule-tests
+    tests/visual_entity_depth_schedule_tests.cpp
+  )
+
+  target_compile_features(svp-vision-visual-entity-depth-schedule-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-visual-entity-depth-schedule-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-visual-entity-depth-schedule-tests
+           COMMAND svp-vision-visual-entity-depth-schedule-tests)
+
+  add_executable(svp-vision-visual-entity-cut-detection-tests
+    tests/visual_entity_cut_detection_tests.cpp
+  )
+  target_link_libraries(svp-vision-visual-entity-cut-detection-tests
+    PRIVATE svp::vision)
+  add_test(NAME svp-vision-visual-entity-cut-detection-tests
+           COMMAND svp-vision-visual-entity-cut-detection-tests)
+
   add_executable(svp-vision-plan-tests
     tests/observation_pipeline_plan_tests.cpp
   )
