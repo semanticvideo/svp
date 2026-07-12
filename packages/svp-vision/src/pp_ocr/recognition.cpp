@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <stdexcept>
 
 namespace svp::vision::pp_ocr_internal {
 namespace {
@@ -14,11 +15,16 @@ constexpr int kRecognitionBaseWidth = 320;
 constexpr int kRecognitionWidthAlignment = 32;
 
 int aligned_recognition_width(int resized_width, int max_width) {
+  if (max_width < kRecognitionBaseWidth ||
+      max_width % kRecognitionWidthAlignment != 0) {
+    throw std::invalid_argument(
+        "PP-OCR recognition max width must be at least 320 pixels and "
+        "aligned to 32 pixels");
+  }
   const int aligned =
       ((resized_width + kRecognitionWidthAlignment - 1) /
        kRecognitionWidthAlignment) * kRecognitionWidthAlignment;
-  return std::clamp(
-      aligned, std::min(kRecognitionBaseWidth, max_width), max_width);
+  return std::clamp(aligned, kRecognitionBaseWidth, max_width);
 }
 
 }  // namespace
