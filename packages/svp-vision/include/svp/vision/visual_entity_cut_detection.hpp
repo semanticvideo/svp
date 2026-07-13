@@ -10,7 +10,11 @@ namespace svp::vision {
 
 struct VisualEntityCutDetectionOptions {
   double immediate_difference_threshold = 0.08;
-  double stable_difference_threshold = 0.01;
+  // A replacement may settle into an actively moving shot rather than a
+  // nearly identical next frame. A residual mean change of at most 0.05
+  // still distinguishes that new-shot motion from a gradual full-frame
+  // transition, whose consecutive changes remain substantially larger.
+  double stable_difference_threshold = 0.05;
   // A change this large is a hard full-frame replacement even when the new
   // scene itself contains motion and therefore does not immediately settle.
   double hard_cut_difference_threshold = 0.30;

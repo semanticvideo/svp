@@ -5,12 +5,14 @@
 #include <filesystem>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <stdexcept>
 #include <string>
 
 int main(int argc, char** argv) {
-  if (argc != 5) {
+  if (argc != 5 && argc != 6) {
     std::cerr << "usage: svp-visual-entity-diagnostic "
-                 "<media> <model-cache> <ffmpeg> <ffprobe>\n";
+                 "<media> <model-cache> <ffmpeg> <ffprobe> "
+                 "[--include-embeddings]\n";
     return 2;
   }
 
@@ -19,6 +21,12 @@ int main(int argc, char** argv) {
     const std::filesystem::path model_cache = argv[2];
     const std::filesystem::path ffmpeg = argv[3];
     const std::filesystem::path ffprobe = argv[4];
+    const bool include_embeddings = argc == 6 &&
+        std::string(argv[5]) == "--include-embeddings";
+    if (argc == 6 && !include_embeddings) {
+      throw std::invalid_argument("unknown diagnostic option: " +
+                                  std::string(argv[5]));
+    }
     auto probe = svp::media::probe_media_with_ffprobe(media_path, ffprobe);
     auto plan = svp::media::build_media_ingest_plan(media_path, std::move(probe));
     auto result = svp::vision::run_visual_entity_pipeline(
@@ -49,6 +57,7 @@ int main(int argc, char** argv) {
       nlohmann::json diagnostic_region = {
           {"id", region.region_id},
           {"entity_id", region.entity_id},
+          {"track_id", region.track_id},
           {"frame_id", region.frame_id},
           {"pts_us", region.timestamp_us},
           {"box_norm", {region.box_norm[0], region.box_norm[1],
@@ -59,6 +68,9 @@ int main(int argc, char** argv) {
            region.detector_category_index}};
       if (!region.embedding.empty()) {
         diagnostic_region["embedding_dimension"] = region.embedding.size();
+        if (include_embeddings) {
+          diagnostic_region["embedding"] = region.embedding;
+        }
       }
       regions.push_back(std::move(diagnostic_region));
     }

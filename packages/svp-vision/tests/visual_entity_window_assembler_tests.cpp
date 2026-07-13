@@ -131,6 +131,13 @@ void test_appearance_reacquires_detector_object_after_gap() {
   const auto result = assembler.finish();
   check(result.tracker_result.entities.size() == 1,
         "strong detector appearance evidence reacquires after a gap");
+  check(result.tracker_result.tracks.size() == 2,
+        "reacquired appearance starts a new uninterrupted track");
+  if (result.tracker_result.tracks.size() == 2) {
+    check(result.tracker_result.tracks[0].entity_id ==
+              result.tracker_result.tracks[1].entity_id,
+          "reacquired tracks retain one semantic entity identity");
+  }
 }
 
 void test_appearance_does_not_merge_distinct_detector_objects() {
@@ -165,6 +172,8 @@ void test_appearance_reconciles_fragments_inside_one_window() {
   const auto result = assembler.finish();
   check(result.tracker_result.entities.size() == 1,
         "strong bidirectional appearance evidence reconciles local fragments");
+  check(result.tracker_result.tracks.size() == 2,
+        "reconciled local fragments remain separate appearance tracks");
 }
 
 void test_detector_category_prevents_appearance_merge() {
@@ -227,6 +236,25 @@ void test_moderate_appearance_does_not_merge_across_immediate_cut() {
         "moderate appearance evidence cannot merge adjacent scene objects");
 }
 
+void test_detected_cut_splits_one_local_track_without_losing_identity() {
+  svp::vision::VisualEntityWindowAssembler assembler;
+  assembler.append_window(
+      window({detector_region("continuous_local", 0, {1.0F, 0.0F}),
+              detector_region("continuous_local", 200000, {0.99F, 0.01F}),
+              detector_region("continuous_local", 400000, {}),
+              detector_region("continuous_local", 600000, {0.99F, 0.01F}),
+              detector_region("continuous_local", 800000, {1.0F, 0.0F}),
+              detector_region("continuous_local", 1000000, {})}),
+      {0, 200000, 400000, 600000, 800000, 1000000}, 0, -1,
+      {600000});
+
+  const auto result = assembler.finish();
+  check(result.tracker_result.entities.size() == 1,
+        "appearance preserves identity across a detected cut");
+  check(result.tracker_result.tracks.size() == 2,
+        "a detected cut splits one carried local track into two tracks");
+}
+
 void test_motion_group_reacquires_across_bounded_proposal_gap() {
   svp::vision::VisualEntityWindowAssembler assembler;
   auto before_a = region("before", 0, 0.0, 1.0, 1.0);
@@ -247,6 +275,8 @@ void test_motion_group_reacquires_across_bounded_proposal_gap() {
   const auto result = assembler.finish();
   check(result.tracker_result.entities.size() == 1,
         "matching motion groups reacquire across a bounded proposal gap");
+  check(result.tracker_result.tracks.size() == 2,
+        "reacquired motion groups retain the proposal gap as a track break");
 }
 
 }  // namespace
@@ -261,6 +291,7 @@ int main() {
   test_detector_category_prevents_appearance_merge();
   test_local_fragment_scale_disagreement_prevents_merge();
   test_moderate_appearance_does_not_merge_across_immediate_cut();
+  test_detected_cut_splits_one_local_track_without_losing_identity();
   test_motion_group_reacquires_across_bounded_proposal_gap();
   return failures == 0 ? 0 : 1;
 }

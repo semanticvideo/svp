@@ -39,6 +39,13 @@ void test_gradual_entrance_is_not_a_cut() {
         "multi-frame foreground entrance is not an isolated cut");
 }
 
+void test_replacement_can_settle_into_a_moving_scene() {
+  const auto evidence = svp::vision::detect_visual_entity_cuts({
+      frame(0, 10), frame(200000, 60), frame(400000, 68)});
+  check(evidence.size() == 2 && evidence[0].is_cut,
+        "a replacement followed by bounded new-shot motion is a cut");
+}
+
 void test_sustained_full_frame_transition_is_a_cut() {
   const auto evidence = svp::vision::detect_visual_entity_cuts({
       frame(0, 10), frame(200000, 50), frame(400000, 90),
@@ -54,6 +61,7 @@ void test_sustained_full_frame_transition_is_a_cut() {
 int main() {
   test_isolated_replacement_is_a_cut();
   test_gradual_entrance_is_not_a_cut();
+  test_replacement_can_settle_into_a_moving_scene();
   test_sustained_full_frame_transition_is_a_cut();
   return failures == 0 ? 0 : 1;
 }

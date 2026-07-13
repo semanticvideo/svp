@@ -136,9 +136,11 @@ VisualEntityPipelineResult run_visual_entity_pipeline(
       const auto window_cut_evidence = detect_visual_entity_cuts(
           decoded.frames, options.cut_detection);
       std::vector<std::pair<std::string, std::int64_t>> cut_boundaries;
+      std::vector<std::int64_t> cut_timestamps_us;
       for (const auto& evidence : window_cut_evidence) {
         if (evidence.is_cut) {
           cut_boundaries.emplace_back("visual_cut", evidence.timestamp_us);
+          cut_timestamps_us.push_back(evidence.timestamp_us);
         }
         const bool already_recorded = std::any_of(
             result.cut_evidence.begin(), result.cut_evidence.end(),
@@ -184,7 +186,9 @@ VisualEntityPipelineResult run_visual_entity_pipeline(
            options.detector.category_evidence_confidence_threshold},
           {"nms_iou_threshold", options.detector.nms_iou_threshold},
           {"nms_containment_threshold",
-           options.detector.nms_containment_threshold}};
+           options.detector.nms_containment_threshold},
+          {"cross_category_duplicate_iou_threshold",
+           options.detector.cross_category_duplicate_iou_threshold}};
       window_result.parameters_json["cut_detection"] = {
           {"immediate_difference_threshold",
            options.cut_detection.immediate_difference_threshold},
@@ -200,7 +204,8 @@ VisualEntityPipelineResult run_visual_entity_pipeline(
           std::move(window_result),
           window.timestamps_us,
           window.start_us,
-          previous_window_end_us);
+          previous_window_end_us,
+          cut_timestamps_us);
     }
 
     previous_window_end_us = window.end_us;

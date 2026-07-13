@@ -70,14 +70,15 @@ class VisualEntityWindowAssembler {
       EntityTrackResult window_result,
       const std::vector<std::int64_t>& sampled_timestamps_us,
       std::int64_t overlap_start_us,
-      std::int64_t emit_after_us);
+      std::int64_t emit_after_us,
+      const std::vector<std::int64_t>& discontinuity_timestamps_us = {});
 
   [[nodiscard]] AssembledVisualEntityResult finish();
 
  private:
   struct EntityState {
     std::string entity_id;
-    std::string track_id;
+    std::vector<std::string> track_ids;
     std::vector<TrackedRegion> regions;
     std::set<std::int64_t> observation_times_us;
     std::set<std::string> candidate_sources;
@@ -89,6 +90,7 @@ class VisualEntityWindowAssembler {
   std::vector<MaskWriteEntry> masks_;
   EntityTrackResult provenance_;
   std::size_t next_entity_index_ = 1;
+  std::size_t next_track_index_ = 1;
   std::size_t next_region_index_ = 1;
 };
 

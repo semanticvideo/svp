@@ -121,6 +121,8 @@ VisualEntityDetectorRuntime load_visual_entity_detector(
       options.nms_iou_threshold > 1.0 ||
       options.nms_containment_threshold <= 0.0 ||
       options.nms_containment_threshold > 1.0 ||
+      options.cross_category_duplicate_iou_threshold <= 0.0 ||
+      options.cross_category_duplicate_iou_threshold > 1.0 ||
       options.category_evidence_confidence_threshold <
           options.confidence_threshold ||
       options.category_evidence_confidence_threshold > 1.0) {
@@ -240,9 +242,13 @@ std::vector<VisualEntityDetection> detect_visual_entities(
   for (const auto& candidate : candidates) {
     const bool suppressed = std::any_of(
         retained.begin(), retained.end(), [&](const auto& existing) {
-          if (candidate.class_index != existing.class_index) return false;
-          return iou(candidate.detection, existing.detection) >=
-                  runtime.options.nms_iou_threshold ||
+          const double overlap_iou =
+              iou(candidate.detection, existing.detection);
+          if (candidate.class_index != existing.class_index) {
+            return overlap_iou >=
+                runtime.options.cross_category_duplicate_iou_threshold;
+          }
+          return overlap_iou >= runtime.options.nms_iou_threshold ||
               intersection_over_minimum_area(candidate.detection,
                                              existing.detection) >=
                   runtime.options.nms_containment_threshold;

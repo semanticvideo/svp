@@ -36,6 +36,7 @@ add_library(svp-vision
   src/visual_entity_cut_detection.cpp
   src/visual_entity_frame_decoder.cpp
   src/visual_entity_detector.cpp
+  src/visual_entity_identity_reconciliation.cpp
   src/visual_entity_motion_policy.cpp
   src/visual_entity_sampling.cpp
   src/visual_entity_tracker.cpp

@@ -13,8 +13,8 @@ namespace svp::vision {
 struct VisualEntityDetection {
   int box_px[4] = {0, 0, 0, 0};
   double confidence = 0.0;
-  // Internal detector category used to prevent cross-category suppression and
-  // identity merges. It is supporting evidence, not a user-facing label.
+  // Internal detector category used as supporting identity evidence. It is
+  // not a user-facing label.
   int category_index = -1;
 };
 
@@ -33,6 +33,10 @@ struct VisualEntityDetectorOptions {
   // object while having modest union IoU. Suppress them when most of the
   // smaller box is contained by an already retained box.
   double nms_containment_threshold = 0.80;
+  // RF-DETR can assign different internal categories to duplicate proposals.
+  // Suppress only near-identical cross-category boxes so nested distinct
+  // objects, such as a controller held by a person, remain available.
+  double cross_category_duplicate_iou_threshold = 0.90;
   double minimum_area_ratio = 0.005;
   double maximum_area_ratio = 0.90;
   std::size_t maximum_detections = 32;
