@@ -47,6 +47,12 @@ svp::vision::EntityTrackResult window(
   return result;
 }
 
+svp::vision::VisualEntityWindowAssemblerOptions in_memory_options() {
+  svp::vision::VisualEntityWindowAssemblerOptions options;
+  options.retain_artifacts_in_memory = true;
+  return options;
+}
+
 svp::vision::TrackedRegion detector_region(
     std::string entity_id,
     std::int64_t timestamp_us,
@@ -58,7 +64,7 @@ svp::vision::TrackedRegion detector_region(
 }
 
 void test_overlap_preserves_identity_and_deduplicates_regions() {
-  svp::vision::VisualEntityWindowAssembler assembler;
+  svp::vision::VisualEntityWindowAssembler assembler(in_memory_options());
   assembler.append_window(
       window({region("local_a", 0, 0.1, 0.4, 0.18),
               region("local_a", 200000, 0.12, 0.42, 0.18),
@@ -81,7 +87,7 @@ void test_overlap_preserves_identity_and_deduplicates_regions() {
 }
 
 void test_distinct_overlap_regions_do_not_merge() {
-  svp::vision::VisualEntityWindowAssembler assembler;
+  svp::vision::VisualEntityWindowAssembler assembler(in_memory_options());
   assembler.append_window(
       window({region("left", 0, 0.05, 0.25, 0.12),
               region("left", 200000, 0.05, 0.25, 0.12),
@@ -102,7 +108,7 @@ void test_distinct_overlap_regions_do_not_merge() {
 }
 
 void test_singletons_and_full_frame_regions_are_suppressed() {
-  svp::vision::VisualEntityWindowAssembler assembler;
+  svp::vision::VisualEntityWindowAssembler assembler(in_memory_options());
   assembler.append_window(
       window({region("singleton", 0, 0.1, 0.3, 0.12),
               region("background", 0, 0.0, 1.0, 1.0),
@@ -116,7 +122,7 @@ void test_singletons_and_full_frame_regions_are_suppressed() {
 }
 
 void test_appearance_reacquires_detector_object_after_gap() {
-  svp::vision::VisualEntityWindowAssembler assembler;
+  svp::vision::VisualEntityWindowAssembler assembler(in_memory_options());
   assembler.append_window(
       window({detector_region("before", 0, {1.0F, 0.0F}),
               detector_region("before", 200000, {0.99F, 0.01F}),
@@ -141,7 +147,7 @@ void test_appearance_reacquires_detector_object_after_gap() {
 }
 
 void test_appearance_does_not_merge_distinct_detector_objects() {
-  svp::vision::VisualEntityWindowAssembler assembler;
+  svp::vision::VisualEntityWindowAssembler assembler(in_memory_options());
   assembler.append_window(
       window({detector_region("before", 0, {1.0F, 0.0F}),
               detector_region("before", 200000, {0.99F, 0.01F}),
@@ -159,7 +165,7 @@ void test_appearance_does_not_merge_distinct_detector_objects() {
 }
 
 void test_appearance_reconciles_fragments_inside_one_window() {
-  svp::vision::VisualEntityWindowAssembler assembler;
+  svp::vision::VisualEntityWindowAssembler assembler(in_memory_options());
   assembler.append_window(
       window({detector_region("before", 0, {1.0F, 0.0F}),
               detector_region("before", 200000, {0.99F, 0.01F}),
@@ -177,7 +183,7 @@ void test_appearance_reconciles_fragments_inside_one_window() {
 }
 
 void test_detector_category_prevents_appearance_merge() {
-  svp::vision::VisualEntityWindowAssembler assembler;
+  svp::vision::VisualEntityWindowAssembler assembler(in_memory_options());
   auto before_a = detector_region("before", 0, {1.0F, 0.0F});
   auto before_b = detector_region("before", 200000, {0.99F, 0.01F});
   auto before_c = detector_region("before", 400000, {});
@@ -201,7 +207,7 @@ void test_detector_category_prevents_appearance_merge() {
 }
 
 void test_local_fragment_scale_disagreement_prevents_merge() {
-  svp::vision::VisualEntityWindowAssembler assembler;
+  svp::vision::VisualEntityWindowAssembler assembler(in_memory_options());
   auto after_a = detector_region("after", 2000000, {1.0F, 0.0F});
   auto after_b = detector_region("after", 2200000, {0.99F, 0.01F});
   auto after_c = detector_region("after", 2400000, {});
@@ -221,7 +227,7 @@ void test_local_fragment_scale_disagreement_prevents_merge() {
 }
 
 void test_moderate_appearance_does_not_merge_across_immediate_cut() {
-  svp::vision::VisualEntityWindowAssembler assembler;
+  svp::vision::VisualEntityWindowAssembler assembler(in_memory_options());
   assembler.append_window(
       window({detector_region("before", 0, {1.0F, 0.0F}),
               detector_region("before", 200000, {0.99F, 0.01F}),
@@ -237,7 +243,7 @@ void test_moderate_appearance_does_not_merge_across_immediate_cut() {
 }
 
 void test_detected_cut_splits_one_local_track_without_losing_identity() {
-  svp::vision::VisualEntityWindowAssembler assembler;
+  svp::vision::VisualEntityWindowAssembler assembler(in_memory_options());
   assembler.append_window(
       window({detector_region("continuous_local", 0, {1.0F, 0.0F}),
               detector_region("continuous_local", 200000, {0.99F, 0.01F}),
@@ -256,7 +262,7 @@ void test_detected_cut_splits_one_local_track_without_losing_identity() {
 }
 
 void test_motion_group_reacquires_across_bounded_proposal_gap() {
-  svp::vision::VisualEntityWindowAssembler assembler;
+  svp::vision::VisualEntityWindowAssembler assembler(in_memory_options());
   auto before_a = region("before", 0, 0.0, 1.0, 1.0);
   auto before_b = region("before", 200000, 0.0, 1.0, 1.0);
   auto before_c = region("before", 400000, 0.0, 1.0, 1.0);
@@ -277,6 +283,40 @@ void test_motion_group_reacquires_across_bounded_proposal_gap() {
         "matching motion groups reacquire across a bounded proposal gap");
   check(result.tracker_result.tracks.size() == 2,
         "reacquired motion groups retain the proposal gap as a track break");
+  if (!result.tracker_result.entities.empty()) {
+    check(result.tracker_result.entities.front().entity_type ==
+              "visual_entity",
+          "motion groups use a conforming RC2 entity type");
+  }
+}
+
+void test_streams_finalized_artifacts_before_finish() {
+  std::size_t emitted_regions = 0;
+  std::size_t emitted_masks = 0;
+  svp::vision::VisualEntityWindowAssemblerOptions options;
+  options.handoff_retention_us = 400000;
+  options.artifact_sink = [&](const auto& regions, const auto& masks) {
+    emitted_regions += regions.size();
+    emitted_masks += masks.size();
+  };
+  svp::vision::VisualEntityWindowAssembler assembler(options);
+  assembler.append_window(
+      window({region("streamed", 0, 0.1, 0.4, 0.18),
+              region("streamed", 200000, 0.1, 0.4, 0.18),
+              region("streamed", 400000, 0.1, 0.4, 0.18),
+              region("streamed", 600000, 0.1, 0.4, 0.18),
+              region("streamed", 800000, 0.1, 0.4, 0.18)}),
+      {0, 200000, 400000, 600000, 800000}, 0, -1);
+  check(emitted_regions == 2 && emitted_masks == 2,
+        "regions older than handoff retention stream before finish");
+
+  const auto result = assembler.finish();
+  check(emitted_regions == 5 && emitted_masks == 5,
+        "finish flushes the retained handoff tail");
+  check(result.tracker_result.regions.empty() && result.masks.empty(),
+        "streaming mode does not retain heavy artifacts in memory");
+  check(result.tracker_result.entities.size() == 1,
+        "streaming preserves compact entity aggregates");
 }
 
 }  // namespace
@@ -293,5 +333,6 @@ int main() {
   test_moderate_appearance_does_not_merge_across_immediate_cut();
   test_detected_cut_splits_one_local_track_without_losing_identity();
   test_motion_group_reacquires_across_bounded_proposal_gap();
+  test_streams_finalized_artifacts_before_finish();
   return failures == 0 ? 0 : 1;
 }

@@ -29,8 +29,10 @@ int main(int argc, char** argv) {
     }
     auto probe = svp::media::probe_media_with_ffprobe(media_path, ffprobe);
     auto plan = svp::media::build_media_ingest_plan(media_path, std::move(probe));
+    svp::vision::VisualEntityPipelineOptions options;
+    options.assembly.retain_artifacts_in_memory = true;
     auto result = svp::vision::run_visual_entity_pipeline(
-        plan, ffmpeg, model_cache, {});
+        plan, ffmpeg, model_cache, {}, nullptr, options);
 
     nlohmann::json entities = nlohmann::json::array();
     for (const auto& entity : result.assembled.tracker_result.entities) {
@@ -77,6 +79,7 @@ int main(int argc, char** argv) {
     nlohmann::json output = {
         {"windows_planned", result.windows_planned},
         {"windows_processed", result.windows_processed},
+        {"windows_succeeded", result.windows_succeeded},
         {"frames_attempted", result.frames_attempted},
         {"frames_decoded", result.frames_decoded},
         {"frames_missed", result.frames_missed},
@@ -85,6 +88,8 @@ int main(int argc, char** argv) {
         {"region_count", result.assembled.tracker_result.regions.size()},
         {"mask_count", result.assembled.masks.size()},
         {"blocker", result.blocker},
+        {"failures", result.failures},
+        {"parameters", result.assembled.tracker_result.parameters_json},
         {"entities", std::move(entities)},
         {"tracks", std::move(tracks)},
         {"regions", std::move(regions)}};

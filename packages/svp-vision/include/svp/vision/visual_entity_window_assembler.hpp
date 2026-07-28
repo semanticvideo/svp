@@ -4,12 +4,17 @@
 #include "svp/vision/visual_entity_tracker.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
 #include <vector>
 
 namespace svp::vision {
+
+using VisualEntityArtifactSink = std::function<void(
+    const std::vector<TrackedRegion>&,
+    const std::vector<MaskWriteEntry>&)>;
 
 struct VisualEntityWindowAssemblerOptions {
   // Overlap frames are decoded identically in adjacent windows. Requiring
@@ -54,6 +59,20 @@ struct VisualEntityWindowAssemblerOptions {
   // strongly and are separated by no more than the decode-window overlap.
   std::int64_t maximum_motion_group_gap_us = 1'000'000;
   double minimum_motion_group_endpoint_iou = 0.50;
+
+  // Keep only evidence needed to hand identity into the next overlapping
+  // decode window. Older heavy regions and masks are sent to artifact_sink.
+  std::int64_t handoff_retention_us = 1'000'000;
+
+  // Retain a compact appearance history for re-identification after heavy
+  // region output has streamed to disk.
+  std::size_t maximum_identity_evidence_regions = 16;
+
+  VisualEntityArtifactSink artifact_sink;
+
+  // Diagnostics and unit tests may explicitly request complete in-memory
+  // artifacts. Production callers must provide artifact_sink instead.
+  bool retain_artifacts_in_memory = false;
 };
 
 struct AssembledVisualEntityResult {
@@ -76,18 +95,43 @@ class VisualEntityWindowAssembler {
   [[nodiscard]] AssembledVisualEntityResult finish();
 
  private:
-  struct EntityState {
-    std::string entity_id;
-    std::vector<std::string> track_ids;
-    std::vector<TrackedRegion> regions;
-    std::set<std::int64_t> observation_times_us;
+  struct TrackState {
+    std::string track_id;
+    std::int64_t start_us = 0;
+    std::int64_t end_us = 0;
+    std::string start_frame_id;
+    std::string end_frame_id;
+    std::size_t region_count = 0;
+    bool reacquired = false;
     std::set<std::string> candidate_sources;
   };
 
+  struct EntityState {
+    std::string entity_id;
+    std::vector<std::string> track_ids;
+    std::map<std::string, TrackState> tracks;
+    std::vector<TrackedRegion> regions;
+    std::vector<TrackedRegion> identity_evidence;
+    std::size_t observation_count = 0;
+    std::int64_t first_seen_us = 0;
+    std::int64_t last_seen_us = 0;
+    double screen_area_sum = 0.0;
+    std::set<std::string> candidate_sources;
+  };
+
+  [[nodiscard]] std::vector<TrackedRegion> reconciliation_regions(
+      const EntityState& state) const;
+  void remember_identity_evidence(EntityState& state,
+                                  const TrackedRegion& region);
+  void emit_finalized_before(std::int64_t timestamp_us);
+
   VisualEntityWindowAssemblerOptions options_;
   std::map<std::string, EntityState> entities_;
-  std::set<std::int64_t> sampled_timestamps_us_;
-  std::vector<MaskWriteEntry> masks_;
+  std::size_t sampled_timestamp_count_ = 0;
+  std::int64_t latest_sampled_timestamp_us_ = -1;
+  std::map<std::string, MaskWriteEntry> pending_masks_;
+  std::vector<TrackedRegion> collected_regions_;
+  std::vector<MaskWriteEntry> collected_masks_;
   EntityTrackResult provenance_;
   std::size_t next_entity_index_ = 1;
   std::size_t next_track_index_ = 1;

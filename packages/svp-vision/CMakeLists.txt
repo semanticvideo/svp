@@ -42,6 +42,7 @@ add_library(svp-vision
   src/visual_entity_tracker.cpp
   src/visual_entity_window_assembler.cpp
   src/mask_writer.cpp
+  src/mask_stream_writer.cpp
   src/noise_suppression.cpp
 )
 
@@ -118,6 +119,36 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-vision-visual-entity-sampling-tests
            COMMAND svp-vision-visual-entity-sampling-tests)
+
+  add_executable(svp-vision-visual-entity-frame-decoder-tests
+    tests/visual_entity_frame_decoder_tests.cpp
+  )
+
+  target_compile_features(svp-vision-visual-entity-frame-decoder-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-visual-entity-frame-decoder-tests PRIVATE
+    svp::vision
+  )
+
+  add_test(NAME svp-vision-visual-entity-frame-decoder-tests
+           COMMAND svp-vision-visual-entity-frame-decoder-tests)
+
+  add_executable(svp-vision-visual-entity-detector-policy-tests
+    tests/visual_entity_detector_policy_tests.cpp
+  )
+
+  target_compile_features(svp-vision-visual-entity-detector-policy-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-visual-entity-detector-policy-tests PRIVATE
+    svp::vision
+  )
+
+  add_test(NAME svp-vision-visual-entity-detector-policy-tests
+           COMMAND svp-vision-visual-entity-detector-policy-tests)
 
   add_executable(svp-vision-visual-entity-window-assembler-tests
     tests/visual_entity_window_assembler_tests.cpp

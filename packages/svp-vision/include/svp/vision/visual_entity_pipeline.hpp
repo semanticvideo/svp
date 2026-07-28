@@ -35,10 +35,12 @@ struct VisualEntityPipelineResult {
   AssembledVisualEntityResult assembled;
   std::size_t windows_planned = 0;
   std::size_t windows_processed = 0;
+  std::size_t windows_succeeded = 0;
   std::size_t frames_attempted = 0;
   std::size_t frames_decoded = 0;
   std::size_t frames_missed = 0;
   std::vector<VisualEntityCutEvidence> cut_evidence;
+  nlohmann::json failures = nlohmann::json::array();
   std::string blocker;
 };
 

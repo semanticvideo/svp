@@ -10,6 +10,7 @@
 #include "svp/vision/ocr_generation.hpp"
 #include "svp/vision/visual_entity_tracker.hpp"
 #include "svp/package/entity_writer.hpp"
+#include "svp/package/visual_entity_artifact_writer.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -19,6 +20,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -414,8 +416,8 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
 
     // Visual tracking owns its temporal coverage independently from the
     // five-frame foundation input shared by depth and embedding generation.
-    // It processes bounded overlapping windows so coverage and memory use do
-    // not depend on media duration.
+    // It processes bounded overlapping decode windows for dense temporal
+    // coverage and cross-window identity handoff.
     if (media_plan != nullptr && !ffmpeg_path.empty()) {
       // Read shot boundaries from timeline
       std::vector<std::pair<std::string, std::int64_t>> shot_boundaries;
@@ -430,6 +432,15 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
 
       svp::vision::VisualEntityPipelineOptions entity_options;
       entity_options.execution_provider = "cpu";
+      VisualEntityArtifactWriter artifact_writer(staging_dir);
+      entity_options.assembly.handoff_retention_us =
+          entity_options.sampling.window_overlap_us;
+      entity_options.assembly.artifact_sink =
+          [&artifact_writer](
+              const std::vector<svp::vision::TrackedRegion>& regions,
+              const std::vector<svp::vision::MaskWriteEntry>& masks) {
+            artifact_writer.append(regions, masks);
+          };
       if (on_progress) {
         entity_options.on_progress = [&on_progress](
             std::size_t current, std::size_t total) {
@@ -445,11 +456,18 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
           frame_catalog,
           entity_options);
 
+      std::set<std::string> retained_entity_ids;
+      for (const auto& entity : entity_result.assembled.tracker_result.entities) {
+        retained_entity_ids.insert(entity.entity_id);
+      }
+      const auto streamed_artifacts = artifact_writer.finish(retained_entity_ids);
+
       // Write visual entity artifacts (entities, tracks, regions, masks)
       auto visual_entity_summary = svp::package::write_visual_entity_artifacts(
           staging_dir,
           entity_result.assembled.tracker_result,
-          &entity_result.assembled.masks);
+          nullptr,
+          &streamed_artifacts);
       summary.masks_index_written = visual_entity_summary.masks_written;
       summary.masks_blocks_written = visual_entity_summary.masks_written;
     }

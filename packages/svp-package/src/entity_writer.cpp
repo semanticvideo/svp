@@ -523,7 +523,8 @@ EntityWriteSummary write_entity_artifacts(
 EntityWriteSummary write_visual_entity_artifacts(
     const std::filesystem::path& staging_dir,
     const svp::vision::EntityTrackResult& tracker_result,
-    const std::vector<svp::vision::MaskWriteEntry>* preencoded_masks) {
+    const std::vector<svp::vision::MaskWriteEntry>* preencoded_masks,
+    const VisualEntityArtifactStreamSummary* streamed_artifacts) {
   EntityWriteSummary summary;
 
   const std::filesystem::path entities_dir = staging_dir / "entities";
@@ -576,6 +577,12 @@ EntityWriteSummary write_visual_entity_artifacts(
   summary.entity_count = all_entities.size();
   summary.track_count = all_tracks.size();
 
+  if (streamed_artifacts != nullptr) {
+    summary.regions_written = true;
+    summary.region_count = streamed_artifacts->region_count;
+    summary.masks_written = streamed_artifacts->mask_count > 0;
+    summary.mask_count = streamed_artifacts->mask_count;
+  } else {
   // Write spatial regions per spec §14.2
   std::vector<nlohmann::json> region_records;
   for (const auto& region : tracker_result.regions) {
@@ -642,6 +649,7 @@ EntityWriteSummary write_visual_entity_artifacts(
       std::ofstream empty_block(masks_block, std::ios::binary);
     }
   }
+  }
 
   // Append processor record for visual entity tracker
   nlohmann::json processor_record;
@@ -666,7 +674,7 @@ EntityWriteSummary write_visual_entity_artifacts(
     "task.vision.spatial_region_generation"
   };
   processor_record["cache_keys"] = nlohmann::json::array();
-  processor_record["status"] = "completed";
+  processor_record["status"] = tracker_result.processing_status;
   processor_record["runtime"] = tracker_result.runtime;
   processor_record["execution_provider"] = tracker_result.execution_provider;
   processor_record["opencv_version"] = tracker_result.opencv_version;

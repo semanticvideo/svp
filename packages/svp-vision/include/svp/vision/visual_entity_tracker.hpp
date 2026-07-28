@@ -247,6 +247,7 @@ struct EntityTrackResult {
   std::string runtime;
   std::string execution_provider;
   std::string confidence_calibration_status;
+  std::string processing_status = "completed";
   std::string limitations_note;
   std::string opencv_version;
   nlohmann::json parameters_json;

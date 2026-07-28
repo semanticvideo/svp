@@ -64,6 +64,91 @@ VisualEntityWindowAssembler::VisualEntityWindowAssembler(
     throw std::invalid_argument(
         "local fragment evidence thresholds must be in (0, 1]");
   }
+  if (options_.handoff_retention_us <= 0) {
+    throw std::invalid_argument("handoff retention must be positive");
+  }
+  if (options_.maximum_identity_evidence_regions <
+      options_.minimum_reacquisition_embedding_observations) {
+    throw std::invalid_argument(
+        "identity evidence retention must satisfy reacquisition");
+  }
+  if (!options_.artifact_sink && !options_.retain_artifacts_in_memory) {
+    throw std::invalid_argument(
+        "visual entity assembly requires a streaming artifact sink");
+  }
+}
+
+std::vector<TrackedRegion> VisualEntityWindowAssembler::reconciliation_regions(
+    const EntityState& state) const {
+  std::vector<TrackedRegion> regions = state.identity_evidence;
+  regions.insert(regions.end(), state.regions.begin(), state.regions.end());
+  std::sort(regions.begin(), regions.end(),
+            [](const TrackedRegion& left, const TrackedRegion& right) {
+              if (left.timestamp_us != right.timestamp_us) {
+                return left.timestamp_us < right.timestamp_us;
+              }
+              return left.region_id < right.region_id;
+            });
+  regions.erase(std::unique(regions.begin(), regions.end(),
+                            [](const TrackedRegion& left,
+                               const TrackedRegion& right) {
+                              return left.region_id == right.region_id;
+                            }),
+                regions.end());
+  return regions;
+}
+
+void VisualEntityWindowAssembler::remember_identity_evidence(
+    EntityState& state,
+    const TrackedRegion& region) {
+  if ((region.detector_category_index < 0 || region.embedding.empty()) &&
+      region.candidate_source != "motion_group") {
+    return;
+  }
+  TrackedRegion evidence = region;
+  evidence.mask_pixels.clear();
+  evidence.mask_pixels.shrink_to_fit();
+  state.identity_evidence.push_back(std::move(evidence));
+  if (state.identity_evidence.size() >
+      options_.maximum_identity_evidence_regions) {
+    state.identity_evidence.erase(state.identity_evidence.begin());
+  }
+}
+
+void VisualEntityWindowAssembler::emit_finalized_before(
+    std::int64_t timestamp_us) {
+  std::vector<TrackedRegion> regions;
+  std::vector<MaskWriteEntry> masks;
+  for (auto& [_, state] : entities_) {
+    const auto retained = std::stable_partition(
+        state.regions.begin(), state.regions.end(),
+        [timestamp_us](const TrackedRegion& region) {
+          return region.timestamp_us >= timestamp_us;
+        });
+    for (auto iterator = retained; iterator != state.regions.end(); ++iterator) {
+      const auto mask = pending_masks_.find(iterator->mask_ref);
+      if (mask != pending_masks_.end()) {
+        masks.push_back(std::move(mask->second));
+        pending_masks_.erase(mask);
+      }
+      regions.push_back(std::move(*iterator));
+    }
+    state.regions.erase(retained, state.regions.end());
+  }
+  if (regions.empty() && masks.empty()) return;
+  if (options_.artifact_sink) {
+    options_.artifact_sink(regions, masks);
+  }
+  if (options_.retain_artifacts_in_memory) {
+    collected_regions_.insert(
+        collected_regions_.end(),
+        std::make_move_iterator(regions.begin()),
+        std::make_move_iterator(regions.end()));
+    collected_masks_.insert(
+        collected_masks_.end(),
+        std::make_move_iterator(masks.begin()),
+        std::make_move_iterator(masks.end()));
+  }
 }
 
 void VisualEntityWindowAssembler::append_window(
@@ -72,8 +157,12 @@ void VisualEntityWindowAssembler::append_window(
     std::int64_t overlap_start_us,
     std::int64_t emit_after_us,
     const std::vector<std::int64_t>& discontinuity_timestamps_us) {
-  sampled_timestamps_us_.insert(
-      sampled_timestamps_us.begin(), sampled_timestamps_us.end());
+  for (const auto timestamp_us : sampled_timestamps_us) {
+    if (timestamp_us > latest_sampled_timestamp_us_) {
+      ++sampled_timestamp_count_;
+      latest_sampled_timestamp_us_ = timestamp_us;
+    }
+  }
 
   if (provenance_.processor_id.empty()) {
     provenance_.processor_id = window_result.processor_id;
@@ -178,16 +267,17 @@ void VisualEntityWindowAssembler::append_window(
               {local_id, global_id, 2.0 + spatial_score, true});
           continue;
         }
-        const bool separated_in_time = !state.regions.empty() &&
+        const bool separated_in_time = state.observation_count > 0 &&
             !regions.empty() &&
-            state.regions.back().timestamp_us < regions.front().timestamp_us;
+            state.last_seen_us < regions.front().timestamp_us;
         if (!separated_in_time) continue;
+        const auto prior_regions = reconciliation_regions(state);
         const double visual_score =
             identity_reconciliation::supported_reacquisition_score(
-            state.regions, regions, options_);
+            prior_regions, regions, options_);
         const double group_score =
             identity_reconciliation::motion_group_reacquisition_score(
-            state.regions, regions, options_);
+            prior_regions, regions, options_);
         if (visual_score >= options_.minimum_supported_fragment_similarity) {
           candidates.push_back({local_id, global_id, visual_score, false});
         } else if (group_score >= options_.minimum_motion_group_endpoint_iou) {
@@ -255,17 +345,17 @@ void VisualEntityWindowAssembler::append_window(
       if (global_id.empty()) {
         double best_visual_score = -1.0;
         for (const auto& [existing_id, state] : entities_) {
-          if (state.regions.empty() ||
-              state.regions.back().timestamp_us >=
-                  regions.front().timestamp_us) {
+          if (state.observation_count == 0 ||
+              state.last_seen_us >= regions.front().timestamp_us) {
             continue;
           }
+          const auto prior_regions = reconciliation_regions(state);
           const double appearance =
               identity_reconciliation::supported_reacquisition_score(
-              state.regions, regions, options_);
+              prior_regions, regions, options_);
           const double group =
               identity_reconciliation::motion_group_reacquisition_score(
-              state.regions, regions, options_);
+              prior_regions, regions, options_);
           const double score = std::max(
               appearance,
               group >= options_.minimum_motion_group_endpoint_iou
@@ -305,6 +395,10 @@ void VisualEntityWindowAssembler::append_window(
         } else {
           output_track_id = numbered_id("track_", next_track_index_++);
           state.track_ids.push_back(output_track_id);
+          TrackState track;
+          track.track_id = output_track_id;
+          track.reacquired = state.track_ids.size() > 1;
+          state.tracks.emplace(output_track_id, std::move(track));
         }
       }
 
@@ -312,8 +406,23 @@ void VisualEntityWindowAssembler::append_window(
       region.track_id = output_track_id;
       region.region_id = numbered_id("region_", next_region_index_++);
       region.mask_ref = "mask_" + region.region_id;
-      state.observation_times_us.insert(region.timestamp_us);
+      if (state.observation_count == 0) {
+        state.first_seen_us = region.timestamp_us;
+      }
+      state.last_seen_us = region.timestamp_us;
+      ++state.observation_count;
+      state.screen_area_sum += region.screen_area_ratio;
       state.candidate_sources.insert(region.candidate_source);
+
+      auto& track = state.tracks.at(output_track_id);
+      if (track.region_count == 0) {
+        track.start_us = region.timestamp_us;
+        track.start_frame_id = region.frame_id;
+      }
+      track.end_us = region.timestamp_us;
+      track.end_frame_id = region.frame_id;
+      ++track.region_count;
+      track.candidate_sources.insert(region.candidate_source);
 
       if (!region.mask_pixels.empty() &&
           region.mask_width > 0 && region.mask_height > 0) {
@@ -328,101 +437,87 @@ void VisualEntityWindowAssembler::append_window(
         mask.height = region.mask_height;
         mask.rle_data = encode_mask_rle(
             region.mask_pixels.data(), region.mask_width, region.mask_height);
-        masks_.push_back(std::move(mask));
+        pending_masks_.emplace(mask.mask_id, std::move(mask));
         region.mask_pixels.clear();
         region.mask_pixels.shrink_to_fit();
       }
+      remember_identity_evidence(state, region);
       state.regions.push_back(std::move(region));
     }
+  }
+
+  if (!sampled_timestamps_us.empty()) {
+    emit_finalized_before(
+        sampled_timestamps_us.back() - options_.handoff_retention_us);
   }
 }
 
 AssembledVisualEntityResult VisualEntityWindowAssembler::finish() {
+  emit_finalized_before(std::numeric_limits<std::int64_t>::max());
+
   AssembledVisualEntityResult result;
   result.tracker_result = std::move(provenance_);
 
-  std::set<std::string> retained_mask_ids;
+  std::set<std::string> retained_entity_ids;
   for (auto& [entity_id, state] : entities_) {
-    if (state.observation_times_us.size() < options_.minimum_observation_count) {
+    if (state.observation_count < options_.minimum_observation_count) {
       continue;
     }
-
-    std::sort(state.regions.begin(), state.regions.end(),
-              [](const TrackedRegion& left, const TrackedRegion& right) {
-                if (left.timestamp_us != right.timestamp_us) {
-                  return left.timestamp_us < right.timestamp_us;
-                }
-                return left.region_id < right.region_id;
-              });
-    if (state.regions.empty()) continue;
+    retained_entity_ids.insert(entity_id);
 
     EntityRecord entity;
     entity.entity_id = state.entity_id;
-    entity.entity_type = state.candidate_sources.count("motion_group") > 0
-        ? "dynamic_group"
-        : "visual_entity";
-    entity.first_seen_us = state.regions.front().timestamp_us;
-    entity.last_seen_us = state.regions.back().timestamp_us;
+    entity.entity_type = "visual_entity";
+    entity.first_seen_us = state.first_seen_us;
+    entity.last_seen_us = state.last_seen_us;
     entity.track_ids = state.track_ids;
     entity.processor_id = result.tracker_result.processor_id;
-    double area_sum = 0.0;
-    for (const auto& region : state.regions) {
-      area_sum += region.screen_area_ratio;
-      retained_mask_ids.insert(region.mask_ref);
-    }
-    entity.average_visibility = sampled_timestamps_us_.empty()
+    entity.average_visibility = sampled_timestamp_count_ == 0
         ? 0.0
-        : static_cast<double>(state.observation_times_us.size()) /
-              static_cast<double>(sampled_timestamps_us_.size());
-    entity.average_screen_area =
-        area_sum / static_cast<double>(state.regions.size());
+        : static_cast<double>(state.observation_count) /
+              static_cast<double>(sampled_timestamp_count_);
+    entity.average_screen_area = state.screen_area_sum /
+        static_cast<double>(state.observation_count);
     entity.evidence_sources.push_back({
         {"type", "visual_tracking"},
         {"method", "windowed_optical_flow_kalman"},
-        {"region_count", state.regions.size()}});
+        {"region_count", state.observation_count}});
     result.tracker_result.entities.push_back(std::move(entity));
 
-    for (std::size_t track_index = 0;
-         track_index < state.track_ids.size(); ++track_index) {
-      const auto& track_id = state.track_ids[track_index];
-      std::vector<const TrackedRegion*> track_regions;
-      std::set<std::int64_t> track_observation_times_us;
-      std::set<std::string> track_candidate_sources;
-      for (const auto& region : state.regions) {
-        if (region.track_id != track_id) continue;
-        track_regions.push_back(&region);
-        track_observation_times_us.insert(region.timestamp_us);
-        track_candidate_sources.insert(region.candidate_source);
-      }
-      if (track_regions.empty()) continue;
-
+    for (const auto& track_id : state.track_ids) {
+      const auto& track_state = state.tracks.at(track_id);
       TrackRecord track;
       track.track_id = track_id;
       track.entity_id = state.entity_id;
-      track.start_us = track_regions.front()->timestamp_us;
-      track.end_us = track_regions.back()->timestamp_us;
-      track.start_frame_id = track_regions.front()->frame_id;
-      track.end_frame_id = track_regions.back()->frame_id;
-      track.region_count = static_cast<int>(track_regions.size());
-      track.reacquired = track_index > 0;
+      track.start_us = track_state.start_us;
+      track.end_us = track_state.end_us;
+      track.start_frame_id = track_state.start_frame_id;
+      track.end_frame_id = track_state.end_frame_id;
+      track.region_count = static_cast<int>(track_state.region_count);
+      track.reacquired = track_state.reacquired;
       track.confidence = std::min(
-          1.0, static_cast<double>(track_observation_times_us.size()) /
-                   static_cast<double>(sampled_timestamps_us_.size()));
+          1.0, sampled_timestamp_count_ == 0
+              ? 0.0
+              : static_cast<double>(track_state.region_count) /
+                    static_cast<double>(sampled_timestamp_count_));
       track.processor_id = result.tracker_result.processor_id;
       track.tracking_method = "windowed_optical_flow_kalman";
       track.candidate_source =
-          combined_candidate_source(track_candidate_sources);
+          combined_candidate_source(track_state.candidate_sources);
       result.tracker_result.tracks.push_back(std::move(track));
-    }
-
-    for (auto& region : state.regions) {
-      result.tracker_result.regions.push_back(std::move(region));
     }
   }
 
-  for (auto& mask : masks_) {
-    if (retained_mask_ids.count(mask.mask_id) > 0) {
-      result.masks.push_back(std::move(mask));
+  if (options_.retain_artifacts_in_memory) {
+    for (auto& region : collected_regions_) {
+      if (retained_entity_ids.count(region.entity_id) > 0) {
+        result.tracker_result.regions.push_back(std::move(region));
+      }
+    }
+    for (auto& mask : collected_masks_) {
+      if (retained_entity_ids.count(mask.entity_id) > 0) {
+        result.masks.push_back(std::move(mask));
+      }
     }
   }
   return result;
