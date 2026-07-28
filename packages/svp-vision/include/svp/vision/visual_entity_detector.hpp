@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
@@ -37,15 +38,29 @@ struct VisualEntityDetectorOptions {
   // Suppress only near-identical cross-category boxes so nested distinct
   // objects, such as a controller held by a person, remain available.
   double cross_category_duplicate_iou_threshold = 0.90;
+  // Ignore tiny raster noise and near-full-frame scene proposals. These are
+  // proposal-quality limits, not user-facing object-size semantics.
   double minimum_area_ratio = 0.005;
   double maximum_area_ratio = 0.90;
+  // Bound the per-frame association workload after deterministic NMS.
   std::size_t maximum_detections = 32;
+};
+
+struct VisualEntityDetectorDiagnostics {
+  std::size_t queries_evaluated = 0;
+  std::size_t confidence_filtered = 0;
+  std::size_t area_filtered = 0;
+  std::size_t duplicate_filtered = 0;
+  std::size_t cap_filtered = 0;
+  std::size_t detections_emitted = 0;
 };
 
 struct VisualEntityDetectorRuntime {
   std::unique_ptr<svp::models::OnnxSession> session;
   VisualEntityDetectorOptions options;
   std::vector<std::string> model_refs;
+  nlohmann::json model_identity;
+  VisualEntityDetectorDiagnostics diagnostics;
   std::string blocker;
 };
 

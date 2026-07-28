@@ -125,7 +125,11 @@ VisualEntityDetectorRuntime load_visual_entity_detector(
       options.cross_category_duplicate_iou_threshold > 1.0 ||
       options.category_evidence_confidence_threshold <
           options.confidence_threshold ||
-      options.category_evidence_confidence_threshold > 1.0) {
+      options.category_evidence_confidence_threshold > 1.0 ||
+      options.minimum_area_ratio < 0.0 ||
+      options.minimum_area_ratio >= options.maximum_area_ratio ||
+      options.maximum_area_ratio > 1.0 ||
+      options.maximum_detections == 0) {
     runtime.blocker = "invalid visual entity detector thresholds";
     return runtime;
   }
@@ -150,6 +154,20 @@ VisualEntityDetectorRuntime load_visual_entity_detector(
     runtime.session =
         std::make_unique<svp::models::OnnxSession>(std::move(session));
     runtime.model_refs.push_back(options.model_id);
+    runtime.model_identity = {
+        {"model_id", manifest.model_id},
+        {"model_version", manifest.model_version},
+        {"model_bundle_id", manifest.model_bundle_id},
+        {"bundle_blake3", manifest.bundle_blake3.canonical()},
+        {"source_revision", manifest.source_revision.value_or("")},
+        {"license", manifest.license}};
+    runtime.model_identity["files"] = nlohmann::json::array();
+    for (const auto& file : manifest.files) {
+      runtime.model_identity["files"].push_back({
+          {"path", file.path},
+          {"role", file.role},
+          {"blake3", file.blake3.canonical()}});
+    }
   } catch (const std::exception& error) {
     runtime.blocker = error.what();
   }
@@ -180,6 +198,7 @@ std::vector<VisualEntityDetection> detect_visual_entities(
 
   std::vector<DetectionCandidate> candidates;
   for (std::size_t index = 0; index < kDetectorQueryCount; ++index) {
+    ++runtime.diagnostics.queries_evaluated;
     double confidence = 0.0;
     std::size_t strongest_class_index = 0;
     const std::size_t logits_offset = box_values + index * kDetectorClassCount;
@@ -192,7 +211,10 @@ std::vector<VisualEntityDetection> detect_visual_entities(
         strongest_class_index = class_index;
       }
     }
-    if (confidence < runtime.options.confidence_threshold) continue;
+    if (confidence < runtime.options.confidence_threshold) {
+      ++runtime.diagnostics.confidence_filtered;
+      continue;
+    }
     const std::size_t box_offset = index * 4;
     const double center_x = output.first[box_offset];
     const double center_y = output.first[box_offset + 1];
@@ -217,6 +239,7 @@ std::vector<VisualEntityDetection> detect_visual_entities(
         (static_cast<double>(frame.width) * frame.height);
     if (area_ratio < runtime.options.minimum_area_ratio ||
         area_ratio > runtime.options.maximum_area_ratio) {
+      ++runtime.diagnostics.area_filtered;
       continue;
     }
     detection.confidence = confidence;
@@ -253,15 +276,22 @@ std::vector<VisualEntityDetection> detect_visual_entities(
                                              existing.detection) >=
                   runtime.options.nms_containment_threshold;
         });
-    if (suppressed) continue;
+    if (suppressed) {
+      ++runtime.diagnostics.duplicate_filtered;
+      continue;
+    }
+    if (retained.size() >= runtime.options.maximum_detections) {
+      ++runtime.diagnostics.cap_filtered;
+      continue;
+    }
     retained.push_back(candidate);
-    if (retained.size() == runtime.options.maximum_detections) break;
   }
   std::vector<VisualEntityDetection> detections;
   detections.reserve(retained.size());
   for (const auto& candidate : retained) {
     detections.push_back(candidate.detection);
   }
+  runtime.diagnostics.detections_emitted += detections.size();
   return detections;
 }
 
