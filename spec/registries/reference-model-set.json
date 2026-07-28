@@ -4,14 +4,6 @@
   "model_id_policy": "All model_id fields are canonical SVP model IDs with model_ prefix. source_slug is metadata only.",
   "models": [
     {
-      "model_id": "model_silero_vad_v5",
-      "display_name": "Silero VAD",
-      "source_slug": "snakers4/silero-vad",
-      "required_for": [
-        "speech_regions"
-      ]
-    },
-    {
       "model_id": "model_whisper_small_en",
       "display_name": "Whisper Small English (GGML)",
       "source_slug": "ggerganov/whisper.cpp",
@@ -21,7 +13,7 @@
       ]
     },
     {
-      "model_id": "model_sherpa_onnx_speaker_diarization",
+      "model_id": "model_sherpa_onnx_diarization",
       "display_name": "sherpa-onnx Speaker Diarization",
       "source_slug": "k2-fsa/sherpa-onnx",
       "required_for": [
@@ -88,27 +80,19 @@
       ]
     },
     {
-      "model_id": "model_ocr_text_detector_reference_v1",
-      "display_name": "SVP Reference OCR Text Detector",
-      "source_slug": "svp/reference-ocr-text-detector-v1",
+      "model_id": "model_pp_ocrv6_medium_det",
+      "display_name": "PP-OCRv6 Medium Text Detector",
+      "source_slug": "PP-OCRv6_medium_det",
       "required_for": [
         "text_regions"
       ]
     },
     {
-      "model_id": "model_ocr_text_recognizer_reference_v1",
-      "display_name": "SVP Reference OCR Text Recognizer",
-      "source_slug": "svp/reference-ocr-text-recognizer-v1",
+      "model_id": "model_pp_ocrv6_medium_rec",
+      "display_name": "PP-OCRv6 Medium Text Recognizer",
+      "source_slug": "PP-OCRv6_medium_rec",
       "required_for": [
         "text_observations"
-      ]
-    },
-    {
-      "model_id": "model_ocr_layout_analyzer_reference_v1",
-      "display_name": "SVP Reference OCR Layout Analyzer",
-      "source_slug": "svp/reference-ocr-layout-analyzer-v1",
-      "required_for": [
-        "layout_classification"
       ]
     }
   ]
