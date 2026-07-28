@@ -1,4 +1,4 @@
-# SVP Model Bundle v1 - RC1
+# SVP Model Bundle v1 - RC2
 
 SVP Model Bundles (`.svpmodel`) are ZIP64 packages used by the reference builder to distribute pinned, verified model artifacts without requiring a Python runtime.
 
@@ -39,7 +39,7 @@ Text is UTF-8 and lengths count bytes, not characters.
 
 1. Begin with the bytes `SVP_MODEL_BUNDLE_BLAKE3_V1` followed by one zero byte.
 2. Build the logical file inventory from the fixed root paths
-   `model.svpmodel.json`, `model-lock.json`, `LICENSE`, and `NOTICE`, followed by
+   `model.svpmodel.json`, `LICENSE`, and `NOTICE`, followed by
    every `files[].path` declared by the manifest. A logical path is a relative
    UTF-8 path using `/` separators. Empty paths, absolute paths, empty, `.` or
    `..` components, backslashes, NUL bytes, invalid UTF-8, and duplicate entries
@@ -69,15 +69,12 @@ Directories themselves are not records. File permissions,
 timestamps, ownership, platform metadata, archive compression, and archive
 entry order are not hashed.
 
-Two root control files require a deterministic projection before their content
+One root control file requires a deterministic projection before its content
 bytes are framed:
 
 - `model.svpmodel.json` is parsed as JSON. Its top-level `bundle_blake3` is
   replaced with `blake3:` plus 64 zeroes. Its top-level `model_bundle_id` is
   replaced with `<model_id>@<model_version>+blake3_` plus 12 zeroes.
-- `model-lock.json` is parsed as JSON. In every `models` entry, `bundle_blake3`
-  and `model_bundle_id` receive the same replacements derived from that entry's
-  `model_id` and `model_version`.
 
 Object member names MUST be unique at every level. Duplicate names invalidate a
 control file before projection, even if a JSON library would otherwise keep the
@@ -105,9 +102,8 @@ lexicographic comparison of their UTF-8 keys. Tags, indefinite lengths, and
 non-finite numbers are forbidden. This profile is normative and does not depend
 on any particular JSON or CBOR library.
 
-This removes only the two recursive digest representations; all other manifest
-and lock metadata remains covered. A file with either control filename below
-the bundle root is an ordinary file and is not projected.
+This removes only the manifest's recursive digest representations; all other
+manifest metadata remains covered.
 
 The length framing makes path/content concatenations unambiguous. The fixed
 domain prefix prevents these bytes from being confused with another BLAKE3 use.
@@ -126,4 +122,8 @@ Independent control-number projection vectors are:
 
 A conforming `model.svpmodel.json` contains `model_bundle_id`, canonical `model_id`, `model_version`, `bundle_blake3`, runtime, format, license, supported execution providers, files, input contract, output contract, preprocessor contract, and postprocessor contract.
 
-`model.svpmodel.json` is authoritative for a single bundle. `model-lock.json` is authoritative for the selected set of bundles. If they disagree on identity or hashes, the builder rejects the model set.
+`model.svpmodel.json` is authoritative for a single bundle. The model cache root
+contains exactly one `model-lock.json`, authoritative for the complete selected
+set. The lock is never duplicated inside bundle directories. Each lock entry
+repeats the bundle identity and the exact path, role, and BLAKE3 of every
+manifest file. If they disagree, the builder rejects the model set.

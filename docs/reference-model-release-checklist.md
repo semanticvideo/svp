@@ -23,14 +23,17 @@ required file path, role, and BLAKE3. The lock is never copied into bundles.
 2. For every catalog artifact, confirm the immutable revision or release asset
    identity, remote SHA-256, local BLAKE3, license, and notice obligations.
 3. Reproduce RF-DETR with `scripts/reproduce-reference-rfdetr-model.py` under
-   `onnx==1.22.0`.
+   the exact Python, ONNX, protobuf, NumPy, ml-dtypes, and typing-extensions
+   versions recorded in the catalog and installable from
+   `scripts/requirements-rfdetr-reproduction.txt`.
 4. Reproduce both PP-OCR models with
    `scripts/reproduce-reference-ppocr-models.py` under the exact toolchain in
    the catalog. The Paddle2ONNX command must omit `--optimize_tool` so the
    required default Polygraphy folding runs.
-5. Run `scripts/prepare-reference-model-bundles.py` against the proven runtime
-   metadata, reproduced artifacts, and pinned upstream legal files in a new
-   staging directory.
+5. Run `scripts/prepare-reference-model-bundles.py` against an artifacts-only
+   source cache, reproduced artifacts, and pinned upstream legal files in a new
+   staging directory. Canonical manifest metadata, file roles, and NOTICE text
+   come only from the committed `distribution/reference-models/bundle-inputs.json`.
 6. Verify every generated directory with `svp-models-tool verify --bundle-dir`.
 7. Verify the root lock with `svp-models-tool verify --lock
    <staging-dir>/model-lock.json --cache-dir <staging-dir>`.
@@ -40,6 +43,25 @@ required file path, role, and BLAKE3. The lock is never copied into bundles.
    production cache identity recorded in the catalog. Do not substitute models.
 10. Publish the complete staged cache transactionally only after every prior
     check passes.
+
+## RC2 public artifact procedure
+
+RC1 is preserved as historical release material and MUST NOT be regenerated.
+After changing the active RC2 Markdown or its packaged normative files, create
+an isolated release-tool environment and regenerate every public RC2 artifact
+with one command:
+
+```bash
+python3.11 -m venv /tmp/svp-rc2-artifacts-venv
+/tmp/svp-rc2-artifacts-venv/bin/pip install -r scripts/requirements-rc2-artifacts.txt
+/tmp/svp-rc2-artifacts-venv/bin/python scripts/generate-rc2-release-artifacts.py
+```
+
+The generator renders `spec/SVP_v1_0_RC2.md` into the tracked DOCX and PDF,
+semantically checks all three forms for the current model-lock contract, and
+rebuilds `releases/SVP_v1_0_RC2_Release_Package.zip` with fixed ZIP metadata and
+the active RC2 companion, registries, schemas, review notes, and implementation
+update documents.
 
 ## Proven artifact inventory
 

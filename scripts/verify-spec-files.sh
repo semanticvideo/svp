@@ -34,6 +34,7 @@ required_files=(
   "spec/schemas/color-absence.schema.json"
   "spec/companion/SVP_Index_Manifest_v1_RC1.md"
   "spec/companion/SVP_Model_Bundle_v1_RC1.md"
+  "spec/companion/SVP_Model_Bundle_v1_RC2.md"
   "spec/companion/SVP_Signature_Sidecar_v1_RC1.md"
   "releases/SVP_v1_0_RC1_Release_Package.zip"
   "releases/SVP_v1_0_RC2_Release_Package.zip"
