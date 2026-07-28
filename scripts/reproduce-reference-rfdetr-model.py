@@ -5,6 +5,8 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import math
+import platform
 import subprocess
 import urllib.request
 from pathlib import Path
@@ -49,6 +51,49 @@ def blake3(models_tool: Path, path: Path) -> str:
     ).stdout.strip()
 
 
+def require_toolchain(expected: dict) -> None:
+    actual_python = platform.python_version()
+    if actual_python != expected["python"]:
+        raise SystemExit(
+            f"RF-DETR reproduction requires Python {expected['python']}; "
+            f"found {actual_python}"
+        )
+    for package in ("onnx", "protobuf", "numpy", "ml_dtypes", "typing_extensions"):
+        actual = importlib.metadata.version(package)
+        if actual != expected[package]:
+            raise SystemExit(
+                f"RF-DETR reproduction requires {package}=={expected[package]}; "
+                f"found {actual}"
+            )
+
+
+def resolved_tensor_shape(output, expected_shape: list[int]) -> list[int]:
+    declared = output.type.tensor_type.shape.dim
+    if len(declared) != len(expected_shape):
+        raise SystemExit(
+            f"RF-DETR output {output.name} rank changed: expected "
+            f"{len(expected_shape)}, actual {len(declared)}"
+        )
+    dimensions = []
+    for index, (dimension, expected) in enumerate(zip(declared, expected_shape)):
+        if dimension.HasField("dim_value") and dimension.dim_value > 0:
+            actual = dimension.dim_value
+        elif index == 0 and dimension.dim_param and expected == 1:
+            actual = expected
+        else:
+            raise SystemExit(
+                f"RF-DETR output {output.name} dimension {index} is not a "
+                "supported fixed or single-batch dimension"
+            )
+        if actual != expected:
+            raise SystemExit(
+                f"RF-DETR output {output.name} dimension {index} changed: "
+                f"expected {expected}, actual {actual}"
+            )
+        dimensions.append(actual)
+    return dimensions
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", type=Path, required=True)
@@ -62,16 +107,13 @@ def main() -> None:
     args.work_dir.mkdir(parents=True)
     args.output_dir.mkdir(parents=True)
 
-    actual_onnx = importlib.metadata.version("onnx")
-    if actual_onnx != "1.22.0":
-        raise SystemExit(f"RF-DETR reproduction requires onnx==1.22.0; found {actual_onnx}")
-
     catalog = json.loads(args.catalog.read_text(encoding="utf-8"))
     model = next(
         item for item in catalog["models"]
         if item["model_id"] == "model_rfdetr_nano_coco"
     )
     reproduction = model["reproduction"]
+    require_toolchain(reproduction["toolchain"])
     source_file = reproduction["source_file"]
     source_path = args.work_dir / "model.onnx"
     download(
@@ -86,8 +128,35 @@ def main() -> None:
 
     wrapped = onnx.load(source_path)
     output_names = [output.name for output in wrapped.graph.output]
-    if output_names != ["pred_boxes", "logits"]:
+    if output_names != reproduction["output_order"]:
         raise SystemExit(f"unexpected upstream output order: {output_names}")
+
+    output_contract = reproduction["output_contract"]
+    if output_contract["operation"] != "flatten_and_concatenate":
+        raise SystemExit("unsupported RF-DETR wrapper output operation")
+    expected_components = output_contract["components"]
+    actual_components = []
+    for output, expected_component in zip(wrapped.graph.output, expected_components):
+        if output.type.tensor_type.elem_type != TensorProto.FLOAT:
+            raise SystemExit(f"RF-DETR output {output.name} is not FP32")
+        actual_components.append({
+            "name": output.name,
+            "shape": resolved_tensor_shape(output, expected_component["shape"]),
+        })
+    if actual_components != expected_components:
+        raise SystemExit(
+            "RF-DETR upstream output contract changed: "
+            f"expected {expected_components}, actual {actual_components}"
+        )
+    combined_element_count = sum(
+        math.prod(component["shape"]) for component in actual_components
+    )
+    if combined_element_count != output_contract["combined_element_count"]:
+        raise SystemExit(
+            "RF-DETR combined output element count changed: "
+            f"expected {output_contract['combined_element_count']}, "
+            f"actual {combined_element_count}"
+        )
 
     flattened = []
     for output in list(wrapped.graph.output):
@@ -105,7 +174,8 @@ def main() -> None:
         name="svp_combine_detection_outputs"))
     del wrapped.graph.output[:]
     wrapped.graph.output.append(helper.make_tensor_value_info(
-        "detections", TensorProto.FLOAT, [28500]))
+        output_contract["combined_name"], TensorProto.FLOAT,
+        [combined_element_count]))
     wrapped.doc_string = (
         "SVP wrapper around onnx-community/rfdetr_nano-ONNX FP32. "
         "The learned weights and input are unchanged; pred_boxes and logits are "

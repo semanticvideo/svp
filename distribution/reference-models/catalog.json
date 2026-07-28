@@ -1,7 +1,7 @@
 {
   "schema_version": "svp-reference-model-distribution-1",
   "svp_version": "1.0-rc.2",
-  "bundle_contract": "spec/companion/SVP_Model_Bundle_v1_RC1.md",
+  "bundle_contract": "spec/companion/SVP_Model_Bundle_v1_RC2.md",
   "assembly_mode": "reproduced_and_verified_artifacts",
   "shipping_state": "ready",
   "ppocr_reproduction_environment": {
@@ -210,7 +210,12 @@
       "reproduction": {
         "source_revision": "eae21cee0687a91bcf9fa071605c48d7705d2d91",
         "toolchain": {
-          "onnx": "1.22.0"
+          "python": "3.11.13",
+          "onnx": "1.22.0",
+          "protobuf": "6.31.1",
+          "numpy": "2.4.6",
+          "ml_dtypes": "0.5.4",
+          "typing_extensions": "4.16.0"
         },
         "source_file": {
           "path": "onnx/model.onnx",
@@ -222,7 +227,16 @@
         "script": "scripts/reproduce-reference-rfdetr-model.py",
         "wrapper_revision": "svp-wrapper-2",
         "output_order": ["pred_boxes", "logits"],
-        "output_contract": "flatten both FP32 outputs and concatenate them as detections[28500]"
+        "output_contract": {
+          "operation": "flatten_and_concatenate",
+          "dtype": "float32",
+          "components": [
+            {"name": "pred_boxes", "shape": [1, 300, 4]},
+            {"name": "logits", "shape": [1, 300, 91]}
+          ],
+          "combined_name": "detections",
+          "combined_element_count": 28500
+        }
       },
       "artifacts": [
         {

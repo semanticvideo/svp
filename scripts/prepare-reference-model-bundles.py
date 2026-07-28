@@ -2,9 +2,10 @@
 """Assemble and verify the eight approved reference-model bundles.
 
 This is release tooling, not an SVP runtime dependency. It never downloads or
-uploads weights. The caller supplies the proven upstream-derived artifacts, the
-existing runtime metadata, and the native verifier. The output directory is a
-complete staging tree with one authoritative root model-lock.json.
+uploads weights. The caller supplies only proven upstream-derived artifacts,
+pinned legal materials, and the native verifier. Canonical manifest metadata
+and NOTICE text come from committed distribution inputs. The output directory
+is a complete staging tree with one authoritative root model-lock.json.
 """
 
 import argparse
@@ -16,110 +17,15 @@ from pathlib import Path
 
 
 ZERO_HASH = "blake3:" + ("0" * 64)
-
-MODELS = {
-    "model_whisper_small_en": {
-        "files": [("ggml-small.en.bin", "weights")],
-        "notice": """SVP Model Bundle: model_whisper_small_en
-
-Weights: OpenAI Whisper Small English, converted to GGML for whisper.cpp.
-Source: https://huggingface.co/ggerganov/whisper.cpp
-Pinned revision: c521a4b02f422512d734391fdf08bb08c0862f68
-Artifact: ggml-small.en.bin
-License: MIT
-""",
-    },
-    "model_sherpa_onnx_diarization": {
-        "files": [
-            ("sherpa-onnx-pyannote-segmentation-3-0/model.onnx", "segmentation"),
-            ("3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx", "embedding"),
-        ],
-        "notice": """SVP Model Bundle: model_sherpa_onnx_diarization
-
-Segmentation: pyannote segmentation-3.0 ONNX conversion by csukuangfj.
-Pinned revision: 9403a6902bb58e3d5ae8c7e77c3422de279db2e0
-License: MIT; copyright (c) 2022 CNRS.
-
-Embedding: 3D-Speaker ERes2Net ONNX conversion distributed by sherpa-onnx.
-Pinned GitHub release asset ID: 198893098
-License: Apache-2.0; upstream project Alibaba DAMO Academy 3D-Speaker.
-""",
-    },
-    "model_depth_anything_v2_small": {
-        "files": [("model.onnx", "model")],
-        "notice": """SVP Model Bundle: model_depth_anything_v2_small
-
-Source: onnx-community/depth-anything-v2-small
-Original project: DepthAnything/Depth-Anything-V2
-Pinned revision: f7421df0cc30f121782ab050d42f0a423291dcde
-Pinned license revision: 0a7e2b58a7e378c7863bd7486afc659c41f9ef99
-Artifact: onnx/model.onnx
-License: Apache-2.0
-""",
-    },
-    "model_nomic_embed_text_v1_5": {
-        "files": [
-            ("model.onnx", "model"),
-            ("vocab.txt", "tokenizer_vocab"),
-        ],
-        "notice": """SVP Model Bundle: model_nomic_embed_text_v1_5
-
-Source: nomic-ai/nomic-embed-text-v1.5
-Pinned revision: ac6fcd72429d86ff25c17895e47a9bfcfc50c1b2
-Artifacts: onnx/model.onnx plus the runtime vocabulary
-License: Apache-2.0, from the pinned nomic-ai/contrastors license source.
-""",
-    },
-    "model_nomic_embed_vision_v1_5": {
-        "files": [("model.onnx", "model")],
-        "notice": """SVP Model Bundle: model_nomic_embed_vision_v1_5
-
-Source: nomic-ai/nomic-embed-vision-v1.5
-Pinned revision: e3a725bce72db07ca4adb1d83da08903f3ee02f8
-Artifact: onnx/model.onnx
-License: Apache-2.0, from the pinned nomic-ai/contrastors license source.
-""",
-    },
-    "model_rfdetr_nano_coco": {
-        "files": [
-            ("model.onnx", "model"),
-            ("UPSTREAM-MODEL-CARD.md", "documentation"),
-        ],
-        "notice": """SVP Model Bundle: model_rfdetr_nano_coco
-
-Weights: RF-DETR Nano, Apache-designated model weights from Roboflow.
-ONNX source: onnx-community/rfdetr_nano-ONNX
-Pinned upstream revision: eae21cee0687a91bcf9fa071605c48d7705d2d91
-SVP wrapper revision: 2 (flattened pred_boxes and logits output boundary)
-The wrapper metadata identifies the upstream graph as FP32. Learned weights,
-nodes, inputs, and inference outputs are unchanged from wrapper revision 1.
-License: Apache-2.0, from the pinned roboflow/rf-detr license source.
-""",
-    },
-    "model_pp_ocrv6_medium_det": {
-        "files": [("det.onnx", "model")],
-        "legacy_manifest": "model_manifest.json",
-        "notice": """SVP Model Bundle: model_pp_ocrv6_medium_det
-
-Source model: PaddlePaddle/PP-OCRv6_medium_det.
-Pinned revision: 8e0f56fb2ef86b461d99cfc7ac5c137738985f61
-Artifact: deterministic Paddle2ONNX 2.1.0 opset-14 export with default
-Polygraphy folding from the pinned inference.json and inference.pdiparams.
-License: Apache-2.0
-""",
-    },
-    "model_pp_ocrv6_medium_rec": {
-        "files": [("rec.onnx", "model"), ("inference.yml", "character_dictionary")],
-        "legacy_manifest": "model_manifest.json",
-        "notice": """SVP Model Bundle: model_pp_ocrv6_medium_rec
-
-Source model: PaddlePaddle/PP-OCRv6_medium_rec.
-Pinned revision: e5a92bcbc5cc1b494628e458d267778f0704fd7c
-Artifacts: deterministic Paddle2ONNX 2.1.0 opset-14 export with default
-Polygraphy folding, plus the pinned upstream inference.yml character dictionary.
-License: Apache-2.0
-""",
-    },
+EXPECTED_MODEL_IDS = {
+    "model_whisper_small_en",
+    "model_sherpa_onnx_diarization",
+    "model_depth_anything_v2_small",
+    "model_nomic_embed_text_v1_5",
+    "model_nomic_embed_vision_v1_5",
+    "model_rfdetr_nano_coco",
+    "model_pp_ocrv6_medium_det",
+    "model_pp_ocrv6_medium_rec",
 }
 
 
@@ -132,6 +38,57 @@ def run_tool(tool: Path, *arguments: str) -> str:
 
 def write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+
+def require_exact_keys(value: dict, expected: set[str], source: str) -> None:
+    actual = set(value)
+    if actual != expected:
+        raise SystemExit(
+            f"{source} keys mismatch: expected {sorted(expected)}, "
+            f"actual {sorted(actual)}"
+        )
+
+
+def load_bundle_inputs(path: Path) -> dict[str, dict]:
+    root = json.loads(path.read_text(encoding="utf-8"))
+    require_exact_keys(root, {"schema_version", "models"}, str(path))
+    if root["schema_version"] != "svp-reference-model-bundle-inputs-1":
+        raise SystemExit(f"unsupported bundle-input schema in {path}")
+    if not isinstance(root["models"], list):
+        raise SystemExit(f"{path}.models must be an array")
+
+    inputs = {}
+    for index, model in enumerate(root["models"]):
+        source = f"{path}.models[{index}]"
+        require_exact_keys(model, {"model_id", "files", "notice", "manifest"}, source)
+        model_id = model["model_id"]
+        if not isinstance(model_id, str) or not model_id:
+            raise SystemExit(f"{source}.model_id must be a non-empty string")
+        if model_id in inputs:
+            raise SystemExit(f"duplicate bundle input for {model_id}")
+        if not isinstance(model["notice"], str) or not model["notice"].endswith("\n"):
+            raise SystemExit(f"{source}.notice must be newline-terminated text")
+        if not isinstance(model["manifest"], dict):
+            raise SystemExit(f"{source}.manifest must be an object")
+        if model["manifest"].get("model_id") != model_id:
+            raise SystemExit(f"{source}.manifest.model_id must match model_id")
+        if not isinstance(model["files"], list) or not model["files"]:
+            raise SystemExit(f"{source}.files must be a non-empty array")
+        seen_paths = set()
+        for file_index, file in enumerate(model["files"]):
+            file_source = f"{source}.files[{file_index}]"
+            require_exact_keys(file, {"path", "role"}, file_source)
+            if not all(isinstance(file[key], str) and file[key]
+                       for key in ("path", "role")):
+                raise SystemExit(f"{file_source} path and role must be non-empty strings")
+            if file["path"] in seen_paths:
+                raise SystemExit(f"duplicate bundle input path {model_id}/{file['path']}")
+            seen_paths.add(file["path"])
+        inputs[model_id] = model
+
+    if set(inputs) != EXPECTED_MODEL_IDS:
+        raise SystemExit("bundle inputs must contain exactly the eight approved models")
+    return inputs
 
 
 def file_hash(tool: Path, path: Path) -> str:
@@ -204,18 +161,18 @@ def prepare_one(model_id: str, spec: dict, catalog_model: dict,
                 source_root: Path, reproduced_root: Path, legal_root: Path,
                 output_root: Path,
                 tool: Path) -> dict:
-    source_dir = source_root / model_id
     output_dir = output_root / model_id
     output_dir.mkdir(parents=True)
 
-    manifest_name = spec.get("legacy_manifest", "model.svpmodel.json")
-    manifest = json.loads((source_dir / manifest_name).read_text(encoding="utf-8"))
+    manifest = spec["manifest"].copy()
 
     catalog_artifacts = {
         artifact["path"]: artifact for artifact in catalog_model["artifacts"]
     }
     files = []
-    for relative_path, role in spec["files"]:
+    for file in spec["files"]:
+        relative_path = file["path"]
+        role = file["role"]
         if relative_path not in catalog_artifacts:
             raise SystemExit(f"catalog is missing {model_id}/{relative_path}")
         source_path = artifact_source(
@@ -289,6 +246,12 @@ def main() -> None:
         default=(Path(__file__).resolve().parents[1]
                  / "distribution/reference-models/catalog.json"),
     )
+    parser.add_argument(
+        "--bundle-inputs",
+        type=Path,
+        default=(Path(__file__).resolve().parents[1]
+                 / "distribution/reference-models/bundle-inputs.json"),
+    )
     args = parser.parse_args()
 
     if args.output_dir.exists():
@@ -297,15 +260,17 @@ def main() -> None:
 
     catalog = json.loads(args.catalog.read_text(encoding="utf-8"))
     catalog_models = {model["model_id"]: model for model in catalog["models"]}
-    if set(catalog_models) != set(MODELS):
+    if set(catalog_models) != EXPECTED_MODEL_IDS:
         raise SystemExit("catalog must contain exactly the eight approved models")
+    bundle_inputs = load_bundle_inputs(args.bundle_inputs)
     generated = [
         prepare_one(
-            model_id, spec, catalog_models[model_id], args.source_cache,
+            model_id, bundle_inputs[model_id], catalog_models[model_id],
+            args.source_cache,
             args.reproduced_artifacts, args.legal_materials, args.output_dir,
             args.models_tool
         )
-        for model_id, spec in MODELS.items()
+        for model_id in bundle_inputs
     ]
     root_lock = {
         "schema_version": "svp-model-lock-1",
