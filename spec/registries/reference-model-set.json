@@ -54,6 +54,40 @@
       ]
     },
     {
+      "model_id": "model_rfdetr_nano_coco",
+      "display_name": "RF-DETR Nano COCO FP32",
+      "source_slug": "onnx-community/rfdetr_nano-ONNX",
+      "source_revision": "eae21cee0687a91bcf9fa071605c48d7705d2d91",
+      "license": "Apache-2.0",
+      "model_bundle_id": "model_rfdetr_nano_coco@eae21ce-fp32-svp-wrapper-1+blake3_d443faa85b43",
+      "bundle_blake3": "blake3:d443faa85b432a9701aabcee7bb45cf8ded08bacfb983cc4a8dae667767a1300",
+      "required_files": [
+        {
+          "path": "model.onnx",
+          "role": "model",
+          "blake3": "blake3:d443faa85b432a9701aabcee7bb45cf8ded08bacfb983cc4a8dae667767a1300"
+        },
+        {
+          "path": "LICENSE",
+          "role": "license",
+          "blake3": "blake3:737a97f0d8ebd3087f347d5901000a135555139c7ce1a30ca5104197e9389c5c"
+        },
+        {
+          "path": "UPSTREAM-MODEL-CARD.md",
+          "role": "documentation",
+          "blake3": "blake3:7f47c9389e37c4c037d5448c32dcec8163e21140549868f761c17ab5bce5b6a9"
+        },
+        {
+          "path": "NOTICE",
+          "role": "notice",
+          "blake3": "blake3:eb7b9857ed90a7f2a241048d26da1afac4465bd08d860b859b4559d636fbf000"
+        }
+      ],
+      "required_for": [
+        "visual_entities"
+      ]
+    },
+    {
       "model_id": "model_ocr_text_detector_reference_v1",
       "display_name": "SVP Reference OCR Text Detector",
       "source_slug": "svp/reference-ocr-text-detector-v1",

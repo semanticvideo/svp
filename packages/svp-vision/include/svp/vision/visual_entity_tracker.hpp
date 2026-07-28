@@ -7,11 +7,26 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
 namespace svp::vision {
+
+struct VisualEntityEmbeddingRuntime {
+  std::unique_ptr<svp::models::OnnxSession> session;
+  std::vector<std::string> model_refs;
+  std::string limitations_note;
+};
+
+struct ExternalEntityProposal {
+  std::string frame_id;
+  int box_px[4] = {0, 0, 0, 0};
+  double confidence = 0.0;
+  int detector_category_index = -1;
+  std::string source;
+};
 
 // All constants in this struct have documented rationale referencing
 // spec §20.6 step numbers and OpenCV documentation recommendations.
@@ -83,6 +98,11 @@ struct VisualEntityTrackerOptions {
   //   quality vs compute cost. GrabCut is seeded by region bounding boxes."
   int grabcut_iterations = 5;
 
+  // Detector boxes already provide object-level localization. One GrabCut
+  // pass refines their boundary without repeating the expensive iterative
+  // search used for unsupported motion boxes.
+  int detector_grabcut_iterations = 1;
+
   // --- Kalman filter (§20.6 step 12) ---
   // Standard constant-velocity Kalman model for 2D box tracking.
   // State = [x, y, w, h, vx, vy, vw, vh], Measurement = [x, y, w, h]
@@ -101,9 +121,30 @@ struct VisualEntityTrackerOptions {
   int max_lost_frames = 10;
   double appearance_similarity_threshold = 0.75;
 
+  // A scene cut removes spatial continuity, so appearance must independently
+  // satisfy the same strong threshold used by window-level reacquisition.
+  // This prevents a depicted person in a graphic from taking over a live
+  // person's identity across the cut.
+  double scene_cut_similarity_threshold = 0.90;
+
+  // Minimum predicted-box overlap for direct temporal association. Below
+  // this value, appearance evidence must independently support the match.
+  double association_iou_threshold = 0.1;
+
+  // Detector-only boxes below this confidence may continue a spatially
+  // supported track, but cannot independently create a new entity.
+  double detector_discovery_confidence_threshold = 0.15;
+
+  // Weak detector evidence may continue a track only when at least half of
+  // the predicted and observed boxes overlap. The ordinary 0.1 association
+  // threshold is intentionally insufficient for low-confidence boxes.
+  double weak_detector_continuation_iou_threshold = 0.50;
+
   // --- Visual embedding model ---
   std::string embedding_model_id = "model_nomic_embed_vision_v1_5";
   std::string execution_provider = "cpu";
+  VisualEntityEmbeddingRuntime* embedding_runtime = nullptr;
+  std::vector<ExternalEntityProposal> external_proposals;
 
   // --- Relationship thresholds (§20.8) ---
   // Rationale: "Spec §20.8. IoU > 0.3 for 'overlaps' relationship.
@@ -116,8 +157,6 @@ struct VisualEntityTrackerOptions {
   // --- Depth-based candidate detection ---
   // Minimum depth variance (as fraction of mean depth) to consider depth non-flat
   double depth_variance_threshold = 0.05;
-  // Minimum depth discontinuity (in uint16 units) to detect a boundary
-  int depth_edge_threshold = 2000;
   // IoU threshold for merging depth and motion candidates
   double candidate_merge_iou_threshold = 0.3;
 
@@ -125,6 +164,12 @@ struct VisualEntityTrackerOptions {
   std::function<void(std::size_t current, std::size_t total)> on_tracking_progress;
   std::function<void(std::size_t current, std::size_t total)> on_visual_embedding_progress;
 };
+
+[[nodiscard]] VisualEntityEmbeddingRuntime
+load_visual_entity_embedding_runtime(
+    const std::filesystem::path& model_cache_root,
+    const std::string& model_id,
+    const std::string& execution_provider);
 
 struct TrackedRegion {
   std::string region_id;
@@ -158,6 +203,8 @@ struct TrackedRegion {
   std::string depth_ref;
   // Candidate source: "motion", "depth", or "fused_motion_depth"
   std::string candidate_source;
+  // Internal detector evidence used for association; not an emitted label.
+  int detector_category_index = -1;
 };
 
 struct EntityRecord {
@@ -200,6 +247,7 @@ struct EntityTrackResult {
   std::string runtime;
   std::string execution_provider;
   std::string confidence_calibration_status;
+  std::string processing_status = "completed";
   std::string limitations_note;
   std::string opencv_version;
   nlohmann::json parameters_json;

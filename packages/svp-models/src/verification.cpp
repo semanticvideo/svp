@@ -229,6 +229,52 @@ VerificationReport verify_reference_set_against_cache(
 
     for (const std::filesystem::path& manifest_path : match->second) {
       const std::filesystem::path bundle_root = manifest_path.parent_path();
+      const auto manifest = load_model_bundle_manifest(manifest_path);
+      if (model.source_revision.has_value() &&
+          manifest.source_revision != model.source_revision) {
+        report.add_error("model " + model.model_id +
+                         " does not match pinned source_revision " +
+                         *model.source_revision);
+        continue;
+      }
+      if (model.license.has_value() && manifest.license != *model.license) {
+        report.add_error("model " + model.model_id +
+                         " does not match pinned license " + *model.license);
+        continue;
+      }
+      if (model.model_bundle_id.has_value() &&
+          manifest.model_bundle_id != *model.model_bundle_id) {
+        report.add_error("model " + model.model_id +
+                         " does not match pinned model_bundle_id " +
+                         *model.model_bundle_id);
+        continue;
+      }
+      if (model.bundle_blake3.has_value() &&
+          manifest.bundle_blake3.canonical() != *model.bundle_blake3) {
+        report.add_error("model " + model.model_id +
+                         " does not match pinned bundle_blake3 " +
+                         *model.bundle_blake3);
+        continue;
+      }
+      for (const auto& required_file : model.required_files) {
+        const auto file = std::find_if(
+            manifest.files.begin(), manifest.files.end(),
+            [&](const auto& candidate) {
+              return candidate.path == required_file.path;
+            });
+        if (file == manifest.files.end()) {
+          report.add_error("model " + model.model_id +
+                           " is missing pinned bundle file " +
+                           required_file.path);
+          continue;
+        }
+        if (file->role != required_file.role ||
+            file->blake3.canonical() != required_file.blake3) {
+          report.add_error("model " + model.model_id +
+                           " does not match pinned file identity for " +
+                           required_file.path);
+        }
+      }
       merge_report(report, verify_extracted_bundle(bundle_root));
     }
   }

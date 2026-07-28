@@ -41,6 +41,32 @@ std::vector<std::string> parse_required_for(const nlohmann::json& value,
   return result;
 }
 
+std::vector<ReferenceModelFile> parse_required_files(
+    const nlohmann::json& value,
+    std::string_view source_name) {
+  if (!value.contains("required_files")) return {};
+  const auto& items = value.at("required_files");
+  if (!items.is_array()) {
+    throw ModelError(ModelErrorCode::schema_error,
+                     std::string(source_name) +
+                         ".required_files must be an array");
+  }
+  std::vector<ReferenceModelFile> result;
+  for (std::size_t index = 0; index < items.size(); ++index) {
+    const auto& item = items[index];
+    const std::string item_source = std::string(source_name) +
+        ".required_files[" + std::to_string(index) + "]";
+    detail::require_object(item, item_source);
+    detail::reject_unknown_properties(
+        item, {"path", "role", "blake3"}, item_source);
+    result.push_back({
+        detail::require_string(item, "path", item_source),
+        detail::require_string(item, "role", item_source),
+        detail::require_string(item, "blake3", item_source)});
+  }
+  return result;
+}
+
 }  // namespace
 
 ReferenceModelSet parse_reference_model_set(const nlohmann::json& value,
@@ -74,7 +100,9 @@ ReferenceModelSet parse_reference_model_set(const nlohmann::json& value,
         std::string(source_name) + ".models[" + std::to_string(index) + "]";
     detail::require_object(model, item_source);
     detail::reject_unknown_properties(
-        model, {"model_id", "display_name", "source_slug", "required_for"},
+        model, {"model_id", "display_name", "source_slug", "source_revision",
+                "license", "model_bundle_id", "bundle_blake3",
+                "required_files", "required_for"},
         item_source);
 
     ReferenceModel reference;
@@ -86,6 +114,14 @@ ReferenceModelSet parse_reference_model_set(const nlohmann::json& value,
     }
     reference.display_name = read_optional_string(model, "display_name", item_source);
     reference.source_slug = read_optional_string(model, "source_slug", item_source);
+    reference.source_revision =
+        read_optional_string(model, "source_revision", item_source);
+    reference.license = read_optional_string(model, "license", item_source);
+    reference.model_bundle_id =
+        read_optional_string(model, "model_bundle_id", item_source);
+    reference.bundle_blake3 =
+        read_optional_string(model, "bundle_blake3", item_source);
+    reference.required_files = parse_required_files(model, item_source);
     reference.required_for = parse_required_for(model, item_source);
     model_set.models.push_back(std::move(reference));
   }

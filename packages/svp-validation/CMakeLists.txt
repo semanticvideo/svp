@@ -9,6 +9,7 @@ add_library(svp-validation
   src/color_record_validation.cpp
   src/code_registry.cpp
   src/diarization_validation.cpp
+  src/entity_record_validation.cpp
   src/embedded_svpi_transport_validator.cpp
   src/embedded_media_binding_validation.cpp
   src/index_validation.cpp
@@ -55,8 +56,13 @@ if(BUILD_TESTING)
     tests/embedded_svpi_validation_tests.cpp
   )
 
+  add_executable(svp-entity-record-validation-tests
+    tests/entity_record_validation_tests.cpp
+  )
+
   target_compile_features(svp-diarization-validation-tests PRIVATE cxx_std_20)
   target_compile_features(svp-embedded-svpi-validation-tests PRIVATE cxx_std_20)
+  target_compile_features(svp-entity-record-validation-tests PRIVATE cxx_std_20)
   target_compile_definitions(svp-embedded-svpi-validation-tests PRIVATE
     SVP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
   )
@@ -73,9 +79,17 @@ if(BUILD_TESTING)
     libzip::zip
   )
 
+  target_link_libraries(svp-entity-record-validation-tests PRIVATE
+    svp::validation
+    svp::package
+  )
+
   add_test(NAME svp-diarization-validation-tests
            COMMAND svp-diarization-validation-tests
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME svp-embedded-svpi-validation-tests
            COMMAND svp-embedded-svpi-validation-tests)
+  add_test(NAME svp-entity-record-validation-tests
+           COMMAND svp-entity-record-validation-tests
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()

@@ -5,7 +5,9 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <nlohmann/json.hpp>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -30,6 +32,26 @@ struct MaskWriteSummary {
   int mask_count = 0;
   std::vector<nlohmann::json> index_records;
   std::vector<nlohmann::json> block_manifest_entries;
+};
+
+class MaskStreamWriter {
+ public:
+  explicit MaskStreamWriter(const std::filesystem::path& staging_dir,
+                            bool retain_summary_records = false);
+  ~MaskStreamWriter();
+
+  MaskStreamWriter(const MaskStreamWriter&) = delete;
+  MaskStreamWriter& operator=(const MaskStreamWriter&) = delete;
+  MaskStreamWriter(MaskStreamWriter&&) noexcept;
+  MaskStreamWriter& operator=(MaskStreamWriter&&) noexcept;
+
+  void append(const MaskWriteEntry& mask);
+  [[nodiscard]] MaskWriteSummary finish(
+      const std::set<std::string>* retained_entity_ids = nullptr);
+
+ private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 // Write masks to spatial/masks.index.jsonl and spatial/masks.blocks.svpmz

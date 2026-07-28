@@ -1,5 +1,7 @@
 #include "svp/vision/visual_entity_tracker.hpp"
 #include "svp/vision/noise_suppression.hpp"
+#include "visual_entity_depth_proposals.hpp"
+#include "visual_entity_motion_policy.hpp"
 
 #include "svp/core/process_stdio.hpp"
 #include "svp/models/manifest.hpp"
@@ -14,7 +16,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 #include <fcntl.h>
 #include <fstream>
 #include <iomanip>
@@ -108,12 +109,6 @@ cv::Mat srgb8_frame_to_cv_mat(const ColorRasterFrame& frame) {
       mat.at<cv::Vec3b>(y, x) = cv::Vec3b(px.r, px.g, px.b);
     }
   }
-  return mat;
-}
-
-cv::Mat uint16_depth_to_cv_mat(const std::uint16_t* depth, int width, int height) {
-  cv::Mat mat(height, width, CV_16UC1);
-  std::memcpy(mat.data, depth, static_cast<std::size_t>(width) * height * sizeof(std::uint16_t));
   return mat;
 }
 
@@ -399,111 +394,6 @@ bool is_depth_flat(
   double normalized_var = variance / (mean * mean);
 
   return normalized_var < variance_threshold;
-}
-
-// Detect coherent depth regions from depth discontinuities.
-// Uses Canny edge detection on depth, then finds contours and bounding boxes.
-// Returns depth-derived candidate regions.
-struct DepthCandidate {
-  cv::Rect bbox;
-  cv::Mat mask;
-  double mean_depth;
-};
-
-std::vector<DepthCandidate> detect_depth_candidates(
-    const std::uint16_t* depth_data,
-    int depth_width, int depth_height,
-    int frame_width, int frame_height,
-    int edge_threshold,
-    double min_area_ratio) {
-  std::vector<DepthCandidate> candidates;
-
-  if (depth_data == nullptr || depth_width <= 0 || depth_height <= 0) {
-    return candidates;
-  }
-
-  // Convert depth to CV_16U
-  cv::Mat depth_mat = uint16_depth_to_cv_mat(depth_data, depth_width, depth_height);
-
-  // Convert to 8-bit for edge detection (scale to 0-255)
-  cv::Mat depth_8u;
-  double min_val, max_val;
-  cv::minMaxLoc(depth_mat, &min_val, &max_val);
-  if (max_val < 1.0) return candidates;
-
-  double scale = 255.0 / max_val;
-  depth_mat.convertTo(depth_8u, CV_8UC1, scale);
-
-  // Blur to reduce noise before edge detection
-  cv::Mat blurred;
-  cv::GaussianBlur(depth_8u, blurred, cv::Size(5, 5), 0);
-
-  // Canny edge detection on depth
-  cv::Mat edges;
-  cv::Canny(blurred, edges, edge_threshold * scale, edge_threshold * scale * 2);
-
-  // Dilate edges to connect nearby boundaries
-  cv::Mat dilated;
-  cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
-  cv::dilate(edges, dilated, kernel);
-
-  // Find contours from depth edges
-  std::vector<std::vector<cv::Point>> contours;
-  cv::findContours(dilated, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-
-  double min_area = min_area_ratio * frame_width * frame_height;
-
-  // Scale factor from depth resolution to frame resolution
-  double sx = static_cast<double>(frame_width) / depth_width;
-  double sy = static_cast<double>(frame_height) / depth_height;
-
-  for (const auto& contour : contours) {
-    double area = cv::contourArea(contour);
-    if (area < min_area / (sx * sy)) continue;  // Check area in frame coords
-
-    cv::Rect bbox = cv::boundingRect(contour);
-
-    // Scale bbox to frame resolution
-    cv::Rect frame_bbox(
-      static_cast<int>(bbox.x * sx),
-      static_cast<int>(bbox.y * sy),
-      static_cast<int>(bbox.width * sx),
-      static_cast<int>(bbox.height * sy));
-    frame_bbox &= cv::Rect(0, 0, frame_width, frame_height);
-
-    if (frame_bbox.width <= 0 || frame_bbox.height <= 0) continue;
-
-    // Create mask from contour (in frame resolution)
-    cv::Mat mask = cv::Mat::zeros(frame_height, frame_width, CV_8UC1);
-    // Scale contour points to frame resolution
-    std::vector<cv::Point> scaled_contour;
-    for (const auto& pt : contour) {
-      scaled_contour.emplace_back(
-        static_cast<int>(pt.x * sx),
-        static_cast<int>(pt.y * sy));
-    }
-    cv::fillConvexPoly(mask, scaled_contour, 1);
-
-    // Compute mean depth within the contour region
-    double depth_sum = 0;
-    int depth_count = 0;
-    for (int y = bbox.y; y < bbox.y + bbox.height && y < depth_height; ++y) {
-      for (int x = bbox.x; x < bbox.x + bbox.width && x < depth_width; ++x) {
-        if (y >= 0 && x >= 0) {
-          depth_sum += depth_data[static_cast<std::size_t>(y) * depth_width + x];
-          ++depth_count;
-        }
-      }
-    }
-
-    DepthCandidate dc;
-    dc.bbox = frame_bbox;
-    dc.mask = mask;
-    dc.mean_depth = depth_count > 0 ? depth_sum / depth_count : 0;
-    candidates.push_back(dc);
-  }
-
-  return candidates;
 }
 
 cv::Mat refine_mask_grabcut(
@@ -835,6 +725,51 @@ std::string make_track_id(int idx) {
 
 }  // namespace
 
+VisualEntityEmbeddingRuntime load_visual_entity_embedding_runtime(
+    const std::filesystem::path& model_cache_root,
+    const std::string& model_id,
+    const std::string& execution_provider) {
+  VisualEntityEmbeddingRuntime runtime;
+  if (model_cache_root.empty()) {
+    runtime.limitations_note =
+        "No model cache provided; visual embeddings not used. ";
+    return runtime;
+  }
+
+  const auto model_dir = find_model_bundle_dir(model_cache_root, model_id);
+  if (!model_dir) {
+    runtime.limitations_note =
+        "Visual embedding model not found in cache; embeddings not used. ";
+    return runtime;
+  }
+
+  try {
+    const auto manifest = svp::models::load_model_bundle_manifest(
+        *model_dir / "model.svpmodel.json");
+    const auto verify_report =
+        svp::models::verify_manifest_files(manifest, *model_dir);
+    if (!verify_report.ok()) {
+      runtime.limitations_note =
+          "Visual embedding model verification failed; embeddings unavailable. ";
+      return runtime;
+    }
+
+    svp::models::OnnxSessionOptions session_options;
+    session_options.execution_provider = execution_provider;
+    auto session = svp::models::OnnxSession::load(
+        manifest, *model_dir, session_options);
+    runtime.session =
+        std::make_unique<svp::models::OnnxSession>(std::move(session));
+    runtime.model_refs.push_back(model_id);
+    runtime.limitations_note =
+        "Appearance embeddings from " + model_id + ". ";
+  } catch (const std::exception& error) {
+    runtime.limitations_note =
+        std::string("Visual embedding model load failed: ") + error.what() + ". ";
+  }
+  return runtime;
+}
+
 // ---------------------------------------------------------------------------
 // RLE mask encoding/decoding (spec §14.3)
 // ---------------------------------------------------------------------------
@@ -952,10 +887,17 @@ EntityTrackResult run_visual_entity_tracker(
     {"min_motion_magnitude", options.min_motion_magnitude},
     {"min_region_area_ratio", options.min_region_area_ratio},
     {"grabcut_iterations", options.grabcut_iterations},
+    {"detector_grabcut_iterations", options.detector_grabcut_iterations},
     {"kalman_process_noise", options.kalman_process_noise},
     {"kalman_measurement_noise", options.kalman_measurement_noise},
     {"max_lost_frames", options.max_lost_frames},
-    {"appearance_similarity_threshold", options.appearance_similarity_threshold}
+    {"appearance_similarity_threshold", options.appearance_similarity_threshold},
+    {"scene_cut_similarity_threshold", options.scene_cut_similarity_threshold},
+    {"detector_discovery_confidence_threshold",
+     options.detector_discovery_confidence_threshold},
+    {"weak_detector_continuation_iou_threshold",
+     options.weak_detector_continuation_iou_threshold},
+    {"association_iou_threshold", options.association_iou_threshold}
   };
 
   // Step 1: Degenerate source check (§13.4)
@@ -1002,39 +944,19 @@ EntityTrackResult run_visual_entity_tracker(
   }
 
   // Load visual embedding model
-  std::unique_ptr<svp::models::OnnxSession> embedding_session;
-  std::optional<std::filesystem::path> model_dir;
-  bool embeddings_available = false;
-
-  if (!model_cache_root.empty()) {
-    model_dir = find_model_bundle_dir(model_cache_root, options.embedding_model_id);
-    if (model_dir) {
-      try {
-        auto manifest = svp::models::load_model_bundle_manifest(
-            *model_dir / "model.svpmodel.json");
-        auto verify_report = svp::models::verify_manifest_files(manifest, *model_dir);
-        if (!verify_report.ok()) {
-          // Model hash verification failed — do not trust the model
-          result.limitations_note += "Visual embedding model verification failed; embeddings unavailable. ";
-        } else {
-          svp::models::OnnxSessionOptions session_opts;
-          session_opts.execution_provider = options.execution_provider;
-          auto session = svp::models::OnnxSession::load(manifest, *model_dir, session_opts);
-          embedding_session = std::make_unique<svp::models::OnnxSession>(std::move(session));
-          embeddings_available = true;
-          result.model_refs.push_back(options.embedding_model_id);
-          result.limitations_note += "Appearance embeddings from " + options.embedding_model_id + ". ";
-        }
-      } catch (const std::exception& e) {
-        // Model load failed; continue without embeddings
-        result.limitations_note += std::string("Visual embedding model load failed: ") + e.what() + ". ";
-      }
-    } else {
-      result.limitations_note += "Visual embedding model not found in cache; embeddings not used. ";
-    }
-  } else {
-    result.limitations_note += "No model cache provided; visual embeddings not used. ";
+  VisualEntityEmbeddingRuntime owned_embedding_runtime;
+  VisualEntityEmbeddingRuntime* embedding_runtime = options.embedding_runtime;
+  if (embedding_runtime == nullptr) {
+    owned_embedding_runtime = load_visual_entity_embedding_runtime(
+        model_cache_root,
+        options.embedding_model_id,
+        options.execution_provider);
+    embedding_runtime = &owned_embedding_runtime;
   }
+  svp::models::OnnxSession* embedding_session =
+      embedding_runtime->session.get();
+  result.model_refs = embedding_runtime->model_refs;
+  result.limitations_note += embedding_runtime->limitations_note;
 
   // Tracking state
   struct ActiveTrack {
@@ -1043,6 +965,8 @@ EntityTrackResult run_visual_entity_tracker(
     std::string track_id;
     int entity_idx = 0;
     std::vector<float> last_embedding;
+    std::vector<std::vector<float>> embedding_history;
+    std::size_t embedding_observation_count = 0;
     cv::Rect last_bbox;
     int first_frame_idx = 0;
     int last_frame_idx = 0;
@@ -1052,6 +976,7 @@ EntityTrackResult run_visual_entity_tracker(
     std::int64_t start_us = 0;
     std::int64_t end_us = 0;
     std::string candidate_source;  // "motion", "depth", or "fused_motion_depth"
+    int detector_category_index = -1;
   };
 
   std::vector<ActiveTrack> active_tracks;
@@ -1071,6 +996,12 @@ EntityTrackResult run_visual_entity_tracker(
 
     const auto& frame_prev = decoded_frames[idx_prev];
     const auto& frame_next = decoded_frames[idx_next];
+    const bool isolated_scene_cut = std::any_of(
+        shot_boundaries.begin(), shot_boundaries.end(),
+        [&](const auto& boundary) {
+          return boundary.second > frame_prev.timestamp_us &&
+              boundary.second <= frame_next.timestamp_us;
+        });
 
     cv::Mat mat_prev = srgb8_frame_to_cv_mat(frame_prev);
     cv::Mat mat_next = srgb8_frame_to_cv_mat(frame_next);
@@ -1083,7 +1014,7 @@ EntityTrackResult run_visual_entity_tracker(
     // Detect coherent static regions from depth discontinuities.
     // This runs BEFORE motion detection so that depth-derived entities
     // are discovered even when RGB has no texture for corner detection.
-    std::vector<DepthCandidate> depth_candidates;
+    std::vector<visual_entity_internal::DepthRegionProposal> depth_candidates;
     const std::uint16_t* frame_depth_ptr = nullptr;
     if (!depth_data.empty()) {
       int d_idx = -1;
@@ -1098,11 +1029,10 @@ EntityTrackResult run_visual_entity_tracker(
         // Only detect depth candidates if depth is not flat
         if (!is_depth_flat(frame_depth_ptr, depth_width, depth_height,
                            options.depth_variance_threshold)) {
-          depth_candidates = detect_depth_candidates(
-              frame_depth_ptr, depth_width, depth_height,
-              frame_width, frame_height,
-              options.depth_edge_threshold,
-              options.min_region_area_ratio);
+          visual_entity_internal::DepthRegionProposalOptions proposal_options;
+          proposal_options.minimum_area_ratio = options.min_region_area_ratio;
+          depth_candidates = visual_entity_internal::propose_depth_regions(
+              frame_depth_ptr, depth_width, depth_height, proposal_options);
         }
       }
     }
@@ -1112,6 +1042,7 @@ EntityTrackResult run_visual_entity_tracker(
     // uniform RGB frames), motion candidates will be empty but depth
     // candidates above are still processed.
     std::vector<MotionCluster> clusters;
+    bool motion_group_candidate = false;
 
     // Step 3: Shi-Tomasi corner detection (§20.6 step 3)
     auto corners = detect_corners(gray_prev, options.max_corners,
@@ -1154,14 +1085,42 @@ EntityTrackResult run_visual_entity_tracker(
           residual, options.min_motion_magnitude,
           options.min_region_area_ratio,
           frame_width, frame_height);
+      std::vector<cv::Rect> motion_boxes;
+      motion_boxes.reserve(clusters.size());
+      for (const auto& cluster : clusters) {
+        motion_boxes.push_back(cluster.bbox);
+      }
+      if (visual_entity_internal::has_global_motion_shape(
+              motion_boxes, frame_width, frame_height)) {
+        cv::Rect group_box;
+        double magnitude_sum = 0.0;
+        for (const auto& cluster : clusters) {
+          group_box = group_box.empty() ? cluster.bbox : group_box | cluster.bbox;
+          magnitude_sum += cluster.mean_magnitude;
+        }
+        MotionCluster group;
+        group.bbox = group_box;
+        group.mean_magnitude = clusters.empty()
+            ? 0.0
+            : magnitude_sum / static_cast<double>(clusters.size());
+        clusters = {std::move(group)};
+        motion_group_candidate = true;
+      }
     }
 
     // Skip frame if no candidates from either source
-    if (clusters.empty() && depth_candidates.empty()) {
+    const bool has_detector_proposal = std::any_of(
+        options.external_proposals.begin(), options.external_proposals.end(),
+        [&](const ExternalEntityProposal& proposal) {
+          return proposal.frame_id == frame_next.frame_id;
+        });
+    if (clusters.empty() && depth_candidates.empty() &&
+        !has_detector_proposal) {
       // Mark tracks as lost
       for (auto& track : active_tracks) {
         if (track.last_frame_idx < idx_next) {
           track.kalman.mark_lost();
+          ++track.lost_count;
         }
       }
       continue;
@@ -1173,6 +1132,17 @@ EntityTrackResult run_visual_entity_tracker(
       cv::Mat mask;       // Pre-computed mask (for depth candidates)
       bool has_mask;      // Whether a pre-computed mask is available
       std::string source; // "motion", "depth", or "fused_motion_depth"
+      double confidence = 0.5;
+      int detector_category_index = -1;
+    };
+
+    const auto is_detector_candidate = [](const UnifiedCandidate& candidate) {
+      return candidate.source.find("detector") != std::string::npos ||
+             candidate.source == "objectness_detector";
+    };
+
+    const auto is_motion_group_candidate = [](const UnifiedCandidate& candidate) {
+      return candidate.source == "motion_group";
     };
 
     std::vector<UnifiedCandidate> unified_candidates;
@@ -1186,9 +1156,51 @@ EntityTrackResult run_visual_entity_tracker(
       }
       UnifiedCandidate uc;
       uc.bbox = cluster.bbox;
-      uc.has_mask = false;
-      uc.source = "motion";
+      uc.mask = cv::Mat::zeros(frame_height, frame_width, CV_8UC1);
+      if (!cluster.points.empty()) {
+        std::vector<std::vector<cv::Point>> contours = {cluster.points};
+        cv::drawContours(uc.mask, contours, 0, cv::Scalar(1), cv::FILLED);
+      } else {
+        cv::rectangle(uc.mask, cluster.bbox, cv::Scalar(1), cv::FILLED);
+      }
+      uc.has_mask = true;
+      uc.source = motion_group_candidate ? "motion_group" : "motion";
       unified_candidates.push_back(std::move(uc));
+    }
+
+    for (const auto& proposal : options.external_proposals) {
+      if (proposal.frame_id != frame_next.frame_id) continue;
+      cv::Rect proposal_box(
+          proposal.box_px[0],
+          proposal.box_px[1],
+          proposal.box_px[2] - proposal.box_px[0],
+          proposal.box_px[3] - proposal.box_px[1]);
+      proposal_box &= cv::Rect(0, 0, frame_width, frame_height);
+      if (proposal_box.empty()) continue;
+
+      bool fused = false;
+      for (auto& candidate : unified_candidates) {
+        if (candidate.source != "motion") continue;
+        if (compute_iom(candidate.bbox, proposal_box) <=
+            options.candidate_merge_iou_threshold) {
+          continue;
+        }
+        candidate.bbox = proposal_box;
+        candidate.source = "detector_motion";
+        candidate.confidence = proposal.confidence;
+        candidate.detector_category_index = proposal.detector_category_index;
+        fused = true;
+        break;
+      }
+      if (!fused) {
+        UnifiedCandidate candidate;
+        candidate.bbox = proposal_box;
+        candidate.has_mask = false;
+        candidate.source = proposal.source;
+        candidate.confidence = proposal.confidence;
+        candidate.detector_category_index = proposal.detector_category_index;
+        unified_candidates.push_back(std::move(candidate));
+      }
     }
 
     // Add depth candidates, merging with motion candidates if they overlap
@@ -1201,13 +1213,16 @@ EntityTrackResult run_visual_entity_tracker(
       // Check if this depth candidate overlaps with any existing motion candidate
       bool fused = false;
       for (auto& uc : unified_candidates) {
-        if (uc.source == "motion" || uc.source == "fused_motion_depth") {
+        if (uc.source == "motion" || uc.source == "fused_motion_depth" ||
+            is_detector_candidate(uc)) {
           double iou = compute_iou(uc.bbox, dc.bbox);
           double iom = compute_iom(uc.bbox, dc.bbox);
           // Merge if either IoU or IoM exceeds threshold
           if (iou > options.candidate_merge_iou_threshold ||
               iom > options.candidate_merge_iou_threshold) {
-            uc.source = "fused_motion_depth";
+            uc.source = is_detector_candidate(uc)
+                ? "detector_motion_depth"
+                : "fused_motion_depth";
             fused = true;
             break;
           }
@@ -1225,9 +1240,62 @@ EntityTrackResult run_visual_entity_tracker(
       }
     }
 
+    // A screen-spanning dynamic effect can be fragmented across motion,
+    // detector, and depth proposals even though no one source contains three
+    // regions by itself. Preserve the object proposals, but also emit one
+    // group observation when their combined extent has the established
+    // global-motion shape and at least one proposal carries motion evidence.
+    if (!motion_group_candidate) {
+      std::vector<cv::Rect> supported_boxes;
+      bool has_motion_evidence = false;
+      for (const auto& candidate : unified_candidates) {
+        supported_boxes.push_back(candidate.bbox);
+        has_motion_evidence = has_motion_evidence ||
+            candidate.source.find("motion") != std::string::npos;
+      }
+      if (has_motion_evidence &&
+          visual_entity_internal::has_global_motion_shape(
+              supported_boxes, frame_width, frame_height)) {
+        UnifiedCandidate group;
+        group.bbox = cv::Rect(0, 0, frame_width, frame_height);
+        group.mask = cv::Mat::ones(frame_height, frame_width, CV_8UC1);
+        group.has_mask = true;
+        group.source = "motion_group";
+        unified_candidates.push_back(std::move(group));
+      }
+    }
+
+
+    // Objectness evidence must be associated before broad motion/depth
+    // support. Otherwise a large residual-motion region can greedily claim an
+    // established object track and force the detector observation into a new
+    // identity on the same frame. This is evidence precedence, not a class or
+    // sample-specific policy.
+    std::stable_sort(
+        unified_candidates.begin(), unified_candidates.end(),
+        [&](const UnifiedCandidate& left, const UnifiedCandidate& right) {
+          const int left_priority = is_detector_candidate(left)
+              ? 0
+              : (is_motion_group_candidate(left) ? 2 : 1);
+          const int right_priority = is_detector_candidate(right)
+              ? 0
+              : (is_motion_group_candidate(right) ? 2 : 1);
+          return left_priority < right_priority;
+        });
+
     // Track which tracks have been assigned a region this frame
     // to enforce one-region-per-track-per-frame assignment
     std::set<int> assigned_this_frame;
+    if (isolated_scene_cut) {
+      for (auto& track : active_tracks) {
+        track.lost_count = options.max_lost_frames + 1;
+      }
+    }
+    std::vector<cv::Rect> predicted_boxes(active_tracks.size());
+    for (std::size_t track_index = 0;
+         track_index < active_tracks.size(); ++track_index) {
+      predicted_boxes[track_index] = active_tracks[track_index].kalman.predict();
+    }
 
     // Step 9: Process unified candidates (§20.6 step 9)
     for (auto& uc : unified_candidates) {
@@ -1238,14 +1306,60 @@ EntityTrackResult run_visual_entity_tracker(
         continue;
       }
 
+      // Associate before mask/depth work so unsupported weak detector boxes
+      // are discarded without paying refinement cost.
+      int best_track_idx = -1;
+      double best_iou = 0;
+      for (std::size_t t = 0; t < active_tracks.size(); ++t) {
+        if (assigned_this_frame.count(static_cast<int>(t))) continue;
+        if (!isolated_scene_cut &&
+            active_tracks[t].lost_count > options.max_lost_frames) {
+          continue;
+        }
+        const bool track_is_motion_group =
+            active_tracks[t].candidate_source == "motion_group";
+        if (track_is_motion_group != is_motion_group_candidate(uc)) continue;
+        if (uc.detector_category_index >= 0 &&
+            active_tracks[t].detector_category_index >= 0 &&
+            uc.detector_category_index !=
+                active_tracks[t].detector_category_index) {
+          continue;
+        }
+        const double candidate_iou = compute_iou(predicted_boxes[t], bbox);
+        if (candidate_iou > best_iou) {
+          best_iou = candidate_iou;
+          best_track_idx = static_cast<int>(t);
+        }
+      }
+
+      const bool has_weak_detector_spatial_support = best_track_idx >= 0 &&
+          best_iou >= options.weak_detector_continuation_iou_threshold;
+      const bool detector_only_candidate =
+          uc.source == "objectness_detector";
+      if (detector_only_candidate &&
+          uc.confidence < options.detector_discovery_confidence_threshold &&
+          !has_weak_detector_spatial_support) {
+        continue;
+      }
+      if (isolated_scene_cut) {
+        best_track_idx = -1;
+        best_iou = 0.0;
+      }
+
       // Step 10: Mask refinement (§20.6 step 10, §5.9)
       // For depth-only candidates, use the pre-computed depth mask.
       // For motion and fused candidates, use GrabCut on the color frame.
       cv::Mat binary_mask;
-      if (uc.has_mask && uc.source == "depth") {
+      if (uc.has_mask) {
         binary_mask = uc.mask.clone();
       } else {
-        cv::Mat mask = refine_mask_grabcut(mat_next, bbox, options.grabcut_iterations);
+        const int refinement_iterations =
+            uc.source.find("detector") != std::string::npos ||
+                    uc.source == "objectness_detector"
+                ? options.detector_grabcut_iterations
+                : options.grabcut_iterations;
+        cv::Mat mask =
+            refine_mask_grabcut(mat_next, bbox, refinement_iterations);
         cv::threshold(mask, binary_mask, 0.5, 1, cv::THRESH_BINARY);
       }
 
@@ -1269,25 +1383,17 @@ EntityTrackResult run_visual_entity_tracker(
         }
       }
 
-      // Step 12: Kalman filter tracking (§20.6 step 12)
-      // Try to match this region to an existing track
-      int best_track_idx = -1;
-      double best_iou = 0;
-
-      for (std::size_t t = 0; t < active_tracks.size(); ++t) {
-        if (assigned_this_frame.count(static_cast<int>(t))) continue;
-        if (active_tracks[t].lost_count > options.max_lost_frames) continue;
-        cv::Rect predicted = active_tracks[t].kalman.predict();
-        double iou = compute_iou(predicted, bbox);
-        if (iou > best_iou) {
-          best_iou = iou;
-          best_track_idx = static_cast<int>(t);
-        }
-      }
-
       // Compute visual embedding for this region
       std::vector<float> region_embedding;
-      if (embedding_session) {
+      const bool needs_embedding =
+          embedding_session != nullptr &&
+          (uc.source.find("detector") != std::string::npos ||
+           uc.source == "objectness_detector") &&
+          (isolated_scene_cut || best_track_idx < 0 ||
+           best_iou < options.association_iou_threshold ||
+           active_tracks[best_track_idx].last_embedding.empty() ||
+           active_tracks[best_track_idx].embedding_observation_count < 2);
+      if (needs_embedding) {
         cv::Mat crop = crop_region(mat_next, bbox);
         if (!crop.empty()) {
           cv::Mat resized;
@@ -1311,26 +1417,50 @@ EntityTrackResult run_visual_entity_tracker(
       }
 
       // Step 13: Track reacquisition via embedding similarity (§20.6 step 13)
-      if (best_track_idx < 0 || best_iou < 0.1) {
+      if (best_track_idx < 0 ||
+          best_iou < options.association_iou_threshold) {
+        best_track_idx = -1;
         // Try embedding-based reacquisition
         if (!region_embedding.empty()) {
           double best_sim = -1;
           for (std::size_t t = 0; t < active_tracks.size(); ++t) {
             if (assigned_this_frame.count(static_cast<int>(t))) continue;
-            if (active_tracks[t].lost_count == 0) continue;  // Only lost tracks
             if (active_tracks[t].lost_count > options.max_lost_frames) continue;
+            const bool track_is_motion_group =
+                active_tracks[t].candidate_source == "motion_group";
+            if (track_is_motion_group != is_motion_group_candidate(uc)) continue;
+            if (uc.detector_category_index >= 0 &&
+                active_tracks[t].detector_category_index >= 0 &&
+                uc.detector_category_index !=
+                    active_tracks[t].detector_category_index) {
+              continue;
+            }
             if (active_tracks[t].last_embedding.empty()) continue;
-            double sim = cosine_similarity(region_embedding, active_tracks[t].last_embedding);
+            double sim = cosine_similarity(
+                region_embedding, active_tracks[t].last_embedding);
+            if (isolated_scene_cut) {
+              if (active_tracks[t].embedding_history.size() < 2) continue;
+              sim = 1.0;
+              for (const auto& prior_embedding :
+                   active_tracks[t].embedding_history) {
+                sim = std::min(
+                    sim, cosine_similarity(region_embedding, prior_embedding));
+              }
+            }
             if (sim > best_sim) {
               best_sim = sim;
               best_track_idx = static_cast<int>(t);
             }
           }
-          if (best_sim < options.appearance_similarity_threshold) {
+          const double required_similarity = isolated_scene_cut
+              ? options.scene_cut_similarity_threshold
+              : options.appearance_similarity_threshold;
+          if (best_sim < required_similarity) {
             best_track_idx = -1;  // No good match
           } else {
             // Mark as reacquired
-            if (best_track_idx >= 0) {
+            if (best_track_idx >= 0 &&
+                active_tracks[best_track_idx].lost_count > 0) {
               active_tracks[best_track_idx].reacquired = true;
             }
           }
@@ -1351,6 +1481,11 @@ EntityTrackResult run_visual_entity_tracker(
         track.lost_count = 0;
         if (!region_embedding.empty()) {
           track.last_embedding = region_embedding;
+          ++track.embedding_observation_count;
+          track.embedding_history.push_back(region_embedding);
+          if (track.embedding_history.size() > 2) {
+            track.embedding_history.erase(track.embedding_history.begin());
+          }
         }
         // Upgrade candidate source if this track now has evidence from both sources
         if (uc.source == "depth" && track.candidate_source == "motion") {
@@ -1359,6 +1494,9 @@ EntityTrackResult run_visual_entity_tracker(
           track.candidate_source = "fused_motion_depth";
         } else if (track.candidate_source.empty()) {
           track.candidate_source = uc.source;
+        }
+        if (uc.detector_category_index >= 0) {
+          track.detector_category_index = uc.detector_category_index;
         }
         entity_id = track.entity_id;
         track_id = track.track_id;
@@ -1378,8 +1516,11 @@ EntityTrackResult run_visual_entity_tracker(
         new_track.region_count = 1;
         new_track.lost_count = 0;
         new_track.candidate_source = uc.source;
+        new_track.detector_category_index = uc.detector_category_index;
         if (!region_embedding.empty()) {
           new_track.last_embedding = region_embedding;
+          new_track.embedding_observation_count = 1;
+          new_track.embedding_history.push_back(region_embedding);
         }
         entity_id = new_track.entity_id;
         track_id = new_track.track_id;
@@ -1436,9 +1577,11 @@ EntityTrackResult run_visual_entity_tracker(
 
       region.embedding = region_embedding;
       region.embedding_model_id = options.embedding_model_id;
-      region.confidence = std::min(1.0, best_iou > 0 ? best_iou : 0.5);
+      region.confidence = std::min(
+          1.0, std::max(uc.confidence, best_iou > 0 ? best_iou : 0.0));
       region.mask_ref = "mask_" + region.region_id;
       region.candidate_source = uc.source;
+      region.detector_category_index = uc.detector_category_index;
       // depth_ref: find the depth entry for this frame
       for (std::size_t di = 0; di < depth_frame_ids.size(); ++di) {
         if (depth_frame_ids[di] == frame_next.frame_id) {
@@ -1455,6 +1598,7 @@ EntityTrackResult run_visual_entity_tracker(
     for (auto& track : active_tracks) {
       if (track.last_frame_idx < idx_next) {
         track.kalman.mark_lost();
+        ++track.lost_count;
       }
     }
 

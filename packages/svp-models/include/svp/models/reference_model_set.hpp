@@ -8,10 +8,21 @@
 
 namespace svp::models {
 
+struct ReferenceModelFile {
+  std::string path;
+  std::string role;
+  std::string blake3;
+};
+
 struct ReferenceModel {
   std::string model_id;
   std::optional<std::string> display_name;
   std::optional<std::string> source_slug;
+  std::optional<std::string> source_revision;
+  std::optional<std::string> license;
+  std::optional<std::string> model_bundle_id;
+  std::optional<std::string> bundle_blake3;
+  std::vector<ReferenceModelFile> required_files;
   std::vector<std::string> required_for;
 };
 

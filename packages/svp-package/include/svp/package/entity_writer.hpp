@@ -1,6 +1,8 @@
 #pragma once
 
+#include "svp/vision/mask_writer.hpp"
 #include "svp/vision/visual_entity_tracker.hpp"
+#include "svp/package/visual_entity_artifact_writer.hpp"
 
 #include <cstddef>
 #include <filesystem>
@@ -55,7 +57,9 @@ struct EntityWriteSummary {
  */
 [[nodiscard]] EntityWriteSummary write_visual_entity_artifacts(
     const std::filesystem::path& staging_dir,
-    const svp::vision::EntityTrackResult& tracker_result);
+    const svp::vision::EntityTrackResult& tracker_result,
+    const std::vector<svp::vision::MaskWriteEntry>* preencoded_masks = nullptr,
+    const VisualEntityArtifactStreamSummary* streamed_artifacts = nullptr);
 
 [[nodiscard]] nlohmann::json entity_write_summary_to_json(
     const EntityWriteSummary& summary);

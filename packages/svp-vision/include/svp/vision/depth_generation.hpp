@@ -7,12 +7,30 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace svp::vision {
+
+struct DepthInferenceRuntime {
+  std::unique_ptr<svp::models::OnnxSession> session;
+  std::string model_id;
+  std::string model_bundle_id;
+  std::string execution_provider;
+  std::string blocker;
+};
+
+[[nodiscard]] DepthInferenceRuntime load_depth_inference_runtime(
+    const std::filesystem::path& model_cache_root,
+    const std::string& model_id,
+    const std::string& execution_provider);
+
+[[nodiscard]] std::vector<std::uint16_t> infer_depth_frame(
+    DepthInferenceRuntime& runtime,
+    const ColorRasterFrame& frame);
 
 struct DepthGenerationOptions {
   std::filesystem::path model_cache_root;

@@ -94,6 +94,16 @@
       "introduced": "1.0-draft.0.6"
     },
     {
+      "code": "ERR_CORE_INVALID_ENTITY_RECORD",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "13.2",
+      "description": "An entity record uses a structural entity_type outside the RC2 closed vocabulary.",
+      "introduced": "1.0-rc.2"
+    },
+    {
       "code": "ERR_CORE_INVALID_BLOCK_HEADER",
       "severity": "error",
       "report_bucket": "errors",

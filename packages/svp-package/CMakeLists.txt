@@ -31,6 +31,7 @@ add_library(svp-package
   src/spatial_embedding_placeholders.cpp
   src/timeline_writer.cpp
   src/validation_report_storage.cpp
+  src/visual_entity_artifact_writer.cpp
   src/media_binding.cpp
   src/media_binding_factory.cpp
   src/svpi_writer.cpp
@@ -38,6 +39,18 @@ add_library(svp-package
 )
 
 add_library(svp::package ALIAS svp-package)
+
+add_executable(svp-visual-entity-streaming-diagnostic
+  tools/visual_entity_streaming_diagnostic.cpp
+)
+
+target_compile_features(svp-visual-entity-streaming-diagnostic PRIVATE cxx_std_20)
+
+target_link_libraries(svp-visual-entity-streaming-diagnostic PRIVATE
+  svp::package
+  svp::media
+  svp::vision
+)
 
 target_include_directories(svp-package
   PUBLIC
@@ -75,6 +88,10 @@ if(BUILD_TESTING)
     tests/relationship_type_policy_tests.cpp
   )
 
+  add_executable(svp-visual-entity-artifact-writer-tests
+    tests/visual_entity_artifact_writer_tests.cpp
+  )
+
   add_executable(svp-embedded-svpi-tests
     tests/embedded_svpi_tests_main.cpp
     tests/embedded_svpi_test_support.cpp
@@ -85,6 +102,7 @@ if(BUILD_TESTING)
   target_compile_features(svp-package-tests PRIVATE cxx_std_20)
   target_compile_features(svp-svpi-tests PRIVATE cxx_std_20)
   target_compile_features(svp-relationship-type-policy-tests PRIVATE cxx_std_20)
+  target_compile_features(svp-visual-entity-artifact-writer-tests PRIVATE cxx_std_20)
   target_compile_features(svp-embedded-svpi-tests PRIVATE cxx_std_20)
   target_include_directories(svp-embedded-svpi-tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -113,10 +131,15 @@ if(BUILD_TESTING)
       svp::package
   )
 
+  target_link_libraries(svp-visual-entity-artifact-writer-tests PRIVATE
+    svp::package
+  )
+
   target_link_libraries(svp-embedded-svpi-tests PRIVATE svp::package)
 
   add_test(NAME svp-package-tests COMMAND svp-package-tests)
   add_test(NAME svp-svpi-tests COMMAND svp-svpi-tests)
   add_test(NAME svp-relationship-type-policy-tests COMMAND svp-relationship-type-policy-tests)
+  add_test(NAME svp-visual-entity-artifact-writer-tests COMMAND svp-visual-entity-artifact-writer-tests)
   add_test(NAME svp-embedded-svpi-tests COMMAND svp-embedded-svpi-tests)
 endif()

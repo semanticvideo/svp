@@ -2,6 +2,7 @@
 
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/vision/canonical_frame_input.hpp"
+#include "svp/vision/visual_entity_pipeline.hpp"
 #include "svp/vision/depth_generation.hpp"
 #include "svp/vision/embedding_generation.hpp"
 #include "svp/vision/frame_catalog.hpp"
@@ -9,6 +10,7 @@
 #include "svp/vision/ocr_generation.hpp"
 #include "svp/vision/visual_entity_tracker.hpp"
 #include "svp/package/entity_writer.hpp"
+#include "svp/package/visual_entity_artifact_writer.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -18,6 +20,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -411,22 +414,11 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
       // blocks were generated. The placeholder is an honest empty file.
     }
 
-    // Run visual entity tracker on decoded frames with depth data
-    // per spec §20.6. This produces spatial regions, masks, entity tracks,
-    // and visual embeddings.
-    if (decoded_frames.decoding_succeeded && !decoded_frames.frames.empty()) {
-      svp::vision::VisualEntityTrackerOptions tracker_opts;
-      tracker_opts.embedding_model_id = "model_nomic_embed_vision_v1_5";
-      tracker_opts.execution_provider = "cpu";
-      if (on_progress) {
-        tracker_opts.on_tracking_progress = [&on_progress](std::size_t current, std::size_t total) {
-          on_progress("visual_tracking", current, total, "");
-        };
-        tracker_opts.on_visual_embedding_progress = [&on_progress](std::size_t current, std::size_t total) {
-          on_progress("visual_embeddings", current, total, "");
-        };
-      }
-
+    // Visual tracking owns its temporal coverage independently from the
+    // five-frame foundation input shared by depth and embedding generation.
+    // It processes bounded overlapping decode windows for dense temporal
+    // coverage and cross-window identity handoff.
+    if (media_plan != nullptr && !ffmpeg_path.empty()) {
       // Read shot boundaries from timeline
       std::vector<std::pair<std::string, std::int64_t>> shot_boundaries;
       auto shots = read_jsonl(staging_dir / "timeline" / "shots.jsonl");
@@ -438,34 +430,52 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
         }
       }
 
-      // Read depth frame IDs from depth index
-      std::vector<std::string> depth_frame_ids;
-      auto depth_index = read_jsonl(staging_dir / "spatial" / "depth.index.jsonl");
-      for (const auto& entry : depth_index) {
-        if (entry.contains("frame_id")) {
-          depth_frame_ids.push_back(entry["frame_id"].get<std::string>());
-        }
+      svp::vision::VisualEntityPipelineOptions entity_options;
+      entity_options.execution_provider = "cpu";
+      VisualEntityArtifactWriter artifact_writer(staging_dir);
+      entity_options.assembly.handoff_retention_us =
+          entity_options.sampling.window_overlap_us;
+      entity_options.assembly.artifact_sink =
+          [&artifact_writer](
+              const std::vector<svp::vision::TrackedRegion>& regions,
+              const std::vector<svp::vision::MaskWriteEntry>& masks) {
+            artifact_writer.append(regions, masks);
+          };
+      if (on_progress) {
+        entity_options.on_progress = [&on_progress](
+            std::size_t current, std::size_t total) {
+          on_progress("visual_tracking", current, total, "");
+        };
       }
 
-      auto tracker_result = svp::vision::run_visual_entity_tracker(
-          decoded_frames.frames,
-          depth_result.raw_depth_data,
-          depth_frame_ids,
-          shot_boundaries,
+      auto entity_result = svp::vision::run_visual_entity_pipeline(
+          *media_plan,
+          ffmpeg_path,
           model_cache_root,
-          tracker_opts);
+          shot_boundaries,
+          frame_catalog,
+          entity_options);
+
+      std::set<std::string> retained_entity_ids;
+      for (const auto& entity : entity_result.assembled.tracker_result.entities) {
+        retained_entity_ids.insert(entity.entity_id);
+      }
+      const auto streamed_artifacts = artifact_writer.finish(retained_entity_ids);
 
       // Write visual entity artifacts (entities, tracks, regions, masks)
       auto visual_entity_summary = svp::package::write_visual_entity_artifacts(
-          staging_dir, tracker_result);
+          staging_dir,
+          entity_result.assembled.tracker_result,
+          nullptr,
+          &streamed_artifacts);
       summary.masks_index_written = visual_entity_summary.masks_written;
       summary.masks_blocks_written = visual_entity_summary.masks_written;
-
-      depth_result.raw_depth_data.clear();
-      depth_result.raw_depth_data.shrink_to_fit();
-      decoded_frames.frames.clear();
-      decoded_frames.frames.shrink_to_fit();
     }
+
+    depth_result.raw_depth_data.clear();
+    depth_result.raw_depth_data.shrink_to_fit();
+    decoded_frames.frames.clear();
+    decoded_frames.frames.shrink_to_fit();
 
     if (!summary.masks_index_written) {
       write_empty_file(staging_dir / "spatial" / "masks.index.jsonl");
