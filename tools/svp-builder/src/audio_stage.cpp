@@ -12,6 +12,7 @@
 #include "svp/audio/whisper_model.hpp"
 #include "svp/audio/whisper_cpp_backend.hpp"
 #include "svp/media/canonical_timing.hpp"
+#include "svp/models/reference_processor_model_ids.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -100,12 +101,12 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
 
   const bool asr_model_available =
       svp::audio::check_asr_model_in_cache(
-          "model_whisper_small_en", model_cache_root);
+          svp::models::kWhisperSmallEnglishModelId, model_cache_root);
 
   const bool asr_model_verified =
       asr_model_available &&
       svp::audio::verify_asr_model_files(
-          "model_whisper_small_en", model_cache_root);
+          svp::models::kWhisperSmallEnglishModelId, model_cache_root);
   const bool asr_runtime_available =
       svp::audio::is_whisper_runtime_available();
 
@@ -204,12 +205,12 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
   const bool diar_model_available =
       context.options.force_single_speaker ||
       svp::audio::check_diarization_model_in_cache(
-          "model_sherpa_onnx_diarization", model_cache_root);
+          svp::models::kSherpaOnnxDiarizationModelId, model_cache_root);
   const bool diar_model_verified =
       context.options.force_single_speaker ||
       (diar_model_available &&
        svp::audio::verify_diarization_model_files(
-           "model_sherpa_onnx_diarization", model_cache_root));
+           svp::models::kSherpaOnnxDiarizationModelId, model_cache_root));
 
   svp::audio::DiarizationExecutionBoundary diar_boundary =
       svp::audio::build_diarization_boundary(

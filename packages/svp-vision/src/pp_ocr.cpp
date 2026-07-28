@@ -167,7 +167,7 @@ PpOcrSession create_pp_ocr_session(const PpOcrOptions& options) {
     return session;
   }
 
-  auto bundles = find_pp_ocr_bundles(options.model_cache_root);
+  auto bundles = find_pp_ocr_bundles(options);
   if (!bundles) {
     session.blocker = "PP-OCR model bundles not found in model cache: " +
                       options.model_cache_root.string();

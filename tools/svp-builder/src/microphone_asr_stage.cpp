@@ -1,5 +1,7 @@
 #include "microphone_asr_stage.hpp"
 
+#include "svp/models/reference_processor_model_ids.hpp"
+
 #include "svp/audio/asr_chunk_planner.hpp"
 #include "svp/audio/microphone_transcript.hpp"
 #include "svp/audio/sherpa_diarization.hpp"
@@ -192,7 +194,7 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
   // Whisper must finish every microphone before sherpa-onnx is loaded; loading
   // sherpa's bundled ONNX Runtime first can corrupt Whisper schema registration.
   const std::filesystem::path fingerprint_model_dir =
-      model_cache_root / "model_sherpa_onnx_diarization";
+      model_cache_root / svp::models::kSherpaOnnxDiarizationModelId;
   const bool fingerprint_runtime_available =
       speech_positive_streams > 1 &&
       std::filesystem::exists(fingerprint_model_dir) &&
@@ -520,7 +522,7 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
   }
   nlohmann::json fingerprint_models = nlohmann::json::array();
   if (fingerprint_runtime_available) {
-    fingerprint_models.push_back("model_sherpa_onnx_diarization");
+    fingerprint_models.push_back(svp::models::kSherpaOnnxDiarizationModelId);
   }
   result.processor_record = {
       {"id", result.boundary.diarization_processor_id},

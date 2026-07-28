@@ -1,5 +1,7 @@
 #pragma once
 
+#include "svp/models/reference_processor_model_ids.hpp"
+
 #include "svp/audio/asr_chunk_planner.hpp"
 #include "svp/audio/transcript_records.hpp"
 
@@ -22,7 +24,7 @@ enum class AsrStatus {
 
 struct AsrExecutionBoundary {
   std::string processor_id = "proc_whisper_asr_0001";
-  std::string model_id = "model_whisper_small_en";
+  std::string model_id = svp::models::kWhisperSmallEnglishModelId;
   std::string runtime = "whisper.cpp";
   std::string execution_provider = "cpu";
   AsrChunkPlanResult chunk_plan;

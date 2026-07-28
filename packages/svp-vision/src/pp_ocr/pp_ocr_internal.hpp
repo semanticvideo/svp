@@ -108,6 +108,6 @@ namespace svp::vision::pp_ocr_internal {
     const std::string& filename);
 
 [[nodiscard]] std::optional<ModelBundlePaths> find_pp_ocr_bundles(
-    const std::filesystem::path& cache_root);
+    const PpOcrOptions& options);
 
 }  // namespace svp::vision::pp_ocr_internal

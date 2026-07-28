@@ -1,5 +1,7 @@
 #pragma once
 
+#include "svp/models/reference_processor_model_ids.hpp"
+
 #include "svp/models/runtime.hpp"
 #include "svp/vision/canonical_frame_input.hpp"
 #include "svp/vision/color_frame_sampling.hpp"
@@ -141,7 +143,7 @@ struct VisualEntityTrackerOptions {
   double weak_detector_continuation_iou_threshold = 0.50;
 
   // --- Visual embedding model ---
-  std::string embedding_model_id = "model_nomic_embed_vision_v1_5";
+  std::string embedding_model_id = svp::models::kNomicEmbedVisionV15ModelId;
   std::string execution_provider = "cpu";
   VisualEntityEmbeddingRuntime* embedding_runtime = nullptr;
   std::vector<ExternalEntityProposal> external_proposals;

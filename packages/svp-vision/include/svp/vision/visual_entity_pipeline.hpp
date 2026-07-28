@@ -1,5 +1,7 @@
 #pragma once
 
+#include "svp/models/reference_processor_model_ids.hpp"
+
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/vision/frame_catalog.hpp"
 #include "svp/vision/visual_entity_sampling.hpp"
@@ -26,7 +28,7 @@ struct VisualEntityPipelineOptions {
   VisualEntityDepthScheduleOptions depth_schedule;
   VisualEntityCutDetectionOptions cut_detection;
   VisualEntityDetectorOptions detector;
-  std::string embedding_model_id = "model_nomic_embed_vision_v1_5";
+  std::string embedding_model_id = svp::models::kNomicEmbedVisionV15ModelId;
   std::string execution_provider = "cpu";
   VisualEntityPipelineProgress on_progress;
 };

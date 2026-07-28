@@ -97,6 +97,10 @@ target_link_libraries(svp-builder
 )
 
 if(BUILD_TESTING)
+  add_executable(svp-builder-reference-model-ids-tests
+    tests/reference_processor_model_ids_tests.cpp
+  )
+
   add_executable(svp-builder-pipeline-tests
     tests/build_pipeline_tests.cpp
   )
@@ -137,6 +141,13 @@ if(BUILD_TESTING)
   target_compile_features(svp-interlace-tests PRIVATE cxx_std_20)
   target_compile_features(svp-interlace-batch-tests PRIVATE cxx_std_20)
 
+  target_link_libraries(svp-builder-reference-model-ids-tests
+    PRIVATE
+      svp::audio
+      svp::models
+      svp::vision
+  )
+
   target_link_libraries(svp-builder-pipeline-tests
     PRIVATE
       svp::builder
@@ -176,6 +187,9 @@ if(BUILD_TESTING)
       libzip::zip
   )
 
+  add_test(NAME svp-builder-reference-model-ids-tests
+           COMMAND svp-builder-reference-model-ids-tests
+                   ${CMAKE_SOURCE_DIR}/spec/registries/reference-model-set.json)
   add_test(NAME svp-builder-pipeline-tests COMMAND svp-builder-pipeline-tests)
   add_test(NAME svp-builder-progress-renderer-tests COMMAND svp-builder-progress-renderer-tests)
   add_test(NAME svp-builder-cli-elapsed-tests COMMAND svp-builder-cli-elapsed-tests)

@@ -2,6 +2,7 @@
 
 #include "svp/vision/color_frame_sampling.hpp"
 #include "svp/models/manifest.hpp"
+#include "svp/models/reference_processor_model_ids.hpp"
 #include "svp/models/runtime.hpp"
 
 #include <filesystem>
@@ -51,6 +52,10 @@ struct PpOcrModelInfo {
 
 struct PpOcrOptions {
   std::filesystem::path model_cache_root;
+  std::string detector_model_id = svp::models::kPpOcrV6MediumDetectorModelId;
+  std::string recognizer_model_id =
+      svp::models::kPpOcrV6MediumRecognizerModelId;
+  std::string manifest_filename = "model.svpmodel.json";
   std::string execution_provider = "cpu";
   int det_limit_side_len = 960;
   double det_thresh = 0.3;

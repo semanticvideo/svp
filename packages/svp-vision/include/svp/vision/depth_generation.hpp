@@ -1,5 +1,7 @@
 #pragma once
 
+#include "svp/models/reference_processor_model_ids.hpp"
+
 #include "svp/blocks/block_writer.hpp"
 #include "svp/models/runtime.hpp"
 #include "svp/vision/canonical_frame_input.hpp"
@@ -34,7 +36,7 @@ struct DepthInferenceRuntime {
 
 struct DepthGenerationOptions {
   std::filesystem::path model_cache_root;
-  std::string model_id = "model_depth_anything_v2_small";
+  std::string model_id = svp::models::kDepthAnythingV2SmallModelId;
   std::string execution_provider = "cpu";
   std::uint32_t raster_width = 0;
   std::uint32_t raster_height = 0;

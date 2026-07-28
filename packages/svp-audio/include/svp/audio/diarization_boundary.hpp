@@ -1,5 +1,7 @@
 #pragma once
 
+#include "svp/models/reference_processor_model_ids.hpp"
+
 #include "svp/audio/asr_chunk_planner.hpp"
 #include "svp/audio/sherpa_diarization.hpp"
 #include "svp/audio/transcript_records.hpp"
@@ -22,7 +24,7 @@ enum class DiarizationStatus {
 
 struct DiarizationExecutionBoundary {
   std::string processor_id = "proc_sherpa_diar_0001";
-  std::string model_id = "model_sherpa_onnx_diarization";
+  std::string model_id = svp::models::kSherpaOnnxDiarizationModelId;
   std::string runtime = "onnxruntime";
   std::string execution_provider = "cpu";
   std::string speaker_segments_output_ref = "transcript/speaker_segments.jsonl";
