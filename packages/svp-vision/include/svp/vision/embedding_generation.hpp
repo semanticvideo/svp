@@ -1,5 +1,7 @@
 #pragma once
 
+#include "svp/models/reference_processor_model_ids.hpp"
+
 #include "svp/blocks/block_writer.hpp"
 #include "svp/models/runtime.hpp"
 
@@ -15,8 +17,8 @@ namespace svp::vision {
 
 struct EmbeddingGenerationOptions {
   std::filesystem::path model_cache_root;
-  std::string text_model_id = "model_nomic_embed_text_v1_5";
-  std::string vision_model_id = "model_nomic_embed_vision_v1_5";
+  std::string text_model_id = svp::models::kNomicEmbedTextV15ModelId;
+  std::string vision_model_id = svp::models::kNomicEmbedVisionV15ModelId;
   std::string execution_provider = "cpu";
   std::uint32_t embedding_dim = 768;
   std::function<void(std::size_t current, std::size_t total)> on_progress;

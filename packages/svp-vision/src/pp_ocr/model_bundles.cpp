@@ -69,20 +69,16 @@ bool verify_file_hash(
 }
 
 std::optional<ModelBundlePaths> find_pp_ocr_bundles(
-    const std::filesystem::path& cache_root) {
+    const PpOcrOptions& options) {
   ModelBundlePaths paths;
 
   const std::vector<std::string> det_dir_names = {
-    "model_pp_ocrv6_medium_det", "pp_ocrv6_medium_det",
-    "model_ppocrv6_medium_det", "ppocrv6_medium_det",
-  };
+      options.detector_model_id};
   const std::vector<std::string> rec_dir_names = {
-    "model_pp_ocrv6_medium_rec", "pp_ocrv6_medium_rec",
-    "model_ppocrv6_medium_rec", "ppocrv6_medium_rec",
-  };
+      options.recognizer_model_id};
 
   for (const auto& name : det_dir_names) {
-    auto dir = cache_root / name;
+    auto dir = options.model_cache_root / name;
     if (std::filesystem::exists(dir)) {
       paths.det_bundle_dir = dir;
       for (const auto& entry : std::filesystem::directory_iterator(dir)) {
@@ -90,7 +86,7 @@ std::optional<ModelBundlePaths> find_pp_ocr_bundles(
         if (p.extension() == ".onnx") paths.det_onnx = p;
         if (p.extension() == ".yml" || p.extension() == ".yaml") paths.det_yml = p;
       }
-      auto manifest_path = dir / "model_manifest.json";
+      auto manifest_path = dir / options.manifest_filename;
       if (std::filesystem::exists(manifest_path)) {
         try {
           auto manifest = svp::models::load_model_bundle_manifest(manifest_path);
@@ -108,7 +104,7 @@ std::optional<ModelBundlePaths> find_pp_ocr_bundles(
   }
 
   for (const auto& name : rec_dir_names) {
-    auto dir = cache_root / name;
+    auto dir = options.model_cache_root / name;
     if (std::filesystem::exists(dir)) {
       paths.rec_bundle_dir = dir;
       for (const auto& entry : std::filesystem::directory_iterator(dir)) {
@@ -116,7 +112,7 @@ std::optional<ModelBundlePaths> find_pp_ocr_bundles(
         if (p.extension() == ".onnx") paths.rec_onnx = p;
         if (p.extension() == ".yml" || p.extension() == ".yaml") paths.rec_yml = p;
       }
-      auto manifest_path = dir / "model_manifest.json";
+      auto manifest_path = dir / options.manifest_filename;
       if (std::filesystem::exists(manifest_path)) {
         try {
           auto manifest = svp::models::load_model_bundle_manifest(manifest_path);

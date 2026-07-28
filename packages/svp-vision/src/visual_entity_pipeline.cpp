@@ -47,7 +47,7 @@ VisualEntityPipelineResult run_visual_entity_pipeline(
       options.execution_provider);
   auto depth_runtime = load_depth_inference_runtime(
       model_cache_root,
-      "model_depth_anything_v2_small",
+      svp::models::kDepthAnythingV2SmallModelId,
       options.execution_provider);
   auto detector_options = options.detector;
   detector_options.execution_provider = options.execution_provider;

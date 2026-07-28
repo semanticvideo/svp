@@ -1,5 +1,7 @@
 #pragma once
 
+#include "svp/models/reference_processor_model_ids.hpp"
+
 #include "svp/models/runtime.hpp"
 #include "svp/vision/color_frame_sampling.hpp"
 
@@ -20,7 +22,7 @@ struct VisualEntityDetection {
 };
 
 struct VisualEntityDetectorOptions {
-  std::string model_id = "model_rfdetr_nano_coco";
+  std::string model_id = svp::models::kRfDetrNanoCocoModelId;
   std::string execution_provider = "cpu";
   // Candidate floor. Weak boxes are available to continue an established
   // track, but the tracker applies a separate 0.15 discovery threshold before
