@@ -428,7 +428,6 @@ A reference model bundle uses extension `.svpmodel` and is a ZIP64 package with 
 
 ```text
 model.svpmodel.json
-model-lock.json
 files/
   model.onnx
   model.ort
@@ -440,7 +439,10 @@ LICENSE
 NOTICE
 ```
 
-Only files actually required by a bundle need to exist, but `model.svpmodel.json`, `model-lock.json`, `LICENSE`, and `NOTICE` MUST exist.
+Only files actually required by a bundle need to exist, but
+`model.svpmodel.json`, `LICENSE`, and `NOTICE` MUST exist. Exactly one
+`model-lock.json` MUST exist at the model-cache root and MUST NOT be duplicated
+inside a bundle.
 
 #### 5.11.1.1 Canonical model identity
 
@@ -574,7 +576,10 @@ A model bundle manifest MUST include every field shown below unless a field is e
 
 `model.svpmodel.json` is authoritative for the contents, identity, contracts, license, notice, and file hashes of a single model bundle.
 
-`model-lock.json` is authoritative for the selected reference model set used by a builder release or build invocation. It records which exact model bundles are selected together.
+The single model-cache-root `model-lock.json` is authoritative for the complete
+reference model set used by a builder release or build invocation. It records
+which exact model bundles are selected together and repeats every required file
+path, role, and BLAKE3 value from each selected manifest.
 
 If `model-lock.json` and any referenced `model.svpmodel.json` disagree on `model_id`, `model_version`, `model_bundle_id`, `bundle_blake3`, file paths, file roles, or file BLAKE3 values, the builder MUST reject the model set before processing media.
 
@@ -590,6 +595,9 @@ Reference Model Bundle rules:
 8. The builder MUST record `model_bundle_id`, `bundle_blake3`, individual file BLAKE3 values, runtime, execution provider, and canonical `model_id` in provenance.
 9. The builder MUST NOT auto-update a bundle during a build.
 10. Offline installers MAY include the complete required reference model set.
+11. Installation MUST assemble the complete set in a separate staging
+    directory, verify the root lock against every selected bundle, and only then
+    publish the staged cache transactionally.
 
 Required model-management commands are defined in Section 21.
 

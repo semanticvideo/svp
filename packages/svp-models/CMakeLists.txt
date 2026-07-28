@@ -129,4 +129,18 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-models-bundle-digest-tests
            COMMAND svp-models-bundle-digest-tests)
+
+  add_executable(svp-models-model-lock-tests
+    tests/model_lock_tests.cpp
+  )
+
+  target_compile_features(svp-models-model-lock-tests PRIVATE cxx_std_20)
+
+  target_link_libraries(svp-models-model-lock-tests
+    PRIVATE
+      svp::models
+  )
+
+  add_test(NAME svp-models-model-lock-tests
+           COMMAND svp-models-model-lock-tests)
 endif()

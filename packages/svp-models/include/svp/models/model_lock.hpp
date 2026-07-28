@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/core/hash_string.hpp"
+#include "svp/models/manifest.hpp"
 
 #include <filesystem>
 #include <nlohmann/json.hpp>
@@ -14,6 +15,7 @@ struct ModelLockEntry {
   std::string model_bundle_id;
   std::string model_version;
   svp::core::HashString bundle_blake3;
+  std::vector<ModelBundleFile> files;
 };
 
 struct ModelLock {

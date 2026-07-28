@@ -5,6 +5,7 @@
 #include "svp/models/model_id.hpp"
 #include "json_util.hpp"
 
+#include <set>
 #include <string_view>
 #include <utility>
 
@@ -49,13 +50,16 @@ ModelLock parse_model_lock(const nlohmann::json& value, std::string_view source_
                      std::string(source_name) + ".models must be a non-empty array");
   }
 
+  std::set<std::string> model_ids;
+  std::set<std::string> model_bundle_ids;
   for (std::size_t index = 0; index < models.size(); ++index) {
     const auto& model = models[index];
     const std::string item_source =
         std::string(source_name) + ".models[" + std::to_string(index) + "]";
     detail::require_object(model, item_source);
     detail::reject_unknown_properties(
-        model, {"model_id", "model_bundle_id", "model_version", "bundle_blake3"},
+        model,
+        {"model_id", "model_bundle_id", "model_version", "bundle_blake3", "files"},
         item_source);
 
     std::string model_id = detail::require_string(model, "model_id", item_source);
@@ -63,6 +67,10 @@ ModelLock parse_model_lock(const nlohmann::json& value, std::string_view source_
       throw ModelError(ModelErrorCode::schema_error,
                        item_source + ".model_id must be a canonical SVP model_... "
                                      "identifier");
+    }
+    if (!model_ids.insert(model_id).second) {
+      throw ModelError(ModelErrorCode::schema_error,
+                       item_source + ".model_id duplicates another lock entry");
     }
 
     std::string model_bundle_id =
@@ -72,6 +80,11 @@ ModelLock parse_model_lock(const nlohmann::json& value, std::string_view source_
                        item_source +
                            ".model_bundle_id must use canonical model_...@...+blake3_ "
                            "form");
+    }
+    if (!model_bundle_ids.insert(model_bundle_id).second) {
+      throw ModelError(ModelErrorCode::schema_error,
+                       item_source +
+                           ".model_bundle_id duplicates another lock entry");
     }
 
     std::string model_version =
@@ -88,10 +101,36 @@ ModelLock parse_model_lock(const nlohmann::json& value, std::string_view source_
                            "and bundle_blake3");
     }
 
-    lock.models.push_back(ModelLockEntry{std::move(model_id),
-                                         std::move(model_bundle_id),
-                                         std::move(model_version),
-                                         std::move(bundle_blake3)});
+    const auto& files = detail::require_property(model, "files", item_source);
+    if (!files.is_array() || files.empty()) {
+      throw ModelError(ModelErrorCode::schema_error,
+                       item_source + ".files must be a non-empty array");
+    }
+    std::vector<ModelBundleFile> locked_files;
+    std::set<std::string> file_paths;
+    for (std::size_t file_index = 0; file_index < files.size(); ++file_index) {
+      const auto& file = files[file_index];
+      const std::string file_source =
+          item_source + ".files[" + std::to_string(file_index) + "]";
+      detail::require_object(file, file_source);
+      detail::reject_unknown_properties(file, {"path", "role", "blake3"},
+                                        file_source);
+      std::string path =
+          detail::require_non_empty_string(file, "path", file_source);
+      if (!file_paths.insert(path).second) {
+        throw ModelError(ModelErrorCode::schema_error,
+                         file_source + ".path duplicates another file entry");
+      }
+      std::string role =
+          detail::require_non_empty_string(file, "role", file_source);
+      locked_files.push_back(
+          ModelBundleFile{std::move(path), std::move(role),
+                          require_blake3_64(file, "blake3", file_source)});
+    }
+
+    lock.models.push_back(ModelLockEntry{
+        std::move(model_id), std::move(model_bundle_id), std::move(model_version),
+        std::move(bundle_blake3), std::move(locked_files)});
   }
 
   return lock;

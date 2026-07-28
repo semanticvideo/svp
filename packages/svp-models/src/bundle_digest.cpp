@@ -23,9 +23,8 @@ namespace {
 
 constexpr std::string_view kBundleDigestDomain = "SVP_MODEL_BUNDLE_BLAKE3_V1";
 constexpr std::string_view kManifestFileName = "model.svpmodel.json";
-constexpr std::string_view kLockFileName = "model-lock.json";
-constexpr std::array<std::string_view, 4> kRequiredRootFiles = {
-    kManifestFileName, kLockFileName, "LICENSE", "NOTICE"};
+constexpr std::array<std::string_view, 3> kRequiredRootFiles = {
+    kManifestFileName, "LICENSE", "NOTICE"};
 constexpr std::size_t kBundleDigestHexLength = 64;
 constexpr std::size_t kBundleIdDigestPrefixLength = 12;
 
@@ -307,28 +306,12 @@ std::string zero_bundle_id(const nlohmann::json& value,
 std::vector<std::uint8_t> projected_control_bytes(const BundleFile& file) {
   nlohmann::json value = detail::parse_canonical_control_json(
       read_file_bytes(file.physical_path), file.physical_path);
-  if (file.relative_path == kManifestFileName) {
-    if (!value.is_object()) {
-      throw ModelError(ModelErrorCode::schema_error,
-                       "model bundle manifest must be a JSON object");
-    }
-    value["bundle_blake3"] = zero_bundle_hash();
-    value["model_bundle_id"] = zero_bundle_id(value, kManifestFileName);
-  } else {
-    if (!value.is_object() || !value.contains("models") ||
-        !value["models"].is_array()) {
-      throw ModelError(ModelErrorCode::schema_error,
-                       "model-lock.json must contain a models array");
-    }
-    for (nlohmann::json& model : value["models"]) {
-      if (!model.is_object()) {
-        throw ModelError(ModelErrorCode::schema_error,
-                         "model-lock.json models entries must be objects");
-      }
-      model["bundle_blake3"] = zero_bundle_hash();
-      model["model_bundle_id"] = zero_bundle_id(model, kLockFileName);
-    }
+  if (!value.is_object()) {
+    throw ModelError(ModelErrorCode::schema_error,
+                     "model bundle manifest must be a JSON object");
   }
+  value["bundle_blake3"] = zero_bundle_hash();
+  value["model_bundle_id"] = zero_bundle_id(value, kManifestFileName);
   return detail::encode_canonical_control_cbor(value);
 }
 
@@ -381,8 +364,7 @@ std::string blake3_hex_for_model_bundle(
     blake3_hasher_update(&hasher, file.relative_path.data(),
                          file.relative_path.size());
 
-    if (file.relative_path == kManifestFileName ||
-        file.relative_path == kLockFileName) {
+    if (file.relative_path == kManifestFileName) {
       const std::vector<std::uint8_t> content = projected_control_bytes(file);
       update_u64(hasher, static_cast<std::uint64_t>(content.size()));
       blake3_hasher_update(&hasher, content.data(), content.size());
