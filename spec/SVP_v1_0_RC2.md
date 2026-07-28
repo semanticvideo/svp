@@ -3685,7 +3685,6 @@ Remaining work before final v1.0:
 6. Finalize semantic versioning policy for index schema changes.
 7. Finalize signature algorithms and trust-store requirements beyond the RC1 minimum sidecar envelope.
 8. Decide whether the reference model registry uses static release assets, OCI artifacts, or both for `.svpmodel` distribution.
-9. Finalize the exact `model-lock.json` schema and test disagreement handling against `model.svpmodel.json`.
 
 No remaining open issue is allowed to weaken SVP Core for v1.0. If an issue requires weakening a required core section or field, it is deferred to a future major version.
 

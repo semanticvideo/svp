@@ -63,7 +63,7 @@ Text is UTF-8 and lengths count bytes, not characters.
    path bytes, the content byte length, and the content bytes.
 
 Regular files include empty files, nested manifest-declared files, `LICENSE`,
-`NOTICE`, and the two root control files. An undeclared file invalidates the
+`NOTICE`, and the root control file. An undeclared file invalidates the
 bundle rather than acquiring an implementation-dependent name in the digest.
 Directories themselves are not records. File permissions,
 timestamps, ownership, platform metadata, archive compression, and archive

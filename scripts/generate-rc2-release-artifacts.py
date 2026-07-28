@@ -3,6 +3,7 @@
 
 import hashlib
 import os
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -24,11 +25,44 @@ SPEC_PDF = REPO_ROOT / "spec/SVP_v1_0_RC2.pdf"
 RELEASE_ZIP = REPO_ROOT / "releases/SVP_v1_0_RC2_Release_Package.zip"
 PACKAGE_ROOT = "SVP_v1_0_RC2_Release_Package"
 FIXED_ZIP_TIME = (2026, 6, 19, 20, 25, 0)
+EXPECTED_SYSTEM = "Darwin"
+EXPECTED_MACHINE = "arm64"
+EXPECTED_SOFFICE_VERSION = (
+    "LibreOfficeDev 26.8.0.0.alpha0 "
+    "2c87e51eeaa2b413ff4ae097b2705eea1995d8e5"
+)
 REQUIRED_TEXT = (
     "Semantic Video Package (SVP) v1.0 Release Candidate 2",
     "Exactly one model-lock.json MUST exist at the model-cache root",
     "Installation MUST assemble the complete set in a separate staging directory",
 )
+
+
+def require_generation_environment() -> str:
+    system = platform.system()
+    machine = platform.machine()
+    if (system, machine) != (EXPECTED_SYSTEM, EXPECTED_MACHINE):
+        raise SystemExit(
+            "RC2 artifacts require the tested Apple Silicon environment: "
+            f"expected {EXPECTED_SYSTEM} {EXPECTED_MACHINE}, got {system} {machine}"
+        )
+
+    soffice = shutil.which("soffice")
+    if not soffice:
+        raise SystemExit("soffice is required to generate RC2 release artifacts")
+    result = subprocess.run(
+        [soffice, "--version"],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    version = result.stdout.strip()
+    if version != EXPECTED_SOFFICE_VERSION:
+        raise SystemExit(
+            "RC2 artifacts require the tested LibreOffice build: "
+            f"expected {EXPECTED_SOFFICE_VERSION!r}, got {version!r}"
+        )
+    return soffice
 
 
 def normalize_text(value: str) -> str:
@@ -70,11 +104,8 @@ a {{ color: #075985; }}
 """
 
 
-def run_soffice(source: Path, output_dir: Path, conversion: str,
+def run_soffice(soffice: str, source: Path, output_dir: Path, conversion: str,
                 profile_dir: Path) -> Path:
-    soffice = shutil.which("soffice")
-    if not soffice:
-        raise SystemExit("soffice is required to generate RC2 release artifacts")
     profile_uri = profile_dir.resolve().as_uri()
     result = subprocess.run(
         [
@@ -212,7 +243,59 @@ def write_release_package(destination: Path, update_package: Path) -> None:
         )
 
 
+def require_zip_sources_match(archive_path: Path, update_package: Path) -> None:
+    expected = {
+        package_name(path): path.read_bytes()
+        for path in release_source_paths()
+    }
+    update_package_name = (
+        f"{PACKAGE_ROOT}/docs/SVP_Implementation_Phases_RC2_Update_Package.zip"
+    )
+    expected[update_package_name] = update_package.read_bytes()
+
+    with zipfile.ZipFile(archive_path) as archive:
+        actual_names = archive.namelist()
+        if len(actual_names) != len(set(actual_names)):
+            raise SystemExit(f"{archive_path} contains duplicate entries")
+        if set(actual_names) != set(expected):
+            missing = sorted(set(expected) - set(actual_names))
+            extra = sorted(set(actual_names) - set(expected))
+            raise SystemExit(
+                f"{archive_path} source inventory mismatch: "
+                f"missing={missing}, extra={extra}"
+            )
+        for name, source_bytes in expected.items():
+            if archive.read(name) != source_bytes:
+                raise SystemExit(
+                    f"{archive_path} entry differs from tracked source: {name}"
+                )
+
+    update_root = REPO_ROOT / "docs/SVP_Implementation_Phases_RC2_Update"
+    expected_updates = {
+        f"SVP_Implementation_Phases_RC2_Update/{path.relative_to(update_root).as_posix()}":
+            path.read_bytes()
+        for path in sorted(update_root.rglob("*.md"))
+    }
+    with zipfile.ZipFile(update_package) as archive:
+        actual_names = archive.namelist()
+        if len(actual_names) != len(set(actual_names)):
+            raise SystemExit(f"{update_package} contains duplicate entries")
+        if set(actual_names) != set(expected_updates):
+            missing = sorted(set(expected_updates) - set(actual_names))
+            extra = sorted(set(actual_names) - set(expected_updates))
+            raise SystemExit(
+                f"{update_package} source inventory mismatch: "
+                f"missing={missing}, extra={extra}"
+            )
+        for name, source_bytes in expected_updates.items():
+            if archive.read(name) != source_bytes:
+                raise SystemExit(
+                    f"{update_package} entry differs from tracked source: {name}"
+                )
+
+
 def main() -> None:
+    soffice = require_generation_environment()
     markdown_text = SPEC_MARKDOWN.read_text(encoding="utf-8")
     require_semantic_markers("RC2 Markdown", markdown_text)
 
@@ -223,6 +306,7 @@ def main() -> None:
         generated = temporary_root / "generated"
         generated.mkdir()
         docx = run_soffice(
+            soffice,
             html_path,
             generated,
             "docx:Office Open XML Text",
@@ -231,6 +315,7 @@ def main() -> None:
         enforce_letter_page_geometry(docx)
         normalize_docx(docx)
         pdf = run_soffice(
+            soffice,
             docx,
             generated,
             "pdf:writer_pdf_Export",
@@ -246,8 +331,12 @@ def main() -> None:
         shutil.copyfile(docx, SPEC_DOCX)
         shutil.copyfile(pdf, SPEC_PDF)
         write_release_package(RELEASE_ZIP, update_package)
+        require_zip_sources_match(RELEASE_ZIP, update_package)
 
-    print("generated and semantically verified RC2 DOCX, PDF, and release ZIP")
+    print(
+        "generated, byte-synchronized, and semantically verified RC2 DOCX, "
+        "PDF, and release ZIP"
+    )
 
 
 if __name__ == "__main__":
