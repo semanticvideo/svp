@@ -81,12 +81,22 @@ void add_lock_manifest_identity_checks(VerificationReport& report,
   }
 }
 
-void add_bundle_digest_not_verified_error(VerificationReport& report,
-                                          const ModelBundleManifest& manifest) {
-  report.add_error(
-      "bundle_blake3 for " + manifest.model_bundle_id +
-      " was not verified: RC1 requires authoritative bundle_blake3 verification, "
-      "but does not yet specify the canonical bundle digest byte algorithm");
+void add_bundle_digest_check(VerificationReport& report,
+                             const ModelBundleManifest& manifest,
+                             const std::filesystem::path& bundle_root) {
+  try {
+    const std::string actual_hex = blake3_hex_for_model_bundle(bundle_root);
+    if (actual_hex != manifest.bundle_blake3.hex_value()) {
+      report.add_error("bundle BLAKE3 mismatch for " + manifest.model_bundle_id +
+                       ": expected " + manifest.bundle_blake3.canonical() +
+                       ", actual blake3:" + actual_hex);
+      return;
+    }
+    report.add_info("verified canonical bundle BLAKE3 for " +
+                    manifest.model_bundle_id);
+  } catch (const ModelError& error) {
+    report.add_error(error.what());
+  }
 }
 
 void merge_report(VerificationReport& target, const VerificationReport& source) {
@@ -166,7 +176,7 @@ VerificationReport verify_extracted_bundle(const std::filesystem::path& bundle_r
     const ModelLock lock = load_model_lock(bundle_root / kLockFileName);
     add_lock_manifest_identity_checks(report, lock, manifest);
     merge_report(report, verify_manifest_files(manifest, bundle_root));
-    add_bundle_digest_not_verified_error(report, manifest);
+    add_bundle_digest_check(report, manifest, bundle_root);
   } catch (const ModelError& error) {
     report.add_error(error.what());
     return report;
@@ -194,7 +204,7 @@ VerificationReport verify_lock_against_cache(const ModelLock& lock,
       ModelBundleManifest manifest = load_model_bundle_manifest(match->second);
       add_lock_manifest_identity_checks(report, lock, manifest);
       merge_report(report, verify_manifest_files(manifest, bundle_root));
-      add_bundle_digest_not_verified_error(report, manifest);
+      add_bundle_digest_check(report, manifest, bundle_root);
     } catch (const ModelError& error) {
       report.add_error(error.what());
     }

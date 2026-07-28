@@ -59,7 +59,10 @@ if(SVP_MODEL_ONNX_RUNTIME_AVAILABLE)
 endif()
 
 add_library(svp-models
+  src/bundle_digest.cpp
   src/cache.cpp
+  src/canonical_cbor.cpp
+  src/canonical_control_json.cpp
   src/error.cpp
   src/hash.cpp
   src/manifest.cpp
@@ -107,3 +110,23 @@ target_link_libraries(svp-models
   PRIVATE
     ${BLAKE3_LIBRARY}
 )
+
+if(BUILD_TESTING)
+  add_executable(svp-models-bundle-digest-tests
+    tests/bundle_digest_tests.cpp
+  )
+
+  target_compile_features(svp-models-bundle-digest-tests PRIVATE cxx_std_20)
+
+  target_include_directories(svp-models-bundle-digest-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+
+  target_link_libraries(svp-models-bundle-digest-tests
+    PRIVATE
+      svp::models
+  )
+
+  add_test(NAME svp-models-bundle-digest-tests
+           COMMAND svp-models-bundle-digest-tests)
+endif()
