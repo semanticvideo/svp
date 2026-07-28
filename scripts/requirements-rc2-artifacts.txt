@@ -1,0 +1,5 @@
+Markdown==3.8.2
+pypdf==6.0.0
+python-docx==1.2.0
+lxml==6.1.1
+typing-extensions==4.16.0

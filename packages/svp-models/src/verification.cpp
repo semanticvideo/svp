@@ -14,7 +14,6 @@ namespace svp::models {
 namespace {
 
 constexpr std::string_view kManifestFileName = "model.svpmodel.json";
-constexpr std::string_view kLockFileName = "model-lock.json";
 
 std::vector<std::filesystem::path> find_installed_manifests(
     const std::filesystem::path& cache_root) {
@@ -41,8 +40,7 @@ std::vector<std::filesystem::path> find_installed_manifests(
 void add_required_bundle_file_checks(VerificationReport& report,
                                      const std::filesystem::path& bundle_root) {
   for (const std::string_view required :
-       {kManifestFileName, kLockFileName, std::string_view("LICENSE"),
-        std::string_view("NOTICE")}) {
+       {kManifestFileName, std::string_view("LICENSE"), std::string_view("NOTICE")}) {
     const std::filesystem::path path = bundle_root / required;
     std::error_code error;
     if (!std::filesystem::is_regular_file(path, error)) {
@@ -79,6 +77,25 @@ void add_lock_manifest_identity_checks(VerificationReport& report,
         "model-lock.json bundle_blake3 disagrees with model.svpmodel.json for " +
         manifest.model_bundle_id);
   }
+
+  std::map<std::string, const ModelBundleFile*> manifest_files;
+  for (const ModelBundleFile& file : manifest.files) {
+    manifest_files.emplace(file.path, &file);
+  }
+  if (manifest_files.size() != match->files.size()) {
+    report.add_error("model-lock.json file inventory disagrees with "
+                     "model.svpmodel.json for " + manifest.model_bundle_id);
+    return;
+  }
+  for (const ModelBundleFile& locked_file : match->files) {
+    const auto file = manifest_files.find(locked_file.path);
+    if (file == manifest_files.end() || file->second->role != locked_file.role ||
+        file->second->blake3.canonical() != locked_file.blake3.canonical()) {
+      report.add_error("model-lock.json file identity disagrees with "
+                       "model.svpmodel.json for " + manifest.model_bundle_id +
+                       "/" + locked_file.path);
+    }
+  }
 }
 
 void add_bundle_digest_check(VerificationReport& report,
@@ -110,7 +127,13 @@ std::map<std::string, std::filesystem::path> installed_bundle_manifests_by_bundl
   for (const std::filesystem::path& path : find_installed_manifests(cache_root)) {
     try {
       ModelBundleManifest manifest = load_model_bundle_manifest(path);
-      manifests_by_bundle_id.emplace(manifest.model_bundle_id, path);
+      const auto [existing, inserted] =
+          manifests_by_bundle_id.emplace(manifest.model_bundle_id, path);
+      if (!inserted) {
+        report.add_error("duplicate installed model_bundle_id " +
+                         manifest.model_bundle_id + " at " +
+                         existing->second.string() + " and " + path.string());
+      }
     } catch (const ModelError& error) {
       report.add_error("could not parse installed model manifest " + path.string() +
                        ": " + error.what());
@@ -173,8 +196,6 @@ VerificationReport verify_extracted_bundle(const std::filesystem::path& bundle_r
   try {
     const ModelBundleManifest manifest =
         load_model_bundle_manifest(bundle_root / kManifestFileName);
-    const ModelLock lock = load_model_lock(bundle_root / kLockFileName);
-    add_lock_manifest_identity_checks(report, lock, manifest);
     merge_report(report, verify_manifest_files(manifest, bundle_root));
     add_bundle_digest_check(report, manifest, bundle_root);
   } catch (const ModelError& error) {
@@ -190,6 +211,10 @@ VerificationReport verify_lock_against_cache(const ModelLock& lock,
   VerificationReport report;
   const auto manifests_by_bundle_id =
       installed_bundle_manifests_by_bundle_id(report, cache_root);
+
+  if (manifests_by_bundle_id.size() != lock.models.size()) {
+    report.add_error("model cache bundle count disagrees with model-lock.json");
+  }
 
   for (const ModelLockEntry& entry : lock.models) {
     const auto match = manifests_by_bundle_id.find(entry.model_bundle_id);
@@ -207,6 +232,17 @@ VerificationReport verify_lock_against_cache(const ModelLock& lock,
       add_bundle_digest_check(report, manifest, bundle_root);
     } catch (const ModelError& error) {
       report.add_error(error.what());
+    }
+  }
+
+  std::set<std::string> locked_bundle_ids;
+  for (const ModelLockEntry& entry : lock.models) {
+    locked_bundle_ids.insert(entry.model_bundle_id);
+  }
+  for (const auto& installed : manifests_by_bundle_id) {
+    if (!locked_bundle_ids.contains(installed.first)) {
+      report.add_error("unexpected model bundle " + installed.first + " in cache " +
+                       cache_root.string());
     }
   }
 

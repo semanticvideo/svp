@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://svp.dev/schemas/v1/model-lock.schema.json",
-  "title": "SVP Reference Model Set Lockfile v1 RC1",
+  "title": "SVP Reference Model Set Lockfile v1 RC2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -27,7 +27,8 @@
           "model_id",
           "model_bundle_id",
           "model_version",
-          "bundle_blake3"
+          "bundle_blake3",
+          "files"
         ],
         "properties": {
           "model_id": {
@@ -44,6 +45,33 @@
           "bundle_blake3": {
             "type": "string",
             "pattern": "^blake3:[0-9a-f]{64}$"
+          },
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "role",
+                "blake3"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "role": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "blake3": {
+                  "type": "string",
+                  "pattern": "^blake3:[0-9a-f]{64}$"
+                }
+              }
+            }
           }
         }
       }

@@ -7,6 +7,27 @@
       "model_id": "model_whisper_small_en",
       "display_name": "Whisper Small English (GGML)",
       "source_slug": "ggerganov/whisper.cpp",
+      "source_revision": "c521a4b02f422512d734391fdf08bb08c0862f68",
+      "license": "MIT",
+      "model_bundle_id": "model_whisper_small_en@c521a4b-small.en-ggml+blake3_974ed83895de",
+      "bundle_blake3": "blake3:974ed83895dedae551b5c9d6272637d79fab4e9f8246904c58e22d3fe803538f",
+      "required_files": [
+        {
+          "path": "ggml-small.en.bin",
+          "role": "weights",
+          "blake3": "blake3:508cb2e6b0710204142fa1a3050bc191f297f7976408494a817f032cfba31829"
+        },
+        {
+          "path": "LICENSE",
+          "role": "license",
+          "blake3": "blake3:4df4c3a2e748e546403036457cc35667e088f29976bdda9ce9eeddd51a7755ce"
+        },
+        {
+          "path": "NOTICE",
+          "role": "notice",
+          "blake3": "blake3:d214f3100073c4ae9862895753c44a0f4ee0a3a41b7f54f99eafeedc044d3930"
+        }
+      ],
       "required_for": [
         "transcript",
         "words"
@@ -15,7 +36,33 @@
     {
       "model_id": "model_sherpa_onnx_diarization",
       "display_name": "sherpa-onnx Speaker Diarization",
-      "source_slug": "k2-fsa/sherpa-onnx",
+      "source_slug": "csukuangfj/sherpa-onnx-pyannote-segmentation-3-0 + k2-fsa/sherpa-onnx",
+      "source_revision": "9403a6902bb58e3d5ae8c7e77c3422de279db2e0+github-asset-198893098",
+      "license": "MIT AND Apache-2.0",
+      "model_bundle_id": "model_sherpa_onnx_diarization@9403a69-asset-198893098+blake3_6f318eafdbe9",
+      "bundle_blake3": "blake3:6f318eafdbe9232bedc9847473cc088bce3aed31670ee2ba298c988c15691b7f",
+      "required_files": [
+        {
+          "path": "sherpa-onnx-pyannote-segmentation-3-0/model.onnx",
+          "role": "segmentation",
+          "blake3": "blake3:e13a43fcaab30333795858392bac5ffa50928a2992feeed4107685598947f013"
+        },
+        {
+          "path": "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
+          "role": "embedding",
+          "blake3": "blake3:ca14b5dc7e2fbdb08961405811b2a4be0da0dc323494013d145fb8b826d22b2b"
+        },
+        {
+          "path": "LICENSE",
+          "role": "license",
+          "blake3": "blake3:9e9096469f501ee4105696e17d0e2678e830d0ddc4da742f63259588c926b35d"
+        },
+        {
+          "path": "NOTICE",
+          "role": "notice",
+          "blake3": "blake3:f9c14d81d0dc3d1708ac4ce2e5d7e912c4574d2e4604090d4ad8228ea26ffacf"
+        }
+      ],
       "required_for": [
         "speakers",
         "speaker_segments"
@@ -24,7 +71,28 @@
     {
       "model_id": "model_depth_anything_v2_small",
       "display_name": "Depth Anything V2 Small",
-      "source_slug": "DepthAnything/Depth-Anything-V2",
+      "source_slug": "onnx-community/depth-anything-v2-small",
+      "source_revision": "f7421df0cc30f121782ab050d42f0a423291dcde",
+      "license": "Apache-2.0",
+      "model_bundle_id": "model_depth_anything_v2_small@f7421df-fp32+blake3_7fd7385183db",
+      "bundle_blake3": "blake3:7fd7385183db444c2fb01688b3b367b3fb2de2404a2614d95b21dd7cd6dfe92c",
+      "required_files": [
+        {
+          "path": "model.onnx",
+          "role": "model",
+          "blake3": "blake3:b9858467b09d817b943ada6bd9bf87acc1095def145ded796de0d8a74db6c64a"
+        },
+        {
+          "path": "LICENSE",
+          "role": "license",
+          "blake3": "blake3:3833fc3c91a379ff509b431db1f7fd40dea69a6614249f420ec62398957087b1"
+        },
+        {
+          "path": "NOTICE",
+          "role": "notice",
+          "blake3": "blake3:93edc9cadeafa5a0b563bdcddfd931ddc3cead398abb5f721b016a920d6e8216"
+        }
+      ],
       "required_for": [
         "depth"
       ]
@@ -33,6 +101,32 @@
       "model_id": "model_nomic_embed_text_v1_5",
       "display_name": "Nomic Embed Text v1.5",
       "source_slug": "nomic-ai/nomic-embed-text-v1.5",
+      "source_revision": "ac6fcd72429d86ff25c17895e47a9bfcfc50c1b2",
+      "license": "Apache-2.0",
+      "model_bundle_id": "model_nomic_embed_text_v1_5@ac6fcd7-fp32+blake3_52382b910102",
+      "bundle_blake3": "blake3:52382b91010238b3316480854c931020637fdae19f4fca7bb027f9d9b2f4ccde",
+      "required_files": [
+        {
+          "path": "model.onnx",
+          "role": "model",
+          "blake3": "blake3:34f5f98a1bb6ecd9e6095ec8d4da7b3491517dcf1d6dd5bd57c0171bf744b749"
+        },
+        {
+          "path": "vocab.txt",
+          "role": "tokenizer_vocab",
+          "blake3": "blake3:29a772c92cf4b7bc8f4c52d801f03d36ad8528ef964f856dadc4c4e7cb14e451"
+        },
+        {
+          "path": "LICENSE",
+          "role": "license",
+          "blake3": "blake3:1f17aa45bdc12febcd976ff8a2fcc8e9b60171801c099b4b0a014212b7b50d7e"
+        },
+        {
+          "path": "NOTICE",
+          "role": "notice",
+          "blake3": "blake3:570d03695eaeff5b0476ad8f8a2046351bb9397d4c11456d519fbe707103b3fc"
+        }
+      ],
       "required_for": [
         "text_embeddings"
       ]
@@ -41,6 +135,27 @@
       "model_id": "model_nomic_embed_vision_v1_5",
       "display_name": "Nomic Embed Vision v1.5",
       "source_slug": "nomic-ai/nomic-embed-vision-v1.5",
+      "source_revision": "e3a725bce72db07ca4adb1d83da08903f3ee02f8",
+      "license": "Apache-2.0",
+      "model_bundle_id": "model_nomic_embed_vision_v1_5@e3a725b-fp32+blake3_64e002913ea3",
+      "bundle_blake3": "blake3:64e002913ea338ca2efa5e8c807bf59f37a467273bb9cd01f708cb778bd52694",
+      "required_files": [
+        {
+          "path": "model.onnx",
+          "role": "model",
+          "blake3": "blake3:25225ec8c20844458985a2fc1de3f4718cb66bdc1163a8ac620e781aa436aadb"
+        },
+        {
+          "path": "LICENSE",
+          "role": "license",
+          "blake3": "blake3:1f17aa45bdc12febcd976ff8a2fcc8e9b60171801c099b4b0a014212b7b50d7e"
+        },
+        {
+          "path": "NOTICE",
+          "role": "notice",
+          "blake3": "blake3:c73023570c3c5928acea9f7deb45a16206790343c0b4c41238824ab47b85f28d"
+        }
+      ],
       "required_for": [
         "vision_embeddings"
       ]
@@ -51,13 +166,13 @@
       "source_slug": "onnx-community/rfdetr_nano-ONNX",
       "source_revision": "eae21cee0687a91bcf9fa071605c48d7705d2d91",
       "license": "Apache-2.0",
-      "model_bundle_id": "model_rfdetr_nano_coco@eae21ce-fp32-svp-wrapper-1+blake3_d443faa85b43",
-      "bundle_blake3": "blake3:d443faa85b432a9701aabcee7bb45cf8ded08bacfb983cc4a8dae667767a1300",
+      "model_bundle_id": "model_rfdetr_nano_coco@eae21ce-fp32-svp-wrapper-2+blake3_9796ce749496",
+      "bundle_blake3": "blake3:9796ce749496278b81096e63ca9065a37c90606866595782e02dba68b6be70bf",
       "required_files": [
         {
           "path": "model.onnx",
           "role": "model",
-          "blake3": "blake3:d443faa85b432a9701aabcee7bb45cf8ded08bacfb983cc4a8dae667767a1300"
+          "blake3": "blake3:03d607ab0038a57a48c7c39d3ef9f3bea49da9a5dc82549be7f116c6ee884ed1"
         },
         {
           "path": "LICENSE",
@@ -72,7 +187,7 @@
         {
           "path": "NOTICE",
           "role": "notice",
-          "blake3": "blake3:eb7b9857ed90a7f2a241048d26da1afac4465bd08d860b859b4559d636fbf000"
+          "blake3": "blake3:00de03af272d42ca03a52359edd619ce0f4724b3766b7f1756ba4f3471036a05"
         }
       ],
       "required_for": [
@@ -82,7 +197,28 @@
     {
       "model_id": "model_pp_ocrv6_medium_det",
       "display_name": "PP-OCRv6 Medium Text Detector",
-      "source_slug": "PP-OCRv6_medium_det",
+      "source_slug": "PaddlePaddle/PP-OCRv6_medium_det",
+      "source_revision": "8e0f56fb2ef86b461d99cfc7ac5c137738985f61",
+      "license": "Apache-2.0",
+      "model_bundle_id": "model_pp_ocrv6_medium_det@8e0f56f-paddle2onnx-2.1.0-opset14+blake3_cb7fb2b0846d",
+      "bundle_blake3": "blake3:cb7fb2b0846d3f051719ac114254ceb39e6aa9b218b349d497d2dbd852a40786",
+      "required_files": [
+        {
+          "path": "det.onnx",
+          "role": "model",
+          "blake3": "blake3:a17ce7d78cd56ba0ec9622c3023bd069abdc59e15aedfb7e39a3d22923d558b9"
+        },
+        {
+          "path": "LICENSE",
+          "role": "license",
+          "blake3": "blake3:b715b6b658f6bc2c3e0d7de1027781cd9a21fef20f8ddf7a2573e4654b9f141d"
+        },
+        {
+          "path": "NOTICE",
+          "role": "notice",
+          "blake3": "blake3:885ae20c02c04eec8e8f9f6feefc213e6b3c42d9ac9635ffff4b0441662b9900"
+        }
+      ],
       "required_for": [
         "text_regions"
       ]
@@ -90,7 +226,33 @@
     {
       "model_id": "model_pp_ocrv6_medium_rec",
       "display_name": "PP-OCRv6 Medium Text Recognizer",
-      "source_slug": "PP-OCRv6_medium_rec",
+      "source_slug": "PaddlePaddle/PP-OCRv6_medium_rec",
+      "source_revision": "e5a92bcbc5cc1b494628e458d267778f0704fd7c",
+      "license": "Apache-2.0",
+      "model_bundle_id": "model_pp_ocrv6_medium_rec@e5a92bc-paddle2onnx-2.1.0-opset14+blake3_fa8d10eb5a25",
+      "bundle_blake3": "blake3:fa8d10eb5a25e4be478cb75546fea1836be5cbdd66d889423bd992a89ed8d375",
+      "required_files": [
+        {
+          "path": "rec.onnx",
+          "role": "model",
+          "blake3": "blake3:0882a9c815210b229245e7030bbc994919326b62f086eb96b08eaffe8cbf1691"
+        },
+        {
+          "path": "inference.yml",
+          "role": "character_dictionary",
+          "blake3": "blake3:b3d95381969b6e0115dcb9eb980955edd027bcf1bd817bbcb42667af05ffb53c"
+        },
+        {
+          "path": "LICENSE",
+          "role": "license",
+          "blake3": "blake3:b715b6b658f6bc2c3e0d7de1027781cd9a21fef20f8ddf7a2573e4654b9f141d"
+        },
+        {
+          "path": "NOTICE",
+          "role": "notice",
+          "blake3": "blake3:33c723df5e55fc0901ec952c234d1ea66dafeea1e314b7a031494229961a5846"
+        }
+      ],
       "required_for": [
         "text_observations"
       ]

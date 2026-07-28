@@ -27,7 +27,7 @@ constexpr std::string_view kModelVersion = "1.0.0";
 constexpr std::string_view kZeroDigest =
     "0000000000000000000000000000000000000000000000000000000000000000";
 constexpr std::string_view kCanonicalFixtureDigest =
-    "6adcc898113fde5930187b811fffefb8993e108a016d2f210ead2dd5b935208b";
+    "2114756c26b9db38cb522a25c42bd88dd9f130411d3310e5fc73fe4eba33c351";
 
 struct TemporaryDirectory {
   fs::path path;
@@ -143,25 +143,6 @@ nlohmann::ordered_json manifest_json(const fs::path& root,
   return manifest;
 }
 
-nlohmann::ordered_json lock_json(std::string_view digest_hex,
-                                 bool reverse_object_insertion) {
-  nlohmann::ordered_json model;
-  if (reverse_object_insertion) {
-    model["bundle_blake3"] = canonical_hash(digest_hex);
-    model["model_version"] = kModelVersion;
-    model["model_bundle_id"] = bundle_id(digest_hex);
-    model["model_id"] = kModelId;
-  } else {
-    model["model_id"] = kModelId;
-    model["model_bundle_id"] = bundle_id(digest_hex);
-    model["model_version"] = kModelVersion;
-    model["bundle_blake3"] = canonical_hash(digest_hex);
-  }
-  return {{"schema_version", "svp-model-lock-1"},
-          {"model_set_id", "digest-test-set"},
-          {"models", nlohmann::ordered_json::array({model})}};
-}
-
 std::string create_bundle(const fs::path& root,
                           bool reverse_file_creation,
                           bool reverse_object_insertion) {
@@ -182,13 +163,9 @@ std::string create_bundle(const fs::path& root,
 
   write_json(root / "model.svpmodel.json",
              manifest_json(root, kZeroDigest, reverse_object_insertion));
-  write_json(root / "model-lock.json",
-             lock_json(kZeroDigest, reverse_object_insertion));
   const std::string digest = blake3_hex_for_model_bundle(root);
   write_json(root / "model.svpmodel.json",
              manifest_json(root, digest, reverse_object_insertion));
-  write_json(root / "model-lock.json",
-             lock_json(digest, reverse_object_insertion));
   expect(blake3_hex_for_model_bundle(root) == digest,
          "recursive digest projection was not stable");
   return digest;
@@ -203,6 +180,7 @@ void test_deterministic_bundle_digest() {
 
   expect(first_digest == second_digest,
          "creation and object insertion order changed the digest");
+  std::cout << "canonical digest: " << first_digest << '\n';
   expect(first_digest == kCanonicalFixtureDigest,
          "canonical digest changed from the cross-implementation test vector");
   expect(first_digest.size() == 64, "bundle digest was not 64 hex characters");
@@ -214,7 +192,6 @@ void test_deterministic_bundle_digest() {
                   issue.message.find("bundle BLAKE3") != std::string::npos;
          }),
          "bundle verification omitted aggregate digest proof");
-  std::cout << "canonical digest: " << first_digest << '\n';
 }
 
 void test_recursive_fields_are_projected() {
@@ -224,7 +201,6 @@ void test_recursive_fields_are_projected() {
 
   const std::string alternate(64, 'a');
   write_json(root / "model.svpmodel.json", manifest_json(root, alternate, false));
-  write_json(root / "model-lock.json", lock_json(alternate, true));
   expect(blake3_hex_for_model_bundle(root) == digest,
          "recursive manifest fields changed the digest");
 }
@@ -236,17 +212,13 @@ void test_covered_mutations_change_digest() {
   const fs::path missing = temporary.path / "missing";
   const fs::path extra = temporary.path / "extra";
   const fs::path metadata = temporary.path / "metadata";
-  const fs::path lock_metadata = temporary.path / "lock-metadata";
   const std::string original = create_bundle(changed, false, false);
   const std::string renamed_digest = create_bundle(renamed, false, false);
   const std::string missing_digest = create_bundle(missing, false, false);
   const std::string extra_digest = create_bundle(extra, false, false);
   const std::string metadata_digest = create_bundle(metadata, false, false);
-  const std::string lock_metadata_digest =
-      create_bundle(lock_metadata, false, false);
   expect(renamed_digest == original && missing_digest == original &&
-             extra_digest == original && metadata_digest == original &&
-             lock_metadata_digest == original,
+             extra_digest == original && metadata_digest == original,
          "equivalent fixture bundles produced different digests");
 
   write_bytes(changed / "weights/model.bin", "changed");
@@ -283,14 +255,6 @@ void test_covered_mutations_change_digest() {
          "covered manifest metadata did not change the digest");
   expect(!verify_extracted_bundle(metadata).ok(),
          "covered manifest metadata passed bundle verification");
-
-  auto lock = lock_json(original, false);
-  lock["model_set_id"] = "changed-model-set";
-  write_json(lock_metadata / "model-lock.json", lock);
-  expect(blake3_hex_for_model_bundle(lock_metadata) != original,
-         "covered lock metadata did not change the digest");
-  expect(!verify_extracted_bundle(lock_metadata).ok(),
-         "covered lock metadata passed bundle verification");
 }
 
 void test_json_number_canonicalization() {
@@ -427,7 +391,6 @@ std::string create_unicode_path_bundle(const fs::path& root,
   manifest["bundle_blake3"] = canonical_hash(digest);
   manifest["model_bundle_id"] = bundle_id(digest);
   write_json(root / "model.svpmodel.json", manifest);
-  write_json(root / "model-lock.json", lock_json(digest, false));
   return digest;
 }
 

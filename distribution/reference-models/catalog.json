@@ -1,0 +1,364 @@
+{
+  "schema_version": "svp-reference-model-distribution-1",
+  "svp_version": "1.0-rc.2",
+  "bundle_contract": "spec/companion/SVP_Model_Bundle_v1_RC2.md",
+  "assembly_mode": "reproduced_and_verified_artifacts",
+  "shipping_state": "ready",
+  "ppocr_reproduction_environment": {
+    "python": "3.11",
+    "paddle2onnx": "2.1.0",
+    "paddlepaddle": "3.0.0",
+    "onnx": "1.17.0",
+    "onnxruntime": "1.19.2",
+    "polygraphy": "0.50.3",
+    "onnx-graphsurgeon": "0.6.1",
+    "numpy": "2.4.6",
+    "protobuf": "7.35.1",
+    "optimization": "Paddle2ONNX 2.1.0 default Polygraphy folding"
+  },
+  "models": [
+    {
+      "model_id": "model_whisper_small_en",
+      "model_version": "c521a4b-small.en-ggml",
+      "source_slug": "ggerganov/whisper.cpp",
+      "source_revision": "c521a4b02f422512d734391fdf08bb08c0862f68",
+      "model_bundle_id": "model_whisper_small_en@c521a4b-small.en-ggml+blake3_974ed83895de",
+      "bundle_blake3": "blake3:974ed83895dedae551b5c9d6272637d79fab4e9f8246904c58e22d3fe803538f",
+      "license": "MIT",
+      "license_sources": [
+        {
+          "path": "LICENSE",
+          "source_url": "https://raw.githubusercontent.com/openai/whisper/6e3be77e1a105e59086e3e21ff5f609fd6fa89a5/LICENSE",
+          "source_revision": "6e3be77e1a105e59086e3e21ff5f609fd6fa89a5",
+          "expected_bytes": 1063,
+          "sha256": "b5d65a59060e68c4ff940e1eddfa6f94b2d68fdf58ed7f4dd57721c997e35e9d",
+          "blake3": "blake3:4df4c3a2e748e546403036457cc35667e088f29976bdda9ce9eeddd51a7755ce"
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "ggml-small.en.bin",
+          "source_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/c521a4b02f422512d734391fdf08bb08c0862f68/ggml-small.en.bin",
+          "source_revision": "c521a4b02f422512d734391fdf08bb08c0862f68",
+          "expected_bytes": 487614201,
+          "sha256": "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
+          "blake3": "blake3:508cb2e6b0710204142fa1a3050bc191f297f7976408494a817f032cfba31829"
+        }
+      ]
+    },
+    {
+      "model_id": "model_sherpa_onnx_diarization",
+      "model_version": "9403a69-asset-198893098",
+      "source_slug": "csukuangfj/sherpa-onnx-pyannote-segmentation-3-0 + k2-fsa/sherpa-onnx",
+      "source_revision": "9403a6902bb58e3d5ae8c7e77c3422de279db2e0+github-asset-198893098",
+      "model_bundle_id": "model_sherpa_onnx_diarization@9403a69-asset-198893098+blake3_6f318eafdbe9",
+      "bundle_blake3": "blake3:6f318eafdbe9232bedc9847473cc088bce3aed31670ee2ba298c988c15691b7f",
+      "license": "MIT AND Apache-2.0",
+      "license_sources": [
+        {
+          "path": "LICENSE.pyannote",
+          "source_url": "https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/9403a6902bb58e3d5ae8c7e77c3422de279db2e0/LICENSE",
+          "source_revision": "9403a6902bb58e3d5ae8c7e77c3422de279db2e0",
+          "expected_bytes": 1061,
+          "sha256": "14d7016ad68e7394d6e6b78d96cc2ae431c905287b89674cfdf021e79e62b8ba",
+          "blake3": "blake3:99a46fae49322baac65f4f019c3a79b270972efda793c0f13c2195e87c45fc72"
+        },
+        {
+          "path": "LICENSE.3dspeaker",
+          "source_url": "https://raw.githubusercontent.com/modelscope/3D-Speaker/6d72d8cc6e02b8357f8794fc54ff3e837b525cef/LICENSE",
+          "source_revision": "6d72d8cc6e02b8357f8794fc54ff3e837b525cef",
+          "expected_bytes": 11357,
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "blake3": "blake3:3833fc3c91a379ff509b431db1f7fd40dea69a6614249f420ec62398957087b1"
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "sherpa-onnx-pyannote-segmentation-3-0/model.onnx",
+          "source_url": "https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/9403a6902bb58e3d5ae8c7e77c3422de279db2e0/model.onnx",
+          "source_revision": "9403a6902bb58e3d5ae8c7e77c3422de279db2e0",
+          "expected_bytes": 5992913,
+          "sha256": "220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079",
+          "blake3": "blake3:e13a43fcaab30333795858392bac5ffa50928a2992feeed4107685598947f013"
+        },
+        {
+          "path": "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
+          "source_url": "https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/assets/198893098",
+          "request_headers": {
+            "Accept": "application/octet-stream"
+          },
+          "source_revision": "github-release-asset-198893098",
+          "expected_bytes": 39593761,
+          "sha256": "1a331345f04805badbb495c775a6ddffcdd1a732567d5ec8b3d5749e3c7a5e4b",
+          "blake3": "blake3:ca14b5dc7e2fbdb08961405811b2a4be0da0dc323494013d145fb8b826d22b2b"
+        }
+      ]
+    },
+    {
+      "model_id": "model_depth_anything_v2_small",
+      "model_version": "f7421df-fp32",
+      "source_slug": "onnx-community/depth-anything-v2-small",
+      "source_revision": "f7421df0cc30f121782ab050d42f0a423291dcde",
+      "model_bundle_id": "model_depth_anything_v2_small@f7421df-fp32+blake3_7fd7385183db",
+      "bundle_blake3": "blake3:7fd7385183db444c2fb01688b3b367b3fb2de2404a2614d95b21dd7cd6dfe92c",
+      "license": "Apache-2.0",
+      "license_sources": [
+        {
+          "path": "LICENSE",
+          "source_url": "https://raw.githubusercontent.com/DepthAnything/Depth-Anything-V2/0a7e2b58a7e378c7863bd7486afc659c41f9ef99/LICENSE",
+          "source_revision": "0a7e2b58a7e378c7863bd7486afc659c41f9ef99",
+          "expected_bytes": 11357,
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "blake3": "blake3:3833fc3c91a379ff509b431db1f7fd40dea69a6614249f420ec62398957087b1"
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "model.onnx",
+          "source_url": "https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/f7421df0cc30f121782ab050d42f0a423291dcde/onnx/model.onnx",
+          "source_revision": "f7421df0cc30f121782ab050d42f0a423291dcde",
+          "expected_bytes": 99060839,
+          "sha256": "afb6a5c28f3b6bf1618c6e43f02073ef9dfdc70e937502d51603e57b0a1df10c",
+          "blake3": "blake3:b9858467b09d817b943ada6bd9bf87acc1095def145ded796de0d8a74db6c64a"
+        }
+      ]
+    },
+    {
+      "model_id": "model_nomic_embed_text_v1_5",
+      "model_version": "ac6fcd7-fp32",
+      "source_slug": "nomic-ai/nomic-embed-text-v1.5",
+      "source_revision": "ac6fcd72429d86ff25c17895e47a9bfcfc50c1b2",
+      "model_bundle_id": "model_nomic_embed_text_v1_5@ac6fcd7-fp32+blake3_52382b910102",
+      "bundle_blake3": "blake3:52382b91010238b3316480854c931020637fdae19f4fca7bb027f9d9b2f4ccde",
+      "license": "Apache-2.0",
+      "license_sources": [
+        {
+          "path": "LICENSE",
+          "source_url": "https://raw.githubusercontent.com/nomic-ai/contrastors/5f7b461e5a13b5636692d1c9f1141b27232fe966/LICENSE",
+          "source_revision": "5f7b461e5a13b5636692d1c9f1141b27232fe966",
+          "expected_bytes": 11356,
+          "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+          "blake3": "blake3:1f17aa45bdc12febcd976ff8a2fcc8e9b60171801c099b4b0a014212b7b50d7e"
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "model.onnx",
+          "source_url": "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/ac6fcd72429d86ff25c17895e47a9bfcfc50c1b2/onnx/model.onnx",
+          "source_revision": "ac6fcd72429d86ff25c17895e47a9bfcfc50c1b2",
+          "expected_bytes": 547310275,
+          "sha256": "147d5aa88c2101237358e17796cf3a227cead1ec304ec34b465bb08e9d952965",
+          "blake3": "blake3:34f5f98a1bb6ecd9e6095ec8d4da7b3491517dcf1d6dd5bd57c0171bf744b749"
+        },
+        {
+          "path": "vocab.txt",
+          "source_url": "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/ac6fcd72429d86ff25c17895e47a9bfcfc50c1b2/vocab.txt",
+          "source_revision": "ac6fcd72429d86ff25c17895e47a9bfcfc50c1b2",
+          "expected_bytes": 231508,
+          "sha256": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3",
+          "blake3": "blake3:29a772c92cf4b7bc8f4c52d801f03d36ad8528ef964f856dadc4c4e7cb14e451"
+        }
+      ]
+    },
+    {
+      "model_id": "model_nomic_embed_vision_v1_5",
+      "model_version": "e3a725b-fp32",
+      "source_slug": "nomic-ai/nomic-embed-vision-v1.5",
+      "source_revision": "e3a725bce72db07ca4adb1d83da08903f3ee02f8",
+      "model_bundle_id": "model_nomic_embed_vision_v1_5@e3a725b-fp32+blake3_64e002913ea3",
+      "bundle_blake3": "blake3:64e002913ea338ca2efa5e8c807bf59f37a467273bb9cd01f708cb778bd52694",
+      "license": "Apache-2.0",
+      "license_sources": [
+        {
+          "path": "LICENSE",
+          "source_url": "https://raw.githubusercontent.com/nomic-ai/contrastors/5f7b461e5a13b5636692d1c9f1141b27232fe966/LICENSE",
+          "source_revision": "5f7b461e5a13b5636692d1c9f1141b27232fe966",
+          "expected_bytes": 11356,
+          "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+          "blake3": "blake3:1f17aa45bdc12febcd976ff8a2fcc8e9b60171801c099b4b0a014212b7b50d7e"
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "model.onnx",
+          "source_url": "https://huggingface.co/nomic-ai/nomic-embed-vision-v1.5/resolve/e3a725bce72db07ca4adb1d83da08903f3ee02f8/onnx/model.onnx",
+          "source_revision": "e3a725bce72db07ca4adb1d83da08903f3ee02f8",
+          "expected_bytes": 374487555,
+          "sha256": "53b4287e459193019bed6e094014344d4f3c892bd22b7159bf398d71eb82d750",
+          "blake3": "blake3:25225ec8c20844458985a2fc1de3f4718cb66bdc1163a8ac620e781aa436aadb"
+        }
+      ]
+    },
+    {
+      "model_id": "model_rfdetr_nano_coco",
+      "model_version": "eae21ce-fp32-svp-wrapper-2",
+      "source_slug": "onnx-community/rfdetr_nano-ONNX",
+      "source_revision": "eae21cee0687a91bcf9fa071605c48d7705d2d91",
+      "model_bundle_id": "model_rfdetr_nano_coco@eae21ce-fp32-svp-wrapper-2+blake3_9796ce749496",
+      "bundle_blake3": "blake3:9796ce749496278b81096e63ca9065a37c90606866595782e02dba68b6be70bf",
+      "license": "Apache-2.0",
+      "license_sources": [
+        {
+          "path": "LICENSE",
+          "source_url": "https://raw.githubusercontent.com/roboflow/rf-detr/fb4ceea0d5750890e43964f5fc558c4caf9b6f38/LICENSE",
+          "source_revision": "fb4ceea0d5750890e43964f5fc558c4caf9b6f38",
+          "expected_bytes": 11345,
+          "sha256": "8cabf52c61130fc97a7e5da5e3685ccf44841c0c53d6f881189369b136603cca",
+          "blake3": "blake3:737a97f0d8ebd3087f347d5901000a135555139c7ce1a30ca5104197e9389c5c"
+        }
+      ],
+      "reproduction": {
+        "source_revision": "eae21cee0687a91bcf9fa071605c48d7705d2d91",
+        "toolchain": {
+          "python": "3.11.13",
+          "onnx": "1.22.0",
+          "protobuf": "6.31.1",
+          "numpy": "2.4.6",
+          "ml_dtypes": "0.5.4",
+          "typing_extensions": "4.16.0"
+        },
+        "source_file": {
+          "path": "onnx/model.onnx",
+          "url": "https://huggingface.co/onnx-community/rfdetr_nano-ONNX/resolve/eae21cee0687a91bcf9fa071605c48d7705d2d91/onnx/model.onnx",
+          "expected_bytes": 108074865,
+          "sha256": "9cbac6b11ce34a03034e4d5a24cfac5f18632fd6761d1311dd640232088d7fee",
+          "blake3": "blake3:9e8278e59676a7bb8224547f1cd0420efa13e7a2dbe6524d04b016a8bbb4e2e7"
+        },
+        "script": "scripts/reproduce-reference-rfdetr-model.py",
+        "wrapper_revision": "svp-wrapper-2",
+        "output_order": ["pred_boxes", "logits"],
+        "output_contract": {
+          "operation": "flatten_and_concatenate",
+          "dtype": "float32",
+          "components": [
+            {"name": "pred_boxes", "shape": [1, 300, 4]},
+            {"name": "logits", "shape": [1, 300, 91]}
+          ],
+          "combined_name": "detections",
+          "combined_element_count": 28500
+        }
+      },
+      "artifacts": [
+        {
+          "path": "model.onnx",
+          "source_revision": "eae21cee0687a91bcf9fa071605c48d7705d2d91+svp-wrapper-2",
+          "expected_bytes": 108075335,
+          "sha256": "c49d5952338db028f55ccc3a1c04f7f3a60dc1d5ffbd276232781c7e6cdba9f8",
+          "blake3": "blake3:03d607ab0038a57a48c7c39d3ef9f3bea49da9a5dc82549be7f116c6ee884ed1"
+        },
+        {
+          "path": "UPSTREAM-MODEL-CARD.md",
+          "source_url": "https://huggingface.co/onnx-community/rfdetr_nano-ONNX/resolve/eae21cee0687a91bcf9fa071605c48d7705d2d91/README.md",
+          "source_revision": "eae21cee0687a91bcf9fa071605c48d7705d2d91",
+          "expected_bytes": 772,
+          "sha256": "5def60c7a19ad0812e8de374a5b9de1c248011fae18d0b049871e879857ddbb8",
+          "blake3": "blake3:7f47c9389e37c4c037d5448c32dcec8163e21140549868f761c17ab5bce5b6a9"
+        }
+      ]
+    },
+    {
+      "model_id": "model_pp_ocrv6_medium_det",
+      "model_version": "8e0f56f-paddle2onnx-2.1.0-opset14",
+      "source_slug": "PaddlePaddle/PP-OCRv6_medium_det",
+      "source_revision": "8e0f56fb2ef86b461d99cfc7ac5c137738985f61",
+      "model_bundle_id": "model_pp_ocrv6_medium_det@8e0f56f-paddle2onnx-2.1.0-opset14+blake3_cb7fb2b0846d",
+      "bundle_blake3": "blake3:cb7fb2b0846d3f051719ac114254ceb39e6aa9b218b349d497d2dbd852a40786",
+      "license": "Apache-2.0",
+      "license_sources": [
+        {
+          "path": "LICENSE",
+          "source_url": "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/0345142187dd23375f3c9ceaf74b27c51250be4e/LICENSE",
+          "source_revision": "0345142187dd23375f3c9ceaf74b27c51250be4e",
+          "expected_bytes": 11376,
+          "sha256": "3840c5c0c61c294264d2dd77b8777be6ddd90121ef4e0e64abcd22edea581d6e",
+          "blake3": "blake3:b715b6b658f6bc2c3e0d7de1027781cd9a21fef20f8ddf7a2573e4654b9f141d"
+        }
+      ],
+      "reproduction": {
+        "source_revision": "8e0f56fb2ef86b461d99cfc7ac5c137738985f61",
+        "source_files": [
+          {
+            "path": "inference.json",
+            "url": "https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_det/resolve/8e0f56fb2ef86b461d99cfc7ac5c137738985f61/inference.json",
+            "expected_bytes": 312150,
+            "sha256": "0f1a7ec35da36173529c7a60238b7f7919e3831929c3f700ad90ad4896adecd5",
+            "blake3": "blake3:e341aab4eaa88ac4bffb93daf4ab89542cb0cbb1b4e8221f3b7eedd580da5308"
+          },
+          {
+            "path": "inference.pdiparams",
+            "url": "https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_det/resolve/8e0f56fb2ef86b461d99cfc7ac5c137738985f61/inference.pdiparams",
+            "expected_bytes": 61960476,
+            "sha256": "85218d2e3d98f5a21c58b4220627be923a97aee5db3cc71f39536ab31ac53960",
+            "blake3": "blake3:b6f74251cce911cc1ef6c9681dfb87e720d8a82c03e96413a2a1297b965f11b3"
+          }
+        ],
+        "command": "paddle2onnx --model_dir <source-dir> --model_filename inference.json --params_filename inference.pdiparams --save_file <output-dir>/det.onnx --opset_version 14"
+      },
+      "artifacts": [
+        {
+          "path": "det.onnx",
+          "source_revision": "8e0f56fb2ef86b461d99cfc7ac5c137738985f61+paddle2onnx-2.1.0-opset14-polygraphy",
+          "sha256": "363bff8850064024234760b29543d113354221aa336327e107f2530f263f5b09",
+          "expected_bytes": 62119542,
+          "blake3": "blake3:a17ce7d78cd56ba0ec9622c3023bd069abdc59e15aedfb7e39a3d22923d558b9"
+        }
+      ]
+    },
+    {
+      "model_id": "model_pp_ocrv6_medium_rec",
+      "model_version": "e5a92bc-paddle2onnx-2.1.0-opset14",
+      "source_slug": "PaddlePaddle/PP-OCRv6_medium_rec",
+      "source_revision": "e5a92bcbc5cc1b494628e458d267778f0704fd7c",
+      "model_bundle_id": "model_pp_ocrv6_medium_rec@e5a92bc-paddle2onnx-2.1.0-opset14+blake3_fa8d10eb5a25",
+      "bundle_blake3": "blake3:fa8d10eb5a25e4be478cb75546fea1836be5cbdd66d889423bd992a89ed8d375",
+      "license": "Apache-2.0",
+      "license_sources": [
+        {
+          "path": "LICENSE",
+          "source_url": "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/0345142187dd23375f3c9ceaf74b27c51250be4e/LICENSE",
+          "source_revision": "0345142187dd23375f3c9ceaf74b27c51250be4e",
+          "expected_bytes": 11376,
+          "sha256": "3840c5c0c61c294264d2dd77b8777be6ddd90121ef4e0e64abcd22edea581d6e",
+          "blake3": "blake3:b715b6b658f6bc2c3e0d7de1027781cd9a21fef20f8ddf7a2573e4654b9f141d"
+        }
+      ],
+      "reproduction": {
+        "source_revision": "e5a92bcbc5cc1b494628e458d267778f0704fd7c",
+        "source_files": [
+          {
+            "path": "inference.json",
+            "url": "https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_rec/resolve/e5a92bcbc5cc1b494628e458d267778f0704fd7c/inference.json",
+            "expected_bytes": 221814,
+            "sha256": "0b2e25e990bd072f1bf77d59d67d508bce6c4bd44af6624e0fb27d6da2cd00e8",
+            "blake3": "blake3:b375899fa37ec3e3bfde6787e2963ae2c0d9198e8a5cd568ac87c3a2f9753bca"
+          },
+          {
+            "path": "inference.pdiparams",
+            "url": "https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_rec/resolve/e5a92bcbc5cc1b494628e458d267778f0704fd7c/inference.pdiparams",
+            "expected_bytes": 76465087,
+            "sha256": "1b01c79a914587933f615569e75de54f2e638ebb5d3f3b3c1b38c24ede8c7319",
+            "blake3": "blake3:44f4bc925f7991a709282ee57c3a92fb0509dbdf972bccce7469cdaba083aab4"
+          }
+        ],
+        "command": "paddle2onnx --model_dir <source-dir> --model_filename inference.json --params_filename inference.pdiparams --save_file <output-dir>/rec.onnx --opset_version 14"
+      },
+      "artifacts": [
+        {
+          "path": "rec.onnx",
+          "source_revision": "e5a92bcbc5cc1b494628e458d267778f0704fd7c+paddle2onnx-2.1.0-opset14-polygraphy",
+          "sha256": "d586cb851b35391d1dda84ff6ff387752ba25ec1ad79a9ad7ea60b1e44765c1b",
+          "expected_bytes": 76555610,
+          "blake3": "blake3:0882a9c815210b229245e7030bbc994919326b62f086eb96b08eaffe8cbf1691"
+        },
+        {
+          "path": "inference.yml",
+          "source_url": "https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_rec/resolve/e5a92bcbc5cc1b494628e458d267778f0704fd7c/inference.yml",
+          "source_revision": "e5a92bcbc5cc1b494628e458d267778f0704fd7c",
+          "expected_bytes": 150580,
+          "sha256": "991b700facf5b50a7de193468207d5f4255b538dde0d312ae3b7c7a9b6873129",
+          "blake3": "blake3:b3d95381969b6e0115dcb9eb980955edd027bcf1bd817bbcb42667af05ffb53c"
+        }
+      ]
+    }
+  ]
+}
