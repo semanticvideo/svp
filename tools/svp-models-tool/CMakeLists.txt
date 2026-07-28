@@ -22,4 +22,14 @@ if(BUILD_TESTING)
            COMMAND svp-models-tool verify --manifest not-a-manifest.json)
   set_tests_properties(svp-models-tool-manifest-name PROPERTIES
     WILL_FAIL TRUE)
+
+  add_test(NAME svp-models-tool-hash-help
+           COMMAND svp-models-tool hash --help)
+  set_tests_properties(svp-models-tool-hash-help PROPERTIES
+    PASS_REGULAR_EXPRESSION "File to hash")
+
+  add_test(NAME svp-models-tool-digest-help
+           COMMAND svp-models-tool digest --help)
+  set_tests_properties(svp-models-tool-digest-help PROPERTIES
+    PASS_REGULAR_EXPRESSION "canonical BLAKE3 digest")
 endif()

@@ -1,5 +1,6 @@
 #include "svp/models/cache.hpp"
 #include "svp/models/error.hpp"
+#include "svp/models/hash.hpp"
 #include "svp/models/manifest.hpp"
 #include "svp/models/model_lock.hpp"
 #include "svp/models/reference_model_set.hpp"
@@ -75,6 +76,19 @@ int main(int argc, char** argv) {
 
   auto* path_command = app.add_subcommand("path", "Print the model cache path");
 
+  std::filesystem::path hash_file;
+  auto* hash_command =
+      app.add_subcommand("hash", "Print the BLAKE3 digest of one file");
+  hash_command->add_option("--file", hash_file, "File to hash")->required();
+
+  std::filesystem::path digest_bundle_dir;
+  auto* digest_command = app.add_subcommand(
+      "digest", "Print the canonical BLAKE3 digest of an extracted bundle");
+  digest_command
+      ->add_option("--bundle-dir", digest_bundle_dir,
+                   "Path to an extracted .svpmodel bundle directory")
+      ->required();
+
   std::filesystem::path manifest_path;
   std::filesystem::path bundle_dir;
   std::filesystem::path lock_path;
@@ -99,6 +113,18 @@ int main(int argc, char** argv) {
 
     if (*path_command) {
       std::cout << svp::models::model_cache_root().string() << '\n';
+      return 0;
+    }
+
+    if (*hash_command) {
+      std::cout << "blake3:" << svp::models::blake3_hex_for_file(hash_file) << '\n';
+      return 0;
+    }
+
+    if (*digest_command) {
+      std::cout << "blake3:"
+                << svp::models::blake3_hex_for_model_bundle(digest_bundle_dir)
+                << '\n';
       return 0;
     }
 
