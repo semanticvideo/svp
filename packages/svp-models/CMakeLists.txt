@@ -59,7 +59,10 @@ if(SVP_MODEL_ONNX_RUNTIME_AVAILABLE)
 endif()
 
 add_library(svp-models
+  src/bundle_digest.cpp
   src/cache.cpp
+  src/canonical_cbor.cpp
+  src/canonical_control_json.cpp
   src/error.cpp
   src/hash.cpp
   src/manifest.cpp

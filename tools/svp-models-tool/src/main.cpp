@@ -83,7 +83,7 @@ int main(int argc, char** argv) {
 
   auto* verify_command = app.add_subcommand("verify", "Verify model bundle metadata");
   verify_command->add_option("--manifest", manifest_path,
-                             "Path to model.svpmodel.json");
+                             "Path to model.svpmodel.json; verifies its complete containing bundle");
   verify_command->add_option("--bundle-dir", bundle_dir,
                              "Path to an extracted .svpmodel bundle directory");
   verify_command->add_option("--lock", lock_path, "Path to model-lock.json");
@@ -115,12 +115,14 @@ int main(int argc, char** argv) {
 
       svp::models::VerificationReport report;
       if (!manifest_path.empty()) {
-        const svp::models::ModelBundleManifest manifest =
-            svp::models::load_model_bundle_manifest(manifest_path);
+        if (manifest_path.filename() != "model.svpmodel.json") {
+          std::cerr << "ERROR: --manifest must name model.svpmodel.json\n";
+          return 2;
+        }
         const std::filesystem::path root =
             manifest_path.parent_path().empty() ? std::filesystem::current_path()
                                                 : manifest_path.parent_path();
-        report = svp::models::verify_manifest_files(manifest, root);
+        report = svp::models::verify_extracted_bundle(root);
       } else if (!bundle_dir.empty()) {
         report = svp::models::verify_extracted_bundle(bundle_dir);
       } else if (!lock_path.empty()) {
