@@ -17,6 +17,8 @@ inline constexpr std::string_view kCodeRasterExtentMismatch =
     "ERR_CORE_RASTER_EXTENT_MISMATCH";
 inline constexpr std::string_view kCodeMissingDepth = "ERR_CORE_MISSING_DEPTH";
 inline constexpr std::string_view kCodeMissingMasks = "ERR_CORE_MISSING_MASKS";
+inline constexpr std::string_view kCodeInvalidEntityRecord =
+    "ERR_CORE_INVALID_ENTITY_RECORD";
 inline constexpr std::string_view kCodeInvalidBlockHeader =
     "ERR_CORE_INVALID_BLOCK_HEADER";
 inline constexpr std::string_view kCodeInvalidBlockHash =

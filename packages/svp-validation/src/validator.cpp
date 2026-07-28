@@ -9,6 +9,7 @@
 #include "block_stream_validation.hpp"
 #include "color_record_validation.hpp"
 #include "diarization_validation.hpp"
+#include "entity_record_validation.hpp"
 #include "index_validation.hpp"
 #include "ocr_color_spec.hpp"
 #include "spec_assets.hpp"
@@ -270,6 +271,8 @@ ValidationReport validate_package(const std::filesystem::path& package_path,
   add_layout_findings(report, registry, layout_result.value());
   add_block_stream_findings(report, registry, probe.path, layout_result.value());
   add_diarization_findings(report, registry, probe.path, layout_result.value());
+  add_entity_record_findings(
+      report, registry, probe.path, layout_result.value());
 
   try {
     const auto registry_root = registry_root_for(options);
