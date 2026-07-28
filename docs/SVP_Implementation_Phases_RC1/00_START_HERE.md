@@ -57,9 +57,8 @@ The next work is completion and hardening. It is still organized through the sam
 4. Timeline/scene quality hardening beyond sampled-frame interval evidence.
 5. Transcript chunk embeddings and vision embeddings.
 6. Strict validator/spec enforcement, including relationship, diarization, entity, and model-bundle checks.
-7. Canonical model-bundle BLAKE3 verification.
-8. OCR spacing/evidence verification, scene/color, ASR confidence/alignment, and diarization quality hardening.
-9. Installable SVP agent skill and developer guide.
+7. OCR spacing/evidence verification, scene/color, ASR confidence/alignment, and diarization quality hardening.
+8. Installable SVP agent skill and developer guide.
 
 The phases are not all sequential. Some can run in parallel once dependencies and shared contract zones are clear.
 
