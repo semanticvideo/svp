@@ -10,12 +10,12 @@ struct VisualEntitySamplingOptions {
   // optical-flow displacement reasonable at the canonical analysis raster.
   std::int64_t sample_interval_us = 200000;
 
-  // Tracking operates in bounded windows so memory use does not grow with
-  // media duration. Five seconds contains 26 samples at the default cadence.
+  // Decoding operates in bounded windows. Five seconds contains 26 samples
+  // at the default cadence.
   std::int64_t window_duration_us = 5000000;
 
   // One second of shared evidence gives adjacent windows enough observations
-  // to reconcile identities without retaining an entire video in memory.
+  // to reconcile identities across decode windows.
   std::int64_t window_overlap_us = 1000000;
 };
 
@@ -25,9 +25,9 @@ struct VisualEntitySamplingWindow {
   std::vector<std::int64_t> timestamps_us;
 };
 
-// Produces complete, deterministic temporal coverage from zero through the
-// supplied duration. Each window is independently bounded and adjacent
-// windows overlap for identity handoff.
+// Produces deterministic cadence-aligned timestamps through the supplied
+// duration. Each decode window is independently bounded and adjacent windows
+// overlap for identity handoff.
 [[nodiscard]] std::vector<VisualEntitySamplingWindow>
 make_visual_entity_sampling_plan(
     std::int64_t duration_us,

@@ -12,9 +12,6 @@ namespace {
 
 struct OutputEntity {
   std::string id;
-  std::string type;
-  std::int64_t start_us = 0;
-  std::int64_t end_us = 0;
 };
 
 struct OutputRegion {
@@ -25,22 +22,11 @@ struct OutputRegion {
 };
 
 constexpr std::int64_t kTrackedCheckpointToleranceUs = 100000;
+constexpr std::int64_t kDefaultObservationCadenceUs = 200000;
 // Dynamic groups are motion-supported aggregates rather than continuously
 // measured object boxes. Permit one missed 5 Hz proposal while still
 // requiring nearby spatial evidence from the same tracked group.
 constexpr std::int64_t kDynamicGroupCheckpointToleranceUs = 300000;
-
-bool reference_accepts_entity(
-    const std::string& reference_kind,
-    const OutputEntity& entity) {
-  if (reference_kind == "dynamic_group") {
-    return entity.type == "dynamic_group";
-  }
-  if (reference_kind == "persistent_entity") {
-    return entity.type != "dynamic_group";
-  }
-  return true;
-}
 
 bool reference_accepts_region(
     const std::string& reference_kind,
@@ -72,14 +58,41 @@ double box_iou(const double left[4], const double right[4]) {
 double interval_coverage(
     std::int64_t expected_start,
     std::int64_t expected_end,
-    const OutputEntity& entity) {
-  const std::int64_t intersection =
-      std::max<std::int64_t>(0, std::min(expected_end, entity.end_us) -
-                                   std::max(expected_start, entity.start_us));
+    const std::string& entity_id,
+    const std::string& reference_kind,
+    const std::vector<OutputRegion>& regions,
+    std::int64_t observation_cadence_us) {
   const std::int64_t duration = expected_end - expected_start;
-  return duration > 0
-      ? static_cast<double>(intersection) / static_cast<double>(duration)
-      : 0.0;
+  if (duration <= 0 || entity_id.empty()) return 0.0;
+
+  const std::int64_t half_cadence = observation_cadence_us / 2;
+  std::vector<std::pair<std::int64_t, std::int64_t>> support;
+  for (const auto& region : regions) {
+    if (region.entity_id != entity_id ||
+        !reference_accepts_region(reference_kind, region)) {
+      continue;
+    }
+    const auto start = std::max(expected_start, region.pts_us - half_cadence);
+    const auto end = std::min(expected_end, region.pts_us + half_cadence);
+    if (end > start) support.emplace_back(start, end);
+  }
+  std::sort(support.begin(), support.end());
+  std::int64_t covered = 0;
+  std::int64_t merged_start = 0;
+  std::int64_t merged_end = 0;
+  bool has_interval = false;
+  for (const auto& interval : support) {
+    if (!has_interval || interval.first > merged_end) {
+      if (has_interval) covered += merged_end - merged_start;
+      merged_start = interval.first;
+      merged_end = interval.second;
+      has_interval = true;
+    } else {
+      merged_end = std::max(merged_end, interval.second);
+    }
+  }
+  if (has_interval) covered += merged_end - merged_start;
+  return static_cast<double>(covered) / static_cast<double>(duration);
 }
 
 nlohmann::json load_json(const std::filesystem::path& path) {
@@ -109,11 +122,7 @@ int main(int argc, char** argv) {
 
     std::vector<OutputEntity> output_entities;
     for (const auto& entity : diagnostic.at("entities")) {
-      output_entities.push_back({
-          entity.at("id").get<std::string>(),
-          entity.at("entity_type").get<std::string>(),
-          entity.at("first_seen_us").get<std::int64_t>(),
-          entity.at("last_seen_us").get<std::int64_t>()});
+      output_entities.push_back({entity.at("id").get<std::string>()});
     }
     std::vector<OutputRegion> output_regions;
     for (const auto& region : diagnostic.at("regions")) {
@@ -128,6 +137,10 @@ int main(int argc, char** argv) {
       }
       output_regions.push_back(std::move(output_region));
     }
+    const std::int64_t observation_cadence_us = diagnostic.value(
+        "parameters", nlohmann::json::object())
+        .value("visual_entity_sampling", nlohmann::json::object())
+        .value("sample_interval_us", kDefaultObservationCadenceUs);
 
     nlohmann::json reference_scores = nlohmann::json::array();
     double total_coverage = 0.0;
@@ -149,8 +162,9 @@ int main(int argc, char** argv) {
         double best_coverage = 0.0;
         std::string best_entity_id;
         for (const auto& entity : output_entities) {
-          if (!reference_accepts_entity(reference_kind, entity)) continue;
-          const double coverage = interval_coverage(start_us, end_us, entity);
+          const double coverage = interval_coverage(
+              start_us, end_us, entity.id, reference_kind, output_regions,
+              observation_cadence_us);
           if (coverage > best_coverage ||
               (coverage > 0.0 && coverage == best_coverage && !entity.id.empty() &&
                (best_entity_id.empty() || entity.id < best_entity_id))) {
@@ -240,7 +254,9 @@ int main(int argc, char** argv) {
                   return candidate.id == anchored_entity_id;
                 });
             if (entity != output_entities.end()) {
-              coverage = interval_coverage(start_us, end_us, *entity);
+              coverage = interval_coverage(
+                  start_us, end_us, entity->id, reference_kind,
+                  output_regions, observation_cadence_us);
             }
           }
           selected_ids.push_back(anchored_entity_id);

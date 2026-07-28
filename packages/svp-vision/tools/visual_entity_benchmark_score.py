@@ -127,6 +127,54 @@ def score(
                 break
             yield from regions_by_time[output_time]
 
+    # Match all references at a sampled timestamp together. A region may
+    # explain at most one human checkpoint in that sample.
+    checkpoint_matches: dict[tuple[str, str, int], tuple[float, dict[str, object]]] = {}
+    checkpoint_groups: dict[int, list[tuple[str, str, dict[str, object]]]] = (
+        defaultdict(list)
+    )
+    for reference in evaluated_references:
+        for checkpoint in reference["checkpoints"]:
+            checkpoint_groups[int(checkpoint["pts_us"])].append(
+                (reference["id"], reference["kind"], checkpoint)
+            )
+    for timestamp_us, expected in checkpoint_groups.items():
+        candidates = list(nearby_regions(timestamp_us))
+        edges = []
+        for reference_id, kind, checkpoint in expected:
+            for region_index, region in enumerate(candidates):
+                if not _candidate_accepts_kind(kind, region):
+                    continue
+                iou = box_iou(checkpoint["box_norm"], region["box_norm"])
+                edges.append((
+                    -iou,
+                    reference_id,
+                    str(checkpoint["source_track_id"]),
+                    str(region["entity_id"]),
+                    str(region["track_id"]),
+                    region_index,
+                    checkpoint,
+                    region,
+                ))
+        assigned_checkpoints: set[tuple[str, str, int]] = set()
+        assigned_regions: set[int] = set()
+        for edge in sorted(edges, key=lambda item: item[:6]):
+            iou = -edge[0]
+            reference_id = edge[1]
+            checkpoint = edge[6]
+            region_index = edge[5]
+            region = edge[7]
+            key = (
+                reference_id,
+                str(checkpoint["source_track_id"]),
+                int(checkpoint["pts_us"]),
+            )
+            if key in assigned_checkpoints or region_index in assigned_regions:
+                continue
+            assigned_checkpoints.add(key)
+            assigned_regions.add(region_index)
+            checkpoint_matches[key] = (iou, region)
+
     checkpoint_results: list[dict[str, object]] = []
     checkpoint_by_source_track: dict[str, list[dict[str, object]]] = defaultdict(list)
     expected_by_time: dict[int, list[dict[str, object]]] = defaultdict(list)
@@ -138,25 +186,13 @@ def score(
             reference_kind_by_track[track["source_track_id"]] = kind
         for checkpoint in reference["checkpoints"]:
             expected_by_time[int(checkpoint["pts_us"])].append(checkpoint)
-            best_iou = 0.0
-            best_region: dict[str, object] | None = None
-            for region in nearby_regions(int(checkpoint["pts_us"])):
-                if not _candidate_accepts_kind(kind, region):
-                    continue
-                iou = box_iou(checkpoint["box_norm"], region["box_norm"])
-                candidate_key = (
-                    -iou,
-                    str(region["entity_id"]),
-                    str(region["track_id"]),
-                )
-                best_key = (
-                    -best_iou,
-                    str(best_region["entity_id"]) if best_region else "",
-                    str(best_region["track_id"]) if best_region else "",
-                )
-                if best_region is None or candidate_key < best_key:
-                    best_iou = iou
-                    best_region = region
+            match = checkpoint_matches.get((
+                reference["id"],
+                str(checkpoint["source_track_id"]),
+                int(checkpoint["pts_us"]),
+            ))
+            best_iou = match[0] if match else 0.0
+            best_region = match[1] if match else None
             matched = best_region is not None and best_iou >= minimum_match_iou
             result = {
                 "north_star_id": reference["id"],

@@ -26,7 +26,7 @@ void check_maximum_gap(
   }
 }
 
-void test_short_media_has_complete_coverage() {
+void test_short_media_stays_on_the_requested_cadence() {
   const auto windows =
       svp::vision::make_visual_entity_sampling_plan(1750000);
   check(windows.size() == 1, "short media uses one window");
@@ -34,8 +34,12 @@ void test_short_media_has_complete_coverage() {
   check(windows.front().end_us == 1750000, "coverage reaches duration");
   check(windows.front().timestamps_us.front() == 0,
         "first timestamp is zero");
-  check(windows.front().timestamps_us.back() == 1750000,
-        "last timestamp is duration");
+  check(windows.front().timestamps_us.back() == 1600000,
+        "off-grid duration does not create a mislabeled sample");
+  for (const auto timestamp_us : windows.front().timestamps_us) {
+    check(timestamp_us % 200000 == 0,
+          "every requested timestamp stays on the configured cadence");
+  }
   check_maximum_gap(windows.front(), 200000);
 }
 
@@ -76,7 +80,7 @@ void test_invalid_policy_is_rejected() {
 }  // namespace
 
 int main() {
-  test_short_media_has_complete_coverage();
+  test_short_media_stays_on_the_requested_cadence();
   test_long_media_is_bounded_and_overlapping();
   test_invalid_policy_is_rejected();
   return failures == 0 ? 0 : 1;

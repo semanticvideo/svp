@@ -33,9 +33,6 @@ std::vector<std::int64_t> timestamps_for_window(
     if (end_us - timestamp_us < interval_us) break;
     timestamp_us += interval_us;
   }
-  if (timestamps.empty() || timestamps.back() != end_us) {
-    timestamps.push_back(end_us);
-  }
   return timestamps;
 }
 

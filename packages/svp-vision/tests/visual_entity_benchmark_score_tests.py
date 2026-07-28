@@ -100,11 +100,21 @@ class VisualEntityBenchmarkScoreTests(unittest.TestCase):
             [reference("controller", ["7"]), reference("phone", ["9"])],
             [
                 region(0, "entity_1", "track_1"),
-                region(0, "entity_1", "track_1", [0.6, 0.6, 0.9, 0.9]),
+                region(0, "entity_1", "track_1"),
             ],
         )
 
         self.assertEqual(1, result["summary"]["cross_identity_collision_count"])
+
+    def test_one_output_region_cannot_match_two_references(self):
+        result = self.score(
+            [reference("controller", ["7"]), reference("phone", ["9"])],
+            [region(0, "entity_1", "track_1")],
+        )
+
+        self.assertEqual(
+            0.5, result["summary"]["checkpoint_detection_recall"]
+        )
 
     def test_does_not_reward_a_track_break_when_identity_was_lost(self):
         result = self.score(

@@ -1,5 +1,6 @@
 #include "svp/vision/visual_entity_frame_decoder.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -74,6 +75,20 @@ DecodedCanonicalFrames decode_visual_entity_window(
   if (width <= 0 || height <= 0) {
     result.skipped_reason = "visual entity frame dimensions are not positive";
     return result;
+  }
+  if (timestamps_us.size() > 1) {
+    const auto interval_us = timestamps_us[1] - timestamps_us[0];
+    const bool uniform = interval_us > 0 &&
+        std::adjacent_find(
+            timestamps_us.begin() + 1, timestamps_us.end(),
+            [interval_us](const auto left, const auto right) {
+              return right - left != interval_us;
+            }) == timestamps_us.end();
+    if (!uniform) {
+      result.skipped_reason =
+          "visual entity window timestamps must use a uniform cadence";
+      return result;
+    }
   }
   if (ffmpeg_path.has_parent_path() && !std::filesystem::exists(ffmpeg_path)) {
     result.skipped_reason = "ffmpeg not found at: " + ffmpeg_path.string();
