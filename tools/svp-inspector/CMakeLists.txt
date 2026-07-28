@@ -2,8 +2,11 @@ find_package(CLI11 CONFIG REQUIRED)
 
 add_executable(svp-inspector
   src/main.cpp
+  src/dump_command.cpp
   src/embedded_input_controller.cpp
   src/embedded_transport_output.cpp
+  src/inspect_output.cpp
+  src/query_output.cpp
 )
 
 target_compile_features(svp-inspector PRIVATE cxx_std_20)
