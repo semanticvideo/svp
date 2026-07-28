@@ -31,6 +31,30 @@ std::string value_or_unknown(const std::string& value) {
   return value.empty() ? "unknown" : value;
 }
 
+std::string primary_media_id_for_inspection(
+    const svp::package::PackageSummary& summary) {
+  if (!summary.manifest.primary_media_id.empty()) {
+    return summary.manifest.primary_media_id;
+  }
+  if (summary.svpi.is_svpi) {
+    return summary.svpi.media_binding.media_id;
+  }
+  return {};
+}
+
+nlohmann::json package_summary_json_for_inspection(
+    const svp::package::PackageSummary& summary) {
+  auto result = embedded_transport_output::package_summary_json(summary);
+  if (summary.svpi.is_svpi) {
+    result["resolved_primary_media_id"] =
+        primary_media_id_for_inspection(summary);
+    result["svpi"]["primary_media_binding_id"] =
+        summary.svpi.primary_media_binding_id;
+    result["svpi"]["media_id"] = summary.svpi.media_binding.media_id;
+  }
+  return result;
+}
+
 std::string count_or_unknown(const svp::package::PackageJsonlCountSummary& count) {
   if (!count.present || !count.readable) {
     return "unknown";
@@ -123,8 +147,10 @@ void print_manifest(const svp::package::PackageSummary& summary) {
   std::cout << "  svp_version: " << value_or_unknown(summary.manifest.svp_version) << "\n";
   std::cout << "  package_id: " << value_or_unknown(summary.manifest.package_id) << "\n";
   std::cout << "  created_utc: " << value_or_unknown(summary.manifest.created_utc) << "\n";
-  std::cout << "  primary_media_id: "
-            << value_or_unknown(summary.manifest.primary_media_id) << "\n";
+  if (!summary.svpi.is_svpi) {
+    std::cout << "  primary_media_id: "
+              << value_or_unknown(summary.manifest.primary_media_id) << "\n";
+  }
   std::cout << "  timebase: " << value_or_unknown(summary.manifest.timebase_unit);
   if (!summary.manifest.timebase_origin.empty()) {
     std::cout << " from " << summary.manifest.timebase_origin;
@@ -263,6 +289,8 @@ void print_svpi_summary(const svp::package::PackageSummary& summary) {
             << value_or_unknown(summary.svpi.media_binding_ref) << "\n";
   std::cout << "  primary_media_binding_id: "
             << value_or_unknown(summary.svpi.primary_media_binding_id) << "\n";
+  std::cout << "  resolved_primary_media_id: "
+            << value_or_unknown(primary_media_id_for_inspection(summary)) << "\n";
   std::cout << "  embedded_primary_media_absent: "
             << yes_no(!summary.svpi.has_media_original) << "\n";
 
@@ -1118,7 +1146,7 @@ int main(int argc, char** argv) {
       if (inspect_json) {
         std::cout << nlohmann::json{
             {"embedding", embedded_transport_output::embedding_json(embedding)},
-            {"package", embedded_transport_output::package_summary_json(summary)},
+            {"package", package_summary_json_for_inspection(summary)},
             {"semantic", embedded_transport_output::semantic_summary_json(package_path)},
         }.dump(2) << "\n";
       } else {
@@ -1137,7 +1165,7 @@ int main(int argc, char** argv) {
     const auto summary = svp::package::read_package_summary(package_path);
     if (inspect_json) {
       std::cout << nlohmann::json{
-          {"package", embedded_transport_output::package_summary_json(summary)},
+          {"package", package_summary_json_for_inspection(summary)},
           {"semantic", embedded_transport_output::semantic_summary_json(package_path)},
       }.dump(2)
                 << "\n";
