@@ -1,8 +1,9 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from scripts.model_installer.workflow import atomic_publish
+from scripts.model_installer.workflow import atomic_publish, verify_exact_cache
 
 
 class AtomicPublishTests(unittest.TestCase):
@@ -52,6 +53,68 @@ class AtomicPublishTests(unittest.TestCase):
 
             self.assertEqual(existing.read_text(encoding="utf-8"), "keep")
             self.assertTrue(staging.is_dir())
+
+
+class ExactCacheVerificationTests(unittest.TestCase):
+    def test_verifies_authoritative_lock_and_reference_set(self):
+        with tempfile.TemporaryDirectory() as root:
+            cache = Path(root) / "cache"
+            cache.mkdir()
+            reference = Path(root) / "reference.json"
+            reference.write_text(
+                '{"models":[{"model_id":"model_expected"}]}',
+                encoding="utf-8")
+            lock = cache / "model-lock.json"
+            lock.write_text(
+                '{"models":[{"model_id":"model_expected"}]}',
+                encoding="utf-8")
+
+            with patch("scripts.model_installer.workflow.run_tool") as run_tool:
+                verify_exact_cache(Path("models-tool"), reference, cache)
+
+            self.assertEqual(run_tool.call_count, 2)
+            run_tool.assert_any_call(
+                Path("models-tool"), "verify", "--lock", lock,
+                "--cache-dir", cache)
+            run_tool.assert_any_call(
+                Path("models-tool"), "verify", "--model-set", reference,
+                "--cache-dir", cache)
+
+    def test_requires_lock_and_reference_to_name_the_same_complete_set(self):
+        with tempfile.TemporaryDirectory() as root:
+            cache = Path(root) / "cache"
+            cache.mkdir()
+            reference = Path(root) / "reference.json"
+            reference.write_text(
+                '{"models":[{"model_id":"model_expected"}]}',
+                encoding="utf-8")
+            (cache / "model-lock.json").write_text(
+                '{"models":[{"model_id":"model_expected"},'
+                '{"model_id":"model_extra"}]}', encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "exact reference model set"):
+                verify_exact_cache(Path("unused"), reference, cache)
+
+    def test_requires_authoritative_root_lock(self):
+        with tempfile.TemporaryDirectory() as root:
+            cache = Path(root) / "cache"
+            cache.mkdir()
+            reference = Path(root) / "reference.json"
+            reference.write_text('{"models":[]}', encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "missing authoritative"):
+                verify_exact_cache(Path("unused"), reference, cache)
+
+    def test_rejects_corrupt_authoritative_root_lock(self):
+        with tempfile.TemporaryDirectory() as root:
+            cache = Path(root) / "cache"
+            cache.mkdir()
+            reference = Path(root) / "reference.json"
+            reference.write_text('{"models":[]}', encoding="utf-8")
+            (cache / "model-lock.json").write_text("not JSON", encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "could not parse"):
+                verify_exact_cache(Path("unused"), reference, cache)
 
 
 if __name__ == "__main__":

@@ -140,11 +140,18 @@ def run_downloads(downloads, parallel, progress, transport=None, filesystem=None
                 cancelled.set()
                 return
 
-    threads = [threading.Thread(target=worker, daemon=True) for _ in range(parallel)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
+    threads = [threading.Thread(target=worker) for _ in range(parallel)]
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    except KeyboardInterrupt:
+        cancelled.set()
+        for thread in threads:
+            if thread.ident is not None:
+                thread.join()
+        raise
     if first_error:
         raise first_error[0]
 

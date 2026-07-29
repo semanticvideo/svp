@@ -85,15 +85,28 @@ def run_tool(tool, *arguments):
         raise RuntimeError(result.stdout.strip())
 
 
-def verify_existing(tool, reference_set, cache_dir):
-    if not cache_dir.is_dir():
-        return False
-    result = subprocess.run(
-        [str(tool), "verify", "--model-set", str(reference_set),
-         "--cache-dir", str(cache_dir)],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
-    return result.returncode == 0
+def verify_exact_cache(tool, reference_set_path, cache_dir):
+    lock_path = cache_dir / "model-lock.json"
+    if not lock_path.is_file():
+        raise RuntimeError(f"missing authoritative model lock: {lock_path}")
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        reference_set = json.loads(reference_set_path.read_text(encoding="utf-8"))
+        locked_ids = [model["model_id"] for model in lock["models"]]
+        reference_ids = [model["model_id"] for model in reference_set["models"]]
+    except (KeyError, TypeError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"could not parse authoritative model lock: {error}") from error
+    if len(locked_ids) != len(set(locked_ids)):
+        raise RuntimeError("authoritative model lock contains duplicate model IDs")
+    if len(reference_ids) != len(set(reference_ids)):
+        raise RuntimeError("reference model set contains duplicate model IDs")
+    if set(locked_ids) != set(reference_ids):
+        raise RuntimeError(
+            "authoritative model lock does not contain the exact reference model set"
+        )
+    run_tool(tool, "verify", "--lock", lock_path, "--cache-dir", cache_dir)
+    run_tool(tool, "verify", "--model-set", reference_set_path,
+             "--cache-dir", cache_dir)
 
 
 def atomic_publish(staging, destination, verify_published):
@@ -112,15 +125,11 @@ def run(args, progress):
     if len(catalog.get("models", [])) != 8:
         raise RuntimeError("catalog must contain the exact eight-model set")
     if args.cache_dir.exists():
-        if verify_existing(args.models_tool, args.reference_set, args.cache_dir):
-            progress.emit("stage_completed", "models", "Models",
-                          current=8, total=8, unit="models",
-                          message=f"already verified at {args.cache_dir}")
-            return
-        raise RuntimeError(
-            "model cache destination exists but is not the exact reference set; "
-            "choose another --cache-dir or move the existing folder"
-        )
+        verify_exact_cache(args.models_tool, args.reference_set, args.cache_dir)
+        progress.emit("stage_completed", "models", "Models",
+                      current=8, total=8, unit="models",
+                      message=f"already verified at {args.cache_dir}")
+        return
 
     staging = args.cache_dir.with_name(
         args.cache_dir.name + f".install-{os.getpid()}"
@@ -201,16 +210,11 @@ def run(args, progress):
             "--catalog", args.catalog,
             "--bundle-inputs", args.bundle_inputs,
         ])
-        run_tool(args.models_tool, "verify", "--lock",
-                 staging / "model-lock.json", "--cache-dir", staging)
-        run_tool(args.models_tool, "verify", "--model-set", args.reference_set,
-                 "--cache-dir", staging)
+        verify_exact_cache(args.models_tool, args.reference_set, staging)
         atomic_publish(
             staging, args.cache_dir,
-            lambda published: run_tool(
-                args.models_tool, "verify", "--model-set", args.reference_set,
-                "--cache-dir", published,
-            ),
+            lambda published: verify_exact_cache(
+                args.models_tool, args.reference_set, published),
         )
         progress.emit("stage_completed", "publish", "Model Cache",
                       message=str(args.cache_dir))

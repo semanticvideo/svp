@@ -1,8 +1,12 @@
 #include "install_command.hpp"
 
+#include "executable_path.hpp"
 #include "install_process.hpp"
 #include "install_resources.hpp"
 
+#include "svp/models/model_lock.hpp"
+#include "svp/models/reference_model_set.hpp"
+#include "svp/models/verification.hpp"
 #include "svp/progress/event.hpp"
 
 #include <nlohmann/json.hpp>
@@ -92,8 +96,17 @@ svp::progress::Event parse_event(const std::string& line) {
 
 void require_success(const ProcessResult& result, std::string_view action) {
   if (result.exit_code == 0) return;
-  if (result.exit_code == 130) throw std::runtime_error("installation cancelled");
   throw std::runtime_error(std::string(action) + " failed: " + trimmed(result.output));
+}
+
+std::string verification_errors(const svp::models::VerificationReport& report) {
+  std::string result;
+  for (const auto& issue : report.issues) {
+    if (issue.severity != svp::models::VerificationSeverity::error) continue;
+    if (!result.empty()) result += "; ";
+    result += issue.message;
+  }
+  return result;
 }
 
 }  // namespace
@@ -105,14 +118,42 @@ int install_reference_models(const std::filesystem::path& executable,
                              std::ostream& progress_stream,
                              bool is_tty,
                              int terminal_fd) {
-  require_platform();
   if (parallel_downloads < 1 || parallel_downloads > 2) {
     throw std::invalid_argument("--parallel-downloads must be 1 or 2");
   }
 
   auto sink = svp::progress::make_sink(
       progress_mode, progress_stream, is_tty, terminal_fd);
+  const auto canonical_executable = resolve_current_executable(executable);
   TemporaryDirectory temporary;
+  const auto resources = write_install_resources(temporary.path() / "resources");
+  if (std::filesystem::exists(cache_dir)) {
+    const auto lock_path = cache_dir / "model-lock.json";
+    if (!std::filesystem::is_regular_file(lock_path)) {
+      throw std::runtime_error("existing model cache is missing authoritative "
+                               "model-lock.json: " + lock_path.string());
+    }
+    const auto reference_set =
+        svp::models::load_reference_model_set(resources.reference_set);
+    const auto report = svp::models::verify_locked_reference_set_against_cache(
+        svp::models::load_model_lock(lock_path),
+        reference_set,
+        cache_dir);
+    if (!report.ok()) {
+      throw std::runtime_error("existing model cache is not the exact reference set: " +
+                               verification_errors(report));
+    }
+    sink->emit({.kind = svp::progress::EventKind::completed,
+                .stage_id = "models",
+                .stage_label = "Models",
+                .message = "already verified at " + cache_dir.string(),
+                .current = reference_set.models.size(),
+                .total = reference_set.models.size(),
+                .unit = "models"});
+    return 0;
+  }
+
+  require_platform();
   const auto archive = temporary.path() / "python.tar.gz";
   sink->emit({.kind = svp::progress::EventKind::started,
               .stage_id = "bootstrap_download",
@@ -120,11 +161,13 @@ int install_reference_models(const std::filesystem::path& executable,
   const auto download = run_process({
       "/usr/bin/curl", "--silent", "--show-error", "--location", "--fail",
       "--output", archive.string(), std::string(kPythonUrl)});
+  if (download.exit_code == 130) return 130;
   require_success(download, "installer runtime download");
   if (std::filesystem::file_size(archive) != kPythonBytes) {
     throw std::runtime_error("installer runtime byte count did not match its lock");
   }
   const auto hash = run_process({"/usr/bin/shasum", "-a", "256", archive.string()});
+  if (hash.exit_code == 130) return 130;
   require_success(hash, "installer runtime verification");
   if (!trimmed(hash.output).starts_with(kPythonSha256)) {
     throw std::runtime_error("installer runtime SHA-256 did not match its lock");
@@ -137,13 +180,9 @@ int install_reference_models(const std::filesystem::path& executable,
   std::filesystem::create_directories(runtime_root);
   const auto extract = run_process({
       "/usr/bin/tar", "-xzf", archive.string(), "-C", runtime_root.string()});
+  if (extract.exit_code == 130) return 130;
   require_success(extract, "installer runtime extraction");
-  const auto resources = write_install_resources(temporary.path() / "resources");
   const auto python = runtime_root / "python" / "bin" / "python3";
-
-  std::error_code canonical_error;
-  const auto canonical_executable = std::filesystem::canonical(executable, canonical_error);
-  if (canonical_error) throw std::runtime_error("could not resolve svp-models-tool path");
   const auto result = run_process({
       python.string(), resources.workflow_script.string(),
       "--catalog", resources.catalog.string(),

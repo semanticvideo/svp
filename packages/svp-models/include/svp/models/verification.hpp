@@ -43,4 +43,9 @@ struct VerificationReport {
     const ReferenceModelSet& model_set,
     const std::filesystem::path& cache_root);
 
+[[nodiscard]] VerificationReport verify_locked_reference_set_against_cache(
+    const ModelLock& lock,
+    const ReferenceModelSet& model_set,
+    const std::filesystem::path& cache_root);
+
 }  // namespace svp::models

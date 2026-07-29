@@ -1,4 +1,5 @@
 import io
+import _thread
 import threading
 import time
 import unittest
@@ -65,6 +66,19 @@ class FakeTransport:
                 self.active -= 1
 
 
+class InterruptingTransport:
+    def __init__(self):
+        self.cancelled_before_return = False
+
+    def chunks(self, request, cancelled):
+        _thread.interrupt_main()
+        while not cancelled.wait(0.01):
+            pass
+        self.cancelled_before_return = True
+        return
+        yield
+
+
 def item(model_id, url, payload):
     import hashlib
     return Download(
@@ -126,6 +140,20 @@ class DownloadTests(unittest.TestCase):
     def test_parallel_range_is_closed(self):
         with self.assertRaisesRegex(ValueError, "must be 1 or 2"):
             run_downloads([], 3, FakeProgress())
+
+    def test_keyboard_interrupt_cancels_and_joins_workers_before_return(self):
+        payload = b"payload"
+        downloads = [item("model_0", "u0", payload),
+                     item("model_1", "u1", payload)]
+        transport = InterruptingTransport()
+        filesystem = FakeFilesystem()
+
+        with self.assertRaises(KeyboardInterrupt):
+            run_downloads(downloads, 1, FakeProgress(), transport, filesystem)
+
+        self.assertTrue(transport.cancelled_before_return)
+        self.assertFalse(filesystem.temporary)
+        self.assertFalse(filesystem.published)
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ configure_file(
 
 add_executable(svp-models-tool
   src/main.cpp
+  src/executable_path.cpp
   src/install_command.cpp
   src/install_process.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/generated/install_resources.cpp
@@ -70,6 +71,28 @@ if(BUILD_TESTING)
   add_test(NAME svp-models-tool-path-default COMMAND svp-models-tool path)
   set_tests_properties(svp-models-tool-path-default PROPERTIES
     PASS_REGULAR_EXPRESSION "Library/Application Support/SVP/Models/v1")
+
+  add_executable(svp-models-executable-path-tests
+    tests/executable_path_tests.cpp
+    src/executable_path.cpp
+  )
+  target_compile_features(svp-models-executable-path-tests PRIVATE cxx_std_20)
+  target_include_directories(svp-models-executable-path-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  add_test(NAME svp-models-executable-path-tests
+           COMMAND svp-models-executable-path-tests)
+
+  add_executable(svp-models-install-process-tests
+    tests/install_process_tests.cpp
+    src/install_process.cpp
+  )
+  target_compile_features(svp-models-install-process-tests PRIVATE cxx_std_20)
+  target_include_directories(svp-models-install-process-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  add_test(NAME svp-models-install-process-tests
+           COMMAND svp-models-install-process-tests)
 
   if(Python3_Interpreter_FOUND)
     add_test(
