@@ -1,9 +1,9 @@
 #include "install_command.hpp"
 
-#include "executable_path.hpp"
 #include "install_process.hpp"
 #include "install_resources.hpp"
 
+#include "svp/core/executable_path.hpp"
 #include "svp/models/model_lock.hpp"
 #include "svp/models/reference_model_set.hpp"
 #include "svp/models/verification.hpp"
@@ -124,7 +124,8 @@ int install_reference_models(const std::filesystem::path& executable,
 
   auto sink = svp::progress::make_sink(
       progress_mode, progress_stream, is_tty, terminal_fd);
-  const auto canonical_executable = resolve_current_executable(executable);
+  const auto canonical_executable =
+      svp::core::resolve_current_executable(executable);
   TemporaryDirectory temporary;
   const auto resources = write_install_resources(temporary.path() / "resources");
   if (std::filesystem::exists(cache_dir)) {

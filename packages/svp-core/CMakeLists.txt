@@ -1,4 +1,5 @@
 add_library(svp-core
+  src/executable_path.cpp
   src/hash_string.cpp
   src/id.cpp
   src/memory_diagnostics.cpp
