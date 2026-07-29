@@ -12,6 +12,7 @@ add_library(svp-builder-lib
   src/foundation_color_stage.cpp
   src/foundation_ocr_stage.cpp
   src/microphone_asr_stage.cpp
+  src/model_cache_preflight.cpp
   src/package_skeleton_stage.cpp
   src/progress_renderer.cpp
   src/vision_plan_stage.cpp
@@ -106,6 +107,10 @@ if(BUILD_TESTING)
     tests/build_pipeline_tests.cpp
   )
 
+  add_executable(svp-builder-model-cache-preflight-tests
+    tests/model_cache_preflight_tests.cpp
+  )
+
   add_executable(svp-builder-progress-renderer-tests
     tests/progress_renderer_tests.cpp
   )
@@ -133,6 +138,8 @@ if(BUILD_TESTING)
   )
   target_compile_features(svp-builder-pipeline-tests PRIVATE cxx_std_20)
   target_compile_options(svp-builder-pipeline-tests PRIVATE -UNDEBUG)
+  target_compile_features(svp-builder-model-cache-preflight-tests PRIVATE cxx_std_20)
+  target_compile_options(svp-builder-model-cache-preflight-tests PRIVATE -UNDEBUG)
   target_compile_features(svp-builder-progress-renderer-tests PRIVATE cxx_std_20)
   target_compile_options(svp-builder-progress-renderer-tests PRIVATE -UNDEBUG)
   target_compile_features(svp-builder-cli-elapsed-tests PRIVATE cxx_std_20)
@@ -152,6 +159,13 @@ if(BUILD_TESTING)
   target_link_libraries(svp-builder-pipeline-tests
     PRIVATE
       svp::builder
+      svp::models
+  )
+
+  target_link_libraries(svp-builder-model-cache-preflight-tests
+    PRIVATE
+      svp::builder
+      svp::models
   )
 
   target_link_libraries(svp-builder-progress-renderer-tests
@@ -192,6 +206,20 @@ if(BUILD_TESTING)
            COMMAND svp-builder-reference-model-ids-tests
                    ${CMAKE_SOURCE_DIR}/spec/registries/reference-model-set.json)
   add_test(NAME svp-builder-pipeline-tests COMMAND svp-builder-pipeline-tests)
+  add_test(NAME svp-builder-model-cache-preflight-tests
+           COMMAND svp-builder-model-cache-preflight-tests)
+  add_test(NAME svp-builder-help-without-model-cache COMMAND svp-builder --help)
+  add_test(NAME svp-builder-version-without-model-cache COMMAND svp-builder --version)
+  add_test(NAME svp-builder-probe-help-without-model-cache
+           COMMAND svp-builder probe --help)
+  set_tests_properties(
+    svp-builder-help-without-model-cache
+    svp-builder-version-without-model-cache
+    svp-builder-probe-help-without-model-cache
+    PROPERTIES
+      ENVIRONMENT
+        "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache"
+  )
   add_test(NAME svp-builder-progress-renderer-tests COMMAND svp-builder-progress-renderer-tests)
   add_test(NAME svp-builder-cli-elapsed-tests COMMAND svp-builder-cli-elapsed-tests)
   add_test(NAME svp-transport-output-policy-tests

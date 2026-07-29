@@ -1,5 +1,6 @@
 #include "svp/builder/build_pipeline.hpp"
 #include "svp/builder/build_progress.hpp"
+#include "svp/builder/model_cache_preflight.hpp"
 
 #include "build_pipeline_internal.hpp"
 #include "staging_cleanup.hpp"
@@ -81,6 +82,10 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     const std::string stop_after_name(build_stage_name(effective_options.stop_after));
     const BuildStageExecutionPlan stage_plan =
         execution_plan_for_stage(effective_options.stop_after);
+
+    if (schedules_model_backed_work(stage_plan)) {
+      verify_authoritative_model_cache(effective_options.model_cache_dir);
+    }
 
     sink->emit(make_stage_started(ProgressStageId::media_probe));
     const svp::media::MediaIngestPlan plan =
