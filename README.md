@@ -184,7 +184,8 @@ the generated package is inspectable and the validator passes.
 
 The core C++ project expects:
 
-- CMake and a C++20-capable compiler.
+- Git, CMake 3.24 or newer, and a C++20-capable compiler.
+- vcpkg bootstrapped from its upstream repository.
 - FFmpeg and ffprobe for media probing/extraction.
 - whisper.cpp for local ASR with word-level timestamps.
 - ONNX Runtime for OCR, depth, and embedding model paths.
@@ -205,32 +206,56 @@ library directly rather than shelling out to Python.
 
 ## Build
 
-Configure and build:
+The supported clean-clone path uses vcpkg manifest mode and the checked-in
+`CMakePresets.json`. Start with Xcode Command Line Tools and CMake 3.24 or newer
+installed, then clone and bootstrap vcpkg:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --parallel
+git clone https://github.com/microsoft/vcpkg.git "$HOME/.local/share/vcpkg"
+"$HOME/.local/share/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+export VCPKG_ROOT="$HOME/.local/share/vcpkg"
 ```
 
-Build focused tools:
+`vcpkg.json` is the dependency source of truth. Its `builtin-baseline` pins the
+port versions used by manifest mode, so no dependency versions need to be
+selected manually.
+
+From a clean SVP clone, configure and build Debug:
 
 ```bash
-cmake --build build --target svp-builder
-cmake --build build --target svp-validator
-cmake --build build --target svp-inspector
+git clone https://github.com/semanticvideo/svp.git
+cd svp
+cmake --preset macos-arm64-debug
+cmake --build --preset macos-arm64-debug --parallel
 ```
 
-Run tests:
+The first configure installs the manifest dependencies under that preset's
+build directory. It does not depend on a previously configured SVP build tree.
+
+Run the complete test suite and required spec-file check:
 
 ```bash
-ctest --test-dir build --output-on-failure
-```
-
-Verify required spec files:
-
-```bash
+ctest --preset macos-arm64-debug
 scripts/verify-spec-files.sh
 ```
+
+Configure and build Release independently:
+
+```bash
+cmake --preset macos-arm64-release
+cmake --build --preset macos-arm64-release --parallel
+```
+
+The preset names and their separate build directories can be inspected with:
+
+```bash
+cmake --list-presets
+```
+
+If `VCPKG_ROOT` is not exported or does not point to a bootstrapped vcpkg
+checkout, configuration stops because the preset's toolchain file cannot be
+loaded. Re-export the variable instead of substituting a machine-specific
+absolute path.
 
 ## Install the CLI tools
 
@@ -238,10 +263,9 @@ From the repository root, configure a Release build and install the four public
 CLI tools into the current user's local application prefix:
 
 ```bash
-cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX="$HOME/.local"
-cmake --build build-release --parallel
-cmake --install build-release
+cmake --preset macos-arm64-release -DCMAKE_INSTALL_PREFIX="$HOME/.local"
+cmake --build --preset macos-arm64-release --parallel
+cmake --install build/macos-arm64-release
 ```
 
 This installs:
@@ -277,7 +301,7 @@ To use a different installation prefix, override it during installation and
 add that prefix's `bin` directory to `PATH`:
 
 ```bash
-cmake --install build-release --prefix /path/to/svp-install
+cmake --install build/macos-arm64-release --prefix /path/to/svp-install
 export PATH="/path/to/svp-install/bin:$PATH"
 ```
 
@@ -286,14 +310,14 @@ to the repository checkout and use the same build directory that performed the
 most recent installation:
 
 ```bash
-cmake --build build-release --target uninstall
+cmake --build build/macos-arm64-release --target uninstall
 ```
 
 The uninstall target uses that build directory's install manifest. It removes
 the installed SVP tools and runtime resources but does not remove downloaded
 models or other user data. This is a CMake installation path, not package-manager
-integration. Complete clean-clone and vcpkg bootstrap documentation is tracked
-separately in issue #121.
+integration. The preceding build section is the completed clean-clone and vcpkg
+bootstrap workflow from issue #121.
 
 ## Install the reference models
 
