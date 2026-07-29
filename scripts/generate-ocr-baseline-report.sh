@@ -5,36 +5,54 @@ set -euo pipefail
 # We use a repo-local staging directory because macOS Sandbox can prevent Tesseract
 # from reading temporary images located in absolute paths like /tmp/staging.
 
-# Configuration via env vars or defaults
+# Configuration via environment variables. Local media and model inputs are
+# required so the script never assumes another developer's checkout layout.
 BUILD_DIR="${SVP_BUILD_DIR:-build}"
-MODEL_CACHE="${SVP_MODEL_CACHE:-/Users/domesposito/Projects/svp-model-cache}"
-TESSERACT_BIN="${SVP_TESSERACT_BIN:-/opt/homebrew/bin/tesseract}"
+MODEL_CACHE="${SVP_MODEL_CACHE:-}"
+TESSERACT_BIN="${SVP_TESSERACT_BIN:-tesseract}"
 FFMPEG_BIN="${SVP_FFMPEG_BIN:-ffmpeg}"
-VIDEO_PATH="${SVP_VIDEO_PATH:-/Users/domesposito/Projects/samples/test-30.mp4}"
+VIDEO_PATH="${SVP_VIDEO_PATH:-}"
 REPORT_FILE="${SVP_REPORT_FILE:-docs/ocr_baseline_report.md}"
 
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  SVP_MODEL_CACHE=/path/to/model-cache \
+  SVP_VIDEO_PATH=/path/to/video \
+  scripts/generate-ocr-baseline-report.sh
+
+Optional: SVP_BUILD_DIR, SVP_TESSERACT_BIN, SVP_FFMPEG_BIN, SVP_REPORT_FILE
+EOF
+}
+
 # Validate dependencies
+if [[ -z "$MODEL_CACHE" || -z "$VIDEO_PATH" ]]; then
+  echo "Error: SVP_MODEL_CACHE and SVP_VIDEO_PATH are required." >&2
+  usage
+  exit 2
+fi
+
 if [[ ! -d "$MODEL_CACHE" ]]; then
-  echo "Error: Model cache not found at $MODEL_CACHE"
-  echo "Set SVP_MODEL_CACHE environment variable."
+  echo "Error: SVP_MODEL_CACHE is not a directory: $MODEL_CACHE" >&2
+  usage
   exit 1
 fi
 
 if ! command -v "$TESSERACT_BIN" >/dev/null 2>&1; then
-  echo "Error: Tesseract not found at $TESSERACT_BIN"
-  echo "Set SVP_TESSERACT_BIN environment variable."
+  echo "Error: Tesseract is not executable: $TESSERACT_BIN" >&2
+  echo "Set SVP_TESSERACT_BIN or add tesseract to PATH." >&2
   exit 1
 fi
 
 if ! command -v "$FFMPEG_BIN" >/dev/null 2>&1; then
-  echo "Error: ffmpeg not found ($FFMPEG_BIN)"
-  echo "Set SVP_FFMPEG_BIN environment variable."
+  echo "Error: ffmpeg is not executable: $FFMPEG_BIN" >&2
+  echo "Set SVP_FFMPEG_BIN or add ffmpeg to PATH." >&2
   exit 1
 fi
 
 if [[ ! -f "$VIDEO_PATH" ]]; then
-  echo "Error: Video not found at $VIDEO_PATH"
-  echo "Set SVP_VIDEO_PATH environment variable."
+  echo "Error: SVP_VIDEO_PATH is not a file: $VIDEO_PATH" >&2
+  usage
   exit 1
 fi
 

@@ -10,7 +10,8 @@ Ground truth is used ONLY for scoring, never for OCR or crop generation.
 Usage:
     python3 scripts/ppocr-spike-harness.py \
         --samples-dir /path/to/samples \
-        --output-dir /tmp/ppocr-spike/results
+        --det-model /path/to/PP-OCRv6_medium_det \
+        --rec-model /path/to/PP-OCRv6_medium_rec
 
 Requirements:
     pip3 install paddleocr paddle2onnx onnxruntime opencv-python-headless pyyaml
@@ -26,6 +27,9 @@ import sys
 import time
 import argparse
 import hashlib
+import platform
+import shutil
+import tempfile
 from pathlib import Path
 
 # Ground truth for scoring only
@@ -41,7 +45,7 @@ def shasum_file(path):
             h.update(chunk)
     return h.hexdigest()
 
-def extract_frames(video_path, timestamps, out_dir, scale=None):
+def extract_frames(video_path, timestamps, out_dir, ffmpeg_bin, scale=None):
     """Extract frames at given timestamps using ffmpeg."""
     os.makedirs(out_dir, exist_ok=True)
     frames = []
@@ -50,7 +54,7 @@ def extract_frames(video_path, timestamps, out_dir, scale=None):
         out_path = os.path.join(out_dir, name)
         vf = "scale={}".format(scale) if scale else "null"
         cmd = [
-            "ffmpeg", "-v", "error",
+            ffmpeg_bin, "-v", "error",
             "-ss", str(ts),
             "-i", video_path,
             "-vf", vf,
@@ -257,15 +261,39 @@ def score_against_truth(results, ground_truth_strings):
 
 def main():
     parser = argparse.ArgumentParser(description="SVP PP-OCR Spike Harness")
-    parser.add_argument("--samples-dir", default="/Users/domesposito/Projects/samples")
-    parser.add_argument("--output-dir", default="/tmp/ppocr-spike/results")
-    parser.add_argument("--det-model", default="/Users/domesposito/.paddlex/official_models/PP-OCRv6_medium_det")
-    parser.add_argument("--rec-model", default="/Users/domesposito/.paddlex/official_models/PP-OCRv6_medium_rec")
+    parser.add_argument("--samples-dir", required=True)
+    parser.add_argument(
+        "--output-dir",
+        default=os.path.join(tempfile.gettempdir(), "svp-ppocr-spike", "results"),
+    )
+    parser.add_argument("--det-model")
+    parser.add_argument("--rec-model")
     parser.add_argument("--tesseract", default="tesseract")
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--skip-ppocr", action="store_true")
     parser.add_argument("--skip-tesseract", action="store_true")
     args = parser.parse_args()
+
+    if not os.path.isdir(args.samples_dir):
+        parser.error("--samples-dir must identify an existing directory")
+    if shutil.which(args.ffmpeg) is None:
+        parser.error("--ffmpeg must identify an executable or a command on PATH")
+    if not args.skip_ppocr:
+        if not args.det_model or not args.rec_model:
+            parser.error(
+                "--det-model and --rec-model are required unless --skip-ppocr is used"
+            )
+        model_directories = (
+            ("--det-model", args.det_model),
+            ("--rec-model", args.rec_model),
+        )
+        for option, model_dir in model_directories:
+            if not os.path.isdir(model_dir):
+                parser.error("{} must identify an existing directory".format(option))
+            if not os.path.isfile(os.path.join(model_dir, "inference.pdiparams")):
+                parser.error("{} must contain inference.pdiparams".format(option))
+    if not args.skip_tesseract and shutil.which(args.tesseract) is None:
+        parser.error("--tesseract must identify an executable or a command on PATH")
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -301,8 +329,12 @@ def main():
             p = config["path"]
             print("WARNING: {} not found, skipping".format(p))
             continue
-        frame_dir = os.path.join(args.output_dir, "frames", video_name.replace(".", "_"))
-        frames = extract_frames(config["path"], config["timestamps"], frame_dir, config["scale"])
+        frame_dir = os.path.join(
+            args.output_dir, "frames", video_name.replace(".", "_")
+        )
+        frames = extract_frames(
+            config["path"], config["timestamps"], frame_dir, args.ffmpeg, config["scale"]
+        )
         for f in frames:
             f["source"] = video_name
         all_frames.extend(frames)
@@ -316,8 +348,12 @@ def main():
     for video_name, config in videos_fullres.items():
         if not os.path.exists(config["path"]):
             continue
-        frame_dir = os.path.join(args.output_dir, "frames_fullres", video_name.replace(".", "_"))
-        frames = extract_frames(config["path"], config["timestamps"], frame_dir, config["scale"])
+        frame_dir = os.path.join(
+            args.output_dir, "frames_fullres", video_name.replace(".", "_")
+        )
+        frames = extract_frames(
+            config["path"], config["timestamps"], frame_dir, args.ffmpeg, config["scale"]
+        )
         for f in frames:
             f["source"] = video_name
         all_frames_fullres.extend(frames)
@@ -325,24 +361,36 @@ def main():
 
     report = {
         "spike_date": "2026-06-21",
-        "platform": "M2 MacBook Air",
-        "models": {
-            "ppocr": {
-                "name": "PP-OCRv6_medium",
-                "det_model": args.det_model,
-                "rec_model": args.rec_model,
-                "det_model_sha256": shasum_file(os.path.join(args.det_model, "inference.pdiparams")),
-                "rec_model_sha256": shasum_file(os.path.join(args.rec_model, "inference.pdiparams")),
-                "license": "Apache-2.0"
-            },
-            "tesseract": {
-                "version": subprocess.run([args.tesseract, "--version"], capture_output=True, text=True).stderr.split("\n")[0],
-            }
-        },
-        "frames": [{"path": f["path"], "source": f["source"], "timestamp": f["timestamp"]} for f in all_frames],
+        "platform": platform.platform(),
+        "models": {},
+        "frames": [
+            {"path": f["path"], "source": f["source"], "timestamp": f["timestamp"]}
+            for f in all_frames
+        ],
         "results": {},
         "scoring": {}
     }
+
+    if not args.skip_ppocr:
+        report["models"]["ppocr"] = {
+            "name": "PP-OCRv6_medium",
+            "det_model": args.det_model,
+            "rec_model": args.rec_model,
+            "det_model_sha256": shasum_file(
+                os.path.join(args.det_model, "inference.pdiparams")
+            ),
+            "rec_model_sha256": shasum_file(
+                os.path.join(args.rec_model, "inference.pdiparams")
+            ),
+            "license": "Apache-2.0"
+        }
+
+    if not args.skip_tesseract:
+        tesseract_version = subprocess.run(
+            [args.tesseract, "--version"], capture_output=True, text=True, check=False
+        )
+        version_output = tesseract_version.stdout or tesseract_version.stderr
+        report["models"]["tesseract"] = {"version": version_output.split("\n")[0]}
 
     if not args.skip_ppocr:
         print("\n=== Running PP-OCRv6 ===")

@@ -16,6 +16,7 @@ import ctypes
 import ctypes.util
 import copy
 import json
+import os
 import pathlib
 import sqlite3
 import struct
@@ -144,13 +145,26 @@ BLAKE3_BLOCK_LEN = 64
 BLAKE3_MAX_DEPTH = 54
 
 def load_native_library(name):
+    configured_dir = os.environ.get("SVP_NATIVE_LIBRARY_DIR")
+    if configured_dir:
+        directory = pathlib.Path(configured_dir)
+        for filename in (f"lib{name}.dylib", f"lib{name}.so"):
+            candidate = directory / filename
+            if candidate.exists():
+                return ctypes.CDLL(str(candidate))
+        raise SystemExit(
+            f"Error: SVP_NATIVE_LIBRARY_DIR does not contain lib{name}.dylib or lib{name}.so"
+        )
+
     path = ctypes.util.find_library(name)
     if path is None:
         fallback = pathlib.Path("/opt/homebrew/lib") / f"lib{name}.dylib"
         if fallback.exists():
             path = str(fallback)
     if path is None:
-        raise RuntimeError(f"could not find native library {name}")
+        raise SystemExit(
+            f"Error: could not find native library {name}; set SVP_NATIVE_LIBRARY_DIR"
+        )
     return ctypes.CDLL(path)
 
 libblake3 = load_native_library("blake3")
