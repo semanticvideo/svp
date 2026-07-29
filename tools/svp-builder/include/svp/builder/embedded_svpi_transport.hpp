@@ -30,8 +30,7 @@ struct EmbeddedTransportEmbedOptions {
   std::filesystem::path container_path;
   std::filesystem::path svpi_path;
   std::filesystem::path output_path;
-  std::filesystem::path validation_codes_path =
-      "spec/registries/validation-codes.json";
+  std::filesystem::path validation_codes_path;
   std::string ffprobe_path = "ffprobe";
   bool replace_existing = false;
   bool overwrite_output = false;
@@ -51,8 +50,7 @@ struct EmbeddedTransportEmbedResult {
 struct EmbeddedTransportExtractOptions {
   std::filesystem::path container_path;
   std::filesystem::path output_path;
-  std::filesystem::path validation_codes_path =
-      "spec/registries/validation-codes.json";
+  std::filesystem::path validation_codes_path;
   bool overwrite_output = false;
 };
 

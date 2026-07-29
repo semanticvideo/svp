@@ -64,6 +64,8 @@ target_link_libraries(svp-builder-lib
     libzip::zip
 )
 
+add_dependencies(svp-builder-lib svp-runtime-resources)
+
 add_executable(svp-builder
   src/main.cpp
   src/cli/cli_register.cpp
@@ -99,6 +101,10 @@ target_link_libraries(svp-builder
 )
 
 if(BUILD_TESTING)
+  set(SVP_BUILDER_RUNTIME_RESOURCE_TEST_CWD
+      "${CMAKE_CURRENT_BINARY_DIR}/runtime-resource-cwd")
+  file(MAKE_DIRECTORY "${SVP_BUILDER_RUNTIME_RESOURCE_TEST_CWD}")
+
   add_executable(svp-builder-reference-model-ids-tests
     tests/reference_processor_model_ids_tests.cpp
   )
@@ -208,7 +214,8 @@ if(BUILD_TESTING)
   add_test(NAME svp-builder-reference-model-ids-tests
            COMMAND svp-builder-reference-model-ids-tests
                    ${CMAKE_SOURCE_DIR}/spec/registries/reference-model-set.json)
-  add_test(NAME svp-builder-pipeline-tests COMMAND svp-builder-pipeline-tests)
+  add_test(NAME svp-builder-pipeline-tests COMMAND svp-builder-pipeline-tests
+           WORKING_DIRECTORY ${SVP_BUILDER_RUNTIME_RESOURCE_TEST_CWD})
   add_test(NAME svp-builder-model-cache-preflight-tests
            COMMAND svp-builder-model-cache-preflight-tests)
   add_test(NAME svp-builder-help-without-model-cache COMMAND svp-builder --help)
@@ -228,7 +235,7 @@ if(BUILD_TESTING)
   add_test(NAME svp-transport-output-policy-tests
            COMMAND svp-transport-output-policy-tests)
   add_test(NAME svp-interlace-tests COMMAND svp-interlace-tests
-           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+           WORKING_DIRECTORY ${SVP_BUILDER_RUNTIME_RESOURCE_TEST_CWD})
   add_test(NAME svp-interlace-batch-tests COMMAND svp-interlace-batch-tests
-           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+           WORKING_DIRECTORY ${SVP_BUILDER_RUNTIME_RESOURCE_TEST_CWD})
 endif()

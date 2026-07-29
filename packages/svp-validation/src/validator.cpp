@@ -5,6 +5,7 @@
 #include "svp/package/package_layout.hpp"
 #include "svp/package/package_probe.hpp"
 #include "svp/validation/code_registry.hpp"
+#include "svp/validation/runtime_resources.hpp"
 
 #include "block_stream_validation.hpp"
 #include "color_record_validation.hpp"
@@ -240,17 +241,25 @@ ValidationReport validate_package(const std::filesystem::path& package_path,
   auto report = make_report(package_path);
 
   ValidationCodeRegistry registry;
+  ValidatorOptions resolved_options = options;
   try {
-    registry = load_validation_code_registry(options.validation_codes_path);
+    const auto resources = resolve_validation_resource_paths(
+        options.validation_codes_path, options.registry_root_path,
+        options.schema_root_path);
+    resolved_options.validation_codes_path = resources.validation_codes_path;
+    resolved_options.registry_root_path = resources.registry_root_path;
+    resolved_options.schema_root_path = resources.schema_root_path;
+    registry = load_validation_code_registry(
+        resolved_options.validation_codes_path);
   } catch (const std::exception& error) {
     add_finding(report, make_runtime_finding(kTempCodeRegistryUnreadable,
-                                             options.validation_codes_path.string(),
+                                             resolved_options.validation_codes_path.string(),
                                              error.what()));
     mark_unreadable(report);
     return report;
   }
 
-  if (!add_spec_asset_findings(report, registry, options)) {
+  if (!add_spec_asset_findings(report, registry, resolved_options)) {
     return report;
   }
 
@@ -275,8 +284,8 @@ ValidationReport validate_package(const std::filesystem::path& package_path,
       report, registry, probe.path, layout_result.value());
 
   try {
-    const auto registry_root = registry_root_for(options);
-    const auto schema_root = schema_root_for(options, registry_root);
+    const auto registry_root = registry_root_for(resolved_options);
+    const auto schema_root = schema_root_for(resolved_options, registry_root);
     add_index_findings(report, registry, probe.path, layout_result.value(), schema_root);
     const auto ocr_color_spec = load_ocr_color_spec(registry_root, schema_root);
     add_text_record_findings(report, registry, probe.path, layout_result.value(),
@@ -284,13 +293,13 @@ ValidationReport validate_package(const std::filesystem::path& package_path,
     add_color_record_findings(report, registry, probe.path, layout_result.value(),
                               ocr_color_spec);
   } catch (const nlohmann::json::exception& error) {
-    const auto registry_root = registry_root_for(options);
+    const auto registry_root = registry_root_for(resolved_options);
     add_finding(report, make_finding(registry, kTempCodeRegistryInvalid,
                                      registry_root.string(), error.what()));
     mark_unreadable(report);
     return report;
   } catch (const std::exception& error) {
-    const auto registry_root = registry_root_for(options);
+    const auto registry_root = registry_root_for(resolved_options);
     add_finding(report, make_finding(registry, kTempCodeRegistryUnreadable,
                                      registry_root.string(), error.what()));
     mark_unreadable(report);

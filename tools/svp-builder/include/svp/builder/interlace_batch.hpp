@@ -123,7 +123,7 @@ struct ScanOptions {
   std::string source_dir;
   bool recursive = false;
   std::string ffprobe_path = "ffprobe";
-  std::string validation_codes_path = "spec/registries/validation-codes.json";
+  std::string validation_codes_path;
 };
 
 [[nodiscard]] ScanResult interlace_scan(const ScanOptions& options);
@@ -132,7 +132,7 @@ struct BatchValidateOptions {
   std::string source_dir;
   bool recursive = false;
   std::string ffprobe_path = "ffprobe";
-  std::string validation_codes_path = "spec/registries/validation-codes.json";
+  std::string validation_codes_path;
   std::shared_ptr<BuildProgressSink> progress_sink;
 };
 
@@ -170,7 +170,7 @@ struct CompleteIdentityOptions {
   std::string svpi_path;
   std::string media_path;
   std::string ffprobe_path = "ffprobe";
-  std::string validation_codes_path = "spec/registries/validation-codes.json";
+  std::string validation_codes_path;
   std::shared_ptr<BuildProgressSink> progress_sink;
 };
 
@@ -189,7 +189,7 @@ struct CompleteIdentityBatchOptions {
   std::string source_dir;
   bool recursive = false;
   std::string ffprobe_path = "ffprobe";
-  std::string validation_codes_path = "spec/registries/validation-codes.json";
+  std::string validation_codes_path;
   std::shared_ptr<BuildProgressSink> progress_sink;
 };
 

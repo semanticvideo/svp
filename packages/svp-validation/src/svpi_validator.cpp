@@ -7,6 +7,7 @@
 #include "svp/package/media_binding.hpp"
 #include "svp/package/svpi_media_policy.hpp"
 #include "svp/validation/code_registry.hpp"
+#include "svp/validation/runtime_resources.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -451,18 +452,27 @@ ValidationReport validate_svpi_package(
   auto report = make_report(package_path);
 
   ValidationCodeRegistry registry;
+  SvpiValidatorOptions resolved_options = options;
   try {
-    registry = load_validation_code_registry(options.validation_codes_path);
+    const auto resources = resolve_validation_resource_paths(
+        options.validation_codes_path, options.registry_root_path,
+        options.schema_root_path);
+    resolved_options.validation_codes_path = resources.validation_codes_path;
+    resolved_options.registry_root_path = resources.registry_root_path;
+    resolved_options.schema_root_path = resources.schema_root_path;
+    registry = load_validation_code_registry(
+        resolved_options.validation_codes_path);
   } catch (const std::exception& error) {
     add_finding(report, make_runtime_finding(kTempCodeRegistryUnreadable,
-                                             options.validation_codes_path.string(),
+                                             resolved_options.validation_codes_path.string(),
                                              error.what()));
     mark_unreadable(report);
     return report;
   }
 
   const auto probe = svp::package::probe_package(package_path);
-  if (!add_input_findings(report, registry, probe, options.allow_embedded_transport)) {
+  if (!add_input_findings(report, registry, probe,
+                          resolved_options.allow_embedded_transport)) {
     return report;
   }
 

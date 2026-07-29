@@ -82,9 +82,6 @@ int main() {
   write_payload(payload);
 
   svp::validation::EmbeddedSvpiTransportValidatorOptions options;
-  options.validation_codes_path =
-      std::filesystem::path(SVP_SOURCE_DIR) /
-      "spec/registries/validation-codes.json";
 
   auto report = svp::validation::validate_embedded_svpi_transport(clean, options);
   require(has_code(report, svp::validation::kCodeIsoBmffSvpiNotFound));

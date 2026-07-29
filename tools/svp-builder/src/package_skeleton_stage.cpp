@@ -225,7 +225,6 @@ PackageSkeletonStageResult run_package_final_stage(
     emit_stage_completed(context, ProgressStageId::package_write);
 
     svp::validation::ValidatorOptions validator_opts;
-    validator_opts.validation_codes_path = "spec/registries/validation-codes.json";
 
     // Run validator on first package
     emit_stage_started(context, ProgressStageId::validate);

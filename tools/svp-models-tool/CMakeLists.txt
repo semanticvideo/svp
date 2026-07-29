@@ -38,7 +38,6 @@ configure_file(
 
 add_executable(svp-models-tool
   src/main.cpp
-  src/executable_path.cpp
   src/install_command.cpp
   src/install_process.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/generated/install_resources.cpp
@@ -56,6 +55,7 @@ target_link_libraries(svp-models-tool
     nlohmann_json::nlohmann_json
     svp::models
     svp::progress
+    svp::core
 )
 
 if(BUILD_TESTING)
@@ -91,11 +91,10 @@ if(BUILD_TESTING)
 
   add_executable(svp-models-executable-path-tests
     tests/executable_path_tests.cpp
-    src/executable_path.cpp
   )
   target_compile_features(svp-models-executable-path-tests PRIVATE cxx_std_20)
-  target_include_directories(svp-models-executable-path-tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  target_link_libraries(svp-models-executable-path-tests PRIVATE
+    svp::core
   )
   add_test(NAME svp-models-executable-path-tests
            COMMAND svp-models-executable-path-tests)
