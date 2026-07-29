@@ -2,6 +2,8 @@
 
 #include "svp/core/executable_path.hpp"
 
+#include "spec_assets.hpp"
+
 #include <array>
 #include <sstream>
 #include <stdexcept>
@@ -47,14 +49,40 @@ std::array<std::filesystem::path, 2> candidate_resource_roots(
   };
 }
 
+std::filesystem::path resource_path_for(const std::filesystem::path& root,
+                                        const SpecAsset& asset) {
+  const auto directory = asset.kind == SpecAssetKind::registry
+                             ? "registries"
+                             : "schemas";
+  return root / directory / asset.relative_path;
+}
+
+std::vector<std::filesystem::path> missing_resource_paths(
+    const std::filesystem::path& root) {
+  std::vector<std::filesystem::path> missing;
+  const auto require_regular_file = [&](const std::filesystem::path& path) {
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(path, error) || error) {
+      missing.push_back(path);
+    }
+  };
+
+  require_regular_file(root / kValidationCodesRelativePath);
+  for (const auto& asset : required_rc2_spec_assets()) {
+    require_regular_file(resource_path_for(root, asset));
+  }
+  return missing;
+}
+
 std::runtime_error missing_resources_error(
     const std::vector<std::filesystem::path>& candidates) {
   std::ostringstream message;
   message << "SVP runtime resources could not be located.";
   for (const auto& candidate : candidates) {
-    message << "\nAttempted resource root: " << candidate.string()
-            << "\nRequired validation-code path: "
-            << (candidate / kValidationCodesRelativePath).string();
+    message << "\nAttempted resource root: " << candidate.string();
+    for (const auto& missing : missing_resource_paths(candidate)) {
+      message << "\nMissing required resource: " << missing.string();
+    }
   }
   message << "\nCLI callers can use --validation-codes <path>.";
   return std::runtime_error(message.str());
@@ -68,13 +96,11 @@ RuntimeResourcePaths resolve_default_runtime_resource_paths(
   const auto executable = resolved_executable(executable_path);
   for (const auto& candidate : candidate_resource_roots(executable)) {
     paths.attempted_resource_roots.push_back(candidate);
-    std::error_code error;
-    const auto validation_codes = candidate / kValidationCodesRelativePath;
-    if (!std::filesystem::is_regular_file(validation_codes, error) || error) {
+    if (!missing_resource_paths(candidate).empty()) {
       continue;
     }
 
-    paths.validation_codes_path = validation_codes;
+    paths.validation_codes_path = candidate / kValidationCodesRelativePath;
     paths.registry_root_path = candidate / "registries";
     paths.schema_root_path = candidate / "schemas";
     return paths;

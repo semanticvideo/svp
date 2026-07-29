@@ -82,6 +82,17 @@ void copy_validation_codes(const std::filesystem::path& resource_root) {
       registry_root / "validation-codes.json");
 }
 
+void copy_runtime_resources(const std::filesystem::path& resource_root) {
+  const auto source_root = std::filesystem::path(SVP_SOURCE_DIR) / "spec";
+  for (const auto& directory : {"registries", "schemas"}) {
+    std::filesystem::create_directories(resource_root / directory);
+    std::filesystem::copy(
+        source_root / directory, resource_root / directory,
+        std::filesystem::copy_options::recursive |
+            std::filesystem::copy_options::overwrite_existing);
+  }
+}
+
 std::string read_bytes(const std::filesystem::path& path) {
   std::ifstream input(path, std::ios::binary);
   return {std::istreambuf_iterator<char>(input),
@@ -104,7 +115,7 @@ void test_installed_layout_and_symlink_resolution() {
   const auto executable =
       copy_test_executable(temporary.path() / "prefix" / "bin" / "tool");
   const auto resource_root = temporary.path() / "prefix" / "share" / "svp";
-  copy_validation_codes(resource_root);
+  copy_runtime_resources(resource_root);
 
   const auto resources =
       svp::validation::resolve_default_runtime_resource_paths(executable);
@@ -127,7 +138,7 @@ void test_multi_configuration_layout() {
   const auto executable = copy_test_executable(
       temporary.path() / "prefix" / "bin" / "Debug" / "tool");
   const auto resource_root = temporary.path() / "prefix" / "share" / "svp";
-  copy_validation_codes(resource_root);
+  copy_runtime_resources(resource_root);
 
   const auto resources =
       svp::validation::resolve_default_runtime_resource_paths(executable);
@@ -136,11 +147,27 @@ void test_multi_configuration_layout() {
   CHECK(resources.attempted_resource_roots.size() == 2);
 }
 
+void test_incomplete_first_candidate_falls_back_to_complete_second() {
+  TemporaryDirectory temporary("svp-runtime-incomplete-first-candidate");
+  const auto executable = copy_test_executable(
+      temporary.path() / "prefix" / "bin" / "Debug" / "tool");
+  copy_validation_codes(temporary.path() / "prefix" / "bin" / "share" /
+                        "svp");
+  const auto complete_root = temporary.path() / "prefix" / "share" / "svp";
+  copy_runtime_resources(complete_root);
+
+  const auto resources =
+      svp::validation::resolve_default_runtime_resource_paths(executable);
+  CHECK(resources.registry_root_path ==
+        std::filesystem::weakly_canonical(complete_root) / "registries");
+  CHECK(resources.attempted_resource_roots.size() == 2);
+}
+
 void test_explicit_override_precedence_and_derivation() {
   TemporaryDirectory temporary("svp-runtime-explicit-override");
   const auto executable =
       copy_test_executable(temporary.path() / "prefix" / "bin" / "tool");
-  copy_validation_codes(temporary.path() / "prefix" / "share" / "svp");
+  copy_runtime_resources(temporary.path() / "prefix" / "share" / "svp");
   const auto explicit_codes = temporary.path() / "custom" / "registries" /
                               "validation-codes.json";
   copy_validation_codes(temporary.path() / "custom");
@@ -238,6 +265,7 @@ void test_staged_resources_are_complete_and_byte_identical() {
 int main() {
   test_installed_layout_and_symlink_resolution();
   test_multi_configuration_layout();
+  test_incomplete_first_candidate_falls_back_to_complete_second();
   test_explicit_override_precedence_and_derivation();
   test_explicit_root_precedence();
   test_invalid_explicit_override_does_not_fall_back();
