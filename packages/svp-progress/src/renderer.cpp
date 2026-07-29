@@ -91,16 +91,26 @@ std::string format_event_line(const Event& event) {
 
 struct RowKey {
   std::string scope_id;
+  std::optional<std::int64_t> row_order;
   std::string stage_id;
 
   bool operator<(const RowKey& other) const {
-    return scope_id < other.scope_id ||
-           (scope_id == other.scope_id && stage_id < other.stage_id);
+    if (scope_id != other.scope_id) return scope_id < other.scope_id;
+    if (row_order != other.row_order) {
+      if (!row_order) return false;
+      if (!other.row_order) return true;
+      return *row_order < *other.row_order;
+    }
+    return stage_id < other.stage_id;
   }
 };
 
 RowKey row_key(const Event& event) {
-  return {.scope_id = event.scope_id, .stage_id = event.stage_id};
+  return {
+      .scope_id = event.scope_id,
+      .row_order = event.row_order,
+      .stage_id = event.stage_id,
+  };
 }
 
 class PlainSink final : public Sink {

@@ -31,6 +31,7 @@ struct Event {
   std::string unit;
   std::string scope_id;
   std::string scope_label;
+  std::optional<std::int64_t> row_order;
 };
 
 }  // namespace svp::progress
