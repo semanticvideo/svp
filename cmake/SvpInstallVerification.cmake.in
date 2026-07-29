@@ -65,13 +65,25 @@ function(assert_inventory source_root installed_root expected_files label)
   endif()
 
   set(expected_list "${expected_files}")
+  file(GLOB_RECURSE source_list
+    LIST_DIRECTORIES false
+    RELATIVE "${source_root}"
+    "${source_root}/*.json"
+  )
   file(GLOB_RECURSE actual_list
     LIST_DIRECTORIES false
     RELATIVE "${installed_root}"
     "${installed_root}/*"
   )
   list(SORT expected_list)
+  list(SORT source_list)
   list(SORT actual_list)
+  if(NOT source_list STREQUAL expected_list)
+    fail_verification(
+      "Configured ${label} inventory does not match the source tree\n"
+      "configured: ${expected_list}\nsource: ${source_list}"
+    )
+  endif()
   if(NOT actual_list STREQUAL expected_list)
     fail_verification(
       "Installed ${label} inventory mismatch\n"

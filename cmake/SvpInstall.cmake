@@ -19,30 +19,20 @@ install(TARGETS ${SVP_PUBLIC_CLI_TARGETS}
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )
 
-set(SVP_INSTALL_REGISTRY_RELATIVE_FILES
-  block-types.json
-  color-buckets.json
-  color-spaces.json
-  embedded-svpi-transport-profiles.json
-  equivalence-profile.json
-  ocr-observation-types.json
-  reference-model-set.json
-  relationship-types.json
-  validation-codes.json
+file(GLOB_RECURSE SVP_INSTALL_REGISTRY_RELATIVE_FILES
+  CONFIGURE_DEPENDS
+  LIST_DIRECTORIES false
+  RELATIVE "${CMAKE_SOURCE_DIR}/spec/registries"
+  "${CMAKE_SOURCE_DIR}/spec/registries/*.json"
 )
-set(SVP_INSTALL_SCHEMA_RELATIVE_FILES
-  color-absence.schema.json
-  color-observation.schema.json
-  color-summary.schema.json
-  index-manifest.schema.json
-  model-bundle.schema.json
-  model-lock.schema.json
-  numeric-value.schema.json
-  signature-sidecar.schema.json
-  text-absence.schema.json
-  text-observation.schema.json
-  text-region.schema.json
+file(GLOB_RECURSE SVP_INSTALL_SCHEMA_RELATIVE_FILES
+  CONFIGURE_DEPENDS
+  LIST_DIRECTORIES false
+  RELATIVE "${CMAKE_SOURCE_DIR}/spec/schemas"
+  "${CMAKE_SOURCE_DIR}/spec/schemas/*.json"
 )
+list(SORT SVP_INSTALL_REGISTRY_RELATIVE_FILES)
+list(SORT SVP_INSTALL_SCHEMA_RELATIVE_FILES)
 
 foreach(relative_path IN LISTS SVP_INSTALL_REGISTRY_RELATIVE_FILES)
   cmake_path(GET relative_path PARENT_PATH relative_directory)
