@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 """Test PP-OCRv6 ONNX models with onnxruntime on the same frames."""
-import numpy as np
-import cv2
-import onnxruntime as ort
 import os
 import time
 import json
@@ -122,12 +119,36 @@ def ctc_decode(pred, dict_chars):
 
 def main():
     parser = argparse.ArgumentParser(description="PP-OCRv6 ONNX Runtime runner")
-    parser.add_argument("--det-model", default="/tmp/ppocr-onnx-export/det.onnx")
-    parser.add_argument("--rec-model", default="/tmp/ppocr-onnx-export/rec.onnx")
-    parser.add_argument("--rec-yml", default="/Users/domesposito/.paddlex/official_models/PP-OCRv6_medium_rec/inference.yml")
+    parser.add_argument("--det-model", required=True)
+    parser.add_argument("--rec-model", required=True)
+    parser.add_argument("--rec-yml")
     parser.add_argument("--images", nargs="+", required=True)
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
+
+    model_paths = (
+        ("--det-model", args.det_model),
+        ("--rec-model", args.rec_model),
+    )
+    for option, model_path in model_paths:
+        if not os.path.isfile(model_path):
+            parser.error(f"{option} must identify an existing file")
+    if args.rec_yml and not os.path.isfile(args.rec_yml):
+        parser.error("--rec-yml must identify an existing file")
+    for image_path in args.images:
+        if not os.path.isfile(image_path):
+            parser.error(f"--images entry does not exist: {image_path}")
+
+    global np, cv2, ort
+    try:
+        import numpy as np
+        import cv2
+        import onnxruntime as ort
+    except ModuleNotFoundError as error:
+        parser.error(
+            f"missing Python package {error.name}; install numpy, "
+            "opencv-python-headless, and onnxruntime"
+        )
 
     # Load ONNX models
     det_session = ort.InferenceSession(args.det_model, providers=['CPUExecutionProvider'])
