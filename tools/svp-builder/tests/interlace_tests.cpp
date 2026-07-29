@@ -406,7 +406,6 @@ void test_interlace_validate_structure_only() {
 
   svp::builder::InterlaceValidateOptions opts;
   opts.svpi_path = svpi_path.string();
-  opts.validation_codes_path = "spec/registries/validation-codes.json";
 
   auto result = svp::builder::interlace_validate(opts);
   CHECK(result.structure_valid);
@@ -427,7 +426,6 @@ void test_interlace_validate_with_matching_media() {
   svp::builder::InterlaceValidateOptions opts;
   opts.svpi_path = svpi_path.string();
   opts.media_path = source.string();
-  opts.validation_codes_path = "spec/registries/validation-codes.json";
 
   auto result = svp::builder::interlace_validate(opts);
   CHECK(result.structure_valid);
@@ -452,7 +450,6 @@ void test_interlace_validate_with_wrong_media() {
   svp::builder::InterlaceValidateOptions opts;
   opts.svpi_path = svpi_path.string();
   opts.media_path = wrong.string();
-  opts.validation_codes_path = "spec/registries/validation-codes.json";
 
   auto result = svp::builder::interlace_validate(opts);
   CHECK(result.binding_attempted);
@@ -501,7 +498,6 @@ void test_interlace_extract_from_svp() {
   opts.svp_path = svp_path.string();
   opts.out_dir = out_dir.string();
   opts.ffprobe_path = "/usr/bin/true";
-  opts.validation_codes_path = "spec/registries/validation-codes.json";
 
   auto result = svp::builder::interlace_extract(opts);
   CHECK(result.success);
@@ -548,7 +544,6 @@ void test_interlace_recombine_produces_valid_svp() {
   opts.svpi_path = svpi_path.string();
   opts.output_path = svp_path.string();
   opts.ffprobe_path = "/usr/bin/true";
-  opts.validation_codes_path = "spec/registries/validation-codes.json";
 
   auto result = svp::builder::interlace_recombine(opts);
   CHECK(result.success);
@@ -576,7 +571,6 @@ void test_interlace_recombine_fails_on_wrong_media() {
   opts.svpi_path = svpi_path.string();
   opts.output_path = svp_path.string();
   opts.ffprobe_path = "/usr/bin/true";
-  opts.validation_codes_path = "spec/registries/validation-codes.json";
 
   auto result = svp::builder::interlace_recombine(opts);
   CHECK(!result.success);
@@ -600,7 +594,6 @@ void test_filename_only_matching_does_not_pass_binding() {
   svp::builder::InterlaceValidateOptions opts;
   opts.svpi_path = svpi_path.string();
   opts.media_path = renamed.string();
-  opts.validation_codes_path = "spec/registries/validation-codes.json";
 
   auto result = svp::builder::interlace_validate(opts);
   CHECK(result.binding_attempted);
@@ -650,7 +643,6 @@ void test_missing_svpi_index_fails_validation() {
   zip_discard(src_archive);
 
   svp::validation::SvpiValidatorOptions vopts;
-  vopts.validation_codes_path = "spec/registries/validation-codes.json";
   auto report = svp::validation::validate_svpi_package(corrupted_path, vopts);
   CHECK(svp::validation::exit_code(report) != 0);
 
@@ -706,7 +698,6 @@ void test_media_original_in_svpi_fails_validation() {
   zip_discard(src);
 
   svp::validation::SvpiValidatorOptions vopts;
-  vopts.validation_codes_path = "spec/registries/validation-codes.json";
   auto report = svp::validation::validate_svpi_package(corrupted_path, vopts);
   CHECK(svp::validation::exit_code(report) != 0);
 
@@ -825,7 +816,6 @@ void test_validator_rejects_binding_without_chunk_hashes() {
   zip_discard(src);
 
   svp::validation::SvpiValidatorOptions vopts;
-  vopts.validation_codes_path = "spec/registries/validation-codes.json";
   auto report = svp::validation::validate_svpi_package(corrupted_path, vopts);
   CHECK(svp::validation::exit_code(report) != 0);
 
@@ -855,7 +845,6 @@ void test_extract_preserves_existing_provenance_events() {
   opts.svp_path = svp_path.string();
   opts.out_dir = out_dir.string();
   opts.ffprobe_path = "/usr/bin/true";
-  opts.validation_codes_path = "spec/registries/validation-codes.json";
 
   auto result = svp::builder::interlace_extract(opts);
   CHECK(result.success);
@@ -1171,7 +1160,6 @@ void test_interlace_recombine_removes_default_staging() {
   opts.svpi_path = svpi_path.string();
   opts.output_path = svp_path.string();
   opts.ffprobe_path = "/usr/bin/true";
-  opts.validation_codes_path = "spec/registries/validation-codes.json";
 
   auto result = svp::builder::interlace_recombine(opts);
   CHECK(result.success);
@@ -1203,7 +1191,6 @@ void test_interlace_recombine_preserves_explicit_staging() {
   opts.output_path = svp_path.string();
   opts.staging_dir = staging_dir.string();
   opts.ffprobe_path = "/usr/bin/true";
-  opts.validation_codes_path = "spec/registries/validation-codes.json";
 
   auto result = svp::builder::interlace_recombine(opts);
   CHECK(result.success);

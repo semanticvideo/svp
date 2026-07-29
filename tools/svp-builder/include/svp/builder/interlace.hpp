@@ -47,7 +47,7 @@ struct InterlaceValidateOptions {
   std::string svpi_path;
   std::string media_path;
   std::string ffprobe_path = "ffprobe";
-  std::string validation_codes_path = "spec/registries/validation-codes.json";
+  std::string validation_codes_path;
   std::shared_ptr<BuildProgressSink> progress_sink;
 };
 
@@ -101,7 +101,7 @@ struct InterlaceInspectResult {
 struct InterlaceExtractOptions {
   std::string svp_path;
   std::string out_dir;
-  std::string validation_codes_path = "spec/registries/validation-codes.json";
+  std::string validation_codes_path;
   std::string ffprobe_path = "ffprobe";
   std::shared_ptr<BuildProgressSink> progress_sink;
 };
@@ -123,7 +123,7 @@ struct InterlaceRecombineOptions {
   std::string output_path;
   std::string staging_dir;
   std::string ffprobe_path = "ffprobe";
-  std::string validation_codes_path = "spec/registries/validation-codes.json";
+  std::string validation_codes_path;
   std::shared_ptr<BuildProgressSink> progress_sink;
 };
 

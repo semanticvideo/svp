@@ -83,7 +83,7 @@ struct InterlaceCliOptions {
   std::string iv_svpi;
   std::string iv_media;
   std::string iv_ffprobe = "ffprobe";
-  std::string iv_codes = "spec/registries/validation-codes.json";
+  std::string iv_codes;
   bool iv_json = false;
   std::string iv_progress_mode = "auto";
   bool iv_quiet = false;
@@ -96,7 +96,7 @@ struct InterlaceCliOptions {
   std::string ie_svp;
   std::string ie_out_dir;
   std::string ie_ffprobe = "ffprobe";
-  std::string ie_codes = "spec/registries/validation-codes.json";
+  std::string ie_codes;
   std::string ie_progress_mode = "auto";
   bool ie_quiet = false;
 
@@ -106,7 +106,7 @@ struct InterlaceCliOptions {
   std::string ir_out;
   std::string ir_staging;
   std::string ir_ffprobe = "ffprobe";
-  std::string ir_codes = "spec/registries/validation-codes.json";
+  std::string ir_codes;
   std::string ir_progress_mode = "auto";
   bool ir_quiet = false;
 
@@ -139,14 +139,14 @@ struct InterlaceCliOptions {
   bool sc_recursive = false;
   bool sc_json = false;
   std::string sc_ffprobe = "ffprobe";
-  std::string sc_codes = "spec/registries/validation-codes.json";
+  std::string sc_codes;
 
   // interlace validate-batch
   std::string vb_source_dir;
   bool vb_recursive = false;
   bool vb_json = false;
   std::string vb_ffprobe = "ffprobe";
-  std::string vb_codes = "spec/registries/validation-codes.json";
+  std::string vb_codes;
   std::string vb_progress_mode = "auto";
   bool vb_quiet = false;
 
@@ -154,7 +154,7 @@ struct InterlaceCliOptions {
   std::string ci_svpi;
   std::string ci_media;
   std::string ci_ffprobe = "ffprobe";
-  std::string ci_codes = "spec/registries/validation-codes.json";
+  std::string ci_codes;
   std::string ci_progress_mode = "auto";
   bool ci_quiet = false;
 
@@ -163,7 +163,7 @@ struct InterlaceCliOptions {
   bool cib_recursive = false;
   bool cib_json = false;
   std::string cib_ffprobe = "ffprobe";
-  std::string cib_codes = "spec/registries/validation-codes.json";
+  std::string cib_codes;
   std::string cib_progress_mode = "auto";
   bool cib_quiet = false;
 
@@ -185,13 +185,13 @@ struct TransportCliOptions {
   std::string embed_svpi;
   std::string embed_out;
   std::string embed_ffprobe = "ffprobe";
-  std::string embed_codes = "spec/registries/validation-codes.json";
+  std::string embed_codes;
   bool embed_replace = false;
   bool embed_overwrite = false;
 
   std::string extract_container;
   std::string extract_out;
-  std::string extract_codes = "spec/registries/validation-codes.json";
+  std::string extract_codes;
   bool extract_overwrite = false;
 
   std::string strip_container;

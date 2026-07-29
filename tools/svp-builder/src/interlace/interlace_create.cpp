@@ -176,7 +176,6 @@ InterlaceCreateResult write_svpi_from_staging(
 
   sink.emit(make_stage_started(ProgressStageId::validate));
   svp::validation::SvpiValidatorOptions validator_opts;
-  validator_opts.validation_codes_path = "spec/registries/validation-codes.json";
   auto report = svp::validation::validate_svpi_package(options.output_path, validator_opts);
   result.binding_state = svp::validation::to_string(report.status);
 
@@ -260,7 +259,6 @@ InterlaceCreateResult write_core_only_svpi(
 
   sink.emit(make_stage_started(ProgressStageId::validate));
   svp::validation::SvpiValidatorOptions validator_opts;
-  validator_opts.validation_codes_path = "spec/registries/validation-codes.json";
   auto report = svp::validation::validate_svpi_package(options.output_path, validator_opts);
   result.binding_state = svp::validation::to_string(report.status);
 

@@ -52,6 +52,10 @@ target_link_libraries(svp-validation
 add_dependencies(svp-validation svp-runtime-resources)
 
 if(BUILD_TESTING)
+  set(SVP_VALIDATION_RUNTIME_RESOURCE_TEST_CWD
+      "${CMAKE_CURRENT_BINARY_DIR}/runtime-resource-cwd")
+  file(MAKE_DIRECTORY "${SVP_VALIDATION_RUNTIME_RESOURCE_TEST_CWD}")
+
   add_executable(svp-diarization-validation-tests
     tests/diarization_validation_tests.cpp
   )
@@ -81,8 +85,8 @@ if(BUILD_TESTING)
   set_target_properties(svp-runtime-resource-tests PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools/svp-validation"
   )
-  target_compile_definitions(svp-embedded-svpi-validation-tests PRIVATE
-    SVP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  set_target_properties(svp-embedded-svpi-validation-tests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools/svp-validation"
   )
 
   target_link_libraries(svp-diarization-validation-tests
@@ -111,7 +115,8 @@ if(BUILD_TESTING)
            COMMAND svp-diarization-validation-tests
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME svp-embedded-svpi-validation-tests
-           COMMAND svp-embedded-svpi-validation-tests)
+           COMMAND svp-embedded-svpi-validation-tests
+           WORKING_DIRECTORY ${SVP_VALIDATION_RUNTIME_RESOURCE_TEST_CWD})
   add_test(NAME svp-entity-record-validation-tests
            COMMAND svp-entity-record-validation-tests
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

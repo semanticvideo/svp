@@ -917,7 +917,6 @@ void test_complete_identity_refuses_mismatch() {
   CHECK(!result.error_message.empty());
 
   svp::validation::SvpiValidatorOptions vopts;
-  vopts.validation_codes_path = "spec/registries/validation-codes.json";
   auto report = svp::validation::validate_svpi_package(dir / "clip.svpi", vopts);
   CHECK(svp::validation::exit_code(report) == 0);
 
@@ -1168,7 +1167,6 @@ void test_complete_identity_rejects_same_size_wrong_content() {
   CHECK(!result.error_message.empty());
 
   svp::validation::SvpiValidatorOptions vopts;
-  vopts.validation_codes_path = "spec/registries/validation-codes.json";
   auto report = svp::validation::validate_svpi_package(dir / "clip.svpi", vopts);
   CHECK(svp::validation::exit_code(report) == 0);
 

@@ -31,6 +31,6 @@ if(BUILD_TESTING)
     COMMAND svp-validator-runtime-resource-cwd-tests
             $<TARGET_FILE:svp-validator>
             ${CMAKE_SOURCE_DIR}/fixtures/phase-04-ocr-color/valid/dashboard_number.svp
-            ${CMAKE_SOURCE_DIR}/spec/registries/validation-codes.json
+            ${SVP_RUNTIME_RESOURCE_ROOT}/registries/validation-codes.json
   )
 endif()

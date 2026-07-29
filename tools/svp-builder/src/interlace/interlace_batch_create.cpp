@@ -316,7 +316,7 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
         options.overwrite_sources) {
       std::string inspection_error;
       const auto state = inspect_embedded_batch_artifact(
-          media_path, media_path, "spec/registries/validation-codes.json",
+          media_path, media_path, {},
           inspection_error);
       if (state == EmbeddedBatchArtifactState::valid) {
         file_result.status = BatchFileStatus::already_valid;
@@ -341,11 +341,9 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
       const bool existing_valid =
           options.output_format == BatchOutputFormat::svpi
               ? check_svpi_valid_and_bound(
-                    file_result.artifact_path, media_path,
-                    "spec/registries/validation-codes.json", err)
+                    file_result.artifact_path, media_path, {}, err)
               : check_embedded_batch_artifact(
-                    file_result.artifact_path, media_path,
-                    "spec/registries/validation-codes.json", err);
+                    file_result.artifact_path, media_path, {}, err);
       if (existing_valid) {
         file_result.status = BatchFileStatus::already_valid;
       } else {
