@@ -62,6 +62,18 @@ validator coverage.
 | `fixtures/` | Small package fixtures for validator and reader behavior. |
 | `scripts/` | Utility scripts, spec checks, fixture generation, and reports. |
 
+## Licensing
+
+The reference implementation is licensed under the Apache License 2.0. The
+SVP specifications, schemas, and registries under `spec/` are dedicated under
+CC0 1.0 Universal. Model weights and third-party materials retain their own
+licenses and notices.
+
+See [`LICENSES.md`](LICENSES.md) for the exact path-based boundary,
+[`NOTICE`](NOTICE) for project notices, and
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for binary-distribution
+attribution requirements.
+
 ## SVP Package Expectations
 
 An SVP package is ZIP-based and uses this MIME type:

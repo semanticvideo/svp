@@ -1,0 +1,10 @@
+Semantic Video Package (SVP)
+Copyright 2026 SVP contributors
+
+The reference implementation is licensed under the Apache License, Version
+2.0. The SVP specifications, schemas, and registries are dedicated under CC0
+1.0 Universal as described in LICENSES.md.
+
+This distribution may include third-party software and model materials whose
+copyright and attribution notices must be retained. See THIRD_PARTY_NOTICES.md
+and the LICENSE and NOTICE files carried by individual model bundles.

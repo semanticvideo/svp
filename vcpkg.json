@@ -3,7 +3,7 @@
   "name": "svp",
   "version-string": "1.0.0-rc1",
   "description": "Semantic Video Package reference tools",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "builtin-baseline": "a0b1c8d3a477c1cb4813d8e127a56961707ca42b",
   "dependencies": [
     "cli11",
