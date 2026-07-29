@@ -205,6 +205,16 @@ Normal `svp build` operation must not require Python. Python-installed
 sherpa-onnx may provide a dynamic library, but the builder should load the C API
 library directly rather than shelling out to Python.
 
+## Platform Support
+
+Apple Silicon macOS is the supported platform and the target of the documented
+build and release-validation workflow.
+
+Linux and other POSIX environments are best-effort and are not currently part
+of release validation. Some runtime paths and tests intentionally depend on
+POSIX process execution, dynamic loading, and filesystem behavior. Windows is
+not currently supported.
+
 ## Build
 
 The supported clean-clone path uses vcpkg manifest mode and the checked-in
