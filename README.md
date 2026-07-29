@@ -263,10 +263,9 @@ From the repository root, configure a Release build and install the four public
 CLI tools into the current user's local application prefix:
 
 ```bash
-cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX="$HOME/.local"
-cmake --build build-release --parallel
-cmake --install build-release
+cmake --preset macos-arm64-release -DCMAKE_INSTALL_PREFIX="$HOME/.local"
+cmake --build --preset macos-arm64-release --parallel
+cmake --install build/macos-arm64-release
 ```
 
 This installs:
@@ -302,7 +301,7 @@ To use a different installation prefix, override it during installation and
 add that prefix's `bin` directory to `PATH`:
 
 ```bash
-cmake --install build-release --prefix /path/to/svp-install
+cmake --install build/macos-arm64-release --prefix /path/to/svp-install
 export PATH="/path/to/svp-install/bin:$PATH"
 ```
 
@@ -311,14 +310,14 @@ to the repository checkout and use the same build directory that performed the
 most recent installation:
 
 ```bash
-cmake --build build-release --target uninstall
+cmake --build build/macos-arm64-release --target uninstall
 ```
 
 The uninstall target uses that build directory's install manifest. It removes
 the installed SVP tools and runtime resources but does not remove downloaded
 models or other user data. This is a CMake installation path, not package-manager
-integration. Complete clean-clone and vcpkg bootstrap documentation is tracked
-separately in issue #121.
+integration. The preceding build section is the completed clean-clone and vcpkg
+bootstrap workflow from issue #121.
 
 ## Install the reference models
 
