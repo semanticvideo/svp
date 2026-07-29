@@ -18,6 +18,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 
 add_subdirectory(packages/svp-core)
+add_subdirectory(packages/svp-progress)
 add_subdirectory(packages/svp-blocks)
 add_subdirectory(packages/svp-models)
 add_subdirectory(packages/svp-validation)
