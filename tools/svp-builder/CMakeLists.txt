@@ -166,6 +166,8 @@ if(BUILD_TESTING)
     PRIVATE
       svp::builder
       svp::models
+      svp::package
+      svp::validation
   )
 
   target_link_libraries(svp-builder-progress-renderer-tests
@@ -180,6 +182,7 @@ if(BUILD_TESTING)
   target_link_libraries(svp-interlace-tests
     PRIVATE
       svp::builder
+      svp::models
       svp::package
       svp::validation
       libzip::zip

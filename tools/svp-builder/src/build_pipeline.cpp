@@ -101,6 +101,10 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         user_supplied_staging
             ? effective_options.staging_dir
             : default_staging_dir_for_output(effective_options.output_path);
+    if (effective_options.reset_staging_before_stages) {
+      std::filesystem::remove_all(staging_dir);
+      std::filesystem::create_directories(staging_dir);
+    }
     StagingCleanupGuard staging_guard(staging_dir, user_supplied_staging);
     const bool model_runtime_available = svp::models::OnnxSession::is_available();
     svp::models::set_onnx_verbose(options.verbose);
@@ -237,12 +241,22 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     svp::core::check_memory_limit("builder.run.complete");
     staging_guard.cleanup_on_success();
     return {.exit_code = 0};
+  } catch (const ModelCachePreflightError& error) {
+    svp::core::trace_memory_event("builder.run.exception", {
+        {"error", error.what()}
+    });
+    std::cerr << "svp-builder: " << error.what() << "\n";
+    return {.exit_code = 1,
+            .failure = BuildPipelineFailure::model_cache_preflight,
+            .error_message = error.what()};
   } catch (const std::exception& error) {
     svp::core::trace_memory_event("builder.run.exception", {
         {"error", error.what()}
     });
     std::cerr << "svp-builder: " << error.what() << "\n";
-    return {.exit_code = 1};
+    return {.exit_code = 1,
+            .failure = BuildPipelineFailure::processing,
+            .error_message = error.what()};
   }
 }
 

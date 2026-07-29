@@ -22,7 +22,7 @@ namespace {
   for (const std::string& error : errors) {
     message << "\n- " << error;
   }
-  throw std::runtime_error(message.str());
+  throw ModelCachePreflightError(message.str());
 }
 
 }  // namespace

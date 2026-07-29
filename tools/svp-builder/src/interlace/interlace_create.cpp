@@ -290,16 +290,17 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
     return result;
   }
 
-  sink->emit(make_stage_started(ProgressStageId::media_binding));
-  svp::package::MediaBindingFactoryOptions binding_opts;
-  binding_opts.ffprobe_path = options.ffprobe_path;
-  binding_opts.compute_full_blake3 = options.compute_full_blake3;
-  binding_opts.compute_chunk_proof = options.compute_chunk_proof;
-
-  auto binding_doc = svp::package::create_media_binding(source_path, binding_opts);
-  result.blake3_state = svp::package::to_string(
-      binding_doc.bindings[0].identity.blake3_state);
-  sink->emit(make_stage_completed(ProgressStageId::media_binding));
+  auto create_binding = [&]() {
+    sink->emit(make_stage_started(ProgressStageId::media_binding));
+    svp::package::MediaBindingFactoryOptions binding_opts;
+    binding_opts.ffprobe_path = options.ffprobe_path;
+    binding_opts.compute_full_blake3 = options.compute_full_blake3;
+    binding_opts.compute_chunk_proof = options.compute_chunk_proof;
+    auto binding =
+        svp::package::create_media_binding(source_path, binding_opts);
+    sink->emit(make_stage_completed(ProgressStageId::media_binding));
+    return binding;
+  };
 
   const bool user_supplied_staging = !options.staging_dir.empty();
   const std::filesystem::path staging_dir =
@@ -309,6 +310,9 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
   StagingCleanupGuard staging_guard(staging_dir, user_supplied_staging);
 
   if (options.core_only_diagnostic) {
+    auto binding_doc = create_binding();
+    result.blake3_state = svp::package::to_string(
+        binding_doc.bindings[0].identity.blake3_state);
     result = write_core_only_svpi(
         options, binding_doc, result.blake3_state,
         "not_generated",
@@ -317,9 +321,6 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
     if (result.success) staging_guard.cleanup_on_success();
     return result;
   }
-
-  std::filesystem::remove_all(staging_dir);
-  std::filesystem::create_directories(staging_dir);
 
   std::filesystem::path temp_svp_path =
       staging_dir / "interlace_temp.svp";
@@ -338,10 +339,20 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
   pipeline_opts.allow_fallback_diarization = options.allow_fallback_diarization;
   pipeline_opts.force_single_speaker = options.force_single_speaker;
   pipeline_opts.serial_pipeline = options.serial_pipeline;
+  pipeline_opts.reset_staging_before_stages = true;
   pipeline_opts.progress_sink = sink;
 
   BuildPipeline pipeline;
   auto pipeline_result = pipeline.run(pipeline_opts);
+
+  if (pipeline_result.failure == BuildPipelineFailure::model_cache_preflight) {
+    result.error_message = pipeline_result.error_message;
+    return result;
+  }
+
+  auto binding_doc = create_binding();
+  result.blake3_state = svp::package::to_string(
+      binding_doc.bindings[0].identity.blake3_state);
 
   if (std::filesystem::exists(temp_svp_path)) {
     std::filesystem::remove(temp_svp_path);

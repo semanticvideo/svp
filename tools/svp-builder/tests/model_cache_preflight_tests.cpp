@@ -1,17 +1,21 @@
 #include "svp/builder/build_pipeline.hpp"
+#include "svp/builder/interlace.hpp"
 #include "svp/builder/model_cache_preflight.hpp"
 #include "model_cache_test_fixture.hpp"
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -31,6 +35,27 @@ struct TemporaryDirectory {
   ~TemporaryDirectory() {
     std::error_code error;
     fs::remove_all(path, error);
+  }
+};
+
+struct ScopedEnvironmentVariable {
+  std::string name;
+  std::optional<std::string> previous;
+
+  ScopedEnvironmentVariable(std::string variable_name, const fs::path& value)
+      : name(std::move(variable_name)) {
+    if (const char* existing = std::getenv(name.c_str()); existing != nullptr) {
+      previous = existing;
+    }
+    setenv(name.c_str(), value.string().c_str(), 1);
+  }
+
+  ~ScopedEnvironmentVariable() {
+    if (previous.has_value()) {
+      setenv(name.c_str(), previous->c_str(), 1);
+    } else {
+      unsetenv(name.c_str());
+    }
   }
 };
 
@@ -236,9 +261,16 @@ void test_failure_precedes_media_probe_and_ffprobe() {
   std::cerr.rdbuf(previous);
 
   expect(result.exit_code != 0, "invalid cache did not stop the build");
+  expect(result.failure ==
+             svp::builder::BuildPipelineFailure::model_cache_preflight,
+         "pipeline did not classify the model-cache preflight failure");
   expect(sink->events.empty(),
          "media-processing progress was emitted before preflight failure");
   expect(!fs::exists(marker), "ffprobe ran before preflight failure");
+  expect(!fs::exists(options.output_path),
+         "preflight failure left an output artifact");
+  expect(!fs::exists(options.staging_dir),
+         "preflight failure left a staging artifact");
   expect(captured_stderr.str().find("bundle BLAKE3 mismatch") !=
              std::string::npos,
          "pipeline failure omitted verifier diagnostics");
@@ -246,6 +278,8 @@ void test_failure_precedes_media_probe_and_ffprobe() {
 
 void test_successful_preflight_continues_existing_build_path() {
   TemporaryDirectory temporary;
+  ScopedEnvironmentVariable default_cache(
+      "SVP_MODEL_CACHE_DIR", temporary.path / "missing-default-cache");
   const fs::path cache_root =
       svp::builder::test::write_valid_model_cache(temporary.path / "cache");
   const fs::path probe_path = temporary.path / "probe.json";
@@ -270,6 +304,75 @@ void test_successful_preflight_continues_existing_build_path() {
              sink->events.front().stage_id ==
                  svp::builder::ProgressStageId::media_probe,
          "successful preflight did not continue at media probing");
+}
+
+void test_default_cache_path_is_used() {
+  TemporaryDirectory temporary;
+  const fs::path cache_root =
+      svp::builder::test::write_valid_model_cache(temporary.path / "cache");
+  ScopedEnvironmentVariable default_cache("SVP_MODEL_CACHE_DIR", cache_root);
+  const fs::path probe_path = temporary.path / "probe.json";
+  write_probe_json(probe_path);
+
+  auto sink = std::make_shared<CapturingProgressSink>();
+  svp::builder::BuildPipelineOptions options;
+  options.source_path = (temporary.path / "source.mp4").string();
+  options.probe_json_path = probe_path.string();
+  options.ffmpeg_path = "/usr/bin/false";
+  options.output_path = temporary.path / "output.json";
+  options.staging_dir = temporary.path / "staging";
+  options.stop_after = svp::builder::BuildStage::audio;
+  options.progress_sink = sink;
+
+  static_cast<void>(svp::builder::BuildPipeline{}.run(options));
+  expect(!sink->events.empty() &&
+             sink->events.front().stage_id ==
+                 svp::builder::ProgressStageId::media_probe,
+         "default model-cache path did not pass preflight");
+}
+
+void test_interlace_preflight_failure_has_no_fallback_or_media_work() {
+  TemporaryDirectory temporary;
+  const fs::path cache_root = temporary.path / "cache";
+  svp::builder::test::write_valid_model_cache(cache_root);
+  svp::builder::test::write_text(cache_root / "bundle" / "model.onnx",
+                                 "changed model bytes\n");
+
+  const fs::path source = temporary.path / "source.mp4";
+  svp::builder::test::write_text(source, "synthetic media bytes\n");
+  const fs::path marker = temporary.path / "ffprobe-called";
+  const fs::path ffprobe = temporary.path / "ffprobe-marker.sh";
+  svp::builder::test::write_text(
+      ffprobe, "#!/bin/sh\n: > \"" + marker.string() + "\"\nexit 1\n");
+  fs::permissions(ffprobe, fs::perms::owner_read | fs::perms::owner_write |
+                               fs::perms::owner_exec);
+
+  auto sink = std::make_shared<CapturingProgressSink>();
+  svp::builder::InterlaceCreateOptions options;
+  options.source_path = source.string();
+  options.output_path = (temporary.path / "output.svpi").string();
+  options.staging_dir = (temporary.path / "staging").string();
+  options.model_cache_dir = cache_root.string();
+  options.ffprobe_path = ffprobe.string();
+  options.progress_sink = sink;
+
+  std::ostringstream captured_stderr;
+  std::streambuf* previous = std::cerr.rdbuf(captured_stderr.rdbuf());
+  const svp::builder::InterlaceCreateResult result =
+      svp::builder::interlace_create(options);
+  std::cerr.rdbuf(previous);
+
+  expect(!result.success, "invalid cache silently fell back to a core-only SVPI");
+  expect(result.error_message.find("authoritative model-cache verification failed") !=
+             std::string::npos,
+         "SVPI failure omitted the authoritative preflight diagnostic");
+  expect(!fs::exists(marker), "SVPI media binding ran before preflight failure");
+  expect(!fs::exists(options.output_path),
+         "SVPI preflight failure left an output artifact");
+  expect(!fs::exists(options.staging_dir),
+         "SVPI preflight failure left a staging artifact");
+  expect(sink->events.empty(),
+         "SVPI preflight failure emitted media-processing progress");
 }
 
 void test_non_model_build_remains_cache_independent() {
@@ -307,6 +410,8 @@ int main(int argc, char* argv[]) {
   test_execution_plan_model_backed_boundary();
   test_failure_precedes_media_probe_and_ffprobe();
   test_successful_preflight_continues_existing_build_path();
+  test_default_cache_path_is_used();
+  test_interlace_preflight_failure_has_no_fallback_or_media_work();
   test_non_model_build_remains_cache_independent();
   std::cout << "svp-builder model cache preflight tests: PASS\n";
   return 0;
