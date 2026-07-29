@@ -183,7 +183,7 @@ the generated package is inspectable and the validator passes.
 
 ## Requirements
 
-The core C++ project expects:
+Normal builds and CLI operation expect:
 
 - Git, CMake 3.24 or newer, and a C++20-capable compiler.
 - vcpkg bootstrapped from its upstream repository.
@@ -193,13 +193,14 @@ The core C++ project expects:
 - A local SVP model cache for full media builds.
 - Optional sherpa-onnx C API dynamic library for real diarization.
 
-Common local tool paths on the primary development machine:
+FFmpeg and ffprobe are resolved from `PATH` by default. Homebrew installations
+under `/opt/homebrew/bin` are common Apple Silicon macOS examples, not required
+locations. Use the CLI executable-path options when the tools are elsewhere.
 
-```text
-/opt/homebrew/bin/ffmpeg
-/opt/homebrew/bin/ffprobe
-/Users/domesposito/Projects/svp-model-cache
-```
+Repository fixtures, personal sample media, and OCR comparison tools are
+development-only inputs. They are not required for normal validation,
+inspection, or queries, and full builds operate on media and model-cache paths
+provided by the user.
 
 Normal `svp build` operation must not require Python. Python-installed
 sherpa-onnx may provide a dynamic library, but the builder should load the C API
@@ -372,14 +373,15 @@ weights, and `svp build` never downloads or updates models.
 Example using a local sample and model cache:
 
 ```bash
+export SVP_VIDEO_PATH=/path/to/video.mov
+export SVP_MODEL_CACHE=/path/to/models
+
 mkdir -p build/local-intro
 
 ./build/tools/svp-builder/svp-builder build \
-  /Users/domesposito/Projects/samples/intro.mp4 \
+  "$SVP_VIDEO_PATH" \
   --out build/local-intro/intro.svp \
-  --model-cache /Users/domesposito/Projects/svp-model-cache \
-  --ffmpeg /opt/homebrew/bin/ffmpeg \
-  --ffprobe /opt/homebrew/bin/ffprobe
+  --model-cache "$SVP_MODEL_CACHE"
 ```
 
 If sherpa-onnx is installed in a nonstandard location, pass the C API library
@@ -389,7 +391,7 @@ explicitly:
 ./build/tools/svp-builder/svp-builder build \
   /path/to/video.mov \
   --out build/local-video/video.svp \
-  --model-cache /Users/domesposito/Projects/svp-model-cache \
+  --model-cache /path/to/models \
   --sherpa-lib /path/to/libsherpa-onnx-c-api.dylib
 ```
 
@@ -412,9 +414,7 @@ Create a semantic `.svpi` sidecar from source media:
 ./build/tools/svp-builder/svp-builder interlace create \
   /path/to/video.mov \
   --out /path/to/video.svpi \
-  --model-cache /Users/domesposito/Projects/svp-model-cache \
-  --ffmpeg /opt/homebrew/bin/ffmpeg \
-  --ffprobe /opt/homebrew/bin/ffprobe \
+  --model-cache /path/to/models \
   --sherpa-lib /path/to/libsherpa-onnx-c-api.dylib
 ```
 
@@ -597,11 +597,8 @@ the validator passes.
 
 ## Related Repositories
 
-The companion macOS support repository lives at:
-
-```text
-/Users/domesposito/Projects/svp-system-support
-```
+The companion macOS support repository is
+[`semanticvideo/svp-macos`](https://github.com/semanticvideo/svp-macos).
 
 That project registers `.svp` with macOS, provides Quick Look previews, and
 exposes package media through a MediaExtension reader. This repository remains
