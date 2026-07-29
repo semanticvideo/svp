@@ -1,0 +1,117 @@
+set(manifest_path "@CMAKE_BINARY_DIR@/install_manifest.txt")
+set(install_destdir "$ENV{DESTDIR}")
+
+if(NOT install_destdir STREQUAL "")
+  cmake_path(IS_ABSOLUTE install_destdir destdir_is_absolute)
+  if(NOT destdir_is_absolute)
+    message(FATAL_ERROR "Refusing non-absolute DESTDIR: ${install_destdir}")
+  endif()
+  cmake_path(NORMAL_PATH install_destdir)
+endif()
+
+if(NOT EXISTS "${manifest_path}")
+  message(FATAL_ERROR
+    "Cannot uninstall: install manifest does not exist: ${manifest_path}\n"
+    "Run cmake --install for this build directory before uninstalling."
+  )
+endif()
+
+file(STRINGS "${manifest_path}" manifest_entries)
+if(NOT manifest_entries)
+  message(FATAL_ERROR "Cannot uninstall: install manifest is empty: ${manifest_path}")
+endif()
+
+set(svp_resource_directories)
+set(svp_data_directories)
+
+foreach(manifest_entry IN LISTS manifest_entries)
+  cmake_path(IS_ABSOLUTE manifest_entry manifest_entry_is_absolute)
+  if(NOT manifest_entry_is_absolute OR manifest_entry STREQUAL "/")
+    message(FATAL_ERROR
+      "Refusing unsafe install-manifest entry: '${manifest_entry}'"
+    )
+  endif()
+  cmake_path(NORMAL_PATH manifest_entry)
+
+  cmake_path(GET manifest_entry PARENT_PATH manifest_parent)
+  cmake_path(GET manifest_parent FILENAME manifest_parent_name)
+  if(manifest_parent_name STREQUAL "registries" OR
+     manifest_parent_name STREQUAL "schemas")
+    cmake_path(GET manifest_parent PARENT_PATH manifest_svp_directory)
+    cmake_path(GET manifest_svp_directory FILENAME manifest_svp_name)
+    if(manifest_svp_name STREQUAL "svp")
+      list(APPEND svp_resource_directories
+        "${install_destdir}${manifest_parent}"
+      )
+      list(APPEND svp_data_directories
+        "${install_destdir}${manifest_svp_directory}"
+      )
+    endif()
+  endif()
+
+  set(installed_path "${install_destdir}${manifest_entry}")
+  if(IS_DIRECTORY "${installed_path}" AND NOT IS_SYMLINK "${installed_path}")
+    message(FATAL_ERROR
+      "Refusing to remove manifest-listed directory: ${installed_path}"
+    )
+  endif()
+
+  if(EXISTS "${installed_path}" OR IS_SYMLINK "${installed_path}")
+    message(STATUS "Removing ${installed_path}")
+    execute_process(
+      COMMAND "@CMAKE_COMMAND@" -E rm -f -- "${installed_path}"
+      RESULT_VARIABLE remove_result
+      ERROR_VARIABLE remove_error
+    )
+    if(NOT remove_result EQUAL 0 OR
+       EXISTS "${installed_path}" OR IS_SYMLINK "${installed_path}")
+      string(STRIP "${remove_error}" remove_error)
+      message(FATAL_ERROR
+        "Failed to remove manifest-listed file: ${installed_path}\n${remove_error}"
+      )
+    endif()
+  else()
+    message(STATUS "Already absent: ${installed_path}")
+  endif()
+endforeach()
+
+list(REMOVE_DUPLICATES svp_resource_directories)
+list(REMOVE_DUPLICATES svp_data_directories)
+
+function(remove_empty_svp_directory directory)
+  if(IS_SYMLINK "${directory}")
+    message(STATUS "Preserving SVP directory symlink: ${directory}")
+    return()
+  endif()
+  if(NOT IS_DIRECTORY "${directory}")
+    message(STATUS "SVP directory already absent: ${directory}")
+    return()
+  endif()
+
+  execute_process(
+    COMMAND "@SVP_RMDIR_EXECUTABLE@" "${directory}"
+    RESULT_VARIABLE remove_directory_result
+    ERROR_VARIABLE remove_directory_error
+  )
+  if(remove_directory_result EQUAL 0 AND NOT EXISTS "${directory}")
+    message(STATUS "Removed empty SVP directory: ${directory}")
+    return()
+  endif()
+  if(IS_DIRECTORY "${directory}")
+    string(STRIP "${remove_directory_error}" remove_directory_error)
+    message(STATUS
+      "Preserving SVP directory that could not be removed as empty: "
+      "${directory} (${remove_directory_error})"
+    )
+    return()
+  endif()
+  message(FATAL_ERROR "SVP directory removal failed unexpectedly: ${directory}")
+endfunction()
+
+foreach(resource_directory IN LISTS svp_resource_directories)
+  remove_empty_svp_directory("${resource_directory}")
+endforeach()
+
+foreach(data_directory IN LISTS svp_data_directories)
+  remove_empty_svp_directory("${data_directory}")
+endforeach()

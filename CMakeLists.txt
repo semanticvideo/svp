@@ -33,3 +33,18 @@ add_subdirectory(tools/svp-validator)
 add_subdirectory(tools/svp-inspector)
 add_subdirectory(tools/svp-builder)
 add_subdirectory(tools/svp-models-tool)
+
+include(cmake/SvpInstall.cmake)
+
+if(BUILD_TESTING)
+  configure_file(
+    "${CMAKE_SOURCE_DIR}/cmake/SvpInstallVerification.cmake.in"
+    "${CMAKE_BINARY_DIR}/cmake/SvpInstallVerification.cmake"
+    @ONLY
+  )
+  add_test(NAME svp-cli-install-uninstall-tests
+    COMMAND "${CMAKE_COMMAND}"
+            -P "${CMAKE_BINARY_DIR}/cmake/SvpInstallVerification.cmake"
+  )
+  set_tests_properties(svp-cli-install-uninstall-tests PROPERTIES RUN_SERIAL TRUE)
+endif()
