@@ -184,7 +184,8 @@ the generated package is inspectable and the validator passes.
 
 The core C++ project expects:
 
-- CMake and a C++20-capable compiler.
+- Git, CMake 3.24 or newer, and a C++20-capable compiler.
+- vcpkg bootstrapped from its upstream repository.
 - FFmpeg and ffprobe for media probing/extraction.
 - whisper.cpp for local ASR with word-level timestamps.
 - ONNX Runtime for OCR, depth, and embedding model paths.
@@ -205,32 +206,56 @@ library directly rather than shelling out to Python.
 
 ## Build
 
-Configure and build:
+The supported clean-clone path uses vcpkg manifest mode and the checked-in
+`CMakePresets.json`. Start with Xcode Command Line Tools and CMake 3.24 or newer
+installed, then clone and bootstrap vcpkg:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --parallel
+git clone https://github.com/microsoft/vcpkg.git "$HOME/.local/share/vcpkg"
+"$HOME/.local/share/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+export VCPKG_ROOT="$HOME/.local/share/vcpkg"
 ```
 
-Build focused tools:
+`vcpkg.json` is the dependency source of truth. Its `builtin-baseline` pins the
+port versions used by manifest mode, so no dependency versions need to be
+selected manually.
+
+From a clean SVP clone, configure and build Debug:
 
 ```bash
-cmake --build build --target svp-builder
-cmake --build build --target svp-validator
-cmake --build build --target svp-inspector
+git clone https://github.com/semanticvideo/svp.git
+cd svp
+cmake --preset macos-arm64-debug
+cmake --build --preset macos-arm64-debug --parallel
 ```
 
-Run tests:
+The first configure installs the manifest dependencies under that preset's
+build directory. It does not depend on a previously configured SVP build tree.
+
+Run the complete test suite and required spec-file check:
 
 ```bash
-ctest --test-dir build --output-on-failure
-```
-
-Verify required spec files:
-
-```bash
+ctest --preset macos-arm64-debug
 scripts/verify-spec-files.sh
 ```
+
+Configure and build Release independently:
+
+```bash
+cmake --preset macos-arm64-release
+cmake --build --preset macos-arm64-release --parallel
+```
+
+The preset names and their separate build directories can be inspected with:
+
+```bash
+cmake --list-presets
+```
+
+If `VCPKG_ROOT` is not exported or does not point to a bootstrapped vcpkg
+checkout, configuration stops because the preset's toolchain file cannot be
+loaded. Re-export the variable instead of substituting a machine-specific
+absolute path.
 
 ## Install the CLI tools
 

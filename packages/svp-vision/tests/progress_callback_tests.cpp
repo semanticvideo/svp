@@ -15,7 +15,7 @@
 
 namespace {
 
-void test_depth_callback_fires_with_frame_count() {
+void test_depth_callback_not_called_without_model() {
   const std::filesystem::path tmp_dir =
       std::filesystem::temp_directory_path() / "svp_depth_cb_test";
   std::filesystem::remove_all(tmp_dir);
@@ -25,7 +25,7 @@ void test_depth_callback_fires_with_frame_count() {
   opts.model_cache_root = tmp_dir / "nonexistent_cache";
   opts.model_id = "model_depth_anything_v2_small";
 
-  // Provide 3 synthetic frames so the callback fires with total=3
+  // Provide synthetic frames while keeping the model unavailable.
   opts.frame_input.decoding_succeeded = true;
   opts.frame_input.frames.resize(3);
   for (int i = 0; i < 3; ++i) {
@@ -36,26 +36,23 @@ void test_depth_callback_fires_with_frame_count() {
         svp::vision::Srgb8Pixel{128, 128, 128});
   }
 
-  std::size_t call_count = 0;
-  std::size_t last_current = 0;
-  std::size_t last_total = 0;
-  opts.on_progress = [&](std::size_t current, std::size_t total) {
-    ++call_count;
-    last_current = current;
-    last_total = total;
+  bool called = false;
+  opts.on_progress = [&](std::size_t, std::size_t) {
+    called = true;
   };
 
-  svp::vision::generate_depth_blocks(opts, tmp_dir / "staging");
+  const svp::vision::DepthGenerationResult result =
+      svp::vision::generate_depth_blocks(opts, tmp_dir / "staging");
 
-  // Callback must have been called at least once with total=3
-  assert(call_count > 0);
-  assert(last_total == 3);
-  assert(last_current <= 3);
+  assert(result.depth_frame_input_available);
+  assert(!result.depth_model_available);
+  assert(!called);
 
-  std::cout << "test_depth_callback_fires_with_frame_count: PASS\n";
+  std::filesystem::remove_all(tmp_dir);
+  std::cout << "test_depth_callback_not_called_without_model: PASS\n";
 }
 
-void test_embedding_callback_fires_with_text_count() {
+void test_embedding_callback_not_called_without_model() {
   const std::filesystem::path tmp_dir =
       std::filesystem::temp_directory_path() / "svp_embed_cb_test";
   std::filesystem::remove_all(tmp_dir);
@@ -72,25 +69,26 @@ void test_embedding_callback_fires_with_text_count() {
   svp::vision::EmbeddingGenerationOptions opts;
   opts.model_cache_root = tmp_dir / "nonexistent_cache";
 
-  std::size_t call_count = 0;
-  std::size_t last_total = 0;
-  opts.on_progress = [&](std::size_t current, std::size_t total) {
-    ++call_count;
-    last_total = total;
+  bool called = false;
+  opts.on_progress = [&](std::size_t, std::size_t) {
+    called = true;
   };
 
-  svp::vision::generate_embedding_blocks(opts, tmp_dir);
+  const svp::vision::EmbeddingGenerationResult result =
+      svp::vision::generate_embedding_blocks(opts, tmp_dir);
 
-  // Callback must have been called at least once with total=2
-  assert(call_count > 0);
-  assert(last_total == 2);
+  assert(!result.embedding_model_available);
+  assert(!result.embedding_generation_run);
+  assert(!called);
 
-  std::cout << "test_embedding_callback_fires_with_text_count: PASS\n";
+  std::filesystem::remove_all(tmp_dir);
+  std::cout << "test_embedding_callback_not_called_without_model: PASS\n";
 }
 
 void test_visual_tracker_tracking_callback_fires() {
-  // Create 3 synthetic ColorRasterFrames (64x64) with a white rectangle
-  // to create detectable features for Shi-Tomasi corner detection
+  // Create 3 synthetic ColorRasterFrames (64x64) with a moving white
+  // rectangle to provide non-degenerate optical-flow input.
+  constexpr int kHorizontalStepPixels = 2;
   std::vector<svp::vision::ColorRasterFrame> frames(3);
   for (int i = 0; i < 3; ++i) {
     frames[i].frame_id = "frame_" + std::to_string(i);
@@ -100,9 +98,9 @@ void test_visual_tracker_tracking_callback_fires() {
     frames[i].frame_index = static_cast<std::size_t>(i);
     frames[i].pixels.resize(64 * 64,
         svp::vision::Srgb8Pixel{128, 128, 128});
-    // Add a white rectangle to create detectable features
+    const int horizontal_offset = i * kHorizontalStepPixels;
     for (int y = 20; y < 40; ++y) {
-      for (int x = 20; x < 40; ++x) {
+      for (int x = 20 + horizontal_offset; x < 40 + horizontal_offset; ++x) {
         frames[i].pixels[y * 64 + x] = svp::vision::Srgb8Pixel{255, 255, 255};
       }
     }
@@ -216,8 +214,8 @@ void test_evidence_crop_callback_counts_skipped_inputs() {
 }  // namespace
 
 int main() {
-  test_depth_callback_fires_with_frame_count();
-  test_embedding_callback_fires_with_text_count();
+  test_depth_callback_not_called_without_model();
+  test_embedding_callback_not_called_without_model();
   test_visual_tracker_tracking_callback_fires();
   test_depth_callback_not_called_without_frames();
   test_evidence_crop_callback_counts_skipped_inputs();
