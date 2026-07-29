@@ -232,6 +232,47 @@ Verify required spec files:
 scripts/verify-spec-files.sh
 ```
 
+## Install the CLI tools
+
+Configure a Release build for a non-privileged prefix, build it, and install the
+four public tools with:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$HOME/.local"
+cmake --build build --parallel
+cmake --install build
+export PATH="$HOME/.local/bin:$PATH"
+
+svp-builder --version
+svp-validator --version
+svp-inspector --version
+svp-models-tool --help
+```
+
+This installs the commands beneath `<prefix>/bin` and the runtime registries
+and schemas beneath `<prefix>/share/svp/registries` and
+`<prefix>/share/svp/schemas`. The resource layout is executable-relative, so
+the installed tools do not need the source checkout or build directory.
+
+The configured prefix can be replaced for an individual install:
+
+```bash
+cmake --install build --prefix /path/to/prefix
+```
+
+Uninstall the files recorded by the most recent install from that build
+directory with:
+
+```bash
+cmake --build build --target uninstall
+```
+
+Uninstallation does not remove downloaded models or any other user data. This
+is a CMake installation path, not package-manager integration. Complete
+clean-clone and vcpkg bootstrap documentation is tracked separately in issue
+#121.
+
 ## Install the reference models
 
 On Apple Silicon macOS, install the exact eight-model set used by the SVP

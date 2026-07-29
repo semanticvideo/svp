@@ -1,0 +1,336 @@
+set(build_directory "@CMAKE_BINARY_DIR@")
+set(source_directory "@CMAKE_SOURCE_DIR@")
+set(binary_directory_name "@CMAKE_INSTALL_BINDIR@")
+set(data_directory_name "@CMAKE_INSTALL_DATADIR@")
+set(executable_suffix "@CMAKE_EXECUTABLE_SUFFIX@")
+set(is_macos "@APPLE@")
+set(expected_registry_files "@SVP_INSTALL_REGISTRY_RELATIVE_FILES@")
+set(expected_schema_files "@SVP_INSTALL_SCHEMA_RELATIVE_FILES@")
+
+string(RANDOM LENGTH 16 ALPHABET 0123456789abcdef temporary_token)
+set(temporary_root "/tmp/svp-cli-install-uninstall-${temporary_token}")
+set(install_prefix "${temporary_root}/prefix")
+set(unrelated_directory "${temporary_root}/unrelated-cwd")
+set(model_cache_directory "${temporary_root}/model-cache")
+set(model_cache_sentinel "${model_cache_directory}/do-not-touch.txt")
+
+function(fail_verification)
+  string(JOIN "" failure_message ${ARGV})
+  if(temporary_root MATCHES "^/tmp/svp-cli-install-uninstall-[0-9a-f]+$" AND
+     EXISTS "${temporary_root}")
+    file(REMOVE_RECURSE "${temporary_root}")
+  endif()
+  message(FATAL_ERROR "${failure_message}")
+endfunction()
+
+function(run_checked description)
+  execute_process(
+    ${ARGN}
+    RESULT_VARIABLE command_result
+    OUTPUT_VARIABLE command_output
+    ERROR_VARIABLE command_error
+  )
+  if(NOT command_result EQUAL 0)
+    fail_verification(
+      "${description} failed with exit code ${command_result}\n"
+      "stdout:\n${command_output}\n"
+      "stderr:\n${command_error}"
+    )
+  endif()
+endfunction()
+
+function(assert_exists path description)
+  if(NOT EXISTS "${path}")
+    fail_verification("Missing ${description}: ${path}")
+  endif()
+endfunction()
+
+function(assert_absent path description)
+  if(EXISTS "${path}" OR IS_SYMLINK "${path}")
+    fail_verification("${description} was not removed: ${path}")
+  endif()
+endfunction()
+
+function(assert_file_content path expected_content description)
+  assert_exists("${path}" "${description}")
+  file(READ "${path}" actual_content)
+  if(NOT actual_content STREQUAL expected_content)
+    fail_verification("${description} changed unexpectedly: ${path}")
+  endif()
+endfunction()
+
+function(assert_inventory source_root installed_root expected_files label)
+  if(NOT IS_DIRECTORY "${installed_root}")
+    fail_verification("Installed ${label} directory is missing: ${installed_root}")
+  endif()
+
+  set(expected_list "${expected_files}")
+  file(GLOB_RECURSE source_list
+    LIST_DIRECTORIES false
+    RELATIVE "${source_root}"
+    "${source_root}/*.json"
+  )
+  file(GLOB_RECURSE actual_list
+    LIST_DIRECTORIES false
+    RELATIVE "${installed_root}"
+    "${installed_root}/*"
+  )
+  list(SORT expected_list)
+  list(SORT source_list)
+  list(SORT actual_list)
+  if(NOT source_list STREQUAL expected_list)
+    fail_verification(
+      "Configured ${label} inventory does not match the source tree\n"
+      "configured: ${expected_list}\nsource: ${source_list}"
+    )
+  endif()
+  if(NOT actual_list STREQUAL expected_list)
+    fail_verification(
+      "Installed ${label} inventory mismatch\n"
+      "expected: ${expected_list}\nactual: ${actual_list}"
+    )
+  endif()
+
+  foreach(relative_path IN LISTS expected_list)
+    set(source_file "${source_root}/${relative_path}")
+    set(installed_file "${installed_root}/${relative_path}")
+    assert_exists("${source_file}" "source ${label} file")
+    assert_exists("${installed_file}" "installed ${label} file")
+    execute_process(
+      COMMAND "@CMAKE_COMMAND@" -E compare_files
+              "${source_file}" "${installed_file}"
+      RESULT_VARIABLE compare_result
+    )
+    if(NOT compare_result EQUAL 0)
+      fail_verification(
+        "Installed ${label} file differs from its source: ${relative_path}"
+      )
+    endif()
+  endforeach()
+endfunction()
+
+function(assert_model_cache_untouched)
+  assert_file_content(
+    "${model_cache_sentinel}" "model-cache-sentinel\n" "model cache sentinel"
+  )
+endfunction()
+
+function(run_installed_tool executable argument label)
+  execute_process(
+    COMMAND "${executable}" "${argument}"
+    WORKING_DIRECTORY "${unrelated_directory}"
+    RESULT_VARIABLE tool_result
+    OUTPUT_VARIABLE tool_output
+    ERROR_VARIABLE tool_error
+  )
+  if(NOT tool_result EQUAL 0)
+    fail_verification(
+      "Installed ${label} ${argument} failed with exit code ${tool_result}\n"
+      "stdout:\n${tool_output}\nstderr:\n${tool_error}"
+    )
+  endif()
+endfunction()
+
+function(assert_installed_executables)
+  foreach(tool IN ITEMS svp-builder svp-validator svp-inspector svp-models-tool)
+    set(executable
+      "${install_prefix}/${binary_directory_name}/${tool}${executable_suffix}"
+    )
+    assert_exists("${executable}" "installed ${tool} executable")
+    execute_process(COMMAND /bin/test -x "${executable}"
+                    RESULT_VARIABLE executable_result)
+    if(NOT executable_result EQUAL 0)
+      fail_verification("Installed tool is not executable: ${executable}")
+    endif()
+  endforeach()
+endfunction()
+
+function(assert_no_installed_executables)
+  foreach(tool IN ITEMS svp-builder svp-validator svp-inspector svp-models-tool)
+    assert_absent(
+      "${install_prefix}/${binary_directory_name}/${tool}${executable_suffix}"
+      "installed ${tool} executable"
+    )
+  endforeach()
+endfunction()
+
+function(install_cli)
+  run_checked("isolated-prefix install"
+    COMMAND "@CMAKE_COMMAND@" --install "${build_directory}"
+            --prefix "${install_prefix}"
+  )
+endfunction()
+
+function(run_uninstall output_variable)
+  execute_process(
+    COMMAND "@CMAKE_COMMAND@" --build "${build_directory}" --target uninstall
+    RESULT_VARIABLE uninstall_result
+    OUTPUT_VARIABLE uninstall_output
+    ERROR_VARIABLE uninstall_error
+  )
+  if(NOT uninstall_result EQUAL 0)
+    fail_verification(
+      "uninstall target failed with exit code ${uninstall_result}\n"
+      "stdout:\n${uninstall_output}\nstderr:\n${uninstall_error}"
+    )
+  endif()
+  set("${output_variable}" "${uninstall_output}\n${uninstall_error}" PARENT_SCOPE)
+endfunction()
+
+if(EXISTS "${temporary_root}")
+  fail_verification("Refusing to reuse temporary directory: ${temporary_root}")
+endif()
+file(MAKE_DIRECTORY
+  "${install_prefix}"
+  "${unrelated_directory}"
+  "${model_cache_directory}"
+)
+file(WRITE "${model_cache_sentinel}" "model-cache-sentinel\n")
+set(ENV{SVP_MODEL_CACHE_DIR} "${model_cache_directory}")
+
+install_cli()
+assert_installed_executables()
+assert_inventory(
+  "${source_directory}/spec/registries"
+  "${install_prefix}/${data_directory_name}/svp/registries"
+  "${expected_registry_files}"
+  "registry"
+)
+assert_inventory(
+  "${source_directory}/spec/schemas"
+  "${install_prefix}/${data_directory_name}/svp/schemas"
+  "${expected_schema_files}"
+  "schema"
+)
+
+set(builder "${install_prefix}/${binary_directory_name}/svp-builder${executable_suffix}")
+set(validator "${install_prefix}/${binary_directory_name}/svp-validator${executable_suffix}")
+set(inspector "${install_prefix}/${binary_directory_name}/svp-inspector${executable_suffix}")
+set(models_tool "${install_prefix}/${binary_directory_name}/svp-models-tool${executable_suffix}")
+run_installed_tool("${builder}" "--version" "svp-builder")
+run_installed_tool("${validator}" "--version" "svp-validator")
+run_installed_tool("${inspector}" "--version" "svp-inspector")
+run_installed_tool("${models_tool}" "--help" "svp-models-tool")
+
+set(fixture
+  "${source_directory}/fixtures/phase-04-ocr-color/valid/dashboard_number.svp"
+)
+execute_process(
+  COMMAND "${validator}" validate "${fixture}" --json
+  WORKING_DIRECTORY "${unrelated_directory}"
+  RESULT_VARIABLE validator_result
+  OUTPUT_VARIABLE validator_output
+  ERROR_VARIABLE validator_error
+)
+if(NOT validator_result EQUAL 0 AND NOT validator_result EQUAL 1)
+  fail_verification(
+    "Installed validator resource-discovery run returned ${validator_result}\n"
+    "stdout:\n${validator_output}\nstderr:\n${validator_error}"
+  )
+endif()
+if(NOT validator_output MATCHES "\"status\"[ \t]*:")
+  fail_verification(
+    "Installed validator did not emit a validation report proving resources loaded"
+  )
+endif()
+if(validator_output MATCHES
+   "X_VALIDATOR_(REGISTRY|SCHEMA)_(UNREADABLE|INVALID)")
+  fail_verification(
+    "Installed validator reported a registry/schema discovery failure:\n"
+    "${validator_output}"
+  )
+endif()
+
+if(is_macos)
+  foreach(executable IN ITEMS "${builder}" "${validator}" "${inspector}" "${models_tool}")
+    execute_process(
+      COMMAND /usr/bin/otool -L "${executable}"
+      RESULT_VARIABLE otool_result
+      OUTPUT_VARIABLE otool_output
+      ERROR_VARIABLE otool_error
+    )
+    if(NOT otool_result EQUAL 0)
+      fail_verification("otool failed for ${executable}: ${otool_error}")
+    endif()
+    string(FIND "${otool_output}" "${source_directory}" source_path_index)
+    string(FIND "${otool_output}" "${build_directory}" build_path_index)
+    if(NOT source_path_index EQUAL -1 OR NOT build_path_index EQUAL -1)
+      fail_verification(
+        "Installed executable has a source/build dependency path:\n${otool_output}"
+      )
+    endif()
+  endforeach()
+endif()
+
+set(manifest_path "${build_directory}/install_manifest.txt")
+assert_exists("${manifest_path}" "install manifest")
+file(STRINGS "${manifest_path}" manifest_entries)
+list(LENGTH manifest_entries manifest_entry_count)
+list(LENGTH expected_registry_files registry_count)
+list(LENGTH expected_schema_files schema_count)
+math(EXPR expected_manifest_count "4 + ${registry_count} + ${schema_count}")
+if(NOT manifest_entry_count EQUAL expected_manifest_count)
+  fail_verification(
+    "Install manifest entry count mismatch: expected ${expected_manifest_count}, "
+    "found ${manifest_entry_count}"
+  )
+endif()
+
+set(bin_sentinel "${install_prefix}/${binary_directory_name}/unrelated-tool")
+set(data_sentinel
+  "${install_prefix}/${data_directory_name}/svp/unrelated-user-file.txt"
+)
+file(WRITE "${bin_sentinel}" "unrelated-tool-sentinel\n")
+file(WRITE "${data_sentinel}" "unrelated-user-file-sentinel\n")
+
+run_uninstall(first_uninstall_output)
+assert_no_installed_executables()
+foreach(manifest_entry IN LISTS manifest_entries)
+  assert_absent("${manifest_entry}" "manifest-listed file")
+endforeach()
+assert_file_content(
+  "${bin_sentinel}" "unrelated-tool-sentinel\n" "unrelated bin sentinel"
+)
+assert_file_content(
+  "${data_sentinel}" "unrelated-user-file-sentinel\n" "unrelated SVP sentinel"
+)
+assert_exists("${install_prefix}/${binary_directory_name}" "generic bin directory")
+assert_exists("${install_prefix}/${data_directory_name}" "generic share directory")
+assert_exists(
+  "${install_prefix}/${data_directory_name}/svp" "non-empty SVP data directory"
+)
+assert_model_cache_untouched()
+
+file(REMOVE "${bin_sentinel}" "${data_sentinel}")
+install_cli()
+run_uninstall(second_uninstall_output)
+assert_no_installed_executables()
+assert_absent(
+  "${install_prefix}/${data_directory_name}/svp/registries"
+  "SVP registries directory"
+)
+assert_absent(
+  "${install_prefix}/${data_directory_name}/svp/schemas"
+  "SVP schemas directory"
+)
+assert_absent(
+  "${install_prefix}/${data_directory_name}/svp" "empty SVP data directory"
+)
+assert_exists("${install_prefix}" "generic installation prefix")
+assert_exists("${install_prefix}/${binary_directory_name}" "generic bin directory")
+assert_exists("${install_prefix}/${data_directory_name}" "generic share directory")
+assert_model_cache_untouched()
+
+run_uninstall(third_uninstall_output)
+if(NOT third_uninstall_output MATCHES "Already absent:")
+  fail_verification("Repeated uninstall did not report already-absent files")
+endif()
+assert_no_installed_executables()
+assert_model_cache_untouched()
+
+file(REMOVE_RECURSE "${temporary_root}")
+if(EXISTS "${temporary_root}")
+  message(FATAL_ERROR "Failed to clean temporary verification directory: ${temporary_root}")
+endif()
+
+message(STATUS "SVP isolated-prefix install/run/uninstall verification passed")
