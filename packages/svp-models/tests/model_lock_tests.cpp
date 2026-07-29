@@ -126,6 +126,21 @@ svp::models::ModelLock lock_for_manifest(const nlohmann::json& manifest) {
   return svp::models::parse_model_lock(value, "verification-lock.json");
 }
 
+svp::models::ReferenceModelSet reference_set_for_manifest(
+    const nlohmann::json& manifest) {
+  nlohmann::json value = {
+      {"schema_version", "svp-reference-model-set-1"},
+      {"models", nlohmann::json::array({{
+          {"model_id", manifest["model_id"]},
+          {"model_bundle_id", manifest["model_bundle_id"]},
+          {"bundle_blake3", manifest["bundle_blake3"]},
+          {"required_files", manifest["files"]},
+          {"required_for", nlohmann::json::array({"test"})},
+      }})},
+  };
+  return svp::models::parse_reference_model_set(value, "reference-set.json");
+}
+
 template <typename Function>
 void expect_model_error(Function&& function, std::string_view message) {
   bool rejected = false;
@@ -259,6 +274,23 @@ void test_lock_rejects_duplicate_installed_bundle_identity() {
          "duplicate installed bundle identity was accepted");
 }
 
+void test_locked_reference_set_rejects_extra_locked_model() {
+  TemporaryDirectory temporary;
+  const auto expected = write_valid_bundle(
+      temporary.path / "model_expected", "model_expected", "1.0");
+  const auto extra = write_valid_bundle(
+      temporary.path / "model_extra", "model_extra", "1.0");
+  auto lock = lock_for_manifest(expected);
+  lock.models.push_back(lock_for_manifest(extra).models.front());
+
+  const auto report = svp::models::verify_locked_reference_set_against_cache(
+      lock, reference_set_for_manifest(expected), temporary.path);
+  expect(has_error_containing(report, "unexpected model model_extra"),
+         "extra model in the authoritative lock was accepted");
+  expect(has_error_containing(report, "complete reference set"),
+         "lock and reference-set count disagreement was accepted");
+}
+
 }  // namespace
 
 int main() {
@@ -268,6 +300,7 @@ int main() {
   test_lock_rejects_bundle_identity_disagreement();
   test_lock_rejects_missing_and_unexpected_bundles();
   test_lock_rejects_duplicate_installed_bundle_identity();
+  test_locked_reference_set_rejects_extra_locked_model();
   std::cout << "svp-models model lock tests: PASS\n";
   return 0;
 }

@@ -505,6 +505,24 @@ void test_tty_interleaved_active_rows_include_both_labels() {
   assert(output.find('\n') != std::string::npos);
 }
 
+void test_tty_active_rows_keep_builder_stage_order() {
+  std::ostringstream oss;
+  auto sink = svp::builder::make_progress_sink(
+      svp::builder::ProgressMode::auto_, oss, true);
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::ocr, 6, 10, "frames"));
+  const std::size_t before_second_redraw = oss.str().size();
+  sink->emit(svp::builder::make_stage_progress(
+      svp::builder::ProgressStageId::asr, 4, 10, "chunks"));
+
+  const std::string redraw = oss.str().substr(before_second_redraw);
+  const std::size_t asr = redraw.find("ASR");
+  const std::size_t ocr = redraw.find("OCR");
+  assert(asr != std::string::npos);
+  assert(ocr != std::string::npos);
+  assert(asr < ocr);
+}
+
 void test_scoped_artifact_suppression_modes() {
   const auto event = svp::builder::with_progress_scope(
       svp::builder::make_artifact_written(
@@ -611,6 +629,7 @@ int main() {
   test_plain_scoped_output_includes_scope_label();
   test_json_scoped_output_includes_scope_fields();
   test_tty_interleaved_active_rows_include_both_labels();
+  test_tty_active_rows_keep_builder_stage_order();
   test_scoped_artifact_suppression_modes();
   test_tty_multi_row_wrapped_clear_keeps_active_rows();
   test_tty_completed_row_does_not_duplicate_active_rows();

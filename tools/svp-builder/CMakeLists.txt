@@ -51,6 +51,7 @@ target_compile_features(svp-builder-lib PUBLIC cxx_std_20)
 target_link_libraries(svp-builder-lib
   PUBLIC
     svp::vision
+    svp::progress
   PRIVATE
     nlohmann_json::nlohmann_json
     svp::audio

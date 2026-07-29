@@ -328,4 +328,47 @@ VerificationReport verify_reference_set_against_cache(
   return report;
 }
 
+VerificationReport verify_locked_reference_set_against_cache(
+    const ModelLock& lock,
+    const ReferenceModelSet& model_set,
+    const std::filesystem::path& cache_root) {
+  VerificationReport report = verify_lock_against_cache(lock, cache_root);
+  merge_report(report, verify_reference_set_against_cache(model_set, cache_root));
+
+  std::map<std::string, const ModelLockEntry*> locked_models;
+  for (const ModelLockEntry& entry : lock.models) {
+    locked_models.emplace(entry.model_id, &entry);
+  }
+  std::set<std::string> reference_models;
+  for (const ReferenceModel& model : model_set.models) {
+    reference_models.insert(model.model_id);
+    const auto locked = locked_models.find(model.model_id);
+    if (locked == locked_models.end()) {
+      report.add_error("model-lock.json is missing reference model " +
+                       model.model_id);
+      continue;
+    }
+    if (model.model_bundle_id &&
+        locked->second->model_bundle_id != *model.model_bundle_id) {
+      report.add_error("model-lock.json does not pin the reference bundle for " +
+                       model.model_id);
+    }
+    if (model.bundle_blake3 &&
+        locked->second->bundle_blake3.canonical() != *model.bundle_blake3) {
+      report.add_error("model-lock.json does not pin the reference digest for " +
+                       model.model_id);
+    }
+  }
+  for (const auto& [model_id, entry] : locked_models) {
+    (void)entry;
+    if (!reference_models.contains(model_id)) {
+      report.add_error("model-lock.json contains unexpected model " + model_id);
+    }
+  }
+  if (lock.models.size() != model_set.models.size()) {
+    report.add_error("model-lock.json does not contain the complete reference set");
+  }
+  return report;
+}
+
 }  // namespace svp::models

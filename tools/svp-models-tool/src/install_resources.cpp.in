@@ -1,0 +1,60 @@
+#include "install_resources.hpp"
+
+#include <fstream>
+#include <stdexcept>
+#include <string_view>
+
+namespace svp::models::tool {
+namespace {
+
+void write(const std::filesystem::path& path, std::string_view contents) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream output(path, std::ios::binary);
+  if (!output) {
+    throw std::runtime_error("could not write installer resource: " + path.string());
+  }
+  output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+  if (!output) {
+    throw std::runtime_error("could not finish installer resource: " + path.string());
+  }
+}
+
+constexpr std::string_view kCatalog = R"SVP_RESOURCE(@SVP_INSTALL_CATALOG_JSON@)SVP_RESOURCE";
+constexpr std::string_view kBundleInputs = R"SVP_RESOURCE(@SVP_INSTALL_BUNDLE_INPUTS_JSON@)SVP_RESOURCE";
+constexpr std::string_view kReferenceSet = R"SVP_RESOURCE(@SVP_INSTALL_REFERENCE_SET_JSON@)SVP_RESOURCE";
+constexpr std::string_view kPpocrLock = R"SVP_RESOURCE(@SVP_INSTALL_PPOCR_LOCK@)SVP_RESOURCE";
+constexpr std::string_view kRfdetrLock = R"SVP_RESOURCE(@SVP_INSTALL_RFDETR_LOCK@)SVP_RESOURCE";
+constexpr std::string_view kInit = R"SVP_RESOURCE(@SVP_INSTALL_INIT_PY@)SVP_RESOURCE";
+constexpr std::string_view kProgress = R"SVP_RESOURCE(@SVP_INSTALL_PROGRESS_PY@)SVP_RESOURCE";
+constexpr std::string_view kDownloads = R"SVP_RESOURCE(@SVP_INSTALL_DOWNLOADS_PY@)SVP_RESOURCE";
+constexpr std::string_view kConversion = R"SVP_RESOURCE(@SVP_INSTALL_CONVERSION_PY@)SVP_RESOURCE";
+constexpr std::string_view kWorkflow = R"SVP_RESOURCE(@SVP_INSTALL_WORKFLOW_PY@)SVP_RESOURCE";
+constexpr std::string_view kPrepare = R"SVP_RESOURCE(@SVP_INSTALL_PREPARE_PY@)SVP_RESOURCE";
+
+}  // namespace
+
+InstallResourcePaths write_install_resources(const std::filesystem::path& root) {
+  const auto module = root / "model_installer";
+  write(root / "catalog.json", kCatalog);
+  write(root / "bundle-inputs.json", kBundleInputs);
+  write(root / "reference-model-set.json", kReferenceSet);
+  write(root / "ppocr.lock", kPpocrLock);
+  write(root / "rfdetr.lock", kRfdetrLock);
+  write(module / "__init__.py", kInit);
+  write(module / "progress.py", kProgress);
+  write(module / "downloads.py", kDownloads);
+  write(module / "conversion.py", kConversion);
+  write(module / "workflow.py", kWorkflow);
+  write(root / "prepare-reference-model-bundles.py", kPrepare);
+  return {
+      .catalog = root / "catalog.json",
+      .bundle_inputs = root / "bundle-inputs.json",
+      .reference_set = root / "reference-model-set.json",
+      .ppocr_lock = root / "ppocr.lock",
+      .rfdetr_lock = root / "rfdetr.lock",
+      .prepare_script = root / "prepare-reference-model-bundles.py",
+      .workflow_script = module / "workflow.py",
+  };
+}
+
+}  // namespace svp::models::tool

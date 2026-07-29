@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/builder/build_progress.hpp"
+#include "svp/progress/renderer.hpp"
 
 #include <memory>
 #include <optional>
@@ -9,12 +10,7 @@
 
 namespace svp::builder {
 
-enum class ProgressMode {
-  auto_,
-  plain,
-  json,
-  none,
-};
+using ProgressMode = svp::progress::Mode;
 
 std::optional<ProgressMode> parse_progress_mode(std::string_view value);
 std::string_view progress_mode_name(ProgressMode mode);

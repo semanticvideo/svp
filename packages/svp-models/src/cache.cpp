@@ -47,7 +47,21 @@ std::filesystem::path default_cache_root() {
 }
 
 std::filesystem::path model_cache_root() {
+  if (const char* override_root = std::getenv("SVP_MODEL_CACHE_DIR");
+      override_root != nullptr && override_root[0] != '\0') {
+    return std::filesystem::path(override_root);
+  }
+  if (const char* cache_override = std::getenv("SVP_CACHE_DIR");
+      cache_override != nullptr && cache_override[0] != '\0') {
+    return std::filesystem::path(cache_override) / "models";
+  }
+
+#if defined(__APPLE__)
+  return home_directory() / "Library" / "Application Support" / "SVP" /
+         "Models" / "v1";
+#else
   return default_cache_root() / "models";
+#endif
 }
 
 }  // namespace svp::models
