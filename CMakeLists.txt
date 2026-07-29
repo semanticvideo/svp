@@ -16,6 +16,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(CTest)
+include(cmake/SvpRuntimeResources.cmake)
 
 add_subdirectory(packages/svp-core)
 add_subdirectory(packages/svp-progress)

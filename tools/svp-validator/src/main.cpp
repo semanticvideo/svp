@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
 
   std::string package_path;
   bool json_output = false;
-  std::string validation_codes_path = "spec/registries/validation-codes.json";
+  std::string validation_codes_path;
 
   auto* validate = app.add_subcommand(
       "validate", "Validate an SVP, SVPI, or Embedded SVPI Transport");

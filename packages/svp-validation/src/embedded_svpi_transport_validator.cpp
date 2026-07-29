@@ -4,6 +4,7 @@
 #include "svp/package/embedded_svpi.hpp"
 #include "svp/package/embedded_svpi_transport_profile.hpp"
 #include "svp/validation/code_registry.hpp"
+#include "svp/validation/runtime_resources.hpp"
 #include "svp/validation/svpi_validator.hpp"
 
 #include "embedded_media_binding_validation.hpp"
@@ -105,11 +106,20 @@ ValidationReport validate_embedded_svpi_transport(
       std::string{svp::package::kEmbeddedSvpiTransportUuidText};
 
   ValidationCodeRegistry registry;
+  EmbeddedSvpiTransportValidatorOptions resolved_options = options;
   try {
-    registry = load_validation_code_registry(options.validation_codes_path);
+    const auto resources = resolve_validation_resource_paths(
+        options.validation_codes_path, options.registry_root_path,
+        options.schema_root_path);
+    resolved_options.validation_codes_path = resources.validation_codes_path;
+    resolved_options.registry_root_path = resources.registry_root_path;
+    resolved_options.schema_root_path = resources.schema_root_path;
+    registry = load_validation_code_registry(
+        resolved_options.validation_codes_path);
   } catch (const std::exception& error) {
     add_finding(report, make_runtime_finding(
-        kTempCodeRegistryUnreadable, options.validation_codes_path.string(),
+        kTempCodeRegistryUnreadable,
+        resolved_options.validation_codes_path.string(),
         error.what()));
     report.status = ValidationStatus::unreadable;
     report.core_status = ValidationStatus::unreadable;
@@ -179,9 +189,9 @@ ValidationReport validate_embedded_svpi_transport(
 
   report.embedding_transport.status = "valid";
   SvpiValidatorOptions svpi_options;
-  svpi_options.validation_codes_path = options.validation_codes_path;
-  svpi_options.registry_root_path = options.registry_root_path;
-  svpi_options.schema_root_path = options.schema_root_path;
+  svpi_options.validation_codes_path = resolved_options.validation_codes_path;
+  svpi_options.registry_root_path = resolved_options.registry_root_path;
+  svpi_options.schema_root_path = resolved_options.schema_root_path;
   svpi_options.allow_embedded_transport = true;
   const auto embedded_report = validate_svpi_package(container_path, svpi_options);
   report.embedding_transport.embedded_package_status =
