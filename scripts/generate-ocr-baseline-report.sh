@@ -84,6 +84,7 @@ set +e
 "$SVP_BUILDER" build \
   --model-cache "$MODEL_CACHE" \
   --tesseract "$TESSERACT_BIN" \
+  --ffmpeg "$FFMPEG_BIN" \
   --out "$OUT_JSON" \
   --staging-dir "$STAGING_DIR" \
   "$VIDEO_PATH" \
