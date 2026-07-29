@@ -378,7 +378,7 @@ export SVP_MODEL_CACHE=/path/to/models
 
 mkdir -p build/local-intro
 
-./build/tools/svp-builder/svp-builder build \
+svp-builder build \
   "$SVP_VIDEO_PATH" \
   --out build/local-intro/intro.svp \
   --model-cache "$SVP_MODEL_CACHE"
@@ -388,7 +388,7 @@ If sherpa-onnx is installed in a nonstandard location, pass the C API library
 explicitly:
 
 ```bash
-./build/tools/svp-builder/svp-builder build \
+svp-builder build \
   /path/to/video.mov \
   --out build/local-video/video.svp \
   --model-cache /path/to/models \
@@ -411,7 +411,7 @@ package
 Create a semantic `.svpi` sidecar from source media:
 
 ```bash
-./build/tools/svp-builder/svp-builder interlace create \
+svp-builder interlace create \
   /path/to/video.mov \
   --out /path/to/video.svpi \
   --model-cache /path/to/models \
@@ -421,9 +421,9 @@ Create a semantic `.svpi` sidecar from source media:
 Inspect and validate the sidecar:
 
 ```bash
-./build/tools/svp-builder/svp-builder interlace inspect /path/to/video.svpi
+svp-builder interlace inspect /path/to/video.svpi
 
-./build/tools/svp-builder/svp-builder interlace validate \
+svp-builder interlace validate \
   /path/to/video.svpi \
   --media /path/to/video.mov
 ```
@@ -431,7 +431,7 @@ Inspect and validate the sidecar:
 Extract source media and an `.svpi` sidecar from an existing `.svp` package:
 
 ```bash
-./build/tools/svp-builder/svp-builder interlace extract \
+svp-builder interlace extract \
   /path/to/video.svp \
   --out-dir /path/to/extracted
 ```
@@ -441,7 +441,7 @@ That command writes both the embedded source media and a matching `.svpi`.
 Recombine source media plus SVPI into a full `.svp`:
 
 ```bash
-./build/tools/svp-builder/svp-builder interlace recombine \
+svp-builder interlace recombine \
   /path/to/video.mov \
   /path/to/video.svpi \
   --out /path/to/recombined.svp
@@ -451,7 +451,7 @@ Build a complete Embedded SVPI Transport directly through the normal build
 command:
 
 ```bash
-./build/tools/svp-builder/svp-builder build \
+svp-builder build \
   /path/to/video.mov \
   --out /path/to/video-with-semantics.mov \
   --output-format embedded-svpi \
@@ -465,15 +465,15 @@ The same command accepts `--output-format svp` (the default) and
 Embed an existing SVPI, extract it exactly, or reconstruct the clean container:
 
 ```bash
-./build/tools/svp-builder/svp-builder transport embed \
+svp-builder transport embed \
   /path/to/video.mov /path/to/video.svpi \
   --out /path/to/video-with-semantics.mov
 
-./build/tools/svp-builder/svp-builder transport extract \
+svp-builder transport extract \
   /path/to/video-with-semantics.mov \
   --out /path/to/extracted.svpi
 
-./build/tools/svp-builder/svp-builder transport strip \
+svp-builder transport strip \
   /path/to/video-with-semantics.mov \
   --out /path/to/clean.mov
 ```
@@ -485,20 +485,20 @@ the structurally detected family: `.mp4`, `.mov`, `.m4v`, or `.m4a`.
 Batch workflows are also available:
 
 ```bash
-./build/tools/svp-builder/svp-builder interlace create-batch \
+svp-builder interlace create-batch \
   /path/to/media-dir \
   --output-format svpi \
   --recursive
 
-./build/tools/svp-builder/svp-builder interlace create-batch \
+svp-builder interlace create-batch \
   /path/to/media-dir \
   --output-format embedded-svpi \
   --out-dir /path/to/semantic-media \
   --recursive
 
-./build/tools/svp-builder/svp-builder interlace scan /path/to/media-dir --recursive
-./build/tools/svp-builder/svp-builder interlace validate-batch /path/to/media-dir --recursive
-./build/tools/svp-builder/svp-builder interlace complete-identity-batch /path/to/media-dir --recursive
+svp-builder interlace scan /path/to/media-dir --recursive
+svp-builder interlace validate-batch /path/to/media-dir --recursive
+svp-builder interlace complete-identity-batch /path/to/media-dir --recursive
 ```
 
 Sidecar naming modes for `create-batch` are `visible`, `hidden`, and
@@ -516,21 +516,21 @@ to overwrite source media.
 Validate an SVP, SVPI, or Embedded SVPI Transport:
 
 ```bash
-./build/tools/svp-validator/svp-validator validate build/local-intro/intro.svp
-./build/tools/svp-validator/svp-validator validate /path/to/video-with-semantics.mov --json
+svp-validator validate build/local-intro/intro.svp
+svp-validator validate /path/to/video-with-semantics.mov --json
 ```
 
 Emit machine-readable validation JSON:
 
 ```bash
-./build/tools/svp-validator/svp-validator validate build/local-intro/intro.svp --json
+svp-validator validate build/local-intro/intro.svp --json
 ```
 
 Print a concise package summary:
 
 ```bash
-./build/tools/svp-inspector/svp-inspector inspect build/local-intro/intro.svp
-./build/tools/svp-inspector/svp-inspector inspect /path/to/video-with-semantics.mov --json
+svp-inspector inspect build/local-intro/intro.svp
+svp-inspector inspect /path/to/video-with-semantics.mov --json
 ```
 
 `svp-inspector` can inspect and query `.svpi` packages and Embedded SVPI
@@ -541,26 +541,26 @@ container bytes.
 List package layers:
 
 ```bash
-./build/tools/svp-inspector/svp-inspector query build/local-intro/intro.svp --mode layers
-./build/tools/svp-inspector/svp-inspector query /path/to/video-with-semantics.mov --mode layers
+svp-inspector query build/local-intro/intro.svp --mode layers
+svp-inspector query /path/to/video-with-semantics.mov --mode layers
 ```
 
 Query transcript words:
 
 ```bash
-./build/tools/svp-inspector/svp-inspector query build/local-intro/intro.svp --mode words --text "serious"
+svp-inspector query build/local-intro/intro.svp --mode words --text "serious"
 ```
 
 Query OCR:
 
 ```bash
-./build/tools/svp-inspector/svp-inspector query build/local-intro/intro.svp --mode ocr
+svp-inspector query build/local-intro/intro.svp --mode ocr
 ```
 
 Query speakers:
 
 ```bash
-./build/tools/svp-inspector/svp-inspector query build/local-intro/intro.svp --mode speakers
+svp-inspector query build/local-intro/intro.svp --mode speakers
 ```
 
 ## Model Cache Notes
