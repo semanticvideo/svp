@@ -54,13 +54,22 @@ struct BuildPipelineOptions {
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
   bool serial_pipeline = false;
+  bool reset_staging_before_stages = false;
   std::shared_ptr<BuildProgressSink> progress_sink;
   bool quiet = false;
   bool verbose = false;
 };
 
+enum class BuildPipelineFailure {
+  none,
+  model_cache_preflight,
+  processing,
+};
+
 struct BuildPipelineResult {
   int exit_code = 0;
+  BuildPipelineFailure failure = BuildPipelineFailure::none;
+  std::string error_message;
 };
 
 std::vector<std::string_view> supported_build_stage_names();

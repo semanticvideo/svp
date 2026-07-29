@@ -1,5 +1,6 @@
 #include "build_pipeline_internal.hpp"
 
+#include "svp/builder/model_cache_preflight.hpp"
 #include "svp/core/memory_diagnostics.hpp"
 
 #include <iostream>
@@ -76,6 +77,10 @@ void emit_stage_progress(BuildPipelineContext& context, ProgressStageId stage,
 
 void print_build_progress(const BuildPipelineContext& context,
                           const PackageSkeletonStageResult& package_result) {
+  if (schedules_model_backed_work(context.stage_plan)) {
+    std::cout << "Model cache verified: "
+              << context.options.model_cache_dir.string() << "\n";
+  }
   if (context.options.stop_after == BuildStage::audio) {
     std::cout << "Audio task plan only; no transcription or diarization was generated.\n";
     if (context.output.contains("audio_foundation") &&
@@ -177,7 +182,6 @@ void print_build_progress(const BuildPipelineContext& context,
               << "\n";
     std::cout << "Depth model file hashes verified: "
               << context.output.at("spatial_embedding_placeholders").value("depth_model_verified", false)
-              << " (manifest file BLAKE3 hashes only; bundle_blake3 not yet verifiable)"
               << "\n";
     std::cout << "Depth frame input available: "
               << context.output.at("spatial_embedding_placeholders").value("depth_frame_input_available", false)

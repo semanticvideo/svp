@@ -1,6 +1,7 @@
 #include "svp/builder/build_pipeline.hpp"
 #include "svp/builder/build_progress.hpp"
 #include "svp/builder/progress_renderer.hpp"
+#include "model_cache_test_fixture.hpp"
 #include "staging_cleanup.hpp"
 
 #include <nlohmann/json.hpp>
@@ -425,6 +426,8 @@ void test_pipeline_package_write_failure_emits_stage_failed_no_validate() {
   options.probe_json_path = probe_path.string();
   options.output_path = output_path;
   options.staging_dir = staging_dir;
+  options.model_cache_dir =
+      svp::builder::test::write_valid_model_cache(tmp_dir / "model-cache");
   options.stop_after = svp::builder::BuildStage::package_skeleton;
   options.force_single_speaker = true;
   options.allow_fallback_diarization = true;
@@ -480,6 +483,8 @@ void test_package_build_removes_default_foundation_json_sidecar() {
   options.ffmpeg_path = "/usr/bin/true";
   options.output_path = package_path;
   options.staging_dir = tmp_dir / "staging";
+  options.model_cache_dir =
+      svp::builder::test::write_valid_model_cache(tmp_dir / "model-cache");
   options.stop_after = svp::builder::BuildStage::package_skeleton;
   options.force_single_speaker = true;
 
@@ -510,6 +515,8 @@ void test_verbose_package_build_writes_foundation_json_sidecar() {
   options.ffmpeg_path = "/usr/bin/true";
   options.output_path = package_path;
   options.staging_dir = tmp_dir / "staging";
+  options.model_cache_dir =
+      svp::builder::test::write_valid_model_cache(tmp_dir / "model-cache");
   options.stop_after = svp::builder::BuildStage::package_skeleton;
   options.force_single_speaker = true;
   options.verbose = true;
@@ -547,6 +554,8 @@ void test_serial_package_pipeline_runs_audio_before_package_write() {
   options.ffmpeg_path = "/usr/bin/true";
   options.output_path = package_path;
   options.staging_dir = tmp_dir / "staging";
+  options.model_cache_dir =
+      svp::builder::test::write_valid_model_cache(tmp_dir / "model-cache");
   options.stop_after = svp::builder::BuildStage::package_skeleton;
   options.force_single_speaker = true;
   options.serial_pipeline = true;

@@ -1,5 +1,6 @@
 #include "svp/builder/interlace.hpp"
 #include "svp/builder/build_progress.hpp"
+#include "model_cache_test_fixture.hpp"
 
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
@@ -374,6 +375,8 @@ void test_interlace_create_falls_back_on_pipeline_failure() {
   opts.ffprobe_path = "/usr/bin/true";
   opts.compute_full_blake3 = true;
   opts.compute_chunk_proof = false;
+  opts.model_cache_dir = svp::builder::test::write_valid_model_cache(
+                             root / "model-cache").string();
 
   auto result = svp::builder::interlace_create(opts);
   CHECK(result.success);
@@ -1113,6 +1116,8 @@ void test_interlace_create_fallback_no_visible_staging() {
   opts.ffprobe_path = "/usr/bin/true";
   opts.compute_full_blake3 = true;
   opts.compute_chunk_proof = false;
+  opts.model_cache_dir = svp::builder::test::write_valid_model_cache(
+                             root / "model-cache").string();
 
   auto result = svp::builder::interlace_create(opts);
   CHECK(result.success);
