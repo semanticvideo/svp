@@ -20,7 +20,8 @@ The philosophy is simple:
 
 ## Current Status
 
-SVP v1.0 RC2 is the active implementation target. This repository now contains
+SVP v1.0.0 RC2 (`1.0.0-rc2`) is the active implementation target. This
+repository now contains
 the spec, validator, package writer, query/inspection tools, SVPI sidecar
 support, and a real builder path that can produce validator-clean `.svp`
 packages from local sample media when the required native tools and model cache

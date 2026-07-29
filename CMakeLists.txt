@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.24)
 
+include(cmake/SvpVersion.cmake)
+
 project(
   svp
-  VERSION 1.0.0
+  VERSION ${SVP_PROJECT_VERSION}
   DESCRIPTION "Semantic Video Package reference tools"
   LANGUAGES CXX
 )
