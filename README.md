@@ -234,52 +234,75 @@ scripts/verify-spec-files.sh
 
 ## Install the CLI tools
 
-Configure a Release build for a non-privileged prefix, build it, and install the
-four public tools with:
+From the repository root, configure a Release build and install the four public
+CLI tools into the current user's local application prefix:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="$HOME/.local"
-cmake --build build --parallel
-cmake --install build
-export PATH="$HOME/.local/bin:$PATH"
+cmake --build build-release --parallel
+cmake --install build-release
+```
 
+This installs:
+
+```text
+~/.local/bin/svp-builder
+~/.local/bin/svp-validator
+~/.local/bin/svp-inspector
+~/.local/bin/svp-models-tool
+~/.local/share/svp/registries/*.json
+~/.local/share/svp/schemas/*.json
+```
+
+Add the installed `bin` directory to `PATH` so the commands can be run from
+any directory instead of through the repository's `build` folder:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+To make that setting available in future zsh sessions, add the same `export`
+line to `~/.zshrc`. Verify the installed commands from outside the repository:
+
+```bash
+cd /tmp
 svp-builder --version
 svp-validator --version
 svp-inspector --version
 svp-models-tool --help
 ```
 
-This installs the commands beneath `<prefix>/bin` and the runtime registries
-and schemas beneath `<prefix>/share/svp/registries` and
-`<prefix>/share/svp/schemas`. The resource layout is executable-relative, so
-the installed tools do not need the source checkout or build directory.
-
-The configured prefix can be replaced for an individual install:
+To use a different installation prefix, override it during installation and
+add that prefix's `bin` directory to `PATH`:
 
 ```bash
-cmake --install build --prefix /path/to/prefix
+cmake --install build-release --prefix /path/to/svp-install
+export PATH="/path/to/svp-install/bin:$PATH"
 ```
 
-Uninstall the files recorded by the most recent install from that build
-directory with:
+To uninstall the CLI tools and their installed registries and schemas, return
+to the repository checkout and use the same build directory that performed the
+most recent installation:
 
 ```bash
-cmake --build build --target uninstall
+cmake --build build-release --target uninstall
 ```
 
-Uninstallation does not remove downloaded models or any other user data. This
-is a CMake installation path, not package-manager integration. Complete
-clean-clone and vcpkg bootstrap documentation is tracked separately in issue
-#121.
+The uninstall target uses that build directory's install manifest. It removes
+the installed SVP tools and runtime resources but does not remove downloaded
+models or other user data. This is a CMake installation path, not package-manager
+integration. Complete clean-clone and vcpkg bootstrap documentation is tracked
+separately in issue #121.
 
 ## Install the reference models
 
-On Apple Silicon macOS, install the exact eight-model set used by the SVP
-pipeline with:
+After installing the CLI tools and adding their `bin` directory to `PATH`, use
+the installed model command on Apple Silicon macOS to download and verify the
+exact eight-model set used by the SVP pipeline:
 
 ```bash
-./build/tools/svp-models-tool/svp-models-tool install
+svp-models-tool install
 ```
 
 The default model cache is:
@@ -291,15 +314,15 @@ The default model cache is:
 Print the effective path or choose a different folder explicitly:
 
 ```bash
-./build/tools/svp-models-tool/svp-models-tool path
-./build/tools/svp-models-tool/svp-models-tool path --cache-dir /path/to/models
-./build/tools/svp-models-tool/svp-models-tool install --cache-dir /path/to/models
+svp-models-tool path
+svp-models-tool path --cache-dir /path/to/models
+svp-models-tool install --cache-dir /path/to/models
 ```
 
 Downloads run one model job at a time by default. At most two may run together:
 
 ```bash
-./build/tools/svp-models-tool/svp-models-tool install --parallel-downloads 2
+svp-models-tool install --parallel-downloads 2
 ```
 
 Every source, generated file, bundle, and the complete root model set is
