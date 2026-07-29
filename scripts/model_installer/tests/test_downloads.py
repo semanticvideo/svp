@@ -110,6 +110,16 @@ class DownloadTests(unittest.TestCase):
         byte_events = [event for event in progress.events
                        if event[0][1] == "bytes"]
         self.assertEqual(byte_events[-1][1]["current"], total)
+        self.assertEqual(byte_events[-1][0][0], "stage_completed")
+        completed_downloads = [
+            event for event in progress.events
+            if event[0][0] == "stage_completed" and event[0][1] == "download"
+        ]
+        self.assertEqual(len(completed_downloads), 4)
+        self.assertTrue(all(
+            event[1]["current"] == event[1]["total"]
+            for event in completed_downloads
+        ))
 
     def test_first_failure_cancels_unscheduled_models_and_partial_file(self):
         payloads = {f"u{i}": bytes([i]) * 8 for i in range(4)}

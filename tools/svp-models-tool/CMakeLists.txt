@@ -1,6 +1,23 @@
 find_package(CLI11 CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
+set(SVP_INSTALL_RESOURCE_FILES
+  "${CMAKE_SOURCE_DIR}/distribution/reference-models/catalog.json"
+  "${CMAKE_SOURCE_DIR}/distribution/reference-models/bundle-inputs.json"
+  "${CMAKE_SOURCE_DIR}/spec/registries/reference-model-set.json"
+  "${CMAKE_SOURCE_DIR}/distribution/reference-models/ppocr-requirements-macos-arm64.lock"
+  "${CMAKE_SOURCE_DIR}/distribution/reference-models/rfdetr-requirements-macos-arm64.lock"
+  "${CMAKE_SOURCE_DIR}/scripts/model_installer/__init__.py"
+  "${CMAKE_SOURCE_DIR}/scripts/model_installer/progress.py"
+  "${CMAKE_SOURCE_DIR}/scripts/model_installer/downloads.py"
+  "${CMAKE_SOURCE_DIR}/scripts/model_installer/conversion.py"
+  "${CMAKE_SOURCE_DIR}/scripts/model_installer/workflow.py"
+  "${CMAKE_SOURCE_DIR}/scripts/prepare-reference-model-bundles.py"
+)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  ${SVP_INSTALL_RESOURCE_FILES}
+)
+
 file(READ "${CMAKE_SOURCE_DIR}/distribution/reference-models/catalog.json" SVP_INSTALL_CATALOG_JSON)
 file(READ "${CMAKE_SOURCE_DIR}/distribution/reference-models/bundle-inputs.json" SVP_INSTALL_BUNDLE_INPUTS_JSON)
 file(READ "${CMAKE_SOURCE_DIR}/spec/registries/reference-model-set.json" SVP_INSTALL_REFERENCE_SET_JSON)

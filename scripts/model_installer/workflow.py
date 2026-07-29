@@ -198,6 +198,10 @@ def run(args, progress):
                           current=completed_models, total=8, unit="models",
                           scope_id="aggregate-models")
 
+        progress.emit("stage_completed", "models", "Models",
+                      current=completed_models, total=8, unit="models",
+                      scope_id="aggregate-models")
+
         args.cache_dir.parent.mkdir(parents=True, exist_ok=True)
         progress.emit("stage_started", "publish", "Model Cache")
         run_checked([
@@ -217,7 +221,7 @@ def run(args, progress):
                 args.models_tool, args.reference_set, published),
         )
         progress.emit("stage_completed", "publish", "Model Cache",
-                      message=str(args.cache_dir))
+                      message="\n" + str(args.cache_dir))
     finally:
         shutil.rmtree(work_root, ignore_errors=True)
         if staging.exists():

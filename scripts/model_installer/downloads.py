@@ -133,6 +133,13 @@ def run_downloads(downloads, parallel, progress, transport=None, filesystem=None
                     if cancelled.is_set():
                         return
                     download_one(item)
+                model = model_downloads[0]
+                progress.emit(
+                    "stage_completed", "download", "Download",
+                    current=model_totals[model.model_id],
+                    total=model_totals[model.model_id], unit="bytes",
+                    scope_id=model.model_id, scope_label=model.model_label,
+                )
             except BaseException as error:
                 with queue_lock:
                     if not first_error:
@@ -154,5 +161,11 @@ def run_downloads(downloads, parallel, progress, transport=None, filesystem=None
         raise
     if first_error:
         raise first_error[0]
+
+    progress.emit(
+        "stage_completed", "bytes", "Bytes",
+        current=aggregate_total, total=aggregate_total, unit="bytes",
+        scope_id="aggregate-bytes",
+    )
 
     return aggregate_current, aggregate_total
