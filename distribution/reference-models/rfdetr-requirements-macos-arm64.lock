@@ -1,0 +1,7 @@
+# Complete no-dependency-resolution wheel set for exact RF-DETR wrapping.
+# Install with --only-binary=:all: --no-deps --require-hashes.
+ml-dtypes==0.5.4 --hash=sha256:6c7ecb74c4bd71db68a6bea1edf8da8c34f3d9fe218f038814fd1d310ac76c90
+numpy==2.4.6 --hash=sha256:4cfe66903cc32a9921a6733d96b19bb6abf310397581bbad89c228f5abaf0ee8
+onnx==1.22.0 --hash=sha256:2d8f229a553fa440fe623ed7b36fca5e7762da3af871c3f8f8ce451df73e2914
+protobuf==6.31.1 --hash=sha256:6f1227473dc43d44ed644425268eb7c2e488ae245d51c6866d19fe158e207402
+typing-extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8

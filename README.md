@@ -220,6 +220,42 @@ Verify required spec files:
 scripts/verify-spec-files.sh
 ```
 
+## Install the reference models
+
+On Apple Silicon macOS, install the exact eight-model set used by the SVP
+pipeline with:
+
+```bash
+./build/tools/svp-models-tool/svp-models-tool install
+```
+
+The default model cache is:
+
+```text
+~/Library/Application Support/SVP/Models/v1
+```
+
+Print the effective path or choose a different folder explicitly:
+
+```bash
+./build/tools/svp-models-tool/svp-models-tool path
+./build/tools/svp-models-tool/svp-models-tool path --cache-dir /path/to/models
+./build/tools/svp-models-tool/svp-models-tool install --cache-dir /path/to/models
+```
+
+Downloads run one model job at a time by default. At most two may run together:
+
+```bash
+./build/tools/svp-models-tool/svp-models-tool install --parallel-downloads 2
+```
+
+Every source, generated file, bundle, and the complete root model set is
+verified before the staged cache is published. A failed or interrupted install
+does not publish a partial cache. PP-OCR and RF-DETR are recreated from their
+pinned upstream files with a temporary hash-locked conversion environment,
+which is removed after installation. SVP does not host or substitute model
+weights, and `svp build` never downloads or updates models.
+
 ## Build an SVP Package
 
 Example using a local sample and model cache:

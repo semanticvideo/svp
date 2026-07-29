@@ -5,12 +5,15 @@
 #include "svp/models/model_lock.hpp"
 #include "svp/models/reference_model_set.hpp"
 #include "svp/models/verification.hpp"
+#include "install_command.hpp"
+#include "svp/progress/renderer.hpp"
 
 #include <CLI/CLI.hpp>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <unistd.h>
 
 namespace {
 
@@ -74,7 +77,26 @@ svp::models::VerificationReport verify_model_set_path(
 int main(int argc, char** argv) {
   CLI::App app{"SVP model bundle utility"};
 
+  std::filesystem::path path_cache_dir = svp::models::model_cache_root();
   auto* path_command = app.add_subcommand("path", "Print the model cache path");
+  path_command->add_option("--cache-dir", path_cache_dir,
+                           "Override the model cache directory");
+
+  std::filesystem::path install_cache_dir = svp::models::model_cache_root();
+  int parallel_downloads = 1;
+  std::string install_progress_mode = "auto";
+  auto* install_command = app.add_subcommand(
+      "install", "Install the exact SVP reference-model set");
+  install_command->add_option("--cache-dir", install_cache_dir,
+                              "Override the model cache directory");
+  install_command
+      ->add_option("--parallel-downloads", parallel_downloads,
+                   "Concurrent model jobs (1 or 2)")
+      ->check(CLI::Range(1, 2));
+  install_command
+      ->add_option("--progress", install_progress_mode,
+                   "Progress output: auto, plain, json, or none")
+      ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
 
   std::filesystem::path hash_file;
   auto* hash_command =
@@ -112,8 +134,19 @@ int main(int argc, char** argv) {
     app.parse(argc, argv);
 
     if (*path_command) {
-      std::cout << svp::models::model_cache_root().string() << '\n';
+      std::cout << path_cache_dir.string() << '\n';
       return 0;
+    }
+
+    if (*install_command) {
+      const auto mode = svp::progress::parse_mode(install_progress_mode);
+      if (!mode) {
+        std::cerr << "ERROR: unsupported progress mode\n";
+        return 2;
+      }
+      return svp::models::tool::install_reference_models(
+          argv[0], install_cache_dir, parallel_downloads, *mode,
+          std::cout, isatty(STDOUT_FILENO) != 0, STDOUT_FILENO);
     }
 
     if (*hash_command) {
