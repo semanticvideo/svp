@@ -3,6 +3,8 @@
 These WAV fixtures are deterministic speaker-count probes for the real
 sherpa-onnx diarization path.
 
+These audio files are test fixtures and are included with permission.
+
 They are 16 kHz mono PCM files derived with FFmpeg from local preview clips:
 
 - `anne-preview.m4a`
