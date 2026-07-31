@@ -9,12 +9,21 @@
 #include <fstream>
 #include <map>
 #include <optional>
+#if !defined(_WIN32)
 #include <sys/wait.h>
+#endif
 
 namespace svp::vision::ocr_generation_internal {
 namespace {
 
 std::string shell_quote(const std::filesystem::path& path) {
+#if defined(_WIN32)
+  std::string quoted = "\"";
+  for (const char c : path.string()) {
+    quoted += c == '\"' ? "\\\"" : std::string(1, c);
+  }
+  quoted += "\"";
+#else
   std::string quoted = "'";
   for (const char c : path.string()) {
     if (c == '\'') {
@@ -24,6 +33,7 @@ std::string shell_quote(const std::filesystem::path& path) {
     }
   }
   quoted += "'";
+#endif
   return quoted;
 }
 
@@ -47,19 +57,33 @@ std::optional<ColorRasterFrame> decode_crop_image_with_ffmpeg(
       " -f rawvideo"
       " -pix_fmt rgb24"
       " pipe:1"
+#if defined(_WIN32)
+      " 2>NUL";
+#else
       " 2>/dev/null";
+#endif
 
+#if defined(_WIN32)
+  FILE* pipe = _popen(cmd.c_str(), "rb");
+#else
   FILE* pipe = popen(cmd.c_str(), "r");
+#endif
   if (pipe == nullptr) return std::nullopt;
 
   const std::size_t expected_bytes =
       static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3;
   std::vector<std::uint8_t> raw_bytes(expected_bytes);
   const std::size_t bytes_read = std::fread(raw_bytes.data(), 1, expected_bytes, pipe);
-  const int status = pclose(pipe);
+  const int status =
+#if defined(_WIN32)
+      _pclose(pipe);
+  const bool exited_ok = status == 0;
+#else
+      pclose(pipe);
+  const bool exited_ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+#endif
 
-  if (bytes_read != expected_bytes ||
-      !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+  if (bytes_read != expected_bytes || !exited_ok) {
     return std::nullopt;
   }
 
