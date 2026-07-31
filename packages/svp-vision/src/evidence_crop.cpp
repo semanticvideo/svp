@@ -14,13 +14,22 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#if !defined(_WIN32)
 #include <sys/wait.h>
+#endif
 #include <vector>
 
 namespace svp::vision {
 namespace {
 
 std::string shell_quote(const std::filesystem::path& path) {
+#if defined(_WIN32)
+  std::string quoted = "\"";
+  for (const char c : path.string()) {
+    quoted += c == '\"' ? "\\\"" : std::string(1, c);
+  }
+  quoted += "\"";
+#else
   std::string quoted = "'";
   for (const char c : path.string()) {
     if (c == '\'') {
@@ -30,10 +39,18 @@ std::string shell_quote(const std::filesystem::path& path) {
     }
   }
   quoted += "'";
+#endif
   return quoted;
 }
 
 std::string shell_quote_str(const std::string& s) {
+#if defined(_WIN32)
+  std::string quoted = "\"";
+  for (const char c : s) {
+    quoted += c == '\"' ? "\\\"" : std::string(1, c);
+  }
+  quoted += "\"";
+#else
   std::string quoted = "'";
   for (const char c : s) {
     if (c == '\'') {
@@ -43,6 +60,7 @@ std::string shell_quote_str(const std::string& s) {
     }
   }
   quoted += "'";
+#endif
   return quoted;
 }
 
@@ -122,7 +140,11 @@ bool extract_crop_from_source(
       " -y " + shell_quote(output_path) +
       " 2>&1";
 
+#if defined(_WIN32)
+  FILE* pipe = _popen(cmd.c_str(), "rb");
+#else
   FILE* pipe = popen(cmd.c_str(), "r");
+#endif
   if (!pipe) {
     error = "popen failed: " + std::string(std::strerror(errno));
     return false;
@@ -135,15 +157,24 @@ bool extract_crop_from_source(
     if (n == 0) break;
     output.append(buffer, n);
   }
-  const int status = pclose(pipe);
-  const bool ok = WIFEXITED(status) && WEXITSTATUS(status) == 0 &&
+  const int status =
+#if defined(_WIN32)
+      _pclose(pipe);
+  const int exit_code = status;
+  const bool exited_ok = status == 0;
+#else
+      pclose(pipe);
+  const int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : status;
+  const bool exited_ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+#endif
+  const bool ok = exited_ok &&
       std::filesystem::exists(output_path);
 
   if (!ok) {
     error = trim(output);
     if (error.empty()) {
       error = "ffmpeg exited with status " +
-              std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : status);
+              std::to_string(exit_code);
     }
   }
   return ok;
