@@ -28,7 +28,6 @@ jobs:
 
     env:
       VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-binary-cache
       VCPKG_FEATURE_FLAGS: manifests,binarycaching,versions
 
     steps:
@@ -50,15 +49,19 @@ jobs:
         with:
           path: |
             ${{ env.VCPKG_ROOT }}/downloads
-            ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+            ${{ runner.temp }}/vcpkg-binary-cache
           key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json') }}
 
       - name: Bootstrap vcpkg
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-binary-cache
         run: |
           cmake -E make_directory "$VCPKG_DEFAULT_BINARY_CACHE"
           "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
 
       - name: Configure
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-binary-cache
         run: cmake --preset "${{ matrix.preset }}"
 
       - name: Build CLI targets
