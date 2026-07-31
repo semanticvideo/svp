@@ -8,7 +8,9 @@
 #include <cstring>
 #include <iomanip>
 #include <sstream>
+#if !defined(_WIN32)
 #include <sys/wait.h>
+#endif
 
 namespace svp::vision {
 namespace {
@@ -34,9 +36,14 @@ bool ffmpeg_is_available(const std::filesystem::path& ffmpeg_path) {
   }
 
   std::string paths(path_env);
+#if defined(_WIN32)
+  constexpr char path_list_separator = ';';
+#else
+  constexpr char path_list_separator = ':';
+#endif
   std::size_t start = 0;
   while (start <= paths.size()) {
-    const std::size_t end = paths.find(':', start);
+    const std::size_t end = paths.find(path_list_separator, start);
     const std::string entry =
         paths.substr(start, end == std::string::npos ? std::string::npos : end - start);
     if (!entry.empty() &&
@@ -52,6 +59,13 @@ bool ffmpeg_is_available(const std::filesystem::path& ffmpeg_path) {
 }
 
 std::string shell_quote(const std::filesystem::path& path) {
+#if defined(_WIN32)
+  std::string quoted = "\"";
+  for (const char c : path.string()) {
+    quoted += c == '\"' ? "\\\"" : std::string(1, c);
+  }
+  quoted += "\"";
+#else
   std::string quoted = "'";
   for (const char c : path.string()) {
     if (c == '\'') {
@@ -61,6 +75,7 @@ std::string shell_quote(const std::filesystem::path& path) {
     }
   }
   quoted += "'";
+#endif
   return quoted;
 }
 
@@ -96,9 +111,17 @@ std::vector<Srgb8Pixel> decode_frame_at(const std::filesystem::path& ffmpeg_path
       " -f rawvideo"
       " -pix_fmt rgb24"
       " pipe:1"
+#if defined(_WIN32)
+      " 2>NUL";
+#else
       " 2>/dev/null";
+#endif
 
+#if defined(_WIN32)
+  FILE* pipe = _popen(cmd.c_str(), "rb");
+#else
   FILE* pipe = popen(cmd.c_str(), "r");
+#endif
   if (pipe == nullptr) {
     out_error = std::string("popen failed: ") + std::strerror(errno);
     return {};
@@ -109,19 +132,31 @@ std::vector<Srgb8Pixel> decode_frame_at(const std::filesystem::path& ffmpeg_path
   std::vector<std::uint8_t> raw_bytes(expected_bytes);
   const std::size_t bytes_read = std::fread(raw_bytes.data(), 1, expected_bytes, pipe);
 
-  const int status = pclose(pipe);
+  const int status =
+#if defined(_WIN32)
+      _pclose(pipe);
+  const bool exited_ok = status == 0;
+#else
+      pclose(pipe);
   const bool exited_ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+#endif
+  const int exit_code =
+#if defined(_WIN32)
+      status;
+#else
+      WIFEXITED(status) ? WEXITSTATUS(status) : status;
+#endif
 
   if (bytes_read != expected_bytes) {
     out_error = "short read: got " + std::to_string(bytes_read) + "/" +
                 std::to_string(expected_bytes) + " bytes (ffmpeg exit " +
-                std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : status) + ")";
+                std::to_string(exit_code) + ")";
     return {};
   }
 
   if (!exited_ok) {
     out_error = "ffmpeg exited with status " +
-                std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : status);
+                std::to_string(exit_code);
     return {};
   }
 
