@@ -1,6 +1,10 @@
 #include "svp/package/embedded_package_session.hpp"
 
+#if defined(_WIN32)
+#include <windows.h>
+#else
 #include <sys/stat.h>
+#endif
 
 namespace svp::package {
 
@@ -15,6 +19,42 @@ bool read_file_identity(
     std::int64_t& modified_nanoseconds,
     std::int64_t& changed_seconds,
     std::int64_t& changed_nanoseconds) {
+#if defined(_WIN32)
+  const HANDLE file = CreateFileW(
+      path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+
+  BY_HANDLE_FILE_INFORMATION status {};
+  const bool read = GetFileInformationByHandle(file, &status) != 0;
+  CloseHandle(file);
+  if (!read) {
+    return false;
+  }
+
+  const auto split_file_time = [](const FILETIME& value,
+                                  std::int64_t& seconds,
+                                  std::int64_t& nanoseconds) {
+    ULARGE_INTEGER ticks {};
+    ticks.LowPart = value.dwLowDateTime;
+    ticks.HighPart = value.dwHighDateTime;
+    seconds = static_cast<std::int64_t>(ticks.QuadPart / 10000000ULL);
+    nanoseconds = static_cast<std::int64_t>(
+        (ticks.QuadPart % 10000000ULL) * 100ULL);
+  };
+
+  device = status.dwVolumeSerialNumber;
+  inode = (static_cast<std::uint64_t>(status.nFileIndexHigh) << 32U) |
+          status.nFileIndexLow;
+  file_size = (static_cast<std::uint64_t>(status.nFileSizeHigh) << 32U) |
+              status.nFileSizeLow;
+  split_file_time(status.ftLastWriteTime, modified_seconds,
+                  modified_nanoseconds);
+  split_file_time(status.ftCreationTime, changed_seconds,
+                  changed_nanoseconds);
+#else
   struct stat status {};
   if (::stat(path.c_str(), &status) != 0 || status.st_size < 0) {
     return false;
@@ -32,6 +72,7 @@ bool read_file_identity(
   modified_nanoseconds = status.st_mtim.tv_nsec;
   changed_seconds = status.st_ctim.tv_sec;
   changed_nanoseconds = status.st_ctim.tv_nsec;
+#endif
 #endif
   return true;
 }
