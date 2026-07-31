@@ -40,9 +40,7 @@ jobs:
 
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
-        run: |
-          echo "DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer" >> "$GITHUB_ENV"
-          brew install blake3 cli11 libzip nlohmann-json opencv@4 whisper-cpp
+        run: brew install blake3 cli11 libzip nlohmann-json opencv@4 whisper-cpp
 
       - name: Configure Linux unit tests
         if: runner.os == 'Linux'
