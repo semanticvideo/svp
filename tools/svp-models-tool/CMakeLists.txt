@@ -86,8 +86,16 @@ if(BUILD_TESTING)
     PASS_REGULAR_EXPRESSION "Concurrent model jobs")
 
   add_test(NAME svp-models-tool-path-default COMMAND svp-models-tool path)
+  if(APPLE)
+    set(SVP_MODELS_DEFAULT_PATH_PATTERN
+        "Library/Application Support/SVP/Models/v1")
+  elseif(WIN32)
+    set(SVP_MODELS_DEFAULT_PATH_PATTERN "SVP.*Cache.*v1.*models")
+  else()
+    set(SVP_MODELS_DEFAULT_PATH_PATTERN "[.]cache/svp/v1/models")
+  endif()
   set_tests_properties(svp-models-tool-path-default PROPERTIES
-    PASS_REGULAR_EXPRESSION "Library/Application Support/SVP/Models/v1")
+    PASS_REGULAR_EXPRESSION "${SVP_MODELS_DEFAULT_PATH_PATTERN}")
 
   add_executable(svp-models-executable-path-tests
     tests/executable_path_tests.cpp
