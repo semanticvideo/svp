@@ -346,8 +346,14 @@ int run_microphone_reconciliation_replay(
     source_quality.push_back({
         {"source_ordinal", evidence.source_ordinal},
         {"median_word_signal_db", evidence.median_word_signal_db},
-        {"noise_floor_db", evidence.noise_floor_db},
-        {"median_speech_snr_db", evidence.median_speech_snr_db},
+        {"noise_floor_db",
+         evidence.noise_floor_db.has_value()
+             ? nlohmann::json(*evidence.noise_floor_db)
+             : nlohmann::json(nullptr)},
+        {"median_speech_snr_db",
+         evidence.median_speech_snr_db.has_value()
+             ? nlohmann::json(*evidence.median_speech_snr_db)
+             : nlohmann::json(nullptr)},
         {"mean_asr_confidence", evidence.mean_asr_confidence},
     });
   }
