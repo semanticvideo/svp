@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    name: unit tests (${{ matrix.os }})
+    if: github.event.pull_request.draft == false
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-15
+          - windows-2025
+
+    steps:
+      - name: Check out pull request
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libcli11-dev libopencv-dev libsqlite3-dev libzip-dev ninja-build nlohmann-json3-dev
+          "$VCPKG_INSTALLATION_ROOT/vcpkg" install blake3:x64-linux
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install blake3 cli11 libzip nlohmann-json opencv whisper-cpp
+
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-cc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-cli11
+            mingw-w64-ucrt-x86_64-libblake3
+            mingw-w64-ucrt-x86_64-libzip
+            mingw-w64-ucrt-x86_64-nlohmann-json
+            mingw-w64-ucrt-x86_64-opencv
+            mingw-w64-ucrt-x86_64-sqlite3
+
+      - name: Configure Linux unit tests
+        if: runner.os == 'Linux'
+        run: >-
+          cmake -S . -B build/ci -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DBLAKE3_INCLUDE_DIR="$VCPKG_INSTALLATION_ROOT/installed/x64-linux/include"
+          -DBLAKE3_LIBRARY="$VCPKG_INSTALLATION_ROOT/installed/x64-linux/lib/libblake3.a"
+
+      - name: Configure macOS unit tests
+        if: runner.os == 'macOS'
+        run: cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH="$(brew --prefix)"
+
+      - name: Configure Windows unit tests
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build unit tests
+        if: runner.os != 'Windows'
+        run: cmake --build build/ci --parallel
+
+      - name: Build Windows unit tests
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: cmake --build build/ci --parallel
+
+      - name: Run unit tests
+        if: runner.os != 'Windows'
+        env:
+          SVP_MODEL_CACHE_DIR: ""
+          SVP_MODEL_CACHE_ROOT: ""
+        run: ctest --test-dir build/ci --output-on-failure
+
+      - name: Run Windows unit tests
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        env:
+          SVP_MODEL_CACHE_DIR: ""
+          SVP_MODEL_CACHE_ROOT: ""
+        run: ctest --test-dir build/ci --output-on-failure
