@@ -207,10 +207,14 @@ nlohmann::ordered_json canonical_number(std::string_view token,
   }
 
   double value = 0.0;
-  const auto result = std::from_chars(token.data(), token.data() + token.size(),
-                                      value, std::chars_format::general);
-  if (result.ec != std::errc{} || result.ptr != token.data() + token.size() ||
-      !std::isfinite(value) || value == 0.0) {
+  try {
+    value = nlohmann::ordered_json::parse(token.begin(), token.end())
+                .get<double>();
+  } catch (const nlohmann::json::exception&) {
+    throw ModelError(ModelErrorCode::schema_error,
+                     "could not canonicalize JSON number in " + path.string());
+  }
+  if (!std::isfinite(value) || value == 0.0) {
     throw ModelError(ModelErrorCode::schema_error,
                      "non-integral JSON number is outside the finite binary64 "
                      "range in " + path.string() + ": " + std::string(token));
