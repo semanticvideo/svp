@@ -9,7 +9,9 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#if !defined(_WIN32)
 #include <sys/wait.h>
+#endif
 
 namespace svp::media {
 namespace {
@@ -209,6 +211,13 @@ nlohmann::json stream_timing_to_json(const StreamTiming& timing) {
 }
 
 std::string shell_quote(const std::filesystem::path& path) {
+#if defined(_WIN32)
+  std::string quoted = "\"";
+  for (const char character : path.string()) {
+    quoted += character == '\"' ? "\\\"" : std::string(1, character);
+  }
+  quoted += "\"";
+#else
   std::string quoted = "'";
   for (const char character : path.string()) {
     if (character == '\'') {
@@ -218,11 +227,16 @@ std::string shell_quote(const std::filesystem::path& path) {
     }
   }
   quoted += "'";
+#endif
   return quoted;
 }
 
 std::string read_command_output(const std::string& command) {
+#if defined(_WIN32)
+  FILE* pipe = _popen(command.c_str(), "rb");
+#else
   FILE* pipe = popen(command.c_str(), "r");
+#endif
   if (pipe == nullptr) {
     throw std::runtime_error("unable to run ffprobe");
   }
@@ -233,15 +247,27 @@ std::string read_command_output(const std::string& command) {
     output += buffer;
   }
 
-  const int status = pclose(pipe);
+  const int status =
+#if defined(_WIN32)
+      _pclose(pipe);
+#else
+      pclose(pipe);
+#endif
   if (status == -1) {
     throw std::runtime_error("unable to close ffprobe process");
   }
+#if defined(_WIN32)
+  if (status != 0) {
+    throw std::runtime_error("ffprobe failed with exit status " +
+                             std::to_string(status));
+  }
+#else
   if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
     throw std::runtime_error("ffprobe failed with exit status " +
                              std::to_string(WIFEXITED(status) ? WEXITSTATUS(status)
                                                               : status));
   }
+#endif
   return output;
 }
 
