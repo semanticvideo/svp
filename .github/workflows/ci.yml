@@ -35,12 +35,14 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes libcli11-dev libopencv-dev libsqlite3-dev libzip-dev ninja-build nlohmann-json3-dev zipcmp
+          sudo apt-get install --yes libcli11-dev libopencv-dev libsqlite3-dev libzip-dev ninja-build nlohmann-json3-dev zipcmp zipmerge ziptool
           "$VCPKG_INSTALLATION_ROOT/vcpkg" install --classic blake3:x64-linux
 
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
-        run: brew install blake3 cli11 libzip nlohmann-json opencv@4 whisper-cpp
+        run: |
+          echo "DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer" >> "$GITHUB_ENV"
+          brew install blake3 cli11 libzip nlohmann-json opencv@4 whisper-cpp
 
       - name: Configure Linux unit tests
         if: runner.os == 'Linux'
