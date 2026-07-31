@@ -395,6 +395,8 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-vision-embedding-generation-smoke-test
            COMMAND svp-vision-embedding-generation-smoke-test)
+  set_tests_properties(svp-vision-embedding-generation-smoke-test PROPERTIES
+    SKIP_REGULAR_EXPRESSION "^Skipping:")
 
   add_executable(svp-vision-evidence-crop-linking-tests
     tests/evidence_crop_linking_tests.cpp

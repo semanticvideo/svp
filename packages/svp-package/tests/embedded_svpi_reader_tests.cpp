@@ -6,6 +6,7 @@
 #include "svp/package/embedded_svpi_transport_profile.hpp"
 #include "svp/package/package_layout.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <limits>
 #include <stdexcept>

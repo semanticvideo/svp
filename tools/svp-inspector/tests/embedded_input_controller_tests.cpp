@@ -3,6 +3,7 @@
 #include "svp/package/embedded_svpi.hpp"
 #include "svp/package/package_layout.hpp"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdlib>

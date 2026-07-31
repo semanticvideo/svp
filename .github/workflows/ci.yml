@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            preset: linux-x64-debug
+          - os: macos-15
+            preset: macos-arm64-debug
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-binary-cache
+      VCPKG_FEATURE_FLAGS: manifests,binarycaching,versions
+
+    steps:
+      - name: Check out SVP
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Check out pinned vcpkg
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: microsoft/vcpkg
+          ref: a0b1c8d3a477c1cb4813d8e127a56961707ca42b
+          path: .vcpkg
+          persist-credentials: false
+
+      - name: Restore vcpkg packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ${{ env.VCPKG_ROOT }}/downloads
+            ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json') }}
+
+      - name: Bootstrap vcpkg
+        run: |
+          cmake -E make_directory "$VCPKG_DEFAULT_BINARY_CACHE"
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+
+      - name: Configure
+        run: cmake --preset "${{ matrix.preset }}"
+
+      - name: Build CLI targets
+        run: >-
+          cmake --build --preset "${{ matrix.preset }}" --parallel
+          --target svp-builder svp-validator svp-inspector svp-models-tool
+
+      - name: Build test targets
+        run: cmake --build --preset "${{ matrix.preset }}" --parallel
+
+      - name: Run CTest
+        env:
+          SVP_MODEL_CACHE_DIR: ""
+          SVP_MODEL_CACHE_ROOT: ${{ runner.temp }}/svp-no-model-assets
+          SVP_SHERPA_DIARIZATION_MODEL_DIR: ""
+        run: ctest --preset "${{ matrix.preset }}"
+
+      - name: Verify specification files
+        run: scripts/verify-spec-files.sh

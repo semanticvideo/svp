@@ -147,8 +147,10 @@ bool magnitude_fits(std::string_view magnitude, std::string_view maximum) {
          (magnitude.size() == maximum.size() && magnitude <= maximum);
 }
 
-nlohmann::ordered_json canonical_number(std::string_view token,
-                                        const std::filesystem::path& path) {
+nlohmann::ordered_json canonical_number(
+    std::string_view token,
+    const nlohmann::ordered_json& parsed_value,
+    const std::filesystem::path& path) {
   DecimalNumber decimal = parse_decimal_number(token);
   if (decimal.coefficient == "0") {
     return std::uint64_t{0};
@@ -206,11 +208,10 @@ nlohmann::ordered_json canonical_number(std::string_view token,
     return -static_cast<std::int64_t>(magnitude);
   }
 
-  double value = 0.0;
-  const auto result = std::from_chars(token.data(), token.data() + token.size(),
-                                      value, std::chars_format::general);
-  if (result.ec != std::errc{} || result.ptr != token.data() + token.size() ||
-      !std::isfinite(value) || value == 0.0) {
+  // Reuse the JSON parser's locale-independent binary64 conversion because
+  // older supported libc++ versions do not provide floating-point from_chars.
+  const double value = parsed_value.get<double>();
+  if (!std::isfinite(value) || value == 0.0) {
     throw ModelError(ModelErrorCode::schema_error,
                      "non-integral JSON number is outside the finite binary64 "
                      "range in " + path.string() + ": " + std::string(token));
@@ -227,7 +228,7 @@ void canonicalize_numbers(nlohmann::ordered_json& value,
       throw ModelError(ModelErrorCode::schema_error,
                        "could not map JSON number tokens in " + path.string());
     }
-    value = canonical_number(tokens[token_index++], path);
+    value = canonical_number(tokens[token_index++], value, path);
     return;
   }
   if (value.is_array()) {
