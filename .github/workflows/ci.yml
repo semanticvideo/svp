@@ -53,6 +53,12 @@ jobs:
             ${{ runner.temp }}/vcpkg-binary-cache
           key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json') }}
 
+      - name: Install Linux build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes autoconf autoconf-archive automake libtool
+
       - name: Bootstrap vcpkg
         env:
           VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-binary-cache
