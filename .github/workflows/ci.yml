@@ -42,10 +42,11 @@ jobs:
           repository: microsoft/vcpkg
           ref: a0b1c8d3a477c1cb4813d8e127a56961707ca42b
           path: .vcpkg
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Restore vcpkg packages
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             ${{ env.VCPKG_ROOT }}/downloads
