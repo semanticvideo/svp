@@ -5,27 +5,36 @@
   "description": "Semantic Video Package reference tools",
   "license": "Apache-2.0",
   "builtin-baseline": "a0b1c8d3a477c1cb4813d8e127a56961707ca42b",
+  "default-features": ["full"],
   "dependencies": [
-    "cli11",
-    "nlohmann-json",
-    "sqlite3",
-    "libzip",
     "blake3",
-    "zstd",
-    "onnxruntime",
-    {
-      "name": "whisper-cpp",
-      "features": ["metal"],
-      "platform": "osx"
-    },
-    {
-      "name": "whisper-cpp",
-      "platform": "!osx"
-    },
-    {
-      "name": "opencv4",
-      "version>=": "4.8.0",
-      "features": ["contrib"]
+    "zstd"
+  ],
+  "features": {
+    "full": {
+      "description": "Dependencies for the supported SVP CLI tools",
+      "dependencies": [
+        "cli11",
+        "nlohmann-json",
+        "sqlite3",
+        "libzip",
+        "onnxruntime",
+        {
+          "name": "whisper-cpp",
+          "features": ["metal"],
+          "platform": "osx"
+        },
+        {
+          "name": "whisper-cpp",
+          "platform": "!osx"
+        },
+        {
+          "name": "opencv4",
+          "version>=": "4.8.0",
+          "default-features": false,
+          "features": ["calib3d"]
+        }
+      ]
     }
-  ]
+  }
 }

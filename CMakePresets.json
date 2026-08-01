@@ -23,6 +23,38 @@
       }
     },
     {
+      "name": "linux-x64-vcpkg",
+      "hidden": true,
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/SvpVcpkgToolchain.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-linux"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "windows-x64-vcpkg",
+      "hidden": true,
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/SvpVcpkgToolchain.cmake",
+        "SVP_PORTABLE_TESTS_ONLY": "ON",
+        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON",
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
       "name": "macos-arm64-debug",
       "displayName": "macOS arm64 Debug",
       "inherits": "macos-arm64-vcpkg",
@@ -37,6 +69,19 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "linux-x64-debug",
+      "displayName": "Linux x64 Debug",
+      "inherits": "linux-x64-vcpkg",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "windows-x64-debug",
+      "displayName": "Windows x64 portable Debug",
+      "inherits": "windows-x64-vcpkg"
     }
   ],
   "buildPresets": [
@@ -47,6 +92,15 @@
     {
       "name": "macos-arm64-release",
       "configurePreset": "macos-arm64-release"
+    },
+    {
+      "name": "linux-x64-debug",
+      "configurePreset": "linux-x64-debug"
+    },
+    {
+      "name": "windows-x64-debug",
+      "configurePreset": "windows-x64-debug",
+      "configuration": "Debug"
     }
   ],
   "testPresets": [
@@ -60,6 +114,21 @@
     {
       "name": "macos-arm64-release",
       "configurePreset": "macos-arm64-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-x64-debug",
+      "configurePreset": "linux-x64-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-x64-debug",
+      "configurePreset": "windows-x64-debug",
+      "configuration": "Debug",
       "output": {
         "outputOnFailure": true
       }

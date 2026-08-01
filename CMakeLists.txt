@@ -18,6 +18,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(CTest)
+
+option(SVP_PORTABLE_TESTS_ONLY
+       "Build only the platform-neutral C++ test surface"
+       OFF)
+
+if(SVP_PORTABLE_TESTS_ONLY)
+  add_subdirectory(packages/svp-blocks)
+  return()
+endif()
+
 include(cmake/SvpRuntimeResources.cmake)
 
 add_subdirectory(packages/svp-core)

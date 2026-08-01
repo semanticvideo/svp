@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: build and test (ubuntu-24.04)
+            preset: linux-x64-debug
+            full: true
+          - os: macos-15
+            name: build and test (macos-15)
+            preset: macos-arm64-debug
+            full: true
+          - os: windows-2025
+            name: portable C++ (windows-2025)
+            preset: windows-x64-debug
+            full: false
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
+      VCPKG_FEATURE_FLAGS: manifests,binarycaching,versions
+      # Large test translation units can exhaust hosted-runner memory when
+      # Unix Makefiles receives an unbounded `--parallel` request.
+      SVP_CI_BUILD_PARALLELISM: 2
+
+    steps:
+      - name: Check out SVP
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Check out pinned vcpkg
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: microsoft/vcpkg
+          ref: a0b1c8d3a477c1cb4813d8e127a56961707ca42b
+          path: .vcpkg
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Restore vcpkg packages
+        id: vcpkg-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ${{ env.VCPKG_ROOT }}/downloads
+            ${{ runner.temp }}/vcpkg-binary-cache
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Bootstrap vcpkg
+        if: runner.os != 'Windows'
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-binary-cache
+        run: |
+          cmake -E make_directory "$VCPKG_DEFAULT_BINARY_CACHE"
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+
+      - name: Bootstrap vcpkg on Windows
+        if: runner.os == 'Windows'
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-binary-cache
+        run: |
+          cmake -E make_directory "$env:VCPKG_DEFAULT_BINARY_CACHE"
+          & "$env:VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics
+
+      - name: Configure
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-binary-cache
+        run: cmake --preset "${{ matrix.preset }}"
+
+      - name: Save vcpkg packages
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ${{ env.VCPKG_ROOT }}/downloads
+            ${{ runner.temp }}/vcpkg-binary-cache
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json') }}
+
+      - name: Build CLI targets
+        if: matrix.full
+        run: >-
+          cmake --build --preset "${{ matrix.preset }}"
+          --parallel "${{ env.SVP_CI_BUILD_PARALLELISM }}"
+          --target svp-builder svp-validator svp-inspector svp-models-tool
+
+      - name: Build test targets
+        run: >-
+          cmake --build --preset "${{ matrix.preset }}"
+          --parallel "${{ env.SVP_CI_BUILD_PARALLELISM }}"
+
+      - name: Run CTest
+        env:
+          SVP_MODEL_CACHE_DIR: ""
+          SVP_MODEL_CACHE_ROOT: ${{ runner.temp }}/svp-no-model-assets
+          SVP_SHERPA_DIARIZATION_MODEL_DIR: ""
+        run: ctest --preset "${{ matrix.preset }}"
+
+      - name: Verify specification files
+        shell: bash
+        run: scripts/verify-spec-files.sh
