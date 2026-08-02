@@ -27,16 +27,6 @@ support, and a real builder path that can produce validator-clean `.svp`
 packages from local sample media when the required native tools and model cache
 are available.
 
-Recent real-video proof paths include:
-
-| Sample | What it proves |
-| --- | --- |
-| `test-30.mp4` | OCR text/numeric extraction, transcript, color, depth, relationships, timeline, and one-speaker diarization behavior. |
-| `SVP-TEST.MOV` | Short handwritten-text OCR and evidence-crop behavior. |
-| `CODE.MOV` | Full transcript recovery, deterministic OCR temporal coverage, scene/color grouping, timeline relationships, and agent-readable package reconstruction. |
-| `intro.mp4` | Whisper word confidence propagation and speaker speech-duration accounting. |
-| `speakers.MOV` | Real sherpa-onnx diarization with two speakers when runtime and model bundles are available. |
-
 The known current gap is no longer basic package validity. The active work is
 completion and hardening: semantic quality, query traversal, deterministic
 entity and relationship behavior, model-bundle checks, package hygiene, and
