@@ -17,12 +17,14 @@ add_library(svp-audio
   src/asr_chunk_reconciliation.cpp
   src/asr_execution_boundary.cpp
   src/audio_extraction_executor.cpp
+  src/ctc_forced_aligner.cpp
   src/audio_extraction_plan.cpp
   src/audio_stage_plan.cpp
   src/diarization_boundary.cpp
   src/microphone_signal.cpp
   src/microphone_transcript.cpp
   src/microphone_word_ownership.cpp
+  src/phoneme_lexicon.cpp
   src/sherpa_diarization/api.cpp
   src/sherpa_diarization/asr_word_assignment.cpp
   src/sherpa_diarization/embeddings.cpp
@@ -68,6 +70,7 @@ add_library(svp-audio
   src/whisper_cpp_backend.cpp
   src/whisper_cpp_model.cpp
   src/whisper_pcm_reader.cpp
+  src/word_boundary_conversion.cpp
 )
 
 add_library(svp::audio ALIAS svp-audio)

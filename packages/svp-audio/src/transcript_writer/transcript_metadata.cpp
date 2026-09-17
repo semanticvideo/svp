@@ -52,10 +52,34 @@ std::string asr_vad_status(const AsrExecutionBoundary& boundary) {
 }
 
 nlohmann::json asr_limitations_json(const AsrExecutionBoundary& boundary) {
+  const bool aligned = boundary.alignment_status == "applied" ||
+                       boundary.alignment_status == "partial";
   return {
-      {"timestamp_method", "whisper_cpp_dtw_token_onsets_with_vad_region_caps"},
-      {"timestamp_precision", "centisecond_dtw_onsets_with_vad_region_caps_and_t1_word_ends"},
-      {"timestamp_note", "Word starts use whisper.cpp DTW token onsets, capped by t0 within a VAD speech region or by the VAD region onset across a speech gap; invalid DTW onsets fall back to t0/t1. Word ends use decoder token t1, clamped to the next word onset and converted from centiseconds to integer microseconds."},
+      {"timestamp_method",
+       boundary.alignment_status == "applied"
+           ? "wav2vec2_espeak_ctc_forced_alignment_with_nle_boundary_rules"
+           : (aligned
+                  ? "wav2vec2_espeak_ctc_forced_alignment_with_nle_boundary_"
+                    "rules_and_whisper_dtw_fallback"
+                  : "whisper_cpp_dtw_token_onsets_with_vad_region_caps")},
+      {"timestamp_precision",
+       aligned ? "20ms_ctc_phone_frames_with_phonetic_boundary_rules"
+               : "centisecond_dtw_onsets_with_vad_region_caps_and_t1_word_"
+                 "ends"},
+      {"timestamp_note",
+       aligned
+           ? "Word starts come from a wav2vec2 espeak phoneme CTC forced "
+             "alignment over the Whisper transcript, converted to "
+             "packed-word boundaries by phonetic transition rules; words "
+             "the pronunciation lexicon cannot resolve keep whisper.cpp "
+             "DTW timing."
+           : "Word starts use whisper.cpp DTW token onsets, capped by t0 "
+             "within a VAD speech region or by the VAD region onset across "
+             "a speech gap; invalid DTW onsets fall back to t0/t1. Word "
+             "ends use decoder token t1, clamped to the next word onset "
+             "and converted from centiseconds to integer microseconds."},
+      {"alignment_model_id", boundary.alignment_model_id},
+      {"alignment_status", boundary.alignment_status},
       {"vad_method", "whisper_cpp_builtin_silero_vad"},
       {"vad_model_id", boundary.vad_model_id},
       {"vad_status", asr_vad_status(boundary)},

@@ -1,6 +1,9 @@
 #include "svp/audio/whisper_cpp_backend.hpp"
 
+#include "svp/audio/ctc_forced_aligner.hpp"
+#include "svp/audio/phoneme_lexicon.hpp"
 #include "svp/audio/whisper_pcm_reader.hpp"
+#include "svp/audio/word_boundary_conversion.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -454,6 +457,120 @@ void clamp_word_ends_to_next_onset(std::vector<AsrWord>& words) {
       words.end());
 }
 
+struct CachedPhonemeAligner {
+  std::mutex mutex;
+  std::filesystem::path path;
+  std::optional<CtcForcedAligner> aligner;
+  std::optional<PhonemeLexicon> lexicon;
+};
+
+CachedPhonemeAligner& cached_aligner() {
+  static CachedPhonemeAligner cache;
+  return cache;
+}
+
+std::int64_t seconds_to_chunk_us(double seconds, std::int64_t chunk_start_us,
+                                 std::int64_t chunk_end_us) {
+  return std::clamp<std::int64_t>(
+      chunk_start_us + static_cast<std::int64_t>(std::llround(seconds * 1e6)),
+      chunk_start_us, chunk_end_us);
+}
+
+// Replaces whisper.cpp token-derived word starts with CTC forced-alignment
+// starts converted to the NLE packed-word convention. Whisper still owns
+// the transcript text; alignment only assigns times. Words the lexicon
+// cannot resolve, and any alignment failure, keep whisper timing.
+void apply_phoneme_alignment(WhisperInferenceResult& result,
+                             const std::vector<float>& samples,
+                             const std::filesystem::path& bundle_dir,
+                             std::int64_t chunk_start_us,
+                             std::int64_t chunk_end_us) {
+  std::vector<AsrWord>& words = result.all_words;
+  if (words.empty()) return;
+
+  CachedPhonemeAligner& cache = cached_aligner();
+  std::scoped_lock lock(cache.mutex);
+  if (!cache.aligner.has_value() || cache.path != bundle_dir) {
+    PhonemeLexicon lexicon = PhonemeLexicon::load_from_bundle(bundle_dir);
+    CtcForcedAligner aligner = CtcForcedAligner::load(bundle_dir);
+    cache.lexicon = std::move(lexicon);
+    cache.aligner = std::move(aligner);
+    cache.path = bundle_dir;
+  }
+
+  std::vector<CtcAlignmentToken> tokens;
+  std::vector<bool> resolvable(words.size(), false);
+  for (std::size_t i = 0; i < words.size(); ++i) {
+    const std::string normalized =
+        normalize_word_for_lexicon(words[i].text);
+    if (normalized.empty()) continue;
+    const std::optional<std::vector<std::string>> phones =
+        cache.lexicon->phones_for(normalized);
+    if (!phones.has_value() || phones->empty()) continue;
+    for (const std::string& phone : *phones) {
+      tokens.push_back({phone, i});
+    }
+    resolvable[i] = true;
+  }
+  if (tokens.empty()) {
+    result.alignment_status = "fallback";
+    return;
+  }
+
+  const std::vector<CtcPhoneSpan> phone_spans =
+      cache.aligner->align(samples, tokens);
+
+  std::vector<AlignedWordSpan> spans(words.size());
+  std::vector<bool> has_span(words.size(), false);
+  for (const CtcPhoneSpan& span : phone_spans) {
+    const std::size_t owner = tokens[span.token_index].word_index;
+    AlignedWordSpan& word = spans[owner];
+    if (!has_span[owner]) {
+      word.start_seconds = span.start_seconds;
+      word.end_seconds = span.end_seconds;
+      has_span[owner] = true;
+    } else {
+      word.start_seconds = std::min(word.start_seconds, span.start_seconds);
+      word.end_seconds = std::max(word.end_seconds, span.end_seconds);
+    }
+  }
+  // Unresolved words contribute their whisper interval so gap and phone
+  // context stay defined for their aligned neighbours; their own timing
+  // is never overwritten below.
+  for (std::size_t i = 0; i < words.size(); ++i) {
+    if (has_span[i]) continue;
+    spans[i].start_seconds =
+        static_cast<double>(words[i].start_us - chunk_start_us) / 1e6;
+    spans[i].end_seconds =
+        static_cast<double>(words[i].end_us - chunk_start_us) / 1e6;
+  }
+
+  const std::vector<double> converted = convert_aligned_word_starts(
+      spans, phone_spans, tokens, samples);
+
+  std::size_t applied = 0;
+  for (std::size_t i = 0; i < words.size(); ++i) {
+    // A converted start is only meaningful between two aligned words;
+    // word zero has no left context and applies directly.
+    if (!has_span[i] || (i > 0 && !has_span[i - 1])) continue;
+    words[i].start_us =
+        seconds_to_chunk_us(converted[i], chunk_start_us, chunk_end_us);
+    words[i].end_us = std::min(
+        seconds_to_chunk_us(spans[i].end_seconds, chunk_start_us,
+                            chunk_end_us),
+        i + 1 < words.size() ? words[i + 1].start_us : chunk_end_us);
+    words[i].end_us = std::max(words[i].end_us, words[i].start_us);
+    ++applied;
+  }
+  for (std::size_t i = 0; i + 1 < words.size(); ++i) {
+    if (words[i].end_us > words[i + 1].start_us) {
+      words[i].end_us = words[i + 1].start_us;
+    }
+  }
+  result.alignment_status =
+      applied == words.size() ? "applied" : "applied_partial";
+}
+
 }  // namespace
 #endif
 
@@ -484,12 +601,23 @@ void release_whisper_cpp_model() noexcept {
 #endif
 }
 
+void release_phoneme_aligner() noexcept {
+#if defined(SVP_AUDIO_WHISPER_CPP_AVAILABLE)
+  CachedPhonemeAligner& cache = cached_aligner();
+  std::scoped_lock lock(cache.mutex);
+  cache.aligner.reset();
+  cache.lexicon.reset();
+  cache.path.clear();
+#endif
+}
+
 WhisperInferenceResult run_whisper_cpp_inference(
     const std::filesystem::path& wav_path,
     const std::filesystem::path& ggml_model_path,
     const std::filesystem::path& vad_model_path,
     std::int64_t chunk_start_us,
-    std::int64_t chunk_end_us) {
+    std::int64_t chunk_end_us,
+    const std::filesystem::path& aligner_bundle_dir) {
 #if defined(SVP_AUDIO_WHISPER_CPP_AVAILABLE)
   WhisperInferenceResult result;
   const std::vector<float> samples = read_whisper_pcm16_mono_wav(wav_path);
@@ -544,6 +672,14 @@ WhisperInferenceResult run_whisper_cpp_inference(
     result.segments.push_back(std::move(segment));
   }
   clamp_word_ends_to_next_onset(result.all_words);
+  if (!aligner_bundle_dir.empty()) {
+    try {
+      apply_phoneme_alignment(result, samples, aligner_bundle_dir,
+                              chunk_start_us, chunk_end_us);
+    } catch (const std::exception&) {
+      result.alignment_status = "fallback";
+    }
+  }
   result.ran = true;
   result.termination_reason = "end_of_transcript";
   return result;
@@ -551,6 +687,7 @@ WhisperInferenceResult run_whisper_cpp_inference(
   (void)wav_path;
   (void)ggml_model_path;
   (void)vad_model_path;
+  (void)aligner_bundle_dir;
   (void)chunk_start_us;
   (void)chunk_end_us;
   WhisperInferenceResult result;

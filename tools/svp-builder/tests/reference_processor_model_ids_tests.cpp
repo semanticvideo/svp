@@ -50,6 +50,8 @@ int main(int argc, char** argv) {
       {"audio.asr_chunk_planner", asr_plan.chunks.front().model_id},
       {"audio.asr_boundary", svp::audio::AsrExecutionBoundary{}.model_id},
       {"audio.asr_vad", svp::audio::AsrExecutionBoundary{}.vad_model_id},
+      {"audio.asr_phoneme_alignment",
+       svp::audio::AsrExecutionBoundary{}.alignment_model_id},
       {"audio.diarization_boundary",
        svp::audio::DiarizationExecutionBoundary{}.model_id},
       {"vision.depth_generation", depth.model_id},

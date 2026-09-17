@@ -175,6 +175,7 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
           }
         });
     svp::audio::release_whisper_cpp_model();
+    svp::audio::release_phoneme_aligner();
   }
   if (!microphone_stream_mode) {
     emit_stage_completed(context, ProgressStageId::asr);
