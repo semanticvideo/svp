@@ -18,6 +18,7 @@ bool is_whisper_runtime_available() {
 WhisperInferenceResult run_whisper_inference(
     const std::filesystem::path& wav_path,
     const std::filesystem::path& model_dir,
+    const std::filesystem::path& vad_model_path,
     const std::string& chunk_id,
     std::int64_t chunk_start_us,
     std::int64_t chunk_end_us) {
@@ -30,8 +31,8 @@ WhisperInferenceResult run_whisper_inference(
       return result;
     }
     (void)chunk_id;
-    return run_whisper_cpp_inference(wav_path, *ggml_model, chunk_start_us,
-                                     chunk_end_us);
+    return run_whisper_cpp_inference(wav_path, *ggml_model, vad_model_path,
+                                     chunk_start_us, chunk_end_us);
   } catch (const std::exception& e) {
     WhisperInferenceResult result;
     result.blockers.push_back(std::string("Whisper inference failed: ") +

@@ -45,6 +45,26 @@ nlohmann::json diarization_provenance_json(const AsrExecutionBoundary& boundary)
   return result;
 }
 
+std::string asr_vad_status(const AsrExecutionBoundary& boundary) {
+  if (boundary.vad_model_verified) return "verified";
+  if (boundary.vad_model_available) return "unverified";
+  return "missing";
+}
+
+nlohmann::json asr_limitations_json(const AsrExecutionBoundary& boundary) {
+  return {
+      {"timestamp_method", "whisper_cpp_dtw_token_onsets_with_vad_region_caps"},
+      {"timestamp_precision", "centisecond_dtw_onsets_with_vad_region_caps_and_t1_word_ends"},
+      {"timestamp_note", "Word starts use whisper.cpp DTW token onsets, capped by t0 within a VAD speech region or by the VAD region onset across a speech gap; invalid DTW onsets fall back to t0/t1. Word ends use decoder token t1, clamped to the next word onset and converted from centiseconds to integer microseconds."},
+      {"vad_method", "whisper_cpp_builtin_silero_vad"},
+      {"vad_model_id", boundary.vad_model_id},
+      {"vad_status", asr_vad_status(boundary)},
+      {"vad_note", "The built-in whisper.cpp VAD uses whisper_vad_default_params() and restricts transcription to detected speech segments. Missing or unverified VAD is a blocker."},
+      {"confidence_status", "whisper_cpp_token_probability_mean"},
+      {"confidence_note", "Per-word confidence is the mean of selected-token decoder softmax probabilities for the word's constituent tokens. This is uncalibrated model confidence, not a calibrated probability."},
+  };
+}
+
 }  // namespace
 
 nlohmann::json blocked_transcript_json(const AsrExecutionBoundary& boundary) {
@@ -67,6 +87,7 @@ nlohmann::json blocked_transcript_json(const AsrExecutionBoundary& boundary) {
       {"asr_status", asr_status_string(boundary.asr_status)},
       {"one_speaker_mode", boundary.one_speaker_mode},
       {"diarization", diarization_provenance_json(boundary)},
+      {"asr_limitations", asr_limitations_json(boundary)},
       {"blockers", boundary.blockers},
   };
 }
@@ -81,27 +102,23 @@ nlohmann::json ran_transcript_json(const AsrExecutionBoundary& boundary,
       {"confidence", 0.0},
   };
 
-  nlohmann::json asr_limitations = {
-      {"timestamp_method", "whisper_cpp_token_timestamps"},
-      {"timestamp_precision", "centisecond_token_boundaries"},
-      {"timestamp_note", "Word start_us/end_us are derived from whisper.cpp token timestamps and converted from centiseconds to integer microseconds."},
-      {"confidence_status", "whisper_cpp_token_probability_mean"},
-      {"confidence_note", "Per-word confidence is the mean of selected-token decoder softmax probabilities for the word's constituent tokens. This is uncalibrated model confidence, not a calibrated probability."},
-      {"speaker_mode", boundary.diarization_status == "fallback_one_speaker"
-           ? "one_speaker_fallback"
-           : (boundary.diarization_status == "user_declared_single_speaker"
-                ? "user_declared_single_speaker"
-                : (boundary.diarization_status == "microphone_stream_assignment"
-                     ? "camera_microphone_stream_locked"
-                     : "diarization_assigned"))},
-      {"speaker_note", boundary.diarization_status == "fallback_one_speaker"
-           ? "Single speaker assigned without diarization. All words have speaker_id speaker_0001. This is fallback behavior, not speaker recognition."
-           : (boundary.diarization_status == "user_declared_single_speaker"
-                ? "User requested single-speaker mode. All words have speaker_id speaker_0001. Diarization was intentionally skipped."
-                : (boundary.diarization_status == "microphone_stream_assignment"
-                     ? "Each microphone remains an authoritative source. Exact time-local duplicate words require transcript agreement, matching local fingerprints, and stronger channel-relative SNR on another microphone. Decoder residue is removed only after at least half the words are exact duplicates and sustained voice, shared-timing, SNR, and ASR-confidence evidence establishes bleed."
-                     : "Speaker IDs assigned by max interval overlap with nearest-segment fallback (500ms tolerance). Sustained non-dominant speaker evidence may be expanded across the current ASR utterance. Words outside all segments and tolerance are marked speaker_unknown."))},
-  };
+  nlohmann::json asr_limitations = asr_limitations_json(boundary);
+  asr_limitations["speaker_mode"] =
+      boundary.diarization_status == "fallback_one_speaker"
+          ? "one_speaker_fallback"
+          : (boundary.diarization_status == "user_declared_single_speaker"
+               ? "user_declared_single_speaker"
+               : (boundary.diarization_status == "microphone_stream_assignment"
+                    ? "camera_microphone_stream_locked"
+                    : "diarization_assigned"));
+  asr_limitations["speaker_note"] =
+      boundary.diarization_status == "fallback_one_speaker"
+          ? "Single speaker assigned without diarization. All words have speaker_id speaker_0001. This is fallback behavior, not speaker recognition."
+          : (boundary.diarization_status == "user_declared_single_speaker"
+               ? "User requested single-speaker mode. All words have speaker_id speaker_0001. Diarization was intentionally skipped."
+               : (boundary.diarization_status == "microphone_stream_assignment"
+                    ? "Each microphone remains an authoritative source. Exact time-local duplicate words require transcript agreement, matching local fingerprints, and stronger channel-relative SNR on another microphone. Decoder residue is removed only after at least half the words are exact duplicates and sustained voice, shared-timing, SNR, and ASR-confidence evidence establishes bleed."
+                    : "Speaker IDs assigned by max interval overlap with nearest-segment fallback (500ms tolerance). Sustained non-dominant speaker evidence may be expanded across the current ASR utterance. Words outside all segments and tolerance are marked speaker_unknown."));
 
   nlohmann::json speaker_sources = nlohmann::json::array();
   if (boundary.diarization_status == "microphone_stream_assignment") {
@@ -140,29 +157,25 @@ nlohmann::json ran_transcript_json(const AsrExecutionBoundary& boundary,
   };
 }
 
-nlohmann::json chunk_provenance_json(const AsrChunkPlan& chunk,
-                                     const std::string& processor_id,
-                                     const std::string& asr_status,
-                                     const std::string& diarization_status) {
+nlohmann::json chunk_provenance_json(
+    const AsrChunkPlan& chunk,
+    const AsrExecutionBoundary& boundary,
+    const std::string& asr_status) {
   std::string speaker_mode = "diarization_assigned";
-  if (diarization_status == "fallback_one_speaker") {
+  if (boundary.diarization_status == "fallback_one_speaker") {
     speaker_mode = "one_speaker_fallback";
-  } else if (diarization_status == "user_declared_single_speaker") {
+  } else if (boundary.diarization_status == "user_declared_single_speaker") {
     speaker_mode = "user_declared_single_speaker";
-  } else if (diarization_status == "microphone_stream_assignment") {
+  } else if (boundary.diarization_status == "microphone_stream_assignment") {
     speaker_mode = "camera_microphone_stream_locked";
   }
-  nlohmann::json asr_limitations = {
-      {"timestamp_method", "whisper_cpp_token_timestamps"},
-      {"timestamp_precision", "centisecond_token_boundaries"},
-      {"confidence_status", "whisper_cpp_token_probability_mean"},
-      {"speaker_mode", speaker_mode},
-  };
+  nlohmann::json asr_limitations = asr_limitations_json(boundary);
+  asr_limitations["speaker_mode"] = speaker_mode;
 
   return {
       {"chunk_id", chunk.chunk_id},
       {"input_ref", chunk.input_ref},
-      {"processor_id", processor_id},
+      {"processor_id", boundary.processor_id},
       {"source_start_us", chunk.source_start_us},
       {"source_end_us", chunk.source_end_us},
       {"overlap_before_us", chunk.overlap_before_us},

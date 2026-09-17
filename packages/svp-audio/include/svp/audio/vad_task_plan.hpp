@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/media/media_probe.hpp"
+#include "svp/models/reference_processor_model_ids.hpp"
 
 #include <cstdint>
 #include <nlohmann/json_fwd.hpp>
@@ -23,7 +24,7 @@ struct VadTaskBoundary {
 
 struct VadTaskPlan {
   std::string processor_id = "proc_silero_vad_0001";
-  std::string model_id = "model_silero_vad";
+  std::string model_id = svp::models::kSileroVadModelId;
   std::string runtime = "onnxruntime";
   std::string execution_provider = "unresolved";
   std::int64_t chunk_duration_us = 30000000;

@@ -37,8 +37,9 @@ void test_whisper_inference_blocks_when_model_dir_missing() {
   }
 
   const svp::audio::WhisperInferenceResult result =
-      svp::audio::run_whisper_inference(fake_wav, fake_dir, "test_chunk", 0,
-                                        1000000);
+      svp::audio::run_whisper_inference(
+          fake_wav, fake_dir, fake_dir / "vad_model", "test_chunk", 0,
+          1000000);
 
   assert(!result.ran);
   assert(!result.blockers.empty());

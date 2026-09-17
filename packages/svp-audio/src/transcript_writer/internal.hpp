@@ -24,10 +24,10 @@ nlohmann::json ran_transcript_json(const AsrExecutionBoundary& boundary,
                                    std::size_t word_count,
                                    std::size_t speaker_count);
 
-nlohmann::json chunk_provenance_json(const AsrChunkPlan& chunk,
-                                     const std::string& processor_id,
-                                     const std::string& asr_status,
-                                     const std::string& diarization_status);
+nlohmann::json chunk_provenance_json(
+    const AsrChunkPlan& chunk,
+    const AsrExecutionBoundary& boundary,
+    const std::string& asr_status);
 
 std::vector<std::string> assign_word_speakers(
     const AsrExecutionBoundary& boundary);

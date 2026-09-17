@@ -15,6 +15,7 @@ void release_whisper_cpp_model() noexcept;
 [[nodiscard]] WhisperInferenceResult run_whisper_cpp_inference(
     const std::filesystem::path& wav_path,
     const std::filesystem::path& ggml_model_path,
+    const std::filesystem::path& vad_model_path,
     std::int64_t chunk_start_us,
     std::int64_t chunk_end_us);
 
