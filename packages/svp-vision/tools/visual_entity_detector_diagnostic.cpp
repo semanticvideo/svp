@@ -3,6 +3,7 @@
 #include "svp/vision/visual_entity_detector.hpp"
 #include "svp/vision/visual_entity_frame_decoder.hpp"
 #include "svp/vision/visual_entity_sampling.hpp"
+#include "svp/vision/visual_tracking_quality.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -24,8 +25,14 @@ int main(int argc, char** argv) {
     detector_options.confidence_threshold = std::stod(argv[3]);
     auto probe = svp::media::probe_media_with_ffprobe(media_path, argv[6]);
     auto plan = svp::media::build_media_ingest_plan(media_path, std::move(probe));
+    const auto quality_policy = svp::vision::visual_tracking_quality_policy(
+        svp::vision::kDefaultVisualTrackingQuality);
+    const svp::vision::VisualEntitySamplingOptions sampling_options{
+        quality_policy.sample_interval_us,
+        quality_policy.window_duration_us,
+        quality_policy.window_overlap_us};
     const auto sampling_plan = svp::vision::make_visual_entity_sampling_plan(
-        svp::vision::compute_media_duration_us(plan));
+        svp::vision::compute_media_duration_us(plan), sampling_options);
     const auto window = std::find_if(
         sampling_plan.begin(), sampling_plan.end(), [&](const auto& candidate) {
           return candidate.start_us <= timestamp_us &&

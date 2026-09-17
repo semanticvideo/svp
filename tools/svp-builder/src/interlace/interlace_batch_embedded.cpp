@@ -90,6 +90,7 @@ bool create_embedded_batch_artifact(
   create.ffmpeg_path = options.ffmpeg_path;
   create.sherpa_lib_path = options.sherpa_lib_path;
   create.performance = options.performance;
+  create.visual_tracking_quality = options.visual_tracking_quality;
   create.core_only_diagnostic = options.core_only_diagnostic;
   create.allow_fallback_diarization = options.allow_fallback_diarization;
   create.force_single_speaker = options.force_single_speaker;

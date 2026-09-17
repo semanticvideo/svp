@@ -23,6 +23,8 @@ struct InterlaceCreateOptions {
   std::string probe_json_path;
   std::string sherpa_lib_path;
   svp::vision::InferencePerformanceOptions performance;
+  std::string visual_tracking_quality{
+      svp::vision::kDefaultVisualTrackingQualityName};
   bool compute_full_blake3 = true;
   bool compute_chunk_proof = true;
   bool core_only_diagnostic = false;

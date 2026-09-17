@@ -11,6 +11,15 @@ void add_pipeline_performance_options(
       ->check(CLI::IsMember({"serial", "background", "conservative", "fast"}));
 }
 
+void add_visual_tracking_quality_option(
+    CLI::App& command,
+    std::string& quality) {
+  command
+      .add_option("--visual-tracking-quality", quality,
+                  "Visual tracking quality: off, low, medium, or high")
+      ->check(CLI::IsMember({"off", "low", "medium", "high"}));
+}
+
 }  // namespace
 
 void register_cli(CLI::App& app, CliContext& context) {
@@ -53,6 +62,8 @@ void register_cli(CLI::App& app, CliContext& context) {
                     "Diagnostic partial-stage stop: media-ingest, audio, vision-plan, "
                     "foundation-color, foundation-ocr, package");
   add_pipeline_performance_options(*build, build_opts.performance);
+  add_visual_tracking_quality_option(
+      *build, build_opts.visual_tracking_quality);
   build->add_option("--sherpa-lib", build_opts.sherpa_lib_path,
                     "Explicit path to libsherpa-onnx-c-api.dylib for diarization");
   build->add_flag("--allow-fallback-diarization", build_opts.allow_fallback_diarization,
@@ -128,6 +139,8 @@ void register_cli(CLI::App& app, CliContext& context) {
   ic_create->add_option("--probe-json", opts.ic_probe_json, "Precomputed probe JSON");
   ic_create->add_option("--sherpa-lib", opts.ic_sherpa_lib, "Path to sherpa-onnx shared library");
   add_pipeline_performance_options(*ic_create, opts.ic_performance);
+  add_visual_tracking_quality_option(
+      *ic_create, opts.ic_visual_tracking_quality);
   ic_create->add_flag("--no-blake3", opts.ic_no_blake3, "Skip full-file BLAKE3 computation");
   ic_create->add_flag("--core-only-diagnostic", opts.ic_core_only,
       "Emit core-only SVPI without running semantic pipeline (diagnostic mode)");
@@ -212,6 +225,8 @@ void register_cli(CLI::App& app, CliContext& context) {
   cb_create_batch->add_option("--staging-dir", opts.cb_staging, "Staging directory");
   cb_create_batch->add_option("--sherpa-lib", opts.cb_sherpa_lib, "Path to sherpa-onnx shared library");
   add_pipeline_performance_options(*cb_create_batch, opts.cb_performance);
+  add_visual_tracking_quality_option(
+      *cb_create_batch, opts.cb_visual_tracking_quality);
   cb_create_batch->add_option("--jobs", opts.cb_jobs,
       "Maximum number of media files to process concurrently")
       ->check(CLI::PositiveNumber);

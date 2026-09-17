@@ -198,6 +198,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         {"command", "build"},
         {"stop_after", stop_after_name},
         {"ocr_performance", effective_options.performance.ocr_performance_profile},
+        {"visual_tracking_quality", effective_options.visual_tracking_quality},
         {"valid_svp_package_written", package_result.validator_passes},
     };
 

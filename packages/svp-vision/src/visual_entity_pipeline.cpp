@@ -20,20 +20,31 @@ VisualEntityPipelineResult run_visual_entity_pipeline(
     FrameCatalog* frame_catalog,
     const VisualEntityPipelineOptions& options) {
   VisualEntityPipelineResult result;
+  if (!visual_tracking_enabled(options.quality)) {
+    return result;
+  }
+
+  const auto quality_policy = visual_tracking_quality_policy(options.quality);
+  const VisualEntitySamplingOptions sampling{
+      quality_policy.sample_interval_us,
+      quality_policy.window_duration_us,
+      quality_policy.window_overlap_us};
+  VisualEntityDepthScheduleOptions depth_schedule = options.depth_schedule;
+  depth_schedule.periodic_interval_us = quality_policy.depth_interval_us;
+  const std::string& execution_provider = options.execution_provider;
+
   // The package's current shot timeline is one range per foundation frame,
   // not a cinematic-cut contract. Entity tracking derives cut boundaries
   // from its own dense window frames instead.
   (void)shot_boundaries;
-  if (options.depth_schedule.periodic_interval_us <
-          options.sampling.sample_interval_us ||
-      options.depth_schedule.periodic_interval_us %
-              options.sampling.sample_interval_us != 0) {
+  if (depth_schedule.periodic_interval_us < sampling.sample_interval_us ||
+      depth_schedule.periodic_interval_us % sampling.sample_interval_us != 0) {
     throw std::invalid_argument(
         "visual entity depth cadence must be an integer multiple of the RGB cadence");
   }
   const std::int64_t duration_us = compute_media_duration_us(media_plan);
   const auto windows =
-      make_visual_entity_sampling_plan(duration_us, options.sampling);
+      make_visual_entity_sampling_plan(duration_us, sampling);
   result.windows_planned = windows.size();
   if (windows.empty()) {
     result.blocker = "video duration is unavailable for visual entity tracking";
@@ -44,13 +55,13 @@ VisualEntityPipelineResult run_visual_entity_pipeline(
   auto embedding_runtime = load_visual_entity_embedding_runtime(
       model_cache_root,
       options.embedding_model_id,
-      options.execution_provider);
+      execution_provider);
   auto depth_runtime = load_depth_inference_runtime(
       model_cache_root,
       svp::models::kDepthAnythingV2SmallModelId,
-      options.execution_provider);
+      execution_provider);
   auto detector_options = options.detector;
-  detector_options.execution_provider = options.execution_provider;
+  detector_options.execution_provider = execution_provider;
   auto detector_runtime = load_visual_entity_detector(
       model_cache_root, detector_options);
   const auto record_failure = [&](const std::string& component,
@@ -103,7 +114,7 @@ VisualEntityPipelineResult run_visual_entity_pipeline(
       std::vector<std::uint16_t> window_depth;
       std::vector<std::string> depth_frame_ids;
       const auto proposal_frame_indices = select_visual_entity_depth_frames(
-          decoded.frames, options.depth_schedule);
+          decoded.frames, depth_schedule);
       std::vector<ExternalEntityProposal> detector_proposals;
       if (detector_runtime.session) {
         for (const auto& frame : decoded.frames) {
@@ -165,7 +176,7 @@ VisualEntityPipelineResult run_visual_entity_pipeline(
       // would recreate the five-frame coverage bug.
       tracker_options.keyframe_interval_frames = 1;
       tracker_options.embedding_model_id = options.embedding_model_id;
-      tracker_options.execution_provider = options.execution_provider;
+      tracker_options.execution_provider = execution_provider;
       tracker_options.embedding_runtime = &embedding_runtime;
       tracker_options.external_proposals = std::move(detector_proposals);
 
@@ -223,16 +234,16 @@ VisualEntityPipelineResult run_visual_entity_pipeline(
             " Depth support unavailable: " + depth_runtime.blocker + ".";
       }
       window_result.parameters_json["visual_entity_sampling"] = {
-          {"sample_interval_us", options.sampling.sample_interval_us},
-          {"window_duration_us", options.sampling.window_duration_us},
-          {"window_overlap_us", options.sampling.window_overlap_us}};
+          {"quality", std::string(visual_tracking_quality_name(options.quality))},
+          {"sample_interval_us", sampling.sample_interval_us},
+          {"window_duration_us", sampling.window_duration_us},
+          {"window_overlap_us", sampling.window_overlap_us}};
       window_result.parameters_json["depth_schedule"] = {
-          {"periodic_interval_us",
-           options.depth_schedule.periodic_interval_us},
+          {"periodic_interval_us", depth_schedule.periodic_interval_us},
           {"scene_change_threshold",
-           options.depth_schedule.scene_change_threshold},
+           depth_schedule.scene_change_threshold},
           {"scene_change_burst_frames",
-           options.depth_schedule.scene_change_burst_frames}};
+           depth_schedule.scene_change_burst_frames}};
       window_result.parameters_json["window_assembly"] = {
           {"minimum_overlap_iou", options.assembly.minimum_overlap_iou},
           {"maximum_entity_area_ratio",
@@ -260,19 +271,19 @@ VisualEntityPipelineResult run_visual_entity_pipeline(
           {"diagnostic_in_memory",
            options.assembly.retain_artifacts_in_memory}};
       window_result.parameters_json["objectness_detector"] = {
-          {"model_id", options.detector.model_id},
+          {"model_id", detector_options.model_id},
           {"model_identity", detector_runtime.model_identity},
-          {"confidence_threshold", options.detector.confidence_threshold},
+          {"confidence_threshold", detector_options.confidence_threshold},
           {"category_evidence_confidence_threshold",
-           options.detector.category_evidence_confidence_threshold},
-          {"nms_iou_threshold", options.detector.nms_iou_threshold},
+           detector_options.category_evidence_confidence_threshold},
+          {"nms_iou_threshold", detector_options.nms_iou_threshold},
           {"nms_containment_threshold",
-           options.detector.nms_containment_threshold},
+           detector_options.nms_containment_threshold},
           {"cross_category_duplicate_iou_threshold",
-           options.detector.cross_category_duplicate_iou_threshold},
-          {"minimum_area_ratio", options.detector.minimum_area_ratio},
-          {"maximum_area_ratio", options.detector.maximum_area_ratio},
-          {"maximum_detections", options.detector.maximum_detections}};
+           detector_options.cross_category_duplicate_iou_threshold},
+          {"minimum_area_ratio", detector_options.minimum_area_ratio},
+          {"maximum_area_ratio", detector_options.maximum_area_ratio},
+          {"maximum_detections", detector_options.maximum_detections}};
       window_result.parameters_json["cut_detection"] = {
           {"immediate_difference_threshold",
            options.cut_detection.immediate_difference_threshold},

@@ -26,8 +26,8 @@ struct VisualEntityWindowAssemblerOptions {
   // evidence, not a useful independently tracked entity.
   double maximum_entity_area_ratio = 0.95;
 
-  // Three observations reject two-frame transition residue while retaining
-  // entities visible for 400 ms at the default five-Hz RGB cadence.
+  // Three observations reject two-frame transition residue. Depending on the
+  // selected quality, this represents 400 ms to one second of visibility.
   std::size_t minimum_observation_count = 3;
 
   // Reappearance without temporal overlap needs substantially stronger

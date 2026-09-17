@@ -50,6 +50,8 @@ struct BuildCliOptions {
   std::string model_cache_dir;
   std::string stop_after = "package";
   svp::vision::InferencePerformanceOptions performance;
+  std::string visual_tracking_quality{
+      svp::vision::kDefaultVisualTrackingQualityName};
   std::string sherpa_lib_path;
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
@@ -71,6 +73,8 @@ struct InterlaceCliOptions {
   std::string ic_probe_json;
   std::string ic_sherpa_lib;
   svp::vision::InferencePerformanceOptions ic_performance;
+  std::string ic_visual_tracking_quality{
+      svp::vision::kDefaultVisualTrackingQualityName};
   bool ic_no_blake3 = false;
   bool ic_core_only = false;
   bool ic_allow_fallback = false;
@@ -121,6 +125,8 @@ struct InterlaceCliOptions {
   std::string cb_output_format = "svpi";
   std::string cb_visibility = "visible";
   svp::vision::InferencePerformanceOptions cb_performance;
+  std::string cb_visual_tracking_quality{
+      svp::vision::kDefaultVisualTrackingQualityName};
   int cb_jobs = 1;
   bool cb_recursive = false;
   bool cb_no_blake3 = false;

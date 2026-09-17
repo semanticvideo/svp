@@ -137,6 +137,7 @@ PackageVisionStageResult run_package_vision_stage(BuildPipelineContext& context)
           &context.frame_catalog,
           spatial_progress,
           context.options.performance,
+          context.options.visual_tracking_quality,
           context.options.serial_pipeline,
           &result.processor_records);
 

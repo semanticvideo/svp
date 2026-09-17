@@ -48,6 +48,23 @@ When tests are run, report:
 
 If code changed and tests could not be run, explain why.
 
+## Local macOS Build and Install Safety
+
+When working with local macOS builds or installs:
+
+- Never run `cmake --preset`, `cmake -S`, or any other CMake configure command.
+- Never invoke vcpkg, bootstrap dependencies, or rebuild ONNX Runtime.
+- Never run a build at the same time as a benchmark or another build.
+- If an existing build tree is missing or invalid, stop and report the problem.
+  Do not configure a replacement build tree.
+- If a build or configure command is interrupted or its tool call is canceled,
+  immediately check whether its exact process group is still running. Stop that
+  process group and verify that its CMake, vcpkg, Ninja, and compiler children
+  are gone before doing anything else.
+
+The clean-clone configure instructions in `README.md` are setup documentation,
+not permission for an agent to reconfigure this Mac during an install request.
+
 ## SVP Project Priorities
 
 - SVP v1.0 RC2 is the active implementation target.

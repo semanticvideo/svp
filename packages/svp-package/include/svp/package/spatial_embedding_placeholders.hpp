@@ -4,8 +4,10 @@
 #include <filesystem>
 #include <functional>
 #include <nlohmann/json.hpp>
+#include <string_view>
 #include <vector>
 #include "svp/vision/inference_performance.hpp"
+#include "svp/vision/visual_tracking_quality.hpp"
 
 namespace svp::media { struct MediaIngestPlan; }
 namespace svp::vision { class FrameCatalog; }
@@ -79,6 +81,8 @@ struct SpatialEmbeddingPlaceholderSummary {
     svp::vision::FrameCatalog* frame_catalog = nullptr,
     SpatialProgressCallback on_progress = {},
     const svp::vision::InferencePerformanceOptions& performance = {},
+    std::string_view visual_tracking_quality =
+        svp::vision::kDefaultVisualTrackingQualityName,
     bool serial_model_stages = false,
     std::vector<nlohmann::json>* processor_records = nullptr);
 
