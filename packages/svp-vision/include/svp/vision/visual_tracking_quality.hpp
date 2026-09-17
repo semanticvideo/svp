@@ -7,6 +7,7 @@
 namespace svp::vision {
 
 enum class VisualTrackingQuality {
+  off,
   low,
   medium,
   high,
@@ -26,6 +27,8 @@ inline constexpr std::string_view kDefaultVisualTrackingQualityName = "medium";
 [[nodiscard]] inline constexpr std::string_view visual_tracking_quality_name(
     VisualTrackingQuality quality) noexcept {
   switch (quality) {
+    case VisualTrackingQuality::off:
+      return "off";
     case VisualTrackingQuality::low:
       return "low";
     case VisualTrackingQuality::medium:
@@ -38,19 +41,27 @@ inline constexpr std::string_view kDefaultVisualTrackingQualityName = "medium";
 
 [[nodiscard]] inline constexpr std::optional<VisualTrackingQuality>
 parse_visual_tracking_quality(std::string_view value) noexcept {
+  if (value == "off") return VisualTrackingQuality::off;
   if (value == "low") return VisualTrackingQuality::low;
   if (value == "medium") return VisualTrackingQuality::medium;
   if (value == "high") return VisualTrackingQuality::high;
   return std::nullopt;
 }
 
+[[nodiscard]] inline constexpr bool visual_tracking_enabled(
+    VisualTrackingQuality quality) noexcept {
+  return quality != VisualTrackingQuality::off;
+}
+
 [[nodiscard]] inline constexpr VisualTrackingQualityPolicy
 visual_tracking_quality_policy(VisualTrackingQuality quality) noexcept {
-  // All quality levels keep the proven bounded 20-second window and one-second
-  // identity handoff. Cadence alone owns the explicit coverage tradeoff.
+  // Enabled quality levels keep the proven bounded 20-second window and
+  // one-second identity handoff. Cadence alone owns the coverage tradeoff.
   constexpr std::int64_t kWindowDurationUs = 20'000'000;
   constexpr std::int64_t kWindowOverlapUs = 1'000'000;
   switch (quality) {
+    case VisualTrackingQuality::off:
+      return {0, 0, 0, 0};
     case VisualTrackingQuality::low:
       return {500'000, kWindowDurationUs, kWindowOverlapUs, 1'000'000};
     case VisualTrackingQuality::medium:

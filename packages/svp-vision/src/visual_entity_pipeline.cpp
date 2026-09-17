@@ -19,6 +19,11 @@ VisualEntityPipelineResult run_visual_entity_pipeline(
     const std::vector<std::pair<std::string, std::int64_t>>& shot_boundaries,
     FrameCatalog* frame_catalog,
     const VisualEntityPipelineOptions& options) {
+  VisualEntityPipelineResult result;
+  if (!visual_tracking_enabled(options.quality)) {
+    return result;
+  }
+
   const auto quality_policy = visual_tracking_quality_policy(options.quality);
   const VisualEntitySamplingOptions sampling{
       quality_policy.sample_interval_us,
@@ -28,7 +33,6 @@ VisualEntityPipelineResult run_visual_entity_pipeline(
   depth_schedule.periodic_interval_us = quality_policy.depth_interval_us;
   const std::string& execution_provider = options.execution_provider;
 
-  VisualEntityPipelineResult result;
   // The package's current shot timeline is one range per foundation frame,
   // not a cinematic-cut contract. Entity tracking derives cut boundaries
   // from its own dense window frames instead.

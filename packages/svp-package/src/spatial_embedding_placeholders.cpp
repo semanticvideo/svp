@@ -438,48 +438,51 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
           svp::vision::parse_visual_tracking_quality(visual_tracking_quality);
       if (!parsed_quality) {
         throw std::invalid_argument(
-            "visual tracking quality must be low, medium, or high");
+            "visual tracking quality must be off, low, medium, or high");
       }
       entity_options.quality = *parsed_quality;
-      VisualEntityArtifactWriter artifact_writer(staging_dir);
-      entity_options.assembly.handoff_retention_us =
-          svp::vision::visual_tracking_quality_policy(entity_options.quality)
-              .window_overlap_us;
-      entity_options.assembly.artifact_sink =
-          [&artifact_writer](
-              const std::vector<svp::vision::TrackedRegion>& regions,
-              const std::vector<svp::vision::MaskWriteEntry>& masks) {
-            artifact_writer.append(regions, masks);
+      if (svp::vision::visual_tracking_enabled(entity_options.quality)) {
+        VisualEntityArtifactWriter artifact_writer(staging_dir);
+        entity_options.assembly.handoff_retention_us =
+            svp::vision::visual_tracking_quality_policy(entity_options.quality)
+                .window_overlap_us;
+        entity_options.assembly.artifact_sink =
+            [&artifact_writer](
+                const std::vector<svp::vision::TrackedRegion>& regions,
+                const std::vector<svp::vision::MaskWriteEntry>& masks) {
+              artifact_writer.append(regions, masks);
+            };
+        if (on_progress) {
+          entity_options.on_progress = [&on_progress](
+              std::size_t current, std::size_t total) {
+            on_progress("visual_tracking", current, total, "");
           };
-      if (on_progress) {
-        entity_options.on_progress = [&on_progress](
-            std::size_t current, std::size_t total) {
-          on_progress("visual_tracking", current, total, "");
-        };
+        }
+
+        auto entity_result = svp::vision::run_visual_entity_pipeline(
+            *media_plan,
+            ffmpeg_path,
+            model_cache_root,
+            shot_boundaries,
+            frame_catalog,
+            entity_options);
+
+        std::set<std::string> retained_entity_ids;
+        for (const auto& entity : entity_result.assembled.tracker_result.entities) {
+          retained_entity_ids.insert(entity.entity_id);
+        }
+        const auto streamed_artifacts =
+            artifact_writer.finish(retained_entity_ids);
+
+        // Write visual entity artifacts (entities, tracks, regions, masks)
+        auto visual_entity_summary = svp::package::write_visual_entity_artifacts(
+            staging_dir,
+            entity_result.assembled.tracker_result,
+            nullptr,
+            &streamed_artifacts);
+        summary.masks_index_written = visual_entity_summary.masks_written;
+        summary.masks_blocks_written = visual_entity_summary.masks_written;
       }
-
-      auto entity_result = svp::vision::run_visual_entity_pipeline(
-          *media_plan,
-          ffmpeg_path,
-          model_cache_root,
-          shot_boundaries,
-          frame_catalog,
-          entity_options);
-
-      std::set<std::string> retained_entity_ids;
-      for (const auto& entity : entity_result.assembled.tracker_result.entities) {
-        retained_entity_ids.insert(entity.entity_id);
-      }
-      const auto streamed_artifacts = artifact_writer.finish(retained_entity_ids);
-
-      // Write visual entity artifacts (entities, tracks, regions, masks)
-      auto visual_entity_summary = svp::package::write_visual_entity_artifacts(
-          staging_dir,
-          entity_result.assembled.tracker_result,
-          nullptr,
-          &streamed_artifacts);
-      summary.masks_index_written = visual_entity_summary.masks_written;
-      summary.masks_blocks_written = visual_entity_summary.masks_written;
     }
 
     depth_result.raw_depth_data.clear();

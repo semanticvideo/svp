@@ -16,8 +16,8 @@ void add_visual_tracking_quality_option(
     std::string& quality) {
   command
       .add_option("--visual-tracking-quality", quality,
-                  "Visual tracking quality: low, medium, or high")
-      ->check(CLI::IsMember({"low", "medium", "high"}));
+                  "Visual tracking quality: off, low, medium, or high")
+      ->check(CLI::IsMember({"off", "low", "medium", "high"}));
 }
 
 }  // namespace

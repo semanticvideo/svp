@@ -1,4 +1,5 @@
 #include "svp/vision/visual_entity_sampling.hpp"
+#include "svp/vision/visual_entity_pipeline.hpp"
 #include "svp/vision/visual_tracking_quality.hpp"
 
 #include <algorithm>
@@ -91,6 +92,10 @@ void test_visual_tracking_quality_owns_sampling_coverage() {
       visual_tracking_quality_policy(VisualTrackingQuality::medium);
   const auto high = visual_tracking_quality_policy(VisualTrackingQuality::high);
 
+  check(!svp::vision::visual_tracking_enabled(VisualTrackingQuality::off),
+        "off disables visual tracking");
+  check(svp::vision::visual_tracking_enabled(VisualTrackingQuality::low),
+        "low enables visual tracking");
   check(low.sample_interval_us == 500000, "low quality uses two Hz");
   check(medium.sample_interval_us == 333333,
         "medium quality uses three Hz");
@@ -107,6 +112,9 @@ void test_visual_tracking_quality_owns_sampling_coverage() {
   check(svp::vision::parse_visual_tracking_quality("low") ==
             VisualTrackingQuality::low,
         "low quality parses");
+  check(svp::vision::parse_visual_tracking_quality("off") ==
+            VisualTrackingQuality::off,
+        "off quality parses");
   check(svp::vision::parse_visual_tracking_quality("medium") ==
             VisualTrackingQuality::medium,
         "medium quality parses");
@@ -117,6 +125,24 @@ void test_visual_tracking_quality_owns_sampling_coverage() {
         "performance profile names are not quality levels");
 }
 
+void test_off_returns_without_visual_tracking_work() {
+  svp::media::MediaIngestPlan media_plan;
+  svp::vision::VisualEntityPipelineOptions options;
+  options.quality = svp::vision::VisualTrackingQuality::off;
+  bool reported_progress = false;
+  options.on_progress = [&](std::size_t, std::size_t) {
+    reported_progress = true;
+  };
+
+  const auto result = svp::vision::run_visual_entity_pipeline(
+      media_plan, "missing-ffmpeg", "missing-model-cache", {}, nullptr, options);
+
+  check(result.windows_planned == 0, "off plans no tracking windows");
+  check(result.windows_processed == 0, "off processes no tracking windows");
+  check(result.frames_attempted == 0, "off attempts no tracking frames");
+  check(!reported_progress, "off reports no tracking progress");
+}
+
 }  // namespace
 
 int main() {
@@ -124,5 +150,6 @@ int main() {
   test_long_media_is_bounded_and_overlapping();
   test_invalid_policy_is_rejected();
   test_visual_tracking_quality_owns_sampling_coverage();
+  test_off_returns_without_visual_tracking_work();
   return failures == 0 ? 0 : 1;
 }
