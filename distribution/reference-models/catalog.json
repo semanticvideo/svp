@@ -47,6 +47,35 @@
       ]
     },
     {
+      "model_id": "model_whisper_cpp_silero_vad",
+      "model_version": "9ffd54a-silero-v6.2.0-ggml",
+      "source_slug": "ggml-org/whisper-vad + snakers4/silero-vad",
+      "source_revision": "ggml-org/whisper-vad@9ffd54a1e1ee413ddf265af9913beaf518d1639b+snakers4/silero-vad@be95df9152c0d7618fa1edfeb296fc3dae32376f",
+      "model_bundle_id": "model_whisper_cpp_silero_vad@9ffd54a-silero-v6.2.0-ggml+blake3_19c489aaac72",
+      "bundle_blake3": "blake3:19c489aaac72f3854cfbdbc6daa79ec760891d045985e04213749a682a3abfda",
+      "license": "MIT",
+      "license_sources": [
+        {
+          "path": "LICENSE",
+          "source_url": "https://raw.githubusercontent.com/snakers4/silero-vad/be95df9152c0d7618fa1edfeb296fc3dae32376f/LICENSE",
+          "source_revision": "be95df9152c0d7618fa1edfeb296fc3dae32376f",
+          "expected_bytes": 1075,
+          "sha256": "2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b",
+          "blake3": "blake3:c5d63fa0fb719e98f2bf2e2554d6d80862cb2c6642ec7213a765eb3c7655a350"
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "ggml-silero-v6.2.0.bin",
+          "source_url": "https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v6.2.0.bin",
+          "source_revision": "9ffd54a1e1ee413ddf265af9913beaf518d1639b",
+          "expected_bytes": 885098,
+          "sha256": "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
+          "blake3": "blake3:8644de43deb20579626361caf8afd3504282dd7f1ab915dd59c6591970b6de23"
+        }
+      ]
+    },
+    {
       "model_id": "model_sherpa_onnx_diarization",
       "model_version": "9403a69-asset-198893098",
       "source_slug": "csukuangfj/sherpa-onnx-pyannote-segmentation-3-0 + k2-fsa/sherpa-onnx",

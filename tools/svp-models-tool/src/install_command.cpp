@@ -109,6 +109,45 @@ std::string verification_errors(const svp::models::VerificationReport& report) {
   return result;
 }
 
+bool verify_existing_reference_subset(
+    const svp::models::ModelLock& lock,
+    const svp::models::ReferenceModelSet& reference_set,
+    const std::filesystem::path& cache_dir,
+    std::string& error) {
+  if (lock.models.size() >= reference_set.models.size()) {
+    error = "existing cache is not a strict subset of the reference set";
+    return false;
+  }
+
+  const auto report = svp::models::verify_lock_against_cache(lock, cache_dir);
+  if (!report.ok()) {
+    error = verification_errors(report);
+    return false;
+  }
+
+  for (const auto& entry : lock.models) {
+    const auto reference = std::find_if(
+        reference_set.models.begin(), reference_set.models.end(),
+        [&](const auto& model) { return model.model_id == entry.model_id; });
+    if (reference == reference_set.models.end()) {
+      error = "existing cache contains model outside the current reference set: " +
+              entry.model_id;
+      return false;
+    }
+    if (reference->model_bundle_id.has_value() &&
+        *reference->model_bundle_id != entry.model_bundle_id) {
+      error = "existing cache bundle identity is not current for " + entry.model_id;
+      return false;
+    }
+    if (reference->bundle_blake3.has_value() &&
+        *reference->bundle_blake3 != entry.bundle_blake3.canonical()) {
+      error = "existing cache bundle digest is not current for " + entry.model_id;
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 int install_reference_models(const std::filesystem::path& executable,
@@ -136,22 +175,35 @@ int install_reference_models(const std::filesystem::path& executable,
     }
     const auto reference_set =
         svp::models::load_reference_model_set(resources.reference_set);
+    const auto lock = svp::models::load_model_lock(lock_path);
     const auto report = svp::models::verify_locked_reference_set_against_cache(
-        svp::models::load_model_lock(lock_path),
-        reference_set,
-        cache_dir);
-    if (!report.ok()) {
-      throw std::runtime_error("existing model cache is not the exact reference set: " +
-                               verification_errors(report));
+        lock, reference_set, cache_dir);
+    if (report.ok()) {
+      sink->emit({.kind = svp::progress::EventKind::completed,
+                  .stage_id = "models",
+                  .stage_label = "Models",
+                  .message = "already verified at " + cache_dir.string(),
+                  .current = reference_set.models.size(),
+                  .total = reference_set.models.size(),
+                  .unit = "models"});
+      return 0;
     }
-    sink->emit({.kind = svp::progress::EventKind::completed,
-                .stage_id = "models",
-                .stage_label = "Models",
-                .message = "already verified at " + cache_dir.string(),
-                .current = reference_set.models.size(),
+
+    std::string subset_error;
+    if (!verify_existing_reference_subset(
+            lock, reference_set, cache_dir, subset_error)) {
+      throw std::runtime_error(
+          "existing model cache is neither the exact reference set nor a "
+          "verified current subset: " + subset_error);
+    }
+    sink->emit({.kind = svp::progress::EventKind::started,
+                .stage_id = "models_upgrade",
+                .stage_label = "Model Cache Upgrade",
+                .message = "adding missing reference models to " +
+                           cache_dir.string(),
+                .current = lock.models.size(),
                 .total = reference_set.models.size(),
                 .unit = "models"});
-    return 0;
   }
 
   require_platform();

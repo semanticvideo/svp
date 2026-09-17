@@ -34,6 +34,36 @@
       ]
     },
     {
+      "model_id": "model_whisper_cpp_silero_vad",
+      "display_name": "Silero VAD v6.2.0 (GGML for whisper.cpp)",
+      "source_slug": "ggml-org/whisper-vad + snakers4/silero-vad",
+      "source_revision": "ggml-org/whisper-vad@9ffd54a1e1ee413ddf265af9913beaf518d1639b+snakers4/silero-vad@be95df9152c0d7618fa1edfeb296fc3dae32376f",
+      "license": "MIT",
+      "model_bundle_id": "model_whisper_cpp_silero_vad@9ffd54a-silero-v6.2.0-ggml+blake3_19c489aaac72",
+      "bundle_blake3": "blake3:19c489aaac72f3854cfbdbc6daa79ec760891d045985e04213749a682a3abfda",
+      "required_files": [
+        {
+          "path": "ggml-silero-v6.2.0.bin",
+          "role": "vad_weights",
+          "blake3": "blake3:8644de43deb20579626361caf8afd3504282dd7f1ab915dd59c6591970b6de23"
+        },
+        {
+          "path": "LICENSE",
+          "role": "license",
+          "blake3": "blake3:c5d63fa0fb719e98f2bf2e2554d6d80862cb2c6642ec7213a765eb3c7655a350"
+        },
+        {
+          "path": "NOTICE",
+          "role": "notice",
+          "blake3": "blake3:27ade412d2253262f221369a5da79634db434a91e7072ed3b22bda6dc1f8bb07"
+        }
+      ],
+      "required_for": [
+        "transcript",
+        "words"
+      ]
+    },
+    {
       "model_id": "model_sherpa_onnx_diarization",
       "display_name": "sherpa-onnx Speaker Diarization",
       "source_slug": "csukuangfj/sherpa-onnx-pyannote-segmentation-3-0 + k2-fsa/sherpa-onnx",

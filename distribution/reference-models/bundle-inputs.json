@@ -20,6 +20,24 @@
       }
     },
     {
+      "model_id": "model_whisper_cpp_silero_vad",
+      "files": [{"path": "ggml-silero-v6.2.0.bin", "role": "vad_weights"}],
+      "notice": "SVP Model Bundle: model_whisper_cpp_silero_vad\n\nWeights: Silero VAD v6.2.0 converted to GGML for whisper.cpp.\nSource: https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v6.2.0.bin\nPinned revision: ggml-org/whisper-vad@9ffd54a1e1ee413ddf265af9913beaf518d1639b; snakers4/silero-vad@be95df9152c0d7618fa1edfeb296fc3dae32376f\nArtifact: ggml-silero-v6.2.0.bin\nLicense: MIT (Silero Team).\n",
+      "manifest": {
+        "schema_version": "svp-model-bundle-1",
+        "model_id": "model_whisper_cpp_silero_vad",
+        "display_name": "Silero VAD v6.2.0 (GGML for whisper.cpp)",
+        "source_registry": "huggingface",
+        "runtime": "whisper.cpp",
+        "format": "ggml",
+        "supported_execution_providers": ["cpu"],
+        "input_contract": {"sample_rate": 16000, "channels": 1, "sample_format": "float32"},
+        "output_contract": {"speech_segments": true, "timestamp_unit": "centisecond"},
+        "preprocessor_contract": {"owner": "whisper.cpp"},
+        "postprocessor_contract": {"model": "silero-v6.2.0", "parameters": "whisper_vad_default_params", "speech_only_filtering": true}
+      }
+    },
+    {
       "model_id": "model_sherpa_onnx_diarization",
       "files": [
         {"path": "sherpa-onnx-pyannote-segmentation-3-0/model.onnx", "role": "segmentation"},
