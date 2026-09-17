@@ -6,17 +6,9 @@
 namespace svp::vision {
 
 struct VisualEntitySamplingOptions {
-  // Five observations per second bounds the unobserved interval while keeping
-  // optical-flow displacement reasonable at the canonical analysis raster.
-  std::int64_t sample_interval_us = 200000;
-
-  // Decoding operates in bounded windows. Five seconds contains 26 samples
-  // at the default cadence.
-  std::int64_t window_duration_us = 5000000;
-
-  // One second of shared evidence gives adjacent windows enough observations
-  // to reconcile identities across decode windows.
-  std::int64_t window_overlap_us = 1000000;
+  std::int64_t sample_interval_us;
+  std::int64_t window_duration_us;
+  std::int64_t window_overlap_us;
 };
 
 struct VisualEntitySamplingWindow {
@@ -31,6 +23,6 @@ struct VisualEntitySamplingWindow {
 [[nodiscard]] std::vector<VisualEntitySamplingWindow>
 make_visual_entity_sampling_plan(
     std::int64_t duration_us,
-    const VisualEntitySamplingOptions& options = {});
+    const VisualEntitySamplingOptions& options);
 
 }  // namespace svp::vision

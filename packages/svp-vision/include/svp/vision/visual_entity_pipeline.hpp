@@ -5,6 +5,7 @@
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/vision/frame_catalog.hpp"
 #include "svp/vision/visual_entity_sampling.hpp"
+#include "svp/vision/visual_tracking_quality.hpp"
 #include "svp/vision/visual_entity_depth_schedule.hpp"
 #include "svp/vision/visual_entity_cut_detection.hpp"
 #include "svp/vision/visual_entity_detector.hpp"
@@ -23,7 +24,7 @@ using VisualEntityPipelineProgress =
     std::function<void(std::size_t current, std::size_t total)>;
 
 struct VisualEntityPipelineOptions {
-  VisualEntitySamplingOptions sampling;
+  VisualTrackingQuality quality = kDefaultVisualTrackingQuality;
   VisualEntityWindowAssemblerOptions assembly;
   VisualEntityDepthScheduleOptions depth_schedule;
   VisualEntityCutDetectionOptions cut_detection;

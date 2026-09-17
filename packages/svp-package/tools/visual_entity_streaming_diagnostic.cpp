@@ -32,7 +32,9 @@ int main(int argc, char** argv) {
         svp::media::build_media_ingest_plan(media_path, std::move(probe));
     svp::package::VisualEntityArtifactWriter writer(staging_dir);
     svp::vision::VisualEntityPipelineOptions options;
-    options.assembly.handoff_retention_us = options.sampling.window_overlap_us;
+    options.assembly.handoff_retention_us =
+        svp::vision::visual_tracking_quality_policy(options.quality)
+            .window_overlap_us;
     options.assembly.artifact_sink =
         [&writer](const std::vector<svp::vision::TrackedRegion>& regions,
                   const std::vector<svp::vision::MaskWriteEntry>& masks) {

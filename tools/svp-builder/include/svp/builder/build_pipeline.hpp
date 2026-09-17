@@ -2,6 +2,7 @@
 
 #include "svp/builder/build_progress.hpp"
 #include "svp/vision/inference_performance.hpp"
+#include "svp/vision/visual_tracking_quality.hpp"
 
 #include <cstddef>
 #include <filesystem>
@@ -50,6 +51,8 @@ struct BuildPipelineOptions {
   std::filesystem::path model_cache_dir;
   BuildStage stop_after = BuildStage::package_skeleton;
   svp::vision::InferencePerformanceOptions performance;
+  std::string visual_tracking_quality{
+      svp::vision::kDefaultVisualTrackingQualityName};
   std::string sherpa_lib_path;
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;

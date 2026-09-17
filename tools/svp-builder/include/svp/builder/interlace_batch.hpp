@@ -50,6 +50,8 @@ struct BatchCreateOptions {
   std::string staging_dir;
   std::string sherpa_lib_path;
   svp::vision::InferencePerformanceOptions performance;
+  std::string visual_tracking_quality{
+      svp::vision::kDefaultVisualTrackingQualityName};
   int jobs = 1;
   bool recursive = false;
   BatchOutputFormat output_format = BatchOutputFormat::svpi;

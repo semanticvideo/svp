@@ -24,6 +24,7 @@ svp::builder::InterlaceCreateOptions make_create_options(
   create.probe_json_path = options.probe_json_path;
   create.sherpa_lib_path = options.sherpa_lib_path;
   create.performance = options.performance;
+  create.visual_tracking_quality = options.visual_tracking_quality;
   create.allow_fallback_diarization = options.allow_fallback_diarization;
   create.force_single_speaker = options.force_single_speaker;
   create.serial_pipeline = options.serial_pipeline;

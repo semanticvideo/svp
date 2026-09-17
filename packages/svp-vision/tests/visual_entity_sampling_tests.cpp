@@ -1,4 +1,5 @@
 #include "svp/vision/visual_entity_sampling.hpp"
+#include "svp/vision/visual_tracking_quality.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -27,8 +28,10 @@ void check_maximum_gap(
 }
 
 void test_short_media_stays_on_the_requested_cadence() {
+  const svp::vision::VisualEntitySamplingOptions options{
+      200000, 5000000, 1000000};
   const auto windows =
-      svp::vision::make_visual_entity_sampling_plan(1750000);
+      svp::vision::make_visual_entity_sampling_plan(1750000, options);
   check(windows.size() == 1, "short media uses one window");
   check(windows.front().start_us == 0, "coverage begins at zero");
   check(windows.front().end_us == 1750000, "coverage reaches duration");
@@ -44,8 +47,10 @@ void test_short_media_stays_on_the_requested_cadence() {
 }
 
 void test_long_media_is_bounded_and_overlapping() {
+  const svp::vision::VisualEntitySamplingOptions options{
+      200000, 5000000, 1000000};
   const auto windows =
-      svp::vision::make_visual_entity_sampling_plan(17660000);
+      svp::vision::make_visual_entity_sampling_plan(17660000, options);
   check(windows.size() == 5, "long media is split into bounded windows");
   check(windows.front().start_us == 0, "first window begins at zero");
   check(windows.back().end_us == 17660000,
@@ -66,8 +71,8 @@ void test_long_media_is_bounded_and_overlapping() {
 }
 
 void test_invalid_policy_is_rejected() {
-  svp::vision::VisualEntitySamplingOptions options;
-  options.window_overlap_us = 0;
+  const svp::vision::VisualEntitySamplingOptions options{
+      200000, 5000000, 0};
   bool rejected = false;
   try {
     (void)svp::vision::make_visual_entity_sampling_plan(1000000, options);
@@ -77,11 +82,47 @@ void test_invalid_policy_is_rejected() {
   check(rejected, "overlap without handoff evidence is rejected");
 }
 
+void test_visual_tracking_quality_owns_sampling_coverage() {
+  using svp::vision::VisualTrackingQuality;
+  using svp::vision::visual_tracking_quality_policy;
+
+  const auto low = visual_tracking_quality_policy(VisualTrackingQuality::low);
+  const auto medium =
+      visual_tracking_quality_policy(VisualTrackingQuality::medium);
+  const auto high = visual_tracking_quality_policy(VisualTrackingQuality::high);
+
+  check(low.sample_interval_us == 500000, "low quality uses two Hz");
+  check(medium.sample_interval_us == 333333,
+        "medium quality uses three Hz");
+  check(high.sample_interval_us == 200000, "high quality uses five Hz");
+  for (const auto policy : {low, medium, high}) {
+    check(policy.window_duration_us == 20000000,
+          "quality profiles use twenty-second windows");
+    check(policy.window_overlap_us == 1000000,
+          "quality profiles preserve identity handoff overlap");
+    check(policy.depth_interval_us % policy.sample_interval_us == 0,
+          "depth cadence remains aligned to RGB cadence");
+  }
+
+  check(svp::vision::parse_visual_tracking_quality("low") ==
+            VisualTrackingQuality::low,
+        "low quality parses");
+  check(svp::vision::parse_visual_tracking_quality("medium") ==
+            VisualTrackingQuality::medium,
+        "medium quality parses");
+  check(svp::vision::parse_visual_tracking_quality("high") ==
+            VisualTrackingQuality::high,
+        "high quality parses");
+  check(!svp::vision::parse_visual_tracking_quality("fast"),
+        "performance profile names are not quality levels");
+}
+
 }  // namespace
 
 int main() {
   test_short_media_stays_on_the_requested_cadence();
   test_long_media_is_bounded_and_overlapping();
   test_invalid_policy_is_rejected();
+  test_visual_tracking_quality_owns_sampling_coverage();
   return failures == 0 ? 0 : 1;
 }

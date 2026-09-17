@@ -21,6 +21,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -223,6 +224,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     svp::vision::FrameCatalog* frame_catalog,
     SpatialProgressCallback on_progress,
     const svp::vision::InferencePerformanceOptions& performance,
+    std::string_view visual_tracking_quality,
     bool serial_model_stages,
     std::vector<nlohmann::json>* processor_records) {
   SpatialEmbeddingPlaceholderSummary summary;
@@ -432,9 +434,17 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
 
       svp::vision::VisualEntityPipelineOptions entity_options;
       entity_options.execution_provider = "cpu";
+      const auto parsed_quality =
+          svp::vision::parse_visual_tracking_quality(visual_tracking_quality);
+      if (!parsed_quality) {
+        throw std::invalid_argument(
+            "visual tracking quality must be low, medium, or high");
+      }
+      entity_options.quality = *parsed_quality;
       VisualEntityArtifactWriter artifact_writer(staging_dir);
       entity_options.assembly.handoff_retention_us =
-          entity_options.sampling.window_overlap_us;
+          svp::vision::visual_tracking_quality_policy(entity_options.quality)
+              .window_overlap_us;
       entity_options.assembly.artifact_sink =
           [&artifact_writer](
               const std::vector<svp::vision::TrackedRegion>& regions,
