@@ -374,6 +374,26 @@ svp-builder build \
   --model-cache "$SVP_MODEL_CACHE"
 ```
 
+Visual tracking defaults to `medium`. Use `--visual-tracking-quality` with
+`build`, `interlace create`, or `interlace create-batch` to choose its coverage:
+
+| Mode | Observations per second | Maximum gap | Behavior |
+| --- | ---: | ---: | --- |
+| `off` | 0 | — | Skip visual tracking |
+| `low` | 2 | 500 ms | Reduce tracking work for longer media |
+| `medium` | approximately 3 | 333,333 microseconds | Default balance |
+| `high` | 5 | 200 ms | Maximum temporal coverage |
+
+For example, disable visual tracking while retaining the rest of the build:
+
+```bash
+svp-builder build \
+  "$SVP_VIDEO_PATH" \
+  --out build/local-intro/intro.svp \
+  --model-cache "$SVP_MODEL_CACHE" \
+  --visual-tracking-quality off
+```
+
 If sherpa-onnx is installed in a nonstandard location, pass the C API library
 explicitly:
 
