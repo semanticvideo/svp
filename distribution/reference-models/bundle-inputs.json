@@ -38,6 +38,28 @@
       }
     },
     {
+      "model_id": "model_wav2vec2_espeak_phoneme",
+      "files": [
+        {"path": "wav2vec2-espeak-int8.onnx", "role": "model"},
+        {"path": "vocab.json", "role": "vocabulary"},
+        {"path": "english_mfa.dict", "role": "pronunciation_dictionary"}
+      ],
+      "notice": "SVP Model Bundle: model_wav2vec2_espeak_phoneme\n\nWeights: wav2vec2-lv-60-espeak-cv-ft phoneme CTC model, exported to ONNX and dynamically quantized to int8.\nSource: https://huggingface.co/facebook/wav2vec2-lv-60-espeak-cv-ft\nPinned revision: facebook/wav2vec2-lv-60-espeak-cv-ft@ae45363bf3413b374fecd9dc8bc1df0e24c3b7f4\nArtifact: wav2vec2-espeak-int8.onnx\nLicense: Apache-2.0 (Meta).\n\nPronunciation dictionary: English MFA dictionary v3.1.0 (MFA phone set).\nSource: https://github.com/MontrealCorpusTools/mfa-models/releases/tag/dictionary-english_mfa-v3.1.0\nLicense: CC BY 4.0 (McAuliffe and Sonderegger).\n",
+      "manifest": {
+        "schema_version": "svp-model-bundle-1",
+        "model_id": "model_wav2vec2_espeak_phoneme",
+        "display_name": "wav2vec2 espeak Phoneme CTC (int8 ONNX) + English MFA dictionary",
+        "source_registry": "huggingface",
+        "runtime": "onnxruntime",
+        "format": "onnx",
+        "supported_execution_providers": ["cpu"],
+        "input_contract": {"sample_rate": 16000, "channels": 1, "sample_format": "float32", "normalization": "zero_mean_unit_variance"},
+        "output_contract": {"logits": "phone_ctc", "vocab_size": 392, "frame_hop_samples": 320},
+        "preprocessor_contract": {"owner": "svp-audio"},
+        "postprocessor_contract": {"decoding": "ctc_forced_alignment", "word_boundaries": "phonetic_transition_rules"}
+      }
+    },
+    {
       "model_id": "model_sherpa_onnx_diarization",
       "files": [
         {"path": "sherpa-onnx-pyannote-segmentation-3-0/model.onnx", "role": "segmentation"},

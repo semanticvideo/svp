@@ -10,6 +10,7 @@ struct InstallResourcePaths {
   std::filesystem::path reference_set;
   std::filesystem::path ppocr_lock;
   std::filesystem::path rfdetr_lock;
+  std::filesystem::path wav2vec2_lock;
   std::filesystem::path prepare_script;
   std::filesystem::path workflow_script;
 };

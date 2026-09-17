@@ -1,0 +1,10 @@
+# Complete no-dependency-resolution wheel set for exact wav2vec2-espeak quantization.
+# Install with --only-binary=:all: --no-deps --require-hashes.
+flatbuffers==25.12.19 --hash=sha256:7634f50c427838bb021c2d66a3d1168e9d199b0607e6329399f04846d42e20b4
+ml-dtypes==0.6.0 --hash=sha256:f4f59f83c82ab480e924b988e7b1b4eb4de836dfcf5390c6f59148d1a00e1d02
+numpy==2.4.6 --hash=sha256:4cfe66903cc32a9921a6733d96b19bb6abf310397581bbad89c228f5abaf0ee8
+onnx==1.22.0 --hash=sha256:2d8f229a553fa440fe623ed7b36fca5e7762da3af871c3f8f8ce451df73e2914
+onnxruntime==1.30.0 --hash=sha256:f36c87ec504f4f328e968ee322e4ba9682abe66280b3425625afcbed5333fed7
+packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+protobuf==7.36.1 --hash=sha256:3cf2ee25d006cee57294a1196ea43b37feb78e0dcd1e8af5c1aeddb777655aca
+typing-extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8

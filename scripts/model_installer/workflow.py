@@ -11,7 +11,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from model_installer.conversion import (
-    convert_ppocr, create_environment, run_checked, wrap_rfdetr,
+    convert_ppocr, create_environment, quantize_wav2vec2, run_checked,
+    wrap_rfdetr,
 )
 from model_installer.downloads import Download, run_downloads
 from model_installer.progress import JsonProgress
@@ -52,7 +53,8 @@ def download_plan(catalog, source_root, reproduction_root, legal_root,
             result.append(Download(
                 model_id, label, source["source_url"],
                 legal_root / model_id / source["path"],
-                source["expected_bytes"], source["sha256"], {},
+                source["expected_bytes"], source["sha256"],
+                source.get("request_headers", {}),
             ))
         for artifact in model["artifacts"]:
             if "source_url" not in artifact:
@@ -176,8 +178,8 @@ def atomic_publish(staging, destination, verify_published, replace_existing=Fals
 
 def run(args, progress):
     catalog = json.loads(args.catalog.read_text(encoding="utf-8"))
-    if len(catalog.get("models", [])) != 9:
-        raise RuntimeError("catalog must contain the exact nine-model set")
+    if len(catalog.get("models", [])) != 10:
+        raise RuntimeError("catalog must contain the exact ten-model set")
     catalog_model_ids = {model["model_id"] for model in catalog["models"]}
     total_models = len(catalog_model_ids)
     existing_model_ids = set()
@@ -225,12 +227,22 @@ def run(args, progress):
         )
         needs_rf_environment = any(
             model["model_id"] in missing_model_ids and
-            model.get("reproduction", {}).get("source_file")
+            model.get("reproduction", {}).get("source_file") and
+            model.get("reproduction", {}).get("operation") !=
+                "quantize_matmul_gemm_int8"
+            for model in catalog["models"]
+        )
+        needs_w2v_environment = any(
+            model["model_id"] in missing_model_ids and
+            model.get("reproduction", {}).get("operation") ==
+                "quantize_matmul_gemm_int8"
             for model in catalog["models"]
         )
         pp_environment = None
         rf_environment = None
-        if needs_pp_environment or needs_rf_environment:
+        w2v_environment = None
+        if (needs_pp_environment or needs_rf_environment
+                or needs_w2v_environment):
             progress.emit("stage_started", "bootstrap", "Installer Tools")
             if needs_pp_environment:
                 pp_environment = create_environment(
@@ -240,6 +252,10 @@ def run(args, progress):
                 rf_environment = create_environment(
                     sys.executable, work_root / "rfdetr-environment",
                     args.rfdetr_lock)
+            if needs_w2v_environment:
+                w2v_environment = create_environment(
+                    sys.executable, work_root / "wav2vec2-environment",
+                    args.wav2vec2_lock)
             progress.emit("stage_completed", "bootstrap", "Installer Tools")
 
         downloads = download_plan(
@@ -273,18 +289,29 @@ def run(args, progress):
                               scope_id=model_id,
                               scope_label=model_id.removeprefix("model_"))
             elif reproduction and "source_file" in reproduction:
-                artifact = model["artifacts"][0]
+                artifact = next(
+                    value for value in model["artifacts"]
+                    if "source_url" not in value
+                )
                 output = reproduction_outputs / model_id / artifact["path"]
                 output.parent.mkdir(parents=True, exist_ok=True)
                 progress.emit("stage_started", "reproduce", "Reproduce",
                               scope_id=model_id,
                               scope_label=model_id.removeprefix("model_"))
-                wrap_rfdetr(
-                    rf_environment,
-                    reproduction_sources / model_id /
-                    reproduction["source_file"]["path"],
-                    output, reproduction,
-                )
+                if reproduction.get("operation") == "quantize_matmul_gemm_int8":
+                    quantize_wav2vec2(
+                        w2v_environment,
+                        reproduction_sources / model_id /
+                        reproduction["source_file"]["path"],
+                        output,
+                    )
+                else:
+                    wrap_rfdetr(
+                        rf_environment,
+                        reproduction_sources / model_id /
+                        reproduction["source_file"]["path"],
+                        output, reproduction,
+                    )
                 verify_file(output, artifact)
                 progress.emit("stage_completed", "reproduce", "Reproduce",
                               scope_id=model_id,
@@ -336,6 +363,7 @@ def parse_args():
     parser.add_argument("--prepare-script", type=Path, required=True)
     parser.add_argument("--ppocr-lock", type=Path, required=True)
     parser.add_argument("--rfdetr-lock", type=Path, required=True)
+    parser.add_argument("--wav2vec2-lock", type=Path, required=True)
     parser.add_argument("--models-tool", type=Path, required=True)
     parser.add_argument("--cache-dir", type=Path, required=True)
     parser.add_argument("--parallel-downloads", type=int, choices=(1, 2), default=1)

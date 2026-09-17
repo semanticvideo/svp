@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble and verify the nine approved reference-model bundles.
+"""Assemble and verify the ten approved reference-model bundles.
 
 This is release tooling, not an SVP runtime dependency. It never downloads or
 uploads weights. The caller supplies only proven upstream-derived artifacts,
@@ -20,6 +20,7 @@ ZERO_HASH = "blake3:" + ("0" * 64)
 EXPECTED_MODEL_IDS = {
     "model_whisper_small_en",
     "model_whisper_cpp_silero_vad",
+    "model_wav2vec2_espeak_phoneme",
     "model_sherpa_onnx_diarization",
     "model_depth_anything_v2_small",
     "model_nomic_embed_text_v1_5",
@@ -88,7 +89,7 @@ def load_bundle_inputs(path: Path) -> dict[str, dict]:
         inputs[model_id] = model
 
     if set(inputs) != EXPECTED_MODEL_IDS:
-        raise SystemExit("bundle inputs must contain exactly the nine approved models")
+        raise SystemExit("bundle inputs must contain exactly the ten approved models")
     return inputs
 
 
@@ -138,6 +139,17 @@ def legal_text(model_id: str, catalog_model: dict, legal_root: Path,
     if len(license_sources) == 1:
         return (model_legal_root / license_sources[0]["path"]).read_text(
             encoding="utf-8"
+        )
+    if all(source.get("license") for source in license_sources):
+        names = " and ".join(source["license"] for source in license_sources)
+        sections = [
+            f"--- {source['path']}: {source['license']} ---\n\n"
+            + (model_legal_root / source["path"]).read_text(encoding="utf-8")
+            for source in license_sources
+        ]
+        return (
+            f"This bundle combines works under {names}.\n\n"
+            + "\n".join(sections)
         )
     mit = (model_legal_root / "LICENSE.pyannote").read_text(encoding="utf-8")
     apache = (model_legal_root / "LICENSE.3dspeaker").read_text(encoding="utf-8")
@@ -298,7 +310,7 @@ def main() -> None:
     catalog = json.loads(args.catalog.read_text(encoding="utf-8"))
     catalog_models = {model["model_id"]: model for model in catalog["models"]}
     if set(catalog_models) != EXPECTED_MODEL_IDS:
-        raise SystemExit("catalog must contain exactly the nine approved models")
+        raise SystemExit("catalog must contain exactly the ten approved models")
     bundle_inputs = load_bundle_inputs(args.bundle_inputs)
     generated = []
     for model_id in bundle_inputs:
