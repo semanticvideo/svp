@@ -123,11 +123,18 @@ std::vector<AsrWord> reconcile_overlapping_chunks(
     }
     if (append_from >= current.size()) continue;
 
-    const std::int64_t shift_us = std::max<std::int64_t>(
-        0, result.back().end_us - current[append_from].start_us);
+    // Seam conflicts are local to the overlap: the incoming chunk keeps its
+    // own timestamps, and prior words reaching past the continuation start
+    // trim or collapse to the seam instead of dragging every incoming word.
+    const std::int64_t seam_start = current[append_from].start_us;
+    while (!result.empty() && result.back().start_us >= seam_start) {
+      result.back().start_us = seam_start;
+      result.back().end_us = seam_start;
+    }
+    if (!result.empty() && result.back().end_us > seam_start) {
+      result.back().end_us = seam_start;
+    }
     for (std::size_t i = append_from; i < current.size(); ++i) {
-      current[i].start_us += shift_us;
-      current[i].end_us += shift_us;
       result.push_back(std::move(current[i]));
     }
   }
