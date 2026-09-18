@@ -74,6 +74,16 @@ inline constexpr std::string_view kCodeMediaInvalidLoudnessTarget =
     "ERR_MEDIA_INVALID_LOUDNESS_TARGET";
 inline constexpr std::string_view kCodeMediaInvalidLoudnessSummary =
     "ERR_MEDIA_INVALID_LOUDNESS_SUMMARY";
+inline constexpr std::string_view kCodeMediaInvalidSpectrumRecord =
+    "ERR_MEDIA_INVALID_SPECTRUM_RECORD";
+inline constexpr std::string_view kCodeMediaInvalidSpectrumTiming =
+    "ERR_MEDIA_INVALID_SPECTRUM_TIMING";
+inline constexpr std::string_view kCodeMediaInvalidSpectrumValue =
+    "ERR_MEDIA_INVALID_SPECTRUM_VALUE";
+inline constexpr std::string_view kCodeMediaInvalidSpectrumTarget =
+    "ERR_MEDIA_INVALID_SPECTRUM_TARGET";
+inline constexpr std::string_view kCodeMediaInvalidSpectrumSummary =
+    "ERR_MEDIA_INVALID_SPECTRUM_SUMMARY";
 
 inline constexpr std::string_view kTempCodeInputMissing = "X_VALIDATOR_INPUT_MISSING";
 inline constexpr std::string_view kTempCodeInputNotRegularFile = "X_VALIDATOR_INPUT_NOT_REGULAR_FILE";

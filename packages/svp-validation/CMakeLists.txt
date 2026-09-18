@@ -15,6 +15,7 @@ add_library(svp-validation
   src/index_validation.cpp
   src/json_schema_subset.cpp
   src/loudness_record_validation.cpp
+  src/spectrum_record_validation.cpp
   src/ocr_color_spec.cpp
   src/ocr_color_index_consistency.cpp
   src/record_file_reader.cpp

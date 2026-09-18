@@ -9,7 +9,7 @@
 namespace svp::validation {
 namespace {
 
-constexpr std::array<SpecAsset, 13> kRequiredRc2SpecAssets{{
+constexpr std::array<SpecAsset, 15> kRequiredRc2SpecAssets{{
     {"color-buckets.json", SpecAssetKind::registry},
     {"color-spaces.json", SpecAssetKind::registry},
     {"ocr-observation-types.json", SpecAssetKind::registry},
@@ -23,6 +23,8 @@ constexpr std::array<SpecAsset, 13> kRequiredRc2SpecAssets{{
     {"color-absence.schema.json", SpecAssetKind::schema},
     {"loudness-observation.schema.json", SpecAssetKind::schema},
     {"loudness-summary.schema.json", SpecAssetKind::schema},
+    {"spectrum-observation.schema.json", SpecAssetKind::schema},
+    {"spectrum-summary.schema.json", SpecAssetKind::schema},
 }};
 
 }  // namespace
