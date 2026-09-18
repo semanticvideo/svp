@@ -2,6 +2,7 @@
 #include "svp/audio/asr_chunk_context.hpp"
 #include "svp/audio/transcript_records.hpp"
 #include "svp/audio/wav_slice.hpp"
+#include "svp/audio/whisper_cpp_model.hpp"
 #include "svp/audio/whisper_model.hpp"
 #include "svp/core/memory_diagnostics.hpp"
 #include "svp/models/manifest.hpp"
@@ -12,6 +13,7 @@
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 
@@ -98,19 +100,56 @@ nlohmann::json speaker_record_json(const std::string& speaker_id,
   };
 }
 
-nlohmann::json chunk_provenance_record(const AsrChunkPlan& chunk,
-                                       const std::string& processor_id,
-                                       const std::string& asr_status) {
-  nlohmann::json asr_limitations = {
-      {"timestamp_method", "whisper_cpp_token_timestamps"},
-      {"timestamp_precision", "centisecond_token_boundaries"},
+nlohmann::json asr_timing_fields(const AsrExecutionBoundary& boundary) {
+  const bool aligned = boundary.alignment_status == "applied" ||
+                       boundary.alignment_status == "partial";
+  return {
+      {"timestamp_method",
+       boundary.alignment_status == "applied"
+           ? "wav2vec2_espeak_ctc_forced_alignment_with_nle_boundary_rules"
+           : (aligned
+                  ? "wav2vec2_espeak_ctc_forced_alignment_with_nle_boundary_"
+                    "rules_and_whisper_dtw_fallback"
+                  : "whisper_cpp_dtw_token_onsets_with_vad_region_caps")},
+      {"timestamp_precision",
+       aligned ? "20ms_ctc_phone_frames_with_phonetic_boundary_rules"
+               : "centisecond_dtw_onsets_with_vad_region_caps_and_t1_word_"
+                 "ends"},
+      {"timestamp_note",
+       aligned
+           ? "Word starts come from a wav2vec2 espeak phoneme CTC forced "
+             "alignment over the Whisper transcript, converted to "
+             "packed-word boundaries by phonetic transition rules; words "
+             "the pronunciation lexicon cannot resolve keep whisper.cpp "
+             "DTW timing."
+           : "Word starts use whisper.cpp DTW token onsets, capped by t0 "
+             "within a VAD speech region or by the VAD region onset across "
+             "a speech gap; invalid DTW onsets fall back to t0/t1. Word "
+             "ends use decoder token t1, clamped to the next word onset "
+             "and converted from centiseconds to integer microseconds."},
+      {"alignment_model_id", boundary.alignment_model_id},
+      {"alignment_status", boundary.alignment_status},
+  };
+}
+
+nlohmann::json chunk_provenance_record(
+    const AsrChunkPlan& chunk,
+    const AsrExecutionBoundary& boundary,
+    const std::string& asr_status) {
+  nlohmann::json asr_limitations = asr_timing_fields(boundary);
+  asr_limitations.merge_patch({
+      {"vad_method", "whisper_cpp_builtin_silero_vad"},
+      {"vad_model_id", boundary.vad_model_id},
+      {"vad_status", boundary.vad_model_verified
+           ? "verified"
+           : (boundary.vad_model_available ? "unverified" : "missing")},
       {"confidence_status", "whisper_cpp_token_probability_mean"},
       {"speaker_mode", "one_speaker_fallback"},
-  };
+  });
 
   return {
       {"chunk_id", chunk.chunk_id},
-      {"processor_id", processor_id},
+      {"processor_id", boundary.processor_id},
       {"source_start_us", chunk.source_start_us},
       {"source_end_us", chunk.source_end_us},
       {"overlap_before_us", chunk.overlap_before_us},
@@ -228,6 +267,58 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
                                           const std::filesystem::path& staging_root,
                                           const std::filesystem::path& model_cache_root,
                                           AsrChunkProgressCallback on_chunk_progress) {
+  std::filesystem::path vad_model_path;
+  try {
+    const std::filesystem::path vad_model_dir =
+        model_cache_root / boundary.vad_model_id;
+    const std::optional<std::filesystem::path> resolved_vad_model =
+        find_whisper_ggml_vad_model(vad_model_dir);
+    boundary.vad_model_available = resolved_vad_model.has_value();
+    boundary.vad_model_verified =
+        boundary.vad_model_available &&
+        verify_asr_model_files(boundary.vad_model_id, model_cache_root);
+    if (!boundary.vad_model_available) {
+      boundary.blockers.push_back(
+          "Whisper.cpp Silero VAD model is not available in model cache; "
+          "ASR execution requires verified VAD");
+    } else if (!boundary.vad_model_verified) {
+      boundary.blockers.push_back(
+          "Whisper.cpp Silero VAD model manifest/required files could not be verified");
+    } else {
+      vad_model_path = *resolved_vad_model;
+    }
+  } catch (const std::exception& error) {
+    boundary.vad_model_available = false;
+    boundary.vad_model_verified = false;
+    boundary.blockers.push_back(std::string("Whisper.cpp Silero VAD model resolution failed: ") +
+                                error.what());
+  }
+
+  // The phoneme aligner refines word timing only; a missing or unverified
+  // bundle never blocks ASR because whisper.cpp DTW timing is the
+  // deterministic fallback.
+  std::filesystem::path aligner_model_dir;
+  try {
+    const std::filesystem::path aligner_dir =
+        model_cache_root / boundary.alignment_model_id;
+    boundary.alignment_model_available =
+        std::filesystem::exists(aligner_dir / "model.svpmodel.json");
+    boundary.alignment_model_verified =
+        boundary.alignment_model_available &&
+        verify_asr_model_files(boundary.alignment_model_id, model_cache_root);
+    if (boundary.alignment_model_verified) {
+      aligner_model_dir = aligner_dir;
+      boundary.alignment_status = "resolved";
+    } else {
+      boundary.alignment_status =
+          boundary.alignment_model_available ? "unverified" : "missing";
+    }
+  } catch (const std::exception&) {
+    boundary.alignment_model_available = false;
+    boundary.alignment_model_verified = false;
+    boundary.alignment_status = "resolution_failed";
+  }
+
   if (!boundary.blockers.empty()) {
     boundary.asr_status = AsrStatus::blocked;
     boundary.transcript_written = false;
@@ -252,6 +343,7 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
 
     std::vector<std::vector<AsrWord>> chunk_words;
     chunk_words.reserve(boundary.chunk_plan.chunks.size());
+    std::vector<std::string> chunk_alignment_status;
     svp::core::check_memory_limit("asr.boundary.begin", {
         {"chunk_count", std::to_string(boundary.chunk_plan.chunks.size())},
         {"input_wav", input_wav.string()},
@@ -283,8 +375,9 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
       WhisperInferenceResult whisper_result;
       try {
         whisper_result = run_whisper_inference(
-            chunk_wav, model_dir, chunk.chunk_id, 0,
-            context.slice_end_us - context.slice_start_us);
+            chunk_wav, model_dir, vad_model_path, chunk.chunk_id, 0,
+            context.slice_end_us - context.slice_start_us,
+            aligner_model_dir);
       } catch (...) {
         std::error_code cleanup_error;
         std::filesystem::remove(chunk_wav, cleanup_error);
@@ -316,6 +409,22 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
       chunk_words.push_back(retain_nominal_chunk_words(
           whisper_result.all_words, context, chunk,
           static_cast<std::int64_t>(i)));
+      chunk_alignment_status.push_back(whisper_result.alignment_status);
+    }
+    if (boundary.alignment_status == "resolved") {
+      const auto count = [&](const std::string& status) {
+        return static_cast<std::size_t>(std::count(
+            chunk_alignment_status.begin(), chunk_alignment_status.end(),
+            status));
+      };
+      if (!chunk_alignment_status.empty() &&
+          count("applied") == chunk_alignment_status.size()) {
+        boundary.alignment_status = "applied";
+      } else if (count("applied") + count("applied_partial") > 0) {
+        boundary.alignment_status = "partial";
+      } else {
+        boundary.alignment_status = "fallback";
+      }
     }
     svp::core::check_memory_limit("asr.boundary.after_chunks", {
         {"chunk_count", std::to_string(boundary.chunk_plan.chunks.size())},
@@ -367,9 +476,14 @@ nlohmann::json asr_execution_boundary_to_json(const AsrExecutionBoundary& bounda
     chunk_refs.push_back(ref);
   }
 
-  nlohmann::json asr_limitations = {
-      {"timestamp_method", "whisper_cpp_token_timestamps"},
-      {"timestamp_precision", "centisecond_token_boundaries"},
+  nlohmann::json asr_limitations = asr_timing_fields(boundary);
+  asr_limitations.merge_patch({
+      {"vad_method", "whisper_cpp_builtin_silero_vad"},
+      {"vad_model_id", boundary.vad_model_id},
+      {"vad_status", boundary.vad_model_verified
+           ? "verified"
+           : (boundary.vad_model_available ? "unverified" : "missing")},
+      {"vad_note", "The built-in whisper.cpp VAD uses whisper_vad_default_params() and restricts transcription to detected speech segments. Missing or unverified VAD is a blocker."},
       {"confidence_status", "whisper_cpp_token_probability_mean"},
       {"confidence_note", "Per-word confidence is the mean of selected-token decoder softmax probabilities for the word's constituent tokens. This is uncalibrated model confidence, not a calibrated probability."},
       {"speaker_mode", boundary.diarization_status == "fallback_one_speaker"
@@ -379,7 +493,7 @@ nlohmann::json asr_execution_boundary_to_json(const AsrExecutionBoundary& bounda
                 : (boundary.diarization_status == "microphone_stream_assignment"
                      ? "camera_microphone_stream_locked"
                      : "diarization_assigned"))},
-  };
+  });
 
   nlohmann::json segments_json = nlohmann::json::array();
   for (const SpeakerSegment& seg : boundary.speaker_segments) {
@@ -401,6 +515,13 @@ nlohmann::json asr_execution_boundary_to_json(const AsrExecutionBoundary& bounda
       {"model_runtime_available", boundary.model_runtime_available},
       {"model_available", boundary.model_available},
       {"model_verified", boundary.model_verified},
+      {"vad_model_id", boundary.vad_model_id},
+      {"vad_model_available", boundary.vad_model_available},
+      {"vad_model_verified", boundary.vad_model_verified},
+      {"alignment_model_id", boundary.alignment_model_id},
+      {"alignment_model_available", boundary.alignment_model_available},
+      {"alignment_model_verified", boundary.alignment_model_verified},
+      {"alignment_status", boundary.alignment_status},
       {"asr_status", asr_status_to_string(boundary.asr_status)},
       {"transcript_written", boundary.transcript_written},
       {"words_written", boundary.words_written},

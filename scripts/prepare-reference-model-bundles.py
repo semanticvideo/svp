@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble and verify the eight approved reference-model bundles.
+"""Assemble and verify the ten approved reference-model bundles.
 
 This is release tooling, not an SVP runtime dependency. It never downloads or
 uploads weights. The caller supplies only proven upstream-derived artifacts,
@@ -19,6 +19,8 @@ from pathlib import Path
 ZERO_HASH = "blake3:" + ("0" * 64)
 EXPECTED_MODEL_IDS = {
     "model_whisper_small_en",
+    "model_whisper_cpp_silero_vad",
+    "model_wav2vec2_espeak_phoneme",
     "model_sherpa_onnx_diarization",
     "model_depth_anything_v2_small",
     "model_nomic_embed_text_v1_5",
@@ -87,7 +89,7 @@ def load_bundle_inputs(path: Path) -> dict[str, dict]:
         inputs[model_id] = model
 
     if set(inputs) != EXPECTED_MODEL_IDS:
-        raise SystemExit("bundle inputs must contain exactly the eight approved models")
+        raise SystemExit("bundle inputs must contain exactly the ten approved models")
     return inputs
 
 
@@ -137,6 +139,17 @@ def legal_text(model_id: str, catalog_model: dict, legal_root: Path,
     if len(license_sources) == 1:
         return (model_legal_root / license_sources[0]["path"]).read_text(
             encoding="utf-8"
+        )
+    if all(source.get("license") for source in license_sources):
+        names = " and ".join(source["license"] for source in license_sources)
+        sections = [
+            f"--- {source['path']}: {source['license']} ---\n\n"
+            + (model_legal_root / source["path"]).read_text(encoding="utf-8")
+            for source in license_sources
+        ]
+        return (
+            f"This bundle combines works under {names}.\n\n"
+            + "\n".join(sections)
         )
     mit = (model_legal_root / "LICENSE.pyannote").read_text(encoding="utf-8")
     apache = (model_legal_root / "LICENSE.3dspeaker").read_text(encoding="utf-8")
@@ -233,6 +246,41 @@ def prepare_one(model_id: str, spec: dict, catalog_model: dict,
     }
 
 
+def reuse_existing_bundle(model_id: str, catalog_model: dict,
+                          existing_root: Path, output_root: Path,
+                          tool: Path) -> dict:
+    existing_dir = existing_root / model_id
+    manifest_path = existing_dir / "model.svpmodel.json"
+    if not manifest_path.is_file():
+        raise SystemExit(
+            f"existing cache is missing manifest for reusable model {model_id}"
+        )
+
+    output_dir = output_root / model_id
+    shutil.copytree(existing_dir, output_dir)
+    run_tool(tool, "verify", "--bundle-dir", str(output_dir))
+    manifest = json.loads(
+        (output_dir / "model.svpmodel.json").read_text(encoding="utf-8")
+    )
+    if manifest.get("model_id") != model_id:
+        raise SystemExit(f"reused bundle manifest has wrong model_id for {model_id}")
+    if manifest.get("model_bundle_id") != catalog_model["model_bundle_id"]:
+        raise SystemExit(f"reused bundle identity does not match catalog for {model_id}")
+    if manifest.get("bundle_blake3") != catalog_model["bundle_blake3"]:
+        raise SystemExit(f"reused bundle digest does not match catalog for {model_id}")
+
+    return {
+        "model_id": model_id,
+        "model_version": catalog_model["model_version"],
+        "model_bundle_id": manifest["model_bundle_id"],
+        "bundle_blake3": manifest["bundle_blake3"],
+        "source_slug": catalog_model["source_slug"],
+        "source_revision": catalog_model["source_revision"],
+        "license": catalog_model["license"],
+        "required_files": manifest["files"],
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-cache", type=Path, required=True)
@@ -240,6 +288,7 @@ def main() -> None:
     parser.add_argument("--legal-materials", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--models-tool", type=Path, required=True)
+    parser.add_argument("--reuse-cache", type=Path)
     parser.add_argument(
         "--catalog",
         type=Path,
@@ -261,17 +310,36 @@ def main() -> None:
     catalog = json.loads(args.catalog.read_text(encoding="utf-8"))
     catalog_models = {model["model_id"]: model for model in catalog["models"]}
     if set(catalog_models) != EXPECTED_MODEL_IDS:
-        raise SystemExit("catalog must contain exactly the eight approved models")
+        raise SystemExit("catalog must contain exactly the ten approved models")
     bundle_inputs = load_bundle_inputs(args.bundle_inputs)
-    generated = [
-        prepare_one(
-            model_id, bundle_inputs[model_id], catalog_models[model_id],
-            args.source_cache,
-            args.reproduced_artifacts, args.legal_materials, args.output_dir,
-            args.models_tool
-        )
-        for model_id in bundle_inputs
-    ]
+    reuse_locked_ids = set()
+    if args.reuse_cache is not None:
+        reuse_lock_path = args.reuse_cache / "model-lock.json"
+        if reuse_lock_path.is_file():
+            reuse_lock = json.loads(reuse_lock_path.read_text(encoding="utf-8"))
+            reuse_locked_ids = {
+                model["model_id"] for model in reuse_lock.get("models", [])
+            }
+    generated = []
+    for model_id in bundle_inputs:
+        if model_id in reuse_locked_ids and (
+            args.reuse_cache / model_id
+        ).is_dir():
+            generated.append(
+                reuse_existing_bundle(
+                    model_id, catalog_models[model_id], args.reuse_cache,
+                    args.output_dir, args.models_tool
+                )
+            )
+        else:
+            generated.append(
+                prepare_one(
+                    model_id, bundle_inputs[model_id], catalog_models[model_id],
+                    args.source_cache,
+                    args.reproduced_artifacts, args.legal_materials,
+                    args.output_dir, args.models_tool
+                )
+            )
     root_lock = {
         "schema_version": "svp-model-lock-1",
         "model_set_id": "svp-reference-model-set-rc2",

@@ -23,15 +23,19 @@ struct WhisperInferenceResult {
   std::vector<AsrWord> all_words;
   std::vector<int> decoded_token_ids;
   std::string termination_reason;
+  // not_requested | applied | applied_partial | fallback
+  std::string alignment_status = "not_requested";
   std::vector<std::string> blockers;
 };
 
 [[nodiscard]] WhisperInferenceResult run_whisper_inference(
     const std::filesystem::path& wav_path,
     const std::filesystem::path& model_dir,
+    const std::filesystem::path& vad_model_path,
     const std::string& chunk_id,
     std::int64_t chunk_start_us,
-    std::int64_t chunk_end_us);
+    std::int64_t chunk_end_us,
+    const std::filesystem::path& aligner_model_dir = {});
 
 [[nodiscard]] bool is_whisper_runtime_available();
 

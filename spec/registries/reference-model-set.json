@@ -34,6 +34,36 @@
       ]
     },
     {
+      "model_id": "model_whisper_cpp_silero_vad",
+      "display_name": "Silero VAD v6.2.0 (GGML for whisper.cpp)",
+      "source_slug": "ggml-org/whisper-vad + snakers4/silero-vad",
+      "source_revision": "ggml-org/whisper-vad@9ffd54a1e1ee413ddf265af9913beaf518d1639b+snakers4/silero-vad@be95df9152c0d7618fa1edfeb296fc3dae32376f",
+      "license": "MIT",
+      "model_bundle_id": "model_whisper_cpp_silero_vad@9ffd54a-silero-v6.2.0-ggml+blake3_19c489aaac72",
+      "bundle_blake3": "blake3:19c489aaac72f3854cfbdbc6daa79ec760891d045985e04213749a682a3abfda",
+      "required_files": [
+        {
+          "path": "ggml-silero-v6.2.0.bin",
+          "role": "vad_weights",
+          "blake3": "blake3:8644de43deb20579626361caf8afd3504282dd7f1ab915dd59c6591970b6de23"
+        },
+        {
+          "path": "LICENSE",
+          "role": "license",
+          "blake3": "blake3:c5d63fa0fb719e98f2bf2e2554d6d80862cb2c6642ec7213a765eb3c7655a350"
+        },
+        {
+          "path": "NOTICE",
+          "role": "notice",
+          "blake3": "blake3:27ade412d2253262f221369a5da79634db434a91e7072ed3b22bda6dc1f8bb07"
+        }
+      ],
+      "required_for": [
+        "transcript",
+        "words"
+      ]
+    },
+    {
       "model_id": "model_sherpa_onnx_diarization",
       "display_name": "sherpa-onnx Speaker Diarization",
       "source_slug": "csukuangfj/sherpa-onnx-pyannote-segmentation-3-0 + k2-fsa/sherpa-onnx",
@@ -255,6 +285,46 @@
       ],
       "required_for": [
         "text_observations"
+      ]
+    },
+    {
+      "model_id": "model_wav2vec2_espeak_phoneme",
+      "display_name": "wav2vec2 espeak Phoneme CTC (int8 ONNX) + English MFA dictionary",
+      "source_slug": "onnx-community/wav2vec2-lv-60-espeak-cv-ft-ONNX + MontrealCorpusTools/mfa-models english_mfa dictionary",
+      "source_revision": "c69750f5043e5e1f8a71ab95dd3b98338c280c92+dictionary-english_mfa-v3.1.0",
+      "license": "Apache-2.0 AND CC-BY-4.0",
+      "model_bundle_id": "model_wav2vec2_espeak_phoneme@ae45363-w2v2-espeak-int8-opset14+blake3_2c1e3439aff8",
+      "bundle_blake3": "blake3:2c1e3439aff88ca28745459021af91e7e6810949046d7b197e5b1e52d4d05baf",
+      "required_files": [
+        {
+          "path": "wav2vec2-espeak-int8.onnx",
+          "role": "model",
+          "blake3": "blake3:02d383ff911d69f70c2cb3605c79a013df3a6ccce5ed46cdfd15e75b7fa67fda"
+        },
+        {
+          "path": "vocab.json",
+          "role": "vocabulary",
+          "blake3": "blake3:101491a7bc86484e0ee65157973f274326cd5aa30298525a1e0f73f808600984"
+        },
+        {
+          "path": "english_mfa.dict",
+          "role": "pronunciation_dictionary",
+          "blake3": "blake3:48e7fd27759fb3a5c5640770114ed898ae186cca0b44a5f8aefd7e2b2cc2ce9c"
+        },
+        {
+          "path": "LICENSE",
+          "role": "license",
+          "blake3": "blake3:bb9dc0314ac4a76b78cb4d4f35b4bd9320161dbdda1ff83cd5c993482329dd18"
+        },
+        {
+          "path": "NOTICE",
+          "role": "notice",
+          "blake3": "blake3:14a37b73ace77bf94badc4d9a021d228e4c00b2f14be8eda001414cd45c3f1be"
+        }
+      ],
+      "required_for": [
+        "transcript",
+        "words"
       ]
     }
   ]

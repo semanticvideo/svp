@@ -39,6 +39,15 @@ struct AsrExecutionBoundary {
   bool model_runtime_available = false;
   bool model_available = false;
   bool model_verified = false;
+  std::string vad_model_id = svp::models::kWhisperCppSileroVadModelId;
+  bool vad_model_available = false;
+  bool vad_model_verified = false;
+  std::string alignment_model_id =
+      svp::models::kWav2Vec2EspeakPhonemeModelId;
+  bool alignment_model_available = false;
+  bool alignment_model_verified = false;
+  // unavailable | unverified | applied | partial | fallback
+  std::string alignment_status = "unavailable";
   AsrStatus asr_status = AsrStatus::planned;
   bool transcript_written = false;
   bool words_written = false;

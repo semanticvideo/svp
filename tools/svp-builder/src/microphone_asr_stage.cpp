@@ -185,6 +185,7 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
     completed_chunks_before_stream += chunks_by_stream[stream_ordinal];
   }
   svp::audio::release_whisper_cpp_model();
+  svp::audio::release_phoneme_aligner();
 
   std::size_t speech_positive_streams = 0;
   for (const auto& transcript : transcripts) {

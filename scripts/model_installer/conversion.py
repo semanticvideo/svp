@@ -36,6 +36,35 @@ def convert_ppocr(environment_python, source_dir, output_path):
     ])
 
 
+def quantize_wav2vec2(environment_python, source_path, output_path):
+    helper_script = output_path.parent / ".quantize-wav2vec2.py"
+    helper_script.write_text(
+        "from model_installer.conversion import _quantize_wav2vec2_main\n"
+        "_quantize_wav2vec2_main()\n", encoding="utf-8"
+    )
+    environment = os.environ.copy()
+    module_root = str(Path(__file__).resolve().parents[1])
+    environment["PYTHONPATH"] = module_root
+    environment["SVP_W2V_SOURCE"] = str(source_path)
+    environment["SVP_W2V_OUTPUT"] = str(output_path)
+    try:
+        run_checked([environment_python, helper_script], environment=environment)
+    finally:
+        helper_script.unlink(missing_ok=True)
+
+
+def _quantize_wav2vec2_main():
+    from onnxruntime.quantization import QuantType, quantize_dynamic
+
+    source_path = Path(os.environ["SVP_W2V_SOURCE"])
+    output_path = Path(os.environ["SVP_W2V_OUTPUT"])
+    quantize_dynamic(
+        source_path, output_path,
+        weight_type=QuantType.QInt8,
+        op_types_to_quantize=["MatMul", "Gemm"],
+    )
+
+
 def _resolved_shape(output, expected):
     actual = []
     for index, (dimension, expected_value) in enumerate(

@@ -102,9 +102,8 @@ TranscriptWriteResult write_transcript_artifacts(
   std::vector<nlohmann::json> provenance_records;
   for (const AsrChunkPlan& chunk : boundary.chunk_plan.chunks) {
     provenance_records.push_back(
-        writer::chunk_provenance_json(chunk, boundary.processor_id,
-                                      writer::asr_status_string(boundary.asr_status),
-                                      boundary.diarization_status));
+        writer::chunk_provenance_json(
+            chunk, boundary, writer::asr_status_string(boundary.asr_status)));
   }
   write_jsonl_file(provenance_path, provenance_records);
   result.chunk_provenance_written = true;

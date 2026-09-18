@@ -3,6 +3,11 @@
 namespace svp::models {
 
 inline constexpr char kWhisperSmallEnglishModelId[] = "model_whisper_small_en";
+inline constexpr char kSileroVadModelId[] = "model_silero_vad";
+inline constexpr char kWhisperCppSileroVadModelId[] =
+    "model_whisper_cpp_silero_vad";
+inline constexpr char kWav2Vec2EspeakPhonemeModelId[] =
+    "model_wav2vec2_espeak_phoneme";
 inline constexpr char kSherpaOnnxDiarizationModelId[] =
     "model_sherpa_onnx_diarization";
 inline constexpr char kDepthAnythingV2SmallModelId[] =

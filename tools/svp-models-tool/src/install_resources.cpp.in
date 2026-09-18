@@ -24,6 +24,7 @@ constexpr std::string_view kBundleInputs = R"SVP_RESOURCE(@SVP_INSTALL_BUNDLE_IN
 constexpr std::string_view kReferenceSet = R"SVP_RESOURCE(@SVP_INSTALL_REFERENCE_SET_JSON@)SVP_RESOURCE";
 constexpr std::string_view kPpocrLock = R"SVP_RESOURCE(@SVP_INSTALL_PPOCR_LOCK@)SVP_RESOURCE";
 constexpr std::string_view kRfdetrLock = R"SVP_RESOURCE(@SVP_INSTALL_RFDETR_LOCK@)SVP_RESOURCE";
+constexpr std::string_view kWav2vec2Lock = R"SVP_RESOURCE(@SVP_INSTALL_WAV2VEC2_LOCK@)SVP_RESOURCE";
 constexpr std::string_view kInit = R"SVP_RESOURCE(@SVP_INSTALL_INIT_PY@)SVP_RESOURCE";
 constexpr std::string_view kProgress = R"SVP_RESOURCE(@SVP_INSTALL_PROGRESS_PY@)SVP_RESOURCE";
 constexpr std::string_view kDownloads = R"SVP_RESOURCE(@SVP_INSTALL_DOWNLOADS_PY@)SVP_RESOURCE";
@@ -40,6 +41,7 @@ InstallResourcePaths write_install_resources(const std::filesystem::path& root) 
   write(root / "reference-model-set.json", kReferenceSet);
   write(root / "ppocr.lock", kPpocrLock);
   write(root / "rfdetr.lock", kRfdetrLock);
+  write(root / "wav2vec2.lock", kWav2vec2Lock);
   write(module / "__init__.py", kInit);
   write(module / "progress.py", kProgress);
   write(module / "downloads.py", kDownloads);
@@ -52,6 +54,7 @@ InstallResourcePaths write_install_resources(const std::filesystem::path& root) 
       .reference_set = root / "reference-model-set.json",
       .ppocr_lock = root / "ppocr.lock",
       .rfdetr_lock = root / "rfdetr.lock",
+      .wav2vec2_lock = root / "wav2vec2.lock",
       .prepare_script = root / "prepare-reference-model-bundles.py",
       .workflow_script = module / "workflow.py",
   };

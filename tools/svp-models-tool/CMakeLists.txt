@@ -7,6 +7,7 @@ set(SVP_INSTALL_RESOURCE_FILES
   "${CMAKE_SOURCE_DIR}/spec/registries/reference-model-set.json"
   "${CMAKE_SOURCE_DIR}/distribution/reference-models/ppocr-requirements-macos-arm64.lock"
   "${CMAKE_SOURCE_DIR}/distribution/reference-models/rfdetr-requirements-macos-arm64.lock"
+  "${CMAKE_SOURCE_DIR}/distribution/reference-models/wav2vec2-requirements-macos-arm64.lock"
   "${CMAKE_SOURCE_DIR}/scripts/model_installer/__init__.py"
   "${CMAKE_SOURCE_DIR}/scripts/model_installer/progress.py"
   "${CMAKE_SOURCE_DIR}/scripts/model_installer/downloads.py"
@@ -23,6 +24,7 @@ file(READ "${CMAKE_SOURCE_DIR}/distribution/reference-models/bundle-inputs.json"
 file(READ "${CMAKE_SOURCE_DIR}/spec/registries/reference-model-set.json" SVP_INSTALL_REFERENCE_SET_JSON)
 file(READ "${CMAKE_SOURCE_DIR}/distribution/reference-models/ppocr-requirements-macos-arm64.lock" SVP_INSTALL_PPOCR_LOCK)
 file(READ "${CMAKE_SOURCE_DIR}/distribution/reference-models/rfdetr-requirements-macos-arm64.lock" SVP_INSTALL_RFDETR_LOCK)
+file(READ "${CMAKE_SOURCE_DIR}/distribution/reference-models/wav2vec2-requirements-macos-arm64.lock" SVP_INSTALL_WAV2VEC2_LOCK)
 file(READ "${CMAKE_SOURCE_DIR}/scripts/model_installer/__init__.py" SVP_INSTALL_INIT_PY)
 file(READ "${CMAKE_SOURCE_DIR}/scripts/model_installer/progress.py" SVP_INSTALL_PROGRESS_PY)
 file(READ "${CMAKE_SOURCE_DIR}/scripts/model_installer/downloads.py" SVP_INSTALL_DOWNLOADS_PY)

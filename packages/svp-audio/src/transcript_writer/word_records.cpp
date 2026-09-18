@@ -29,6 +29,7 @@ WordRecordBuildResult build_word_records(
         {"end_us", word.end_us},
         {"confidence", word.confidence},
         {"chunk_ordinal", word.chunk_ordinal},
+        {"timing_source", word.timing_source},
         {"speaker_id", speaker_id},
     });
   }

@@ -52,6 +52,9 @@ struct AsrWord {
   std::int64_t end_us = 0;
   double confidence = 0.0;
   std::int64_t chunk_ordinal = 0;
+  // Which stage assigned start_us/end_us. whisper.cpp DTW token timing is
+  // the baseline; the phoneme aligner rewrites resolvable words.
+  std::string timing_source = "whisper_cpp_dtw";
 };
 
 [[nodiscard]] std::vector<AsrWord> reconcile_overlapping_chunks(

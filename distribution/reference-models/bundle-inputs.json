@@ -20,6 +20,46 @@
       }
     },
     {
+      "model_id": "model_whisper_cpp_silero_vad",
+      "files": [{"path": "ggml-silero-v6.2.0.bin", "role": "vad_weights"}],
+      "notice": "SVP Model Bundle: model_whisper_cpp_silero_vad\n\nWeights: Silero VAD v6.2.0 converted to GGML for whisper.cpp.\nSource: https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v6.2.0.bin\nPinned revision: ggml-org/whisper-vad@9ffd54a1e1ee413ddf265af9913beaf518d1639b; snakers4/silero-vad@be95df9152c0d7618fa1edfeb296fc3dae32376f\nArtifact: ggml-silero-v6.2.0.bin\nLicense: MIT (Silero Team).\n",
+      "manifest": {
+        "schema_version": "svp-model-bundle-1",
+        "model_id": "model_whisper_cpp_silero_vad",
+        "display_name": "Silero VAD v6.2.0 (GGML for whisper.cpp)",
+        "source_registry": "huggingface",
+        "runtime": "whisper.cpp",
+        "format": "ggml",
+        "supported_execution_providers": ["cpu"],
+        "input_contract": {"sample_rate": 16000, "channels": 1, "sample_format": "float32"},
+        "output_contract": {"speech_segments": true, "timestamp_unit": "centisecond"},
+        "preprocessor_contract": {"owner": "whisper.cpp"},
+        "postprocessor_contract": {"model": "silero-v6.2.0", "parameters": "whisper_vad_default_params", "speech_only_filtering": true}
+      }
+    },
+    {
+      "model_id": "model_wav2vec2_espeak_phoneme",
+      "files": [
+        {"path": "wav2vec2-espeak-int8.onnx", "role": "model"},
+        {"path": "vocab.json", "role": "vocabulary"},
+        {"path": "english_mfa.dict", "role": "pronunciation_dictionary"}
+      ],
+      "notice": "SVP Model Bundle: model_wav2vec2_espeak_phoneme\n\nWeights: wav2vec2-lv-60-espeak-cv-ft phoneme CTC model. The upstream ONNX export is by onnx-community; SVP dynamically quantized it to int8.\nONNX source: https://huggingface.co/onnx-community/wav2vec2-lv-60-espeak-cv-ft-ONNX\nPinned ONNX revision: onnx-community/wav2vec2-lv-60-espeak-cv-ft-ONNX@c69750f5043e5e1f8a71ab95dd3b98338c280c92\nVocabulary source: https://huggingface.co/facebook/wav2vec2-lv-60-espeak-cv-ft\nPinned vocabulary revision: facebook/wav2vec2-lv-60-espeak-cv-ft@ae45363bf3413b374fecd9dc8bc1df0e24c3b7f4\nArtifact: wav2vec2-espeak-int8.onnx\nLicense: Apache-2.0 (Meta).\n\nPronunciation dictionary: English MFA dictionary v3.1.0 (MFA phone set).\nSource: https://github.com/MontrealCorpusTools/mfa-models/releases/tag/dictionary-english_mfa-v3.1.0\nLicense: CC BY 4.0 (McAuliffe and Sonderegger).\n",
+      "manifest": {
+        "schema_version": "svp-model-bundle-1",
+        "model_id": "model_wav2vec2_espeak_phoneme",
+        "display_name": "wav2vec2 espeak Phoneme CTC (int8 ONNX) + English MFA dictionary",
+        "source_registry": "huggingface",
+        "runtime": "onnxruntime",
+        "format": "onnx",
+        "supported_execution_providers": ["cpu"],
+        "input_contract": {"sample_rate": 16000, "channels": 1, "sample_format": "float32", "normalization": "zero_mean_unit_variance"},
+        "output_contract": {"logits": "phone_ctc", "vocab_size": 392, "frame_hop_samples": 320},
+        "preprocessor_contract": {"owner": "svp-audio"},
+        "postprocessor_contract": {"decoding": "ctc_forced_alignment", "word_boundaries": "phonetic_transition_rules"}
+      }
+    },
+    {
       "model_id": "model_sherpa_onnx_diarization",
       "files": [
         {"path": "sherpa-onnx-pyannote-segmentation-3-0/model.onnx", "role": "segmentation"},

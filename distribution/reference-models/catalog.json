@@ -47,6 +47,107 @@
       ]
     },
     {
+      "model_id": "model_whisper_cpp_silero_vad",
+      "model_version": "9ffd54a-silero-v6.2.0-ggml",
+      "source_slug": "ggml-org/whisper-vad + snakers4/silero-vad",
+      "source_revision": "ggml-org/whisper-vad@9ffd54a1e1ee413ddf265af9913beaf518d1639b+snakers4/silero-vad@be95df9152c0d7618fa1edfeb296fc3dae32376f",
+      "model_bundle_id": "model_whisper_cpp_silero_vad@9ffd54a-silero-v6.2.0-ggml+blake3_19c489aaac72",
+      "bundle_blake3": "blake3:19c489aaac72f3854cfbdbc6daa79ec760891d045985e04213749a682a3abfda",
+      "license": "MIT",
+      "license_sources": [
+        {
+          "path": "LICENSE",
+          "source_url": "https://raw.githubusercontent.com/snakers4/silero-vad/be95df9152c0d7618fa1edfeb296fc3dae32376f/LICENSE",
+          "source_revision": "be95df9152c0d7618fa1edfeb296fc3dae32376f",
+          "expected_bytes": 1075,
+          "sha256": "2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b",
+          "blake3": "blake3:c5d63fa0fb719e98f2bf2e2554d6d80862cb2c6642ec7213a765eb3c7655a350"
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "ggml-silero-v6.2.0.bin",
+          "source_url": "https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v6.2.0.bin",
+          "source_revision": "9ffd54a1e1ee413ddf265af9913beaf518d1639b",
+          "expected_bytes": 885098,
+          "sha256": "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
+          "blake3": "blake3:8644de43deb20579626361caf8afd3504282dd7f1ab915dd59c6591970b6de23"
+        }
+      ]
+    },
+    {
+      "model_id": "model_wav2vec2_espeak_phoneme",
+      "model_version": "ae45363-w2v2-espeak-int8-opset14",
+      "source_slug": "onnx-community/wav2vec2-lv-60-espeak-cv-ft-ONNX + MontrealCorpusTools/mfa-models english_mfa dictionary",
+      "source_revision": "c69750f5043e5e1f8a71ab95dd3b98338c280c92+dictionary-english_mfa-v3.1.0",
+      "model_bundle_id": "model_wav2vec2_espeak_phoneme@ae45363-w2v2-espeak-int8-opset14+blake3_2c1e3439aff8",
+      "bundle_blake3": "blake3:2c1e3439aff88ca28745459021af91e7e6810949046d7b197e5b1e52d4d05baf",
+      "license": "Apache-2.0 AND CC-BY-4.0",
+      "license_sources": [
+        {
+          "path": "LICENSE.apache-2.0",
+          "license": "Apache-2.0",
+          "source_url": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "expected_bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "blake3": "blake3:83cb3a2fcf829b6138e095b083016c34ddcdfa07b68d38782722c14fcf85ace6"
+        },
+        {
+          "path": "LICENSE.cc-by-4.0",
+          "license": "CC-BY-4.0",
+          "source_url": "https://creativecommons.org/licenses/by/4.0/legalcode.txt",
+          "expected_bytes": 18657,
+          "sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411",
+          "blake3": "blake3:811c1b55d1b36b9fcc2fef4ccbfec9eb843b83d314d08d956816fa616f35e32b",
+          "request_headers": {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+          }
+        }
+      ],
+      "reproduction": {
+        "source_revision": "c69750f5043e5e1f8a71ab95dd3b98338c280c92",
+        "toolchain": {
+          "python": "3.11.13",
+          "onnxruntime": "1.30.0",
+          "onnx": "1.22.0",
+          "numpy": "2.4.6"
+        },
+        "source_file": {
+          "path": "onnx/model.onnx",
+          "url": "https://huggingface.co/onnx-community/wav2vec2-lv-60-espeak-cv-ft-ONNX/resolve/c69750f5043e5e1f8a71ab95dd3b98338c280c92/onnx/model.onnx",
+          "expected_bytes": 1264009987,
+          "sha256": "93265694093f5f91497181ed9d7791f43bc818d2e23c46caf988fd9b8b1a1fba",
+          "blake3": "blake3:fdc5ab5081f0a5aa496d03706a66bd2ce3d7fa797599e9733583647471616d68"
+        },
+        "operation": "quantize_matmul_gemm_int8"
+      },
+      "artifacts": [
+        {
+          "path": "wav2vec2-espeak-int8.onnx",
+          "source_revision": "c69750f5043e5e1f8a71ab95dd3b98338c280c92+onnxruntime1.30.0-matmulgemm-int8dynamic",
+          "expected_bytes": 355459641,
+          "sha256": "35f54f7efd72b6b9607c0aa510c826a39b8b7cd460dd3d67c2980bb8c0eb6ca1",
+          "blake3": "blake3:02d383ff911d69f70c2cb3605c79a013df3a6ccce5ed46cdfd15e75b7fa67fda"
+        },
+        {
+          "path": "vocab.json",
+          "source_url": "https://huggingface.co/facebook/wav2vec2-lv-60-espeak-cv-ft/resolve/ae45363bf3413b374fecd9dc8bc1df0e24c3b7f4/vocab.json",
+          "source_revision": "ae45363bf3413b374fecd9dc8bc1df0e24c3b7f4",
+          "expected_bytes": 4637,
+          "sha256": "d732ab2456c0c017930001dc9af0b41b3b93d25b2eb9740bf9d925508d7d87d0",
+          "blake3": "blake3:101491a7bc86484e0ee65157973f274326cd5aa30298525a1e0f73f808600984"
+        },
+        {
+          "path": "english_mfa.dict",
+          "source_url": "https://github.com/MontrealCorpusTools/mfa-models/releases/download/dictionary-english_mfa-v3.1.0/english_mfa.dict",
+          "source_revision": "dictionary-english_mfa-v3.1.0",
+          "expected_bytes": 1078195,
+          "sha256": "975bf9c7791535c5aec57995e0bd2b77eb7ca364d1d974c2134e07bb0f16b079",
+          "blake3": "blake3:48e7fd27759fb3a5c5640770114ed898ae186cca0b44a5f8aefd7e2b2cc2ce9c"
+        }
+      ]
+    },
+    {
       "model_id": "model_sherpa_onnx_diarization",
       "model_version": "9403a69-asset-198893098",
       "source_slug": "csukuangfj/sherpa-onnx-pyannote-segmentation-3-0 + k2-fsa/sherpa-onnx",
@@ -226,13 +327,30 @@
         },
         "script": "scripts/reproduce-reference-rfdetr-model.py",
         "wrapper_revision": "svp-wrapper-2",
-        "output_order": ["pred_boxes", "logits"],
+        "output_order": [
+          "pred_boxes",
+          "logits"
+        ],
         "output_contract": {
           "operation": "flatten_and_concatenate",
           "dtype": "float32",
           "components": [
-            {"name": "pred_boxes", "shape": [1, 300, 4]},
-            {"name": "logits", "shape": [1, 300, 91]}
+            {
+              "name": "pred_boxes",
+              "shape": [
+                1,
+                300,
+                4
+              ]
+            },
+            {
+              "name": "logits",
+              "shape": [
+                1,
+                300,
+                91
+              ]
+            }
           ],
           "combined_name": "detections",
           "combined_element_count": 28500
