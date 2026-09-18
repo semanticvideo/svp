@@ -7,6 +7,8 @@
 #include "pocketfft/pocketfft_hdronly.h"
 
 #include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -27,6 +29,18 @@ namespace {
 
 constexpr double kSqrt2 = 1.4142135623730950488;
 constexpr double kPi = 3.14159265358979323846;
+
+// A child that stops producing output must not block the build forever: any
+// read that waits longer than this inactivity budget is treated as a hang.
+// Generous enough for multi-hour sources on slow media.
+constexpr int kSubprocessReadTimeoutMs = 300000;
+
+void terminate_child(pid_t pid) {
+  kill(pid, SIGKILL);
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
+}
 
 // A Hann-windowed full-scale sine reads exactly 0 dBFS after this correction:
 // Parseval folds its mean-square (1/2) into the normalization factor.
@@ -141,11 +155,14 @@ class SpectrumEngine {
     record.end_us = final_partial ? stream_start_offset_us_ + window_end_us
                                   : record.start_us + kSpectrumWindowDurationUs;
 
-    if (sample_count >= 2) {
-      measure_bands(sample_count, record);
+    // The canonical timeline is non-negative: audio before the presentation
+    // origin (a stream that leads the video start) has no representable window.
+    if (record.start_us >= 0) {
+      if (sample_count >= 2) {
+        measure_bands(sample_count, record);
+      }
+      records_.push_back(record);
     }
-
-    records_.push_back(record);
     window_index_ += 1;
     for (auto& channel : window_samples_) {
       channel.clear();
@@ -292,14 +309,37 @@ void run_decode_feeding_engine(const std::vector<std::string>& arguments,
   carry.reserve(static_cast<std::size_t>(frame_bytes));
   std::array<char, 65536> buffer{};
   while (true) {
+    pollfd descriptor{};
+    descriptor.fd = pipe_fds[0];
+    descriptor.events = POLLIN;
+    const int ready = poll(&descriptor, 1, kSubprocessReadTimeoutMs);
+    if (ready < 0 && errno == EINTR) {
+      continue;
+    }
+    if (ready == 0) {
+      close(pipe_fds[0]);
+      terminate_child(pid);
+      throw std::runtime_error(
+          "ffmpeg spectrum decode produced no output before the read deadline");
+    }
+    if (ready < 0 || (descriptor.revents & (POLLERR | POLLNVAL)) != 0) {
+      close(pipe_fds[0]);
+      terminate_child(pid);
+      throw std::runtime_error(
+          std::string("poll on ffmpeg output failed: ") + std::strerror(errno));
+    }
     const ssize_t count = read(pipe_fds[0], buffer.data(), buffer.size());
     if (count > 0) {
       carry.insert(carry.end(), buffer.data(), buffer.data() + count);
       const std::int64_t complete =
           static_cast<std::int64_t>(carry.size()) / frame_bytes * frame_bytes;
       if (complete > 0) {
-        engine.accept(reinterpret_cast<const float*>(carry.data()),
-                      complete / frame_bytes);
+        const std::int64_t sample_count =
+            complete / static_cast<std::int64_t>(sizeof(float));
+        std::vector<float> samples(static_cast<std::size_t>(sample_count));
+        std::memcpy(samples.data(), carry.data(),
+                    static_cast<std::size_t>(complete));
+        engine.accept(samples.data(), complete / frame_bytes);
         carry.erase(carry.begin(), carry.begin() + complete);
       }
       continue;

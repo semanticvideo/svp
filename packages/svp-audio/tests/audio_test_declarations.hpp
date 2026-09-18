@@ -18,6 +18,7 @@ void test_spectrum_bands_above_nyquist_are_null();
 void test_spectrum_stereo_averages_channel_energy();
 void test_spectrum_silence_reports_null_bands();
 void test_spectrum_summary_energy_averages_across_windows();
+void test_spectrum_windows_before_origin_are_omitted();
 void test_spectrum_record_and_summary_json_serialization();
 void test_spectrum_plan_targets_original_streams_with_loudness_grid();
 void test_spectrum_executor_writes_empty_artifacts_when_no_audio();

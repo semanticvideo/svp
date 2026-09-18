@@ -166,6 +166,24 @@ void test_spectrum_summary_energy_averages_across_windows() {
          0.5);
 }
 
+void test_spectrum_windows_before_origin_are_omitted() {
+  // A stream that starts 100 ms before the presentation origin produces a
+  // negative start_us for its first window. Stored timestamps must be
+  // non-negative, so that window is omitted while the rest of the grid stays
+  // intact.
+  const std::vector<float> pcm =
+      sine_pcm(1000.0, 1.0, 48000, 1, 57600, 0);
+  const svp::audio::SpectrumMeasurement measurement =
+      svp::audio::measure_spectrum_pcm(pcm.data(), 57600, 1, 48000, -100000,
+                                     "astream_0001");
+
+  assert(measurement.windows.size() == 2);
+  assert(measurement.windows[0].start_us == 300000);
+  assert(measurement.windows[0].end_us == 700000);
+  assert(measurement.windows[1].start_us == 700000);
+  assert(measurement.windows[0].bands_dbfs[kBand1000].has_value());
+}
+
 void test_spectrum_record_and_summary_json_serialization() {
   svp::audio::SpectrumWindowRecord record;
   record.index = 3;

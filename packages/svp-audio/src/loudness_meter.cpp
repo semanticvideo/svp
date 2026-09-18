@@ -5,6 +5,8 @@
 #include <nlohmann/json.hpp>
 
 #include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -66,6 +68,18 @@ std::string escape_lavfi_path(const std::filesystem::path& path) {
   return escaped;
 }
 
+// A child that stops producing output must not block the build forever: any
+// read that waits longer than this inactivity budget is treated as a hang.
+// Generous enough for multi-hour sources on slow media.
+constexpr int kSubprocessReadTimeoutMs = 300000;
+
+void terminate_child(pid_t pid) {
+  kill(pid, SIGKILL);
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
+}
+
 std::string run_process_capture_stdout(const std::vector<std::string>& arguments) {
   int pipe_fds[2] = {-1, -1};
   if (pipe(pipe_fds) != 0) {
@@ -103,6 +117,25 @@ std::string run_process_capture_stdout(const std::vector<std::string>& arguments
   std::string output;
   std::array<char, 65536> buffer{};
   while (true) {
+    pollfd descriptor{};
+    descriptor.fd = pipe_fds[0];
+    descriptor.events = POLLIN;
+    const int ready = poll(&descriptor, 1, kSubprocessReadTimeoutMs);
+    if (ready < 0 && errno == EINTR) {
+      continue;
+    }
+    if (ready == 0) {
+      close(pipe_fds[0]);
+      terminate_child(pid);
+      throw std::runtime_error(
+          "ffprobe loudness measurement produced no output before the read deadline");
+    }
+    if (ready < 0 || (descriptor.revents & (POLLERR | POLLNVAL)) != 0) {
+      close(pipe_fds[0]);
+      terminate_child(pid);
+      throw std::runtime_error(
+          std::string("poll on ffprobe output failed: ") + std::strerror(errno));
+    }
     const ssize_t count = read(pipe_fds[0], buffer.data(), buffer.size());
     if (count > 0) {
       output.append(buffer.data(), static_cast<std::size_t>(count));
@@ -331,6 +364,11 @@ LoudnessMeasurement measure_loudness(const std::filesystem::path& ffprobe_path,
     LoudnessWindowRecord record;
     record.index = window_index;
     record.start_us = stream_start_offset_us + window_index * window_duration_us;
+    // The canonical timeline is non-negative: audio before the presentation
+    // origin (a stream that leads the video start) has no representable window.
+    if (record.start_us < 0) {
+      continue;
+    }
     record.end_us =
         window_index == window_count - 1
             ? stream_start_offset_us + stream_end_us

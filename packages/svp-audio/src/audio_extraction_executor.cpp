@@ -492,13 +492,14 @@ AudioDerivedArtifactRun stage_loudness_artifact(const AudioExtractionPlan& plan,
   std::vector<nlohmann::json> json_records;
   std::vector<LoudnessStreamSummary> stream_summaries;
   std::int64_t ordinal = 0;
-  std::string measurement_error;
 
   for (const LoudnessStreamTarget& target : plan.loudness.targets) {
     const std::filesystem::path input_path =
         staged_path_for_ref(staging_root, target.input_ref);
     if (!std::filesystem::exists(input_path)) {
-      continue;
+      artifact.skipped_reason = "staged input is missing for target " +
+                                target.source_audio_stream_id;
+      return artifact;
     }
     try {
       LoudnessMeasurement measurement = measure_loudness(
@@ -512,17 +513,11 @@ AudioDerivedArtifactRun stage_loudness_artifact(const AudioExtractionPlan& plan,
       }
       stream_summaries.push_back(std::move(measurement.summary));
     } catch (const std::exception& error) {
-      if (measurement_error.empty()) {
-        measurement_error = error.what();
-      }
+      artifact.skipped_reason = "loudness measurement failed for target " +
+                                target.source_audio_stream_id + ": " +
+                                error.what();
+      return artifact;
     }
-  }
-
-  if (!plan.loudness.targets.empty() && stream_summaries.empty()) {
-    artifact.skipped_reason = measurement_error.empty()
-                                  ? "no original audio streams were staged"
-                                  : measurement_error;
-    return artifact;
   }
 
   artifact.staged_output_path = staged_path_for_ref(staging_root, artifact.output_ref);
@@ -568,13 +563,14 @@ AudioDerivedArtifactRun stage_spectrum_artifact(const AudioExtractionPlan& plan,
   std::vector<nlohmann::json> json_records;
   std::vector<SpectrumStreamSummary> stream_summaries;
   std::int64_t ordinal = 0;
-  std::string measurement_error;
 
   for (const LoudnessStreamTarget& target : plan.spectrum.targets) {
     const std::filesystem::path input_path =
         staged_path_for_ref(staging_root, target.input_ref);
     if (!std::filesystem::exists(input_path)) {
-      continue;
+      artifact.skipped_reason = "staged input is missing for target " +
+                                target.source_audio_stream_id;
+      return artifact;
     }
     try {
       SpectrumMeasurement measurement = measure_spectrum(
@@ -588,17 +584,11 @@ AudioDerivedArtifactRun stage_spectrum_artifact(const AudioExtractionPlan& plan,
       }
       stream_summaries.push_back(std::move(measurement.summary));
     } catch (const std::exception& error) {
-      if (measurement_error.empty()) {
-        measurement_error = error.what();
-      }
+      artifact.skipped_reason = "spectrum measurement failed for target " +
+                                target.source_audio_stream_id + ": " +
+                                error.what();
+      return artifact;
     }
-  }
-
-  if (!plan.spectrum.targets.empty() && stream_summaries.empty()) {
-    artifact.skipped_reason = measurement_error.empty()
-                                  ? "no original audio streams were staged"
-                                  : measurement_error;
-    return artifact;
   }
 
   artifact.staged_output_path = staged_path_for_ref(staging_root, artifact.output_ref);
