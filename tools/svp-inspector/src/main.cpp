@@ -83,9 +83,9 @@ int main(int argc, char** argv) {
                    "Path to a .svp or .svpi package")
       ->required();
   dump->add_option("--section", dump_section,
-                   "Section to dump: manifest, index_manifest, loudness_summary, or all")
+                   "Section to dump: manifest, index_manifest, loudness_summary, spectrum_summary, or all")
       ->check(CLI::IsMember({"manifest", "index_manifest", "loudness_summary",
-                            "all"}));
+                            "spectrum_summary", "all"}));
 
   std::string query_package_path;
   std::string query_mode = "layers";
@@ -102,11 +102,11 @@ int main(int argc, char** argv) {
   query
       ->add_option(
           "--mode", query_mode,
-          "Query mode: layers, transcript, words, speakers, ocr, colors, validation, relationships, traverse, path, context, health, loudness")
+          "Query mode: layers, transcript, words, speakers, ocr, colors, validation, relationships, traverse, path, context, health, loudness, spectrum")
       ->check(CLI::IsMember({"layers", "transcript", "words", "speakers",
                             "ocr", "colors", "validation", "relationships",
                             "traverse", "path", "context", "health",
-                            "loudness"}));
+                            "loudness", "spectrum"}));
   query->add_option("--text", query_text,
                     "Search text for words or OCR mode");
   query->add_option("--bucket", query_color_bucket,
@@ -150,7 +150,7 @@ int main(int argc, char** argv) {
                     "Time window end in microseconds");
   std::string query_target;
   query->add_option("--target", query_target,
-                    "Audio stream target_id for loudness mode");
+                    "Audio stream target_id for loudness or spectrum mode");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -312,6 +312,13 @@ int main(int argc, char** argv) {
         target_filter = query_target;
       }
       query_cmd::print_loudness(query_package_path, target_filter,
+                                query_start_us, query_end_us, query_json);
+    } else if (query_mode == "spectrum") {
+      std::optional<std::string> target_filter;
+      if (!query_target.empty()) {
+        target_filter = query_target;
+      }
+      query_cmd::print_spectrum(query_package_path, target_filter,
                                 query_start_us, query_end_us, query_json);
     } else if (query_mode == "health") {
       const auto health =

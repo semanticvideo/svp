@@ -46,5 +46,10 @@ void print_loudness(const std::filesystem::path& package_path,
                     std::int64_t start_us,
                     std::int64_t end_us,
                     bool json_output);
+void print_spectrum(const std::filesystem::path& package_path,
+                    const std::optional<std::string>& target_id,
+                    std::int64_t start_us,
+                    std::int64_t end_us,
+                    bool json_output);
 
 }  // namespace query_cmd

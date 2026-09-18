@@ -22,6 +22,7 @@ const std::vector<DumpTarget>& dump_targets() {
       {"manifest", "manifest.json"},
       {"index_manifest", "index/index_manifest.json"},
       {"loudness_summary", "media/audio/loudness_summary.json"},
+      {"spectrum_summary", "media/audio/spectrum_summary.json"},
   };
   return targets;
 }

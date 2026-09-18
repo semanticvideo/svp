@@ -21,13 +21,15 @@ struct KnownLayer {
   std::string_view kind;
 };
 
-constexpr std::array<KnownLayer, 26> kKnownLayers{{
+constexpr std::array<KnownLayer, 28> kKnownLayers{{
     {"core", "manifest.json", "json"},
     {"core", "mimetype", "text"},
     {"media", "media/audio/audio_absence.json", "json"},
     {"media", "media/audio/waveform.jsonl", "jsonl"},
     {"media", "media/audio/loudness.jsonl", "jsonl"},
     {"media", "media/audio/loudness_summary.json", "json"},
+    {"media", "media/audio/spectrum.jsonl", "jsonl"},
+    {"media", "media/audio/spectrum_summary.json", "json"},
     {"transcript", "transcript/transcript.json", "json"},
     {"transcript", "transcript/words.jsonl", "jsonl"},
     {"transcript", "transcript/speakers.jsonl", "jsonl"},
@@ -516,6 +518,122 @@ LoudnessRangeResult loudness_range(const std::filesystem::path& package_path,
 LoudnessSummaryInfo loudness_summary(const std::filesystem::path& package_path) {
   LoudnessSummaryInfo info;
   const auto json = read_json_entry(package_path, "media/audio/loudness_summary.json");
+  info.present = json.present;
+  if (!json.present || !json.parsed) {
+    info.error_message = json.error_message;
+    return info;
+  }
+  info.parsed = true;
+  info.record = json.value;
+  return info;
+}
+
+SpectrumRangeResult spectrum_range(const std::filesystem::path& package_path,
+                                   std::int64_t start_us,
+                                   std::int64_t end_us,
+                                   const std::optional<std::string>& target_id) {
+  SpectrumRangeResult result;
+  result.start_us = start_us;
+  result.end_us = end_us;
+
+  const auto jsonl = read_jsonl_entry(package_path, "media/audio/spectrum.jsonl");
+  result.present = jsonl.present;
+  if (!jsonl.readable) {
+    result.error_message = jsonl.error_message;
+    return result;
+  }
+  result.readable = true;
+  if (end_us <= start_us) {
+    result.error_message = "end_us must be greater than start_us";
+    return result;
+  }
+
+  struct BandAccumulator {
+    double power_sum = 0.0;
+    double power_max = 0.0;
+    std::uint64_t measured_windows = 0;
+  };
+
+  std::unordered_map<std::string, std::array<BandAccumulator, kSpectrumBandCount>>
+      bands_per_stream;
+  std::unordered_map<std::string, std::int64_t> covered_us_per_stream;
+  std::unordered_map<std::string, std::uint64_t> window_count_per_stream;
+
+  for (const auto& record : jsonl.records) {
+    const std::string record_target = json_string(record, "target_id");
+    if (target_id.has_value() && record_target != *target_id) {
+      continue;
+    }
+    const auto start_it = record.find("start_us");
+    const auto end_it = record.find("end_us");
+    const auto bands_it = record.find("bands");
+    if (start_it == record.end() || end_it == record.end() ||
+        bands_it == record.end() || !start_it->is_number() ||
+        !end_it->is_number() || !bands_it->is_array()) {
+      continue;
+    }
+    const std::int64_t record_start = start_it->get<std::int64_t>();
+    const std::int64_t record_end = end_it->get<std::int64_t>();
+    if (record_end <= start_us || record_start >= end_us) {
+      continue;
+    }
+
+    ++window_count_per_stream[record_target];
+    covered_us_per_stream[record_target] +=
+        std::min(record_end, end_us) - std::max(record_start, start_us);
+
+    auto& accumulators = bands_per_stream[record_target];
+    for (std::size_t band = 0;
+         band < bands_it->size() && band < kSpectrumBandCount; ++band) {
+      const nlohmann::json& value = (*bands_it)[band];
+      if (!value.is_number()) {
+        continue;
+      }
+      const double power = std::pow(10.0, value.get<double>() / 10.0);
+      accumulators[band].power_sum += power;
+      accumulators[band].power_max =
+          std::max(accumulators[band].power_max, power);
+      ++accumulators[band].measured_windows;
+    }
+  }
+
+  std::vector<std::string> stream_ids;
+  for (const auto& [id, count] : window_count_per_stream) {
+    stream_ids.push_back(id);
+  }
+  std::ranges::sort(stream_ids);
+
+  for (const std::string& id : stream_ids) {
+    SpectrumRangeStreamResult stream_result;
+    stream_result.target_id = id;
+    stream_result.window_count = window_count_per_stream[id];
+    stream_result.covered_us = covered_us_per_stream[id];
+
+    const auto& accumulators = bands_per_stream[id];
+    for (std::size_t band = 0; band < kSpectrumBandCount; ++band) {
+      const BandAccumulator& acc = accumulators[band];
+      if (acc.measured_windows > 0 && acc.power_sum > 0.0) {
+        stream_result.mean_band_dbfs[band] =
+            std::round(10.0 * std::log10(acc.power_sum /
+                                         static_cast<double>(acc.measured_windows)) *
+                       10.0) /
+            10.0;
+      }
+      if (acc.power_max > 0.0) {
+        stream_result.max_band_dbfs[band] =
+            std::round(10.0 * std::log10(acc.power_max) * 10.0) / 10.0;
+      }
+    }
+
+    result.streams.push_back(std::move(stream_result));
+  }
+
+  return result;
+}
+
+SpectrumSummaryInfo spectrum_summary(const std::filesystem::path& package_path) {
+  SpectrumSummaryInfo info;
+  const auto json = read_json_entry(package_path, "media/audio/spectrum_summary.json");
   info.present = json.present;
   if (!json.present || !json.parsed) {
     info.error_message = json.error_message;
