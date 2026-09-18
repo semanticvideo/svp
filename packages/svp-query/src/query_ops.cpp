@@ -383,11 +383,11 @@ LoudnessRangeResult loudness_range(const std::filesystem::path& package_path,
                                    std::int64_t end_us,
                                    const std::optional<std::string>& target_id) {
   // BS.1770 gating constants: the absolute gate is -70 LUFS and the relative
-  // gate sits 10 LU below the ungated mean. The -0.691 LU offset is the
-  // standard's channel-weight normalization term.
+  // gate sits 10 LU below the ungated mean. Stored momentary values already
+  // carry the standard's channel-weight normalization, so energy derived from
+  // them needs no further offset.
   constexpr double kAbsoluteGateLufs = -70.0;
   constexpr double kRelativeGateOffsetLu = 10.0;
-  constexpr double kChannelWeightOffsetLu = 0.691;
 
   LoudnessRangeResult result;
   result.start_us = start_us;
@@ -408,6 +408,7 @@ LoudnessRangeResult loudness_range(const std::filesystem::path& package_path,
   struct Window {
     double momentary_lufs;
     double energy;
+    std::int64_t overlap_us;
   };
   std::unordered_map<std::string, std::vector<Window>> windows_per_stream;
   std::unordered_map<std::string, double> max_peak_linear_per_stream;
@@ -432,14 +433,15 @@ LoudnessRangeResult loudness_range(const std::filesystem::path& package_path,
     }
 
     ++window_count_per_stream[record_target];
-    covered_us_per_stream[record_target] +=
+    const std::int64_t overlap_us =
         std::min(record_end, end_us) - std::max(record_start, start_us);
+    covered_us_per_stream[record_target] += overlap_us;
 
     const auto momentary_it = record.find("momentary_lufs");
     if (momentary_it != record.end() && momentary_it->is_number()) {
       const double momentary = momentary_it->get<double>();
       windows_per_stream[record_target].push_back(
-          Window{momentary, std::pow(10.0, momentary / 10.0)});
+          Window{momentary, std::pow(10.0, momentary / 10.0), overlap_us});
     }
 
     const auto peak_it = record.find("true_peak_dbtp");
@@ -477,28 +479,30 @@ LoudnessRangeResult loudness_range(const std::filesystem::path& package_path,
     }
 
     if (!gated.empty()) {
-      double mean_energy = 0.0;
+      // Each window contributes energy in proportion to how much of it the
+      // queried range actually covers; normalization divides by total covered
+      // duration so a partially overlapped window does not count fully.
+      double weighted_energy = 0.0;
+      double weighted_us = 0.0;
       for (const Window& window : gated) {
-        mean_energy += window.energy;
+        weighted_energy += window.energy * static_cast<double>(window.overlap_us);
+        weighted_us += static_cast<double>(window.overlap_us);
       }
-      mean_energy /= static_cast<double>(gated.size());
       const double ungated_lufs =
-          10.0 * std::log10(mean_energy) - kChannelWeightOffsetLu;
+          10.0 * std::log10(weighted_energy / weighted_us);
       const double relative_gate = ungated_lufs - kRelativeGateOffsetLu;
 
       double gated_energy = 0.0;
-      std::uint64_t gated_count = 0;
+      double gated_us = 0.0;
       for (const Window& window : gated) {
         if (window.momentary_lufs > relative_gate) {
-          gated_energy += window.energy;
-          ++gated_count;
+          gated_energy += window.energy * static_cast<double>(window.overlap_us);
+          gated_us += static_cast<double>(window.overlap_us);
         }
       }
-      if (gated_count > 0) {
+      if (gated_us > 0.0) {
         stream_result.integrated_lufs =
-            std::round((10.0 * std::log10(gated_energy / gated_count) -
-                        kChannelWeightOffsetLu) *
-                       10.0) /
+            std::round(10.0 * std::log10(gated_energy / gated_us) * 10.0) /
             10.0;
       }
     }
@@ -551,7 +555,7 @@ SpectrumRangeResult spectrum_range(const std::filesystem::path& package_path,
   struct BandAccumulator {
     double power_sum = 0.0;
     double power_max = 0.0;
-    std::uint64_t measured_windows = 0;
+    std::int64_t measured_us = 0;
   };
 
   std::unordered_map<std::string, std::array<BandAccumulator, kSpectrumBandCount>>
@@ -579,8 +583,9 @@ SpectrumRangeResult spectrum_range(const std::filesystem::path& package_path,
     }
 
     ++window_count_per_stream[record_target];
-    covered_us_per_stream[record_target] +=
+    const std::int64_t overlap_us =
         std::min(record_end, end_us) - std::max(record_start, start_us);
+    covered_us_per_stream[record_target] += overlap_us;
 
     auto& accumulators = bands_per_stream[record_target];
     for (std::size_t band = 0;
@@ -589,11 +594,13 @@ SpectrumRangeResult spectrum_range(const std::filesystem::path& package_path,
       if (!value.is_number()) {
         continue;
       }
+      // Weight each band's energy by how much of the window the range covers.
       const double power = std::pow(10.0, value.get<double>() / 10.0);
-      accumulators[band].power_sum += power;
+      accumulators[band].power_sum +=
+          power * static_cast<double>(overlap_us);
       accumulators[band].power_max =
           std::max(accumulators[band].power_max, power);
-      ++accumulators[band].measured_windows;
+      accumulators[band].measured_us += overlap_us;
     }
   }
 
@@ -612,10 +619,10 @@ SpectrumRangeResult spectrum_range(const std::filesystem::path& package_path,
     const auto& accumulators = bands_per_stream[id];
     for (std::size_t band = 0; band < kSpectrumBandCount; ++band) {
       const BandAccumulator& acc = accumulators[band];
-      if (acc.measured_windows > 0 && acc.power_sum > 0.0) {
+      if (acc.measured_us > 0 && acc.power_sum > 0.0) {
         stream_result.mean_band_dbfs[band] =
             std::round(10.0 * std::log10(acc.power_sum /
-                                         static_cast<double>(acc.measured_windows)) *
+                                         static_cast<double>(acc.measured_us)) *
                        10.0) /
             10.0;
       }
