@@ -428,7 +428,8 @@ LoudnessRangeResult loudness_range(const std::filesystem::path& package_path,
     }
     const std::int64_t record_start = start_it->get<std::int64_t>();
     const std::int64_t record_end = end_it->get<std::int64_t>();
-    if (record_end <= start_us || record_start >= end_us) {
+    if (record_end <= record_start || record_end <= start_us ||
+        record_start >= end_us) {
       continue;
     }
 
@@ -578,7 +579,8 @@ SpectrumRangeResult spectrum_range(const std::filesystem::path& package_path,
     }
     const std::int64_t record_start = start_it->get<std::int64_t>();
     const std::int64_t record_end = end_it->get<std::int64_t>();
-    if (record_end <= start_us || record_start >= end_us) {
+    if (record_end <= record_start || record_end <= start_us ||
+        record_start >= end_us) {
       continue;
     }
 
