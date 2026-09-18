@@ -24,6 +24,7 @@
 | 0.6 | 2026-06-19 | Defines exact rational timestamp rounding, adds optional detached `.svpsig` authenticity sidecars, requires a machine-readable validation-code registry, requires per-layer equivalence metrics, keeps word-level language out of v1.0 Core, and defines native SVP Model Bundles for reference model distribution without Python runtime requirements. |
 | RC1 | 2026-06-19 | Resolves final release-candidate blockers: defines `index/index_manifest.json`, separates authenticity findings from Core status and exit codes, unifies canonical model IDs, expands the model-bundle manifest contract, and adds `index-manifest.schema.json`. |
 | RC2 | 2026-06-19 | Adds first-class OCR/visible-text observations and structured color observations to SVP Core; defines package paths, schemas, registries, validation codes, index/query tables, provenance rules, builder roadmap changes, fixture requirements, and implementation pause guidance before Phase 03+. |
+| RC2 | 2026-09-18 | Adds measured audio loudness observations to SVP Core: `media/audio/loudness.jsonl` per-window ITU-R BS.1770 records and `media/audio/loudness_summary.json` per-stream integrated loudness, loudness range, and true peak, with required schemas, validation rules, and provenance requirements. |
 
 ## Normative artifacts for v1.0
 
@@ -50,7 +51,7 @@ A complete SVP v1.0 release should ship these artifacts together in one public r
 
 This document is the release-candidate seed for `/spec/svp-v1.md`.
 
-`/spec/validation-codes.json`, `/spec/equivalence-profile.json`, `/spec/block-types.json`, `/spec/color-buckets.json`, `/spec/color-spaces.json`, `/spec/ocr-observation-types.json`, `/spec/svp-model-bundle-v1.md`, and `/spec/svp-signature-v1.md` are normative machine-readable companions to this document. `index-manifest.schema.json`, `text-region.schema.json`, `text-observation.schema.json`, `numeric-value.schema.json`, `text-absence.schema.json`, `color-observation.schema.json`, `color-summary.schema.json`, and `color-absence.schema.json` are required in `/schemas`. If a registry file, schema file, and the prose conflict, the release is defective and MUST be corrected before a final v1.0 tag.
+`/spec/validation-codes.json`, `/spec/equivalence-profile.json`, `/spec/block-types.json`, `/spec/color-buckets.json`, `/spec/color-spaces.json`, `/spec/ocr-observation-types.json`, `/spec/svp-model-bundle-v1.md`, and `/spec/svp-signature-v1.md` are normative machine-readable companions to this document. `index-manifest.schema.json`, `text-region.schema.json`, `text-observation.schema.json`, `numeric-value.schema.json`, `text-absence.schema.json`, `color-observation.schema.json`, `color-summary.schema.json`, `color-absence.schema.json`, `loudness-observation.schema.json`, and `loudness-summary.schema.json` are required in `/schemas`. If a registry file, schema file, and the prose conflict, the release is defective and MUST be corrected before a final v1.0 tag.
 
 ## RC2 change summary
 
@@ -744,6 +745,7 @@ The Default Equivalence Profile v1 is used by the reference validator when compa
 | Text observations | `raw_text` and `normalized_text` MUST match exactly when produced from the same reference model set and OCR normalization rules. Confidence fields use the confidence tolerance. |
 | Numeric values | Decimal-string numeric values MUST match exactly. Raw source text MUST match exactly. |
 | Color observations | Same target type, target ID, sampling basis, color space, and bucket registry version. Corresponding bucket coverage values MUST differ by <= `0.005`; coverage totals MUST sum within `0.001`; dominant bucket MUST match unless buckets are tied within tolerance. |
+| Loudness observations | Same target ID, window timing, and record structure. Corresponding `momentary_lufs`, `shortterm_lufs`, `integrated_lufs`, `loudness_range_lu`, `lra_low_lufs`, `lra_high_lufs`, `max_momentary_lufs`, and `max_shortterm_lufs` values MUST differ by <= `0.1` LU; corresponding `true_peak_dbtp` values MUST differ by <= `0.1` dBTP. `null` matches only `null`. |
 
 The reference validator MUST report whether two packages are:
 
@@ -810,6 +812,8 @@ video.svp
       original_stream_000.flac
       analysis_mono_16k.wav
       waveform.jsonl
+      loudness.jsonl
+      loudness_summary.json
       audio_absence.json
 
   transcript/
@@ -871,7 +875,7 @@ video.svp
 
 `labels/labels.jsonl` is the only non-core file tree. It MAY be absent. If present with a supported label schema version, it MUST validate against that label schema. If present with an unsupported future label schema version, it MUST be treated according to Section 19.1 and MUST NOT invalidate SVP Core.
 
-`text_absence.json` and `color_absence.json` MUST exist. For normal video media, they record that OCR and color processors ran even if no text regions were found or if color observations are near-uniform. `audio_absence.json` MUST exist. For normal media it records `source_audio_present: true`. For silent source media it records `source_audio_present: false`, and `original_stream_000.flac` MUST be a canonical silent FLAC asset with provenance. This keeps the audio section required without making silent video impossible.
+`text_absence.json` and `color_absence.json` MUST exist. For normal video media, they record that OCR and color processors ran even if no text regions were found or if color observations are near-uniform. `audio_absence.json` MUST exist. For normal media it records `source_audio_present: true`, the `original_audio_refs` of extracted streams, and `original_audio_stream_ids` holding the canonical `astream_NNNN` ID of each extracted stream in the same order as `original_audio_refs`. For silent source media it records `source_audio_present: false`, and `original_stream_000.flac` MUST be a canonical silent FLAC asset with provenance. This keeps the audio section required without making silent video impossible.
 
 The recovery journal, global cache, temporary task outputs, and scheduler state are not package sections. They MUST NOT appear inside the final `.svp` archive.
 
@@ -1096,6 +1100,80 @@ Primary audio selection rule:
 ```
 
 Waveform data is required so apps and agents can reason about silence, loudness, spikes, and pacing without decoding audio.
+
+### 10.5 Loudness
+
+`media/audio/loudness.jsonl` stores measured loudness observations per original audio stream. `media/audio/loudness_summary.json` stores the package-level loudness summary. Both files MUST exist.
+
+Loudness is measured per ITU-R BS.1770 (K-weighted loudness with absolute and relative gating) on each extracted `media/audio/original_stream_NNN.flac` at its native sample rate and channel layout. Loudness MUST NOT be measured on the mono 16 kHz analysis WAV; the analysis downmix discards channel energy and band-limits the K-weighted signal.
+
+`loudness.jsonl` stores one record per 400 ms measurement window per audio stream. The 400 ms window is the BS.1770 momentary block length. Windows are non-overlapping and ordered by `start_us` within each `target_id`:
+
+```json
+{
+  "id": "loud_00000001",
+  "start_us": 84120000,
+  "end_us": 84120400,
+  "start_sec": "84.120",
+  "end_sec": "84.120",
+  "target_type": "audio_stream",
+  "target_id": "astream_0001",
+  "momentary_lufs": -21.4,
+  "shortterm_lufs": -20.8,
+  "true_peak_dbtp": -3.2,
+  "processor_id": "proc_loudness_ebur128_0001"
+}
+```
+
+Rules:
+
+1. `start_us` is inclusive, `end_us` is exclusive, and both follow the canonical time model in Section 7.
+2. Window `start_us` values are the source stream's normalized presentation start offset plus an integer multiple of the record `window_us` declared in `loudness_summary.json`.
+3. `target_type` is `audio_stream` and `target_id` is the canonical `astream_NNN` audio stream ID of the measured original stream.
+4. `momentary_lufs` is the BS.1770 momentary (400 ms) loudness of the window. `shortterm_lufs` is the BS.1770 short-term (3 s) loudness evaluated at the window end.
+5. `true_peak_dbtp` is the maximum true peak level in the window in dBTP, measured with at least 4x oversampling per the BS.1770 true-peak method.
+6. Loudness and peak fields are finite numbers or `null`. `null` means the value is unmeasurable for that window, such as digital silence with no gated energy. Implementations MUST NOT use sentinel numbers such as `-inf`, `-999`, or `0` to mean "no measurement".
+7. The final window of a stream MAY be shorter than `window_us`; `end_us` then equals the stream end.
+8. When the source contains no audio, `loudness.jsonl` contains zero records, matching the `speech_regions.jsonl` convention for silent media.
+9. Loudness records are observational measurements of the packaged audio, not editorial gain decisions.
+
+`media/audio/loudness_summary.json` stores the per-stream loudness summary:
+
+```json
+{
+  "schema_version": "svp-loudness-summary-v1",
+  "measurement_standard": "ITU-R BS.1770-4",
+  "window_us": 400000,
+  "streams": [
+    {
+      "target_id": "astream_0001",
+      "integrated_lufs": -19.6,
+      "loudness_range_lu": 8.4,
+      "lra_low_lufs": -27.1,
+      "lra_high_lufs": -18.7,
+      "true_peak_dbtp": -1.8,
+      "max_momentary_lufs": -12.1,
+      "max_shortterm_lufs": -14.3,
+      "channels": 2,
+      "sample_rate": 48000
+    }
+  ],
+  "processor_id": "proc_loudness_ebur128_0001"
+}
+```
+
+Summary rules:
+
+1. `integrated_lufs` is the BS.1770 gated integrated loudness over the full stream.
+2. `loudness_range_lu`, `lra_low_lufs`, and `lra_high_lufs` follow the EBU R128 loudness-range definition over the full stream.
+3. `true_peak_dbtp` is the maximum true peak over the full stream.
+4. `max_momentary_lufs` and `max_shortterm_lufs` are the maximum momentary and short-term values observed over the full stream.
+5. `channels` and `sample_rate` record the measured stream's channel count and sample rate for provenance.
+6. A stream whose measured energy never exceeds the BS.1770 absolute gate reports `null` for `integrated_lufs`, `loudness_range_lu`, `lra_low_lufs`, and `lra_high_lufs`.
+7. When the source contains no audio, `streams` is an empty array.
+8. The loudness processor MUST record a processor record in `provenance/processors.jsonl` identifying input refs, output refs, the measurement standard and revision, the window length, the peak mode, the runtime, and the processor version.
+
+Because momentary loudness is `10 * log10` of gated channel energy, consumers MAY compute an approximate gated integrated loudness over any subrange `[T1, T2)` by energy-averaging stored window records and applying the BS.1770 absolute and relative gates. Range integrations derived from stored windows MUST be described as approximations of a fresh BS.1770 measurement over the exact range.
 
 ## 11. Transcript section
 
@@ -3242,6 +3320,18 @@ A strict validator MUST validate color observations with these checks:
 11. `dominant_bucket` MUST be present in `bucket_coverage` and MUST be one of the maximum-coverage buckets after tolerance handling.
 12. Color provenance IDs MUST reference valid processor provenance records.
 13. The SQLite index MUST contain rows corresponding to color observations and bucket coverage values.
+
+### 23.3 Audio loudness validation rules
+
+A strict validator MUST validate loudness records with these checks:
+
+1. `media/audio/loudness.jsonl` and `media/audio/loudness_summary.json` exist.
+2. Every loudness record validates against `loudness-observation.schema.json`.
+3. `loudness_summary.json` validates against `loudness-summary.schema.json`.
+4. Every loudness record has `end_us` greater than `start_us`, and records for the same `target_id` are ordered by `start_us` without overlap.
+5. `momentary_lufs`, `shortterm_lufs`, and `true_peak_dbtp` are finite numbers or `null`. No other value shape is valid.
+6. `target_id` is the canonical `astream_NNNN` ID of the measured original stream and MUST appear in the `original_audio_stream_ids` recorded by `audio_absence.json`. A `target_id` that does not resolve to a recorded original stream is invalid.
+7. Loudness provenance IDs MUST reference valid processor provenance records.
 
 ## 24. Security and privacy requirements
 
