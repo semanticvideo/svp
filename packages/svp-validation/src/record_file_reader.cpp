@@ -41,4 +41,18 @@ JsonLinesReadResult read_json_lines_from_package(const std::filesystem::path& pa
   return result;
 }
 
+JsonReadResult read_json_from_package(const std::filesystem::path& package_path,
+                                      const std::string& entry) {
+  const auto entry_result = svp::package::read_package_entry(package_path, entry);
+  if (!entry_result.has_value()) {
+    return JsonReadResult{.error_message = entry_result.error_message()};
+  }
+
+  try {
+    return JsonReadResult{.value = nlohmann::json::parse(entry_result.value())};
+  } catch (const nlohmann::json::exception& error) {
+    return JsonReadResult{.error_message = error.what()};
+  }
+}
+
 }  // namespace svp::validation
