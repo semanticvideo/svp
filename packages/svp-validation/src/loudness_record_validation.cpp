@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cmath>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -34,22 +35,25 @@ bool number_or_null_finite(const nlohmann::json& value) {
   return value.is_null() || (value.is_number() && std::isfinite(value.get<double>()));
 }
 
-std::unordered_set<std::string> known_stream_ids(
+// Returns the authoritative stream set only when audio_absence.json actually
+// provides it: an absent or unreadable entry means membership cannot be checked,
+// while a present-but-empty array is authoritative and rejects every target_id.
+std::optional<std::unordered_set<std::string>> known_stream_ids(
     const std::filesystem::path& package_path,
     const svp::package::PackageLayout& layout) {
-  std::unordered_set<std::string> ids;
   if (!layout.has_entry(std::string{kAudioAbsenceEntry})) {
-    return ids;
+    return std::nullopt;
   }
   const auto absence = read_json_from_package(package_path,
                                               std::string{kAudioAbsenceEntry});
   if (!absence.has_value() || !absence.value.is_object()) {
-    return ids;
+    return std::nullopt;
   }
   const auto it = absence.value.find("original_audio_stream_ids");
   if (it == absence.value.end() || !it->is_array()) {
-    return ids;
+    return std::nullopt;
   }
+  std::unordered_set<std::string> ids;
   for (const nlohmann::json& id : *it) {
     if (id.is_string()) {
       ids.insert(id.get<std::string>());
@@ -82,7 +86,7 @@ void validate_loudness_summary(ValidationReport& report,
                                const std::filesystem::path& package_path,
                                const svp::package::PackageLayout& layout,
                                const nlohmann::json& summary_schema,
-                               const std::unordered_set<std::string>& stream_ids) {
+                               const std::optional<std::unordered_set<std::string>>& stream_ids) {
   if (!layout.has_entry(std::string{kLoudnessSummaryEntry})) {
     return;
   }
@@ -113,7 +117,8 @@ void validate_loudness_summary(ValidationReport& report,
     }
     const auto id_it = stream.find("target_id");
     if (id_it != stream.end() && id_it->is_string() &&
-        !stream_ids.empty() && !stream_ids.contains(id_it->get<std::string>())) {
+        stream_ids.has_value() &&
+        !stream_ids->contains(id_it->get<std::string>())) {
       add_finding(report, make_finding(registry, kCodeMediaInvalidLoudnessTarget,
                                      package_entry_path(kLoudnessSummaryEntry),
                                      "stream target_id does not resolve to a recorded audio stream."));
@@ -129,7 +134,7 @@ void add_loudness_record_findings(ValidationReport& report,
                                 const svp::package::PackageLayout& layout,
                                 const nlohmann::json& loudness_observation_schema,
                                 const nlohmann::json& loudness_summary_schema) {
-  const std::unordered_set<std::string> stream_ids =
+  const std::optional<std::unordered_set<std::string>> stream_ids =
       known_stream_ids(package_path, layout);
 
   if (layout.has_entry(std::string{kLoudnessEntry})) {
@@ -182,8 +187,8 @@ void add_loudness_record_findings(ValidationReport& report,
         }
 
         if (target_it != record.value.end() && target_it->is_string() &&
-            !stream_ids.empty() &&
-            !stream_ids.contains(target_it->get<std::string>())) {
+            stream_ids.has_value() &&
+            !stream_ids->contains(target_it->get<std::string>())) {
           add_finding(report,
                       make_finding(registry, kCodeMediaInvalidLoudnessTarget,
                                    record_path(kLoudnessEntry, record.line),
