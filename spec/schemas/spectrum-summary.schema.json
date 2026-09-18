@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp.dev/schemas/spectrum-summary.schema.json",
+  "title": "spectrum-summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "measurement_standard",
+    "window_us",
+    "band_centers_hz",
+    "streams",
+    "processor_id"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "measurement_standard": {
+      "type": "string",
+      "enum": [
+        "IEC 61260 octave bands"
+      ]
+    },
+    "window_us": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "band_centers_hz": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "items": {
+        "type": "number"
+      }
+    },
+    "streams": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target_id",
+          "mean_band_dbfs",
+          "max_band_dbfs",
+          "channels",
+          "sample_rate"
+        ],
+        "properties": {
+          "target_id": {
+            "type": "string"
+          },
+          "mean_band_dbfs": {
+            "type": "array",
+            "minItems": 10,
+            "maxItems": 10
+          },
+          "max_band_dbfs": {
+            "type": "array",
+            "minItems": 10,
+            "maxItems": 10
+          },
+          "channels": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sample_rate": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "processor_id": {
+      "type": "string"
+    }
+  }
+}
