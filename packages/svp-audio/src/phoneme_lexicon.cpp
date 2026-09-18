@@ -165,7 +165,12 @@ std::optional<std::vector<std::string>> PhonemeLexicon::phones_for(
         normalized_word.substr(0, normalized_word.size() - suffix.size());
     const auto base = entries_.find(stem);
     if (base == entries_.end()) continue;
-    std::vector<std::string> phones = base->second;
+    std::vector<std::string> phones;
+    phones.reserve(base->second.size() + suffix_phones.size());
+    for (const std::string& phone : base->second) {
+      if (phone != "spn") phones.push_back(phone);
+    }
+    if (phones.empty()) return std::nullopt;
     phones.insert(phones.end(), suffix_phones.begin(), suffix_phones.end());
     return phones;
   }

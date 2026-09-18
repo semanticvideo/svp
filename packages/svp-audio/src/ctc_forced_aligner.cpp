@@ -115,7 +115,7 @@ CtcForcedAligner CtcForcedAligner::load(
 std::vector<CtcPhoneSpan> CtcForcedAligner::align(
     const std::vector<float>& samples,
     const std::vector<CtcAlignmentToken>& tokens) const {
-  if (tokens.empty()) return {};
+  if (tokens.empty() || samples.empty()) return {};
   const std::vector<float> normalized = normalize_samples(samples);
 
   const auto [logits, shape] = impl_->session.run_raw_with_shape(
@@ -126,6 +126,7 @@ std::vector<CtcPhoneSpan> CtcForcedAligner::align(
   }
   const std::size_t frames = static_cast<std::size_t>(shape[1]);
   const std::size_t vocab_size = static_cast<std::size_t>(shape[2]);
+  if (frames == 0 || vocab_size == 0) return {};
 
   std::unordered_map<std::string, int> token_ids;
   for (std::size_t id = 0; id < impl_->id_to_phone.size(); ++id) {

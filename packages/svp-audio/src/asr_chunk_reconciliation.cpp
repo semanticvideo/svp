@@ -127,12 +127,14 @@ std::vector<AsrWord> reconcile_overlapping_chunks(
     // own timestamps, and prior words reaching past the continuation start
     // trim or collapse to the seam instead of dragging every incoming word.
     const std::int64_t seam_start = current[append_from].start_us;
-    while (!result.empty() && result.back().start_us >= seam_start) {
-      result.back().start_us = seam_start;
-      result.back().end_us = seam_start;
+    std::size_t tail = result.size();
+    while (tail > 0 && result[tail - 1].start_us >= seam_start) {
+      result[tail - 1].start_us = seam_start;
+      result[tail - 1].end_us = seam_start;
+      --tail;
     }
-    if (!result.empty() && result.back().end_us > seam_start) {
-      result.back().end_us = seam_start;
+    if (tail > 0 && result[tail - 1].end_us > seam_start) {
+      result[tail - 1].end_us = seam_start;
     }
     for (std::size_t i = append_from; i < current.size(); ++i) {
       result.push_back(std::move(current[i]));

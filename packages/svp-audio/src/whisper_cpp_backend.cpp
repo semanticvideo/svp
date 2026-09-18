@@ -303,7 +303,18 @@ VadTimeMapper build_vad_time_mapper(
                                      static_cast<int>(samples.size()) - 1);
     const int original_segment_length =
         segment_end_samples - segment_start_samples;
-    if (original_segment_length <= 0) continue;
+    // whisper.cpp packs a non-final segment's overlap extension into the
+    // processed buffer too, so the copied length decides the skip — a
+    // degenerate segment still contributes its overlap and silence gap.
+    int copied_segment_end_samples = segment_end_samples;
+    if (index < segment_count - 1) {
+      copied_segment_end_samples = std::min(
+          copied_segment_end_samples + overlap_samples,
+          static_cast<int>(samples.size()) - 1);
+    }
+    const int segment_length =
+        copied_segment_end_samples - segment_start_samples;
+    if (segment_length <= 0) continue;
     if (debug) {
       std::fprintf(stderr,
                    "vad seg %d: orig %.2f-%.2f processed_from %.2f\n", index,
@@ -323,13 +334,7 @@ VadTimeMapper build_vad_time_mapper(
     append_vad_mapping_point(
         mapper, processed_segment_end, original_end_centiseconds);
 
-    int copied_segment_end_samples = segment_end_samples;
-    if (index < segment_count - 1) {
-      copied_segment_end_samples = std::min(
-          copied_segment_end_samples + overlap_samples,
-          static_cast<int>(samples.size()) - 1);
-    }
-    processed_offset_samples += copied_segment_end_samples - segment_start_samples;
+    processed_offset_samples += segment_length;
 
     if (index < segment_count - 1) {
       append_vad_mapping_point(

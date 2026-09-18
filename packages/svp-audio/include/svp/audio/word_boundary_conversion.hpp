@@ -19,11 +19,18 @@ struct AlignedWordSpan {
 // strict acoustic onset. The rules below were validated against a
 // Premiere Pro reference on both Kaldi and wav2vec2 alignments:
 //
-//   gap >= 600ms      -> end of the final quiet run before the word
-//                        (preserves real silences)
-//   50ms <= gap       -> midpoint of the inter-word gap
-//   gap < 50ms        -> phone-aware rules using the first phone of this
-//                        word (f) and the last phone of the previous (l):
+// Each word is decided in this order:
+//
+//   span opens on a real pause   -> last quiet-to-loud resumption inside the
+//                                   span (a word cannot contain a silence)
+//   gap >= 600ms                 -> end of the final quiet run before the
+//                                   word (preserves real silences)
+//   measurable valley dip        -> first stretch of the valley, or a
+//                                   lead-in ahead of the rise
+//   50ms <= gap                  -> 35% of the gap from prev_end
+//   gap < 50ms                   -> phone-aware rules using the first phone
+//                                   of this word (f) and the last phone of
+//                                   the previous (l):
 //     f is a plosive/nasal longer than 80ms:
 //         l is a vowel shorter than 70ms -> midpoint(l.start, word.start)
 //         otherwise                      -> midpoint(f.start, f.end)
