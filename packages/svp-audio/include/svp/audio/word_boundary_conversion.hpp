@@ -33,11 +33,26 @@ struct AlignedWordSpan {
 //
 // phone_spans and tokens must come from the same CtcForcedAligner::align
 // call; tokens[i].word_index groups spans into words. samples must be the
-// same 16 kHz mono audio that was aligned. Returns one start per word.
+// same 16 kHz mono audio that was aligned. decoder_end_seconds carries
+// each word's decoder-declared interval end (whisper token timing) so a
+// resumption snap cannot chase a rise that belongs to the next word;
+// entries <= 0 mean unknown and fall back to the aligned span end.
+// Returns one start per word.
 [[nodiscard]] std::vector<double> convert_aligned_word_starts(
     const std::vector<AlignedWordSpan>& words,
     const std::vector<CtcPhoneSpan>& phone_spans,
     const std::vector<CtcAlignmentToken>& tokens,
+    const std::vector<float>& samples,
+    const std::vector<double>& decoder_end_seconds);
+
+// Returns each word's start moved to the last quiet-to-loud resumption edge
+// inside its own interval when the interval opens on a real pause — the
+// trellis (or whisper DTW) may smear a word's span across a silence, and a
+// single word can never contain a genuine pause. Intervals without a leading
+// silence, and intervals whose head is clearly voiced, are returned
+// unchanged. samples must be the same 16 kHz mono audio.
+[[nodiscard]] std::vector<double> snap_word_starts_to_resumptions(
+    const std::vector<AlignedWordSpan>& words,
     const std::vector<float>& samples);
 
 }  // namespace svp::audio

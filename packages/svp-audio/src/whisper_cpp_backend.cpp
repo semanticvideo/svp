@@ -33,6 +33,9 @@ constexpr unsigned int kMaximumInferenceThreads = 8;
 constexpr std::int64_t kWhisperCentisecondsPerSecond = 100;
 constexpr std::int64_t kWhisperCentisecondsToMicroseconds = 10'000;
 constexpr std::int64_t kWhisperVadProcessedGapMilliseconds = 100;
+// A VAD mapping segment whose original span exceeds its processed span by
+// more than this is a synthetic gap covering removed silence, not speech.
+constexpr std::int64_t kVadSyntheticGapSlackCentiseconds = 5;
 
 // whisper_model_type exposes whisper.cpp's private e_model ordinal through its
 // public C API. Keep these values named so the DTW preset mapping is explicit.
@@ -96,8 +99,13 @@ struct VadTimeMapper {
     return std::nullopt;
   }
 
+  // Maps a processed-buffer timestamp back to original time. Inside a
+  // synthetic gap the mapping interpolates proportionally into the removed
+  // silence, which scatters word times across pauses that no longer exist
+  // in the output; instead onsets resolve to the following speech region's
+  // start and offsets to the preceding region's end.
   [[nodiscard]] std::int64_t map_centiseconds(
-      std::int64_t processed_centiseconds) const {
+      std::int64_t processed_centiseconds, bool is_onset) const {
     if (points.empty()) return processed_centiseconds;
     if (processed_centiseconds <= points.front().processed_centiseconds) {
       return points.front().original_centiseconds;
@@ -112,6 +120,12 @@ struct VadTimeMapper {
       if (processed_span <= 0) return current.original_centiseconds;
       const std::int64_t original_span =
           current.original_centiseconds - previous.original_centiseconds;
+      // original time advancing far beyond processed time marks a synthetic
+      // gap (removed silence); a small slack absorbs centisecond rounding.
+      if (original_span > processed_span + kVadSyntheticGapSlackCentiseconds) {
+        return is_onset ? current.original_centiseconds
+                        : previous.original_centiseconds;
+      }
       return previous.original_centiseconds +
              ((processed_centiseconds - previous.processed_centiseconds) *
               original_span) /
@@ -273,6 +287,7 @@ VadTimeMapper build_vad_time_mapper(
   const int silence_samples = static_cast<int>(
       kWhisperVadProcessedGapMilliseconds * WHISPER_SAMPLE_RATE / 1000);
   int processed_offset_samples = 0;
+  const bool debug = std::getenv("SVP_VAD_DEBUG") != nullptr;
 
   for (int index = 0; index < segment_count; ++index) {
     const std::int64_t original_start_centiseconds = static_cast<std::int64_t>(
@@ -289,6 +304,13 @@ VadTimeMapper build_vad_time_mapper(
     const int original_segment_length =
         segment_end_samples - segment_start_samples;
     if (original_segment_length <= 0) continue;
+    if (debug) {
+      std::fprintf(stderr,
+                   "vad seg %d: orig %.2f-%.2f processed_from %.2f\n", index,
+                   original_start_centiseconds / 100.0,
+                   original_end_centiseconds / 100.0,
+                   samples_to_centiseconds(processed_offset_samples) / 100.0);
+    }
 
     const std::int64_t processed_segment_start =
         samples_to_centiseconds(processed_offset_samples);
@@ -329,10 +351,11 @@ std::int64_t clamped_token_time_us(
     std::int64_t centiseconds,
     const VadTimeMapper& vad_time_mapper,
     std::int64_t chunk_start_us,
-    std::int64_t chunk_end_us) {
+    std::int64_t chunk_end_us,
+    bool is_onset) {
   if (centiseconds < 0) return chunk_start_us;
   const std::int64_t original_centiseconds =
-      vad_time_mapper.map_centiseconds(centiseconds);
+      vad_time_mapper.map_centiseconds(centiseconds, is_onset);
   return std::clamp<std::int64_t>(
       chunk_start_us + original_centiseconds *
           kWhisperCentisecondsToMicroseconds,
@@ -363,7 +386,7 @@ std::int64_t token_start_us(const whisper_token_data& token_data,
                         ? *speech_region_start
                         : token_data.t_dtw));
   return clamped_token_time_us(onset_centiseconds, vad_time_mapper,
-                               chunk_start_us, chunk_end_us);
+                               chunk_start_us, chunk_end_us, true);
 }
 
 std::int64_t token_end_us(const whisper_token_data& token_data,
@@ -371,7 +394,7 @@ std::int64_t token_end_us(const whisper_token_data& token_data,
                           std::int64_t chunk_start_us,
                           std::int64_t chunk_end_us) {
   return clamped_token_time_us(token_data.t1, vad_time_mapper,
-                               chunk_start_us, chunk_end_us);
+                               chunk_start_us, chunk_end_us, false);
 }
 
 std::string trim_leading_space(const char* raw) {
@@ -545,27 +568,90 @@ void apply_phoneme_alignment(WhisperInferenceResult& result,
         static_cast<double>(words[i].end_us - chunk_start_us) / 1e6;
   }
 
-  const std::vector<double> converted = convert_aligned_word_starts(
-      spans, phone_spans, tokens, samples);
+  // The decoder's own interval end bounds the resumption scan: an aligned
+  // span can over-extend into the next word's onset, and a rise past this
+  // point belongs to that word, not to this one.
+  std::vector<double> decoder_ends(words.size());
+  for (std::size_t i = 0; i < words.size(); ++i) {
+    decoder_ends[i] =
+        static_cast<double>(words[i].end_us - chunk_start_us) / 1e6;
+  }
 
-  std::size_t applied = 0;
+  const std::vector<double> converted = convert_aligned_word_starts(
+      spans, phone_spans, tokens, samples, decoder_ends);
+  const std::vector<double> snapped = snap_word_starts_to_resumptions(
+      spans, samples);
+
+  // Starts are decided for every word before any end is written: a word's
+  // end must clamp to its successor's final start, not to a stale decoder
+  // estimate that may sit seconds early after VAD silence removal.
+  std::vector<std::int64_t> final_starts(words.size());
+  std::vector<bool> aligned(words.size());
   for (std::size_t i = 0; i < words.size(); ++i) {
     // A converted start is only meaningful between two aligned words;
     // word zero has no left context and applies directly.
-    if (!has_span[i] || (i > 0 && !has_span[i - 1])) continue;
-    words[i].start_us =
-        seconds_to_chunk_us(converted[i], chunk_start_us, chunk_end_us);
-    words[i].end_us = std::min(
+    aligned[i] = has_span[i] && (i == 0 || has_span[i - 1]);
+    if (aligned[i]) {
+      final_starts[i] = seconds_to_chunk_us(converted[i], chunk_start_us,
+                                          chunk_end_us);
+      continue;
+    }
+    // A word cannot straddle a real pause even without phone alignment:
+    // pull its start out of the silence inside its own interval.
+    const std::int64_t snapped_start = seconds_to_chunk_us(
+        snapped[i], chunk_start_us, chunk_end_us);
+    final_starts[i] = words[i].start_us;
+    if (snapped_start > words[i].start_us &&
+        snapped_start < words[i].end_us) {
+      final_starts[i] = snapped_start;
+    }
+  }
+
+  std::size_t applied = 0;
+  for (std::size_t i = 0; i < words.size(); ++i) {
+    const std::int64_t next_start =
+        i + 1 < words.size() ? final_starts[i + 1] : chunk_end_us;
+    if (!aligned[i]) {
+      words[i].start_us = final_starts[i];
+      words[i].end_us = std::min(words[i].end_us, next_start);
+      continue;
+    }
+    const std::int64_t decoder_start = words[i].start_us;
+    const std::int64_t decoder_end = words[i].end_us;
+    const std::int64_t end_us = std::min(
         seconds_to_chunk_us(spans[i].end_seconds, chunk_start_us,
                             chunk_end_us),
-        i + 1 < words.size() ? words[i + 1].start_us : chunk_end_us);
-    words[i].end_us = std::max(words[i].end_us, words[i].start_us);
-    ++applied;
-  }
-  for (std::size_t i = 0; i + 1 < words.size(); ++i) {
-    if (words[i].end_us > words[i + 1].start_us) {
-      words[i].end_us = words[i + 1].start_us;
+        next_start);
+    if (end_us > final_starts[i]) {
+      words[i].timing_source = "wav2vec2_espeak_ctc";
+      words[i].start_us = final_starts[i];
+      words[i].end_us = end_us;
+      ++applied;
+      continue;
     }
+    // Conversion collapsed the interval; keep the decoder's timing so the
+    // word is not silently dropped downstream, still allowing the
+    // resumption snap to pull its start out of a silence inside it.
+    if (std::getenv("SVP_BOUNDARY_DEBUG") != nullptr) {
+      std::fprintf(stderr,
+                   "collapsed w=%zu '%s' conv_start=%.3f span_end=%.3f "
+                   "dec=[%.3f,%.3f] next=%.3f\n",
+                   i, words[i].text.c_str(), converted[i],
+                   spans[i].end_seconds,
+                   (decoder_start - chunk_start_us) / 1e6,
+                   (decoder_end - chunk_start_us) / 1e6,
+                   (next_start - chunk_start_us) / 1e6);
+    }
+    words[i].start_us = decoder_start;
+    words[i].end_us = decoder_end;
+    const std::int64_t snapped_start = seconds_to_chunk_us(
+        snapped[i], chunk_start_us, chunk_end_us);
+    if (snapped_start > words[i].start_us &&
+        snapped_start < words[i].end_us) {
+      words[i].start_us = snapped_start;
+    }
+    words[i].end_us = std::min(words[i].end_us, next_start);
+    words[i].timing_source = "whisper_cpp_dtw";
   }
   result.alignment_status =
       applied == words.size() ? "applied" : "applied_partial";
@@ -661,10 +747,10 @@ WhisperInferenceResult run_whisper_cpp_inference(
     if (text != nullptr) segment.text = text;
     segment.start_us = clamped_token_time_us(
         whisper_full_get_segment_t0(context, segment_index), vad_time_mapper,
-        chunk_start_us, chunk_end_us);
+        chunk_start_us, chunk_end_us, true);
     segment.end_us = clamped_token_time_us(
         whisper_full_get_segment_t1(context, segment_index), vad_time_mapper,
-        chunk_start_us, chunk_end_us);
+        chunk_start_us, chunk_end_us, false);
     segment.words = collect_segment_words(
         context, segment_index, vad_time_mapper, chunk_start_us, chunk_end_us);
     result.all_words.insert(result.all_words.end(), segment.words.begin(),
