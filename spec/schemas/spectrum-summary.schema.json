@@ -14,7 +14,10 @@
   ],
   "properties": {
     "schema_version": {
-      "type": "string"
+      "type": "string",
+      "enum": [
+        "svp-spectrum-summary-v1"
+      ]
     },
     "measurement_standard": {
       "type": "string",
@@ -24,7 +27,9 @@
     },
     "window_us": {
       "type": "integer",
-      "minimum": 1
+      "enum": [
+        400000
+      ]
     },
     "band_centers_hz": {
       "type": "array",

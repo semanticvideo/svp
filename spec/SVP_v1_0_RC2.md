@@ -1117,9 +1117,9 @@ Loudness is measured per ITU-R BS.1770 (K-weighted loudness with absolute and re
 {
   "id": "loud_00000001",
   "start_us": 84120000,
-  "end_us": 84120400,
+  "end_us": 84520000,
   "start_sec": "84.120",
-  "end_sec": "84.120",
+  "end_sec": "84.520",
   "target_type": "audio_stream",
   "target_id": "astream_0001",
   "momentary_lufs": -21.4,
@@ -1132,8 +1132,8 @@ Loudness is measured per ITU-R BS.1770 (K-weighted loudness with absolute and re
 Rules:
 
 1. `start_us` is inclusive, `end_us` is exclusive, and both follow the canonical time model in Section 7.
-2. Window `start_us` values are the source stream's normalized presentation start offset plus an integer multiple of the record `window_us` declared in `loudness_summary.json`.
-3. `target_type` is `audio_stream` and `target_id` is the canonical `astream_NNN` audio stream ID of the measured original stream.
+2. Window `start_us` values are the source stream's normalized presentation start offset plus an integer multiple of the record `window_us` declared in `loudness_summary.json`. A window whose computed `start_us` is negative lies before the canonical presentation origin and MUST be omitted; stored window timestamps MUST be non-negative per Section 7.
+3. `target_type` is `audio_stream` and `target_id` is the canonical `astream_NNNN` audio stream ID of the measured original stream.
 4. `momentary_lufs` is the BS.1770 momentary (400 ms) loudness of the window. `shortterm_lufs` is the BS.1770 short-term (3 s) loudness evaluated at the window end.
 5. `true_peak_dbtp` is the maximum true peak level in the window in dBTP, measured with at least 4x oversampling per the BS.1770 true-peak method.
 6. Loudness and peak fields are finite numbers or `null`. `null` means the value is unmeasurable for that window, such as digital silence with no gated energy. Implementations MUST NOT use sentinel numbers such as `-inf`, `-999`, or `0` to mean "no measurement".
@@ -1191,9 +1191,9 @@ Spectrum is measured on each extracted `media/audio/original_stream_NNN.flac` at
 {
   "id": "spec_00000001",
   "start_us": 84120000,
-  "end_us": 84120400,
+  "end_us": 84520000,
   "start_sec": "84.120",
-  "end_sec": "84.120",
+  "end_sec": "84.520",
   "target_type": "audio_stream",
   "target_id": "astream_0001",
   "bands": [-58.1, -45.3, -32.0, -25.4, -21.9, -19.2, -24.6, -31.0, -38.5, -47.2],
@@ -1204,8 +1204,8 @@ Spectrum is measured on each extracted `media/audio/original_stream_NNN.flac` at
 Rules:
 
 1. `start_us` is inclusive, `end_us` is exclusive, and both follow the canonical time model in Section 7.
-2. Window `start_us` values are the source stream's normalized presentation start offset plus an integer multiple of the record `window_us` declared in `spectrum_summary.json`.
-3. `target_type` is `audio_stream` and `target_id` is the canonical `astream_NNN` audio stream ID of the measured original stream.
+2. Window `start_us` values are the source stream's normalized presentation start offset plus an integer multiple of the record `window_us` declared in `spectrum_summary.json`. A window whose computed `start_us` is negative lies before the canonical presentation origin and MUST be omitted; stored window timestamps MUST be non-negative per Section 7.
+3. `target_type` is `audio_stream` and `target_id` is the canonical `astream_NNNN` audio stream ID of the measured original stream.
 4. `bands` is an array of band energy levels in dBFS, one per band, in the fixed order declared by `spectrum_summary.json`'s `band_centers_hz`. A level of `0` dBFS means the band holds energy equivalent to a full-scale sine in that band.
 5. Band centers are the ten IEC 61260 octave-band frequencies 31.25, 62.5, 125, 250, 500, 1000, 2000, 4000, 8000, and 16000 Hz; each band spans `center / sqrt(2)` through `center * sqrt(2)` Hz. Band energy is the summed Fourier bin power within the band, energy-averaged across channels.
 6. Band values are finite numbers or `null`. `null` means the band is unmeasurable for that window: the band lies entirely above the stream's Nyquist frequency, or the window holds no measurable energy in the band. Implementations MUST NOT use sentinel numbers such as `-inf`, `-999`, or `0` to mean "no measurement".
