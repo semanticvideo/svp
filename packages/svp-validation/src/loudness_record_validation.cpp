@@ -55,9 +55,12 @@ std::optional<std::unordered_set<std::string>> known_stream_ids(
   }
   std::unordered_set<std::string> ids;
   for (const nlohmann::json& id : *it) {
-    if (id.is_string()) {
-      ids.insert(id.get<std::string>());
+    // A malformed element means the list is unusable, not partially
+    // authoritative: fall back to skipping membership checks entirely.
+    if (!id.is_string()) {
+      return std::nullopt;
     }
+    ids.insert(id.get<std::string>());
   }
   return ids;
 }
