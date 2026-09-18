@@ -10,6 +10,8 @@ std::vector<std::string> required_audio_outputs() {
       "media/audio/original_stream_NNN.flac",
       "media/audio/analysis_mono_16k.wav",
       "media/audio/waveform.jsonl",
+      "media/audio/loudness.jsonl",
+      "media/audio/loudness_summary.json",
       "media/audio/audio_absence.json",
       "transcript/speech_regions.jsonl",
       "transcript/transcript.json",
@@ -26,7 +28,8 @@ AudioStagePlan build_audio_stage_plan(const std::filesystem::path& source_path,
                                       const svp::media::MediaProbe& probe,
                                       bool ffmpeg_audio_extraction_available,
                                       const std::filesystem::path& ffmpeg_path,
-                                      bool model_runtime_available) {
+                                      bool model_runtime_available,
+                                      const std::filesystem::path& ffprobe_path) {
   AudioStagePlan plan;
   plan.source_path = source_path;
   plan.source_audio_present = !probe.audio_streams.empty();
@@ -34,7 +37,8 @@ AudioStagePlan build_audio_stage_plan(const std::filesystem::path& source_path,
       build_audio_extraction_plan(source_path,
                                   probe,
                                   ffmpeg_audio_extraction_available,
-                                  ffmpeg_path);
+                                  ffmpeg_path,
+                                  ffprobe_path);
   plan.selected_audio_stream_id =
       plan.extraction_plan.microphone_analysis_streams.size() > 1
           ? "camera_microphone_streams"
@@ -47,6 +51,7 @@ AudioStagePlan build_audio_stage_plan(const std::filesystem::path& source_path,
   plan.pending_processors = {
       "ffmpeg_audio_extraction",
       "waveform_envelope",
+      "loudness_ebur128",
       "silero_vad_onnx",
       "whispercpp_transcription",
       "sherpa_onnx_diarization",

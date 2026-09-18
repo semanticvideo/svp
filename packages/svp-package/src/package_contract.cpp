@@ -5,12 +5,16 @@
 namespace svp::package {
 namespace {
 
-constexpr std::array<PackageLayoutRequirement, 20> kRequiredPackageLayout{{
+constexpr std::array<PackageLayoutRequirement, 22> kRequiredPackageLayout{{
     {"manifest.json", PackageLayoutRequirementKind::required_entry,
      PackageLayoutRequirementArea::core},
     {"mimetype", PackageLayoutRequirementKind::required_entry,
      PackageLayoutRequirementArea::core},
     {"media", PackageLayoutRequirementKind::required_top_level_section,
+     PackageLayoutRequirementArea::core},
+    {"media/audio/loudness.jsonl", PackageLayoutRequirementKind::required_entry,
+     PackageLayoutRequirementArea::core},
+    {"media/audio/loudness_summary.json", PackageLayoutRequirementKind::required_entry,
      PackageLayoutRequirementArea::core},
     {"transcript", PackageLayoutRequirementKind::required_top_level_section,
      PackageLayoutRequirementArea::core},

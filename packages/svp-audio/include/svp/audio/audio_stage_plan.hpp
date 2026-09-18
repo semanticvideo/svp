@@ -29,7 +29,8 @@ struct AudioStagePlan {
     const svp::media::MediaProbe& probe,
     bool ffmpeg_audio_extraction_available,
     const std::filesystem::path& ffmpeg_path = "ffmpeg",
-    bool model_runtime_available = false);
+    bool model_runtime_available = false,
+    const std::filesystem::path& ffprobe_path = "ffprobe");
 
 [[nodiscard]] nlohmann::json audio_stage_plan_to_json(const AudioStagePlan& plan);
 

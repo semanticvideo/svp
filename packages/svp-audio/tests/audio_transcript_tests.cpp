@@ -9,6 +9,9 @@ int main() {
   test_multi_stream_analysis_audio_plans_each_microphone_and_canonical_mix();
   test_waveform_envelope_generates_ten_millisecond_json_records();
   test_audio_extraction_executor_writes_staged_single_stream_outputs();
+  test_loudness_plan_targets_original_streams_with_400ms_windows();
+  test_loudness_window_record_json_serializes_null_fields();
+  test_loudness_executor_writes_empty_artifacts_when_no_audio();
   test_audio_extraction_executor_leaves_multi_stream_analysis_unrun();
   test_vad_task_plan_uses_stable_thirty_second_boundaries();
   test_vad_execution_boundary_preserves_honest_unrun_state();

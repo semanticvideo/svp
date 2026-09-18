@@ -21,6 +21,7 @@ add_library(svp-audio
   src/audio_extraction_plan.cpp
   src/audio_stage_plan.cpp
   src/diarization_boundary.cpp
+  src/loudness_meter.cpp
   src/microphone_signal.cpp
   src/microphone_transcript.cpp
   src/microphone_word_ownership.cpp
