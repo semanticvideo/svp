@@ -644,4 +644,113 @@ void print_context_result(const svp::query::ContextResult& result) {
   }
 }
 
+void print_loudness(const std::filesystem::path& package_path,
+                    const std::optional<std::string>& target_id,
+                    std::int64_t start_us,
+                    std::int64_t end_us,
+                    bool json_output) {
+  if (start_us >= 0 && end_us >= 0) {
+    const auto range =
+        svp::query::loudness_range(package_path, start_us, end_us, target_id);
+    if (json_output) {
+      nlohmann::json streams = nlohmann::json::array();
+      for (const auto& stream : range.streams) {
+        streams.push_back({
+            {"target_id", stream.target_id},
+            {"integrated_lufs", stream.integrated_lufs},
+            {"true_peak_dbtp", stream.true_peak_dbtp},
+            {"window_count", stream.window_count},
+            {"covered_us", stream.covered_us},
+        });
+      }
+      std::cout << nlohmann::json{
+          {"present", range.present},
+          {"approximation", range.approximation},
+          {"start_us", range.start_us},
+          {"end_us", range.end_us},
+          {"streams", streams},
+          {"error", range.error_message},
+      }.dump(2) << "\n";
+      return;
+    }
+
+    if (!range.present) {
+      std::cout << "Loudness: layer not present\n";
+      return;
+    }
+    if (!range.error_message.empty()) {
+      std::cout << "Loudness range query failed: " << range.error_message
+                << "\n";
+      return;
+    }
+    std::cout << "Loudness range [" << start_us << "us, " << end_us
+              << "us) — approximate, aggregated from stored windows\n";
+    for (const auto& stream : range.streams) {
+      std::cout << "  " << stream.target_id;
+      if (stream.integrated_lufs.has_value()) {
+        std::cout << " integrated=" << *stream.integrated_lufs << " LUFS";
+      } else {
+        std::cout << " integrated=n/a";
+      }
+      if (stream.true_peak_dbtp.has_value()) {
+        std::cout << " true_peak=" << *stream.true_peak_dbtp << " dBTP";
+      }
+      std::cout << " windows=" << stream.window_count << "\n";
+    }
+    return;
+  }
+
+  const auto summary = svp::query::loudness_summary(package_path);
+  if (json_output) {
+    nlohmann::json out = {{"present", summary.present},
+                          {"parsed", summary.parsed}};
+    if (summary.parsed) {
+      out["record"] = summary.record;
+    }
+    if (!summary.error_message.empty()) {
+      out["error"] = summary.error_message;
+    }
+    std::cout << out.dump(2) << "\n";
+    return;
+  }
+
+  if (!summary.present) {
+    std::cout << "Loudness: summary not present\n";
+    return;
+  }
+  if (!summary.parsed) {
+    std::cout << "Loudness summary parse failed: " << summary.error_message
+              << "\n";
+    return;
+  }
+
+  std::cout << "Loudness summary ("
+            << summary.record.value("measurement_standard", "?") << ")\n";
+  const auto streams_it = summary.record.find("streams");
+  if (streams_it != summary.record.end() && streams_it->is_array()) {
+    for (const auto& stream : *streams_it) {
+      std::cout << "  " << stream.value("target_id", "?");
+      if (stream.contains("integrated_lufs") &&
+          stream.at("integrated_lufs").is_number()) {
+        std::cout << " integrated=" << stream.at("integrated_lufs").get<double>()
+                  << " LUFS";
+      } else {
+        std::cout << " integrated=n/a";
+      }
+      if (stream.contains("loudness_range_lu") &&
+          stream.at("loudness_range_lu").is_number()) {
+        std::cout << " lra=" << stream.at("loudness_range_lu").get<double>()
+                  << " LU";
+      }
+      if (stream.contains("true_peak_dbtp") &&
+          stream.at("true_peak_dbtp").is_number()) {
+        std::cout << " true_peak=" << stream.at("true_peak_dbtp").get<double>()
+                  << " dBTP";
+      }
+      std::cout << " channels=" << stream.value("channels", 0)
+                << " rate=" << stream.value("sample_rate", 0) << "\n";
+    }
+  }
+}
+
 }  // namespace query_cmd

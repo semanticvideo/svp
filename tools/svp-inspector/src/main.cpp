@@ -83,8 +83,9 @@ int main(int argc, char** argv) {
                    "Path to a .svp or .svpi package")
       ->required();
   dump->add_option("--section", dump_section,
-                   "Section to dump: manifest, index_manifest, or all")
-      ->check(CLI::IsMember({"manifest", "index_manifest", "all"}));
+                   "Section to dump: manifest, index_manifest, loudness_summary, or all")
+      ->check(CLI::IsMember({"manifest", "index_manifest", "loudness_summary",
+                            "all"}));
 
   std::string query_package_path;
   std::string query_mode = "layers";
@@ -101,10 +102,11 @@ int main(int argc, char** argv) {
   query
       ->add_option(
           "--mode", query_mode,
-          "Query mode: layers, transcript, words, speakers, ocr, colors, validation, relationships, traverse, path, context, health")
+          "Query mode: layers, transcript, words, speakers, ocr, colors, validation, relationships, traverse, path, context, health, loudness")
       ->check(CLI::IsMember({"layers", "transcript", "words", "speakers",
                             "ocr", "colors", "validation", "relationships",
-                            "traverse", "path", "context", "health"}));
+                            "traverse", "path", "context", "health",
+                            "loudness"}));
   query->add_option("--text", query_text,
                     "Search text for words or OCR mode");
   query->add_option("--bucket", query_color_bucket,
@@ -146,6 +148,9 @@ int main(int argc, char** argv) {
                     "Time window start in microseconds");
   query->add_option("--end-us", query_end_us,
                     "Time window end in microseconds");
+  std::string query_target;
+  query->add_option("--target", query_target,
+                    "Audio stream target_id for loudness mode");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -301,6 +306,13 @@ int main(int argc, char** argv) {
       } else {
         query_cmd::print_context_result(result);
       }
+    } else if (query_mode == "loudness") {
+      std::optional<std::string> target_filter;
+      if (!query_target.empty()) {
+        target_filter = query_target;
+      }
+      query_cmd::print_loudness(query_package_path, target_filter,
+                                query_start_us, query_end_us, query_json);
     } else if (query_mode == "health") {
       const auto health =
           svp::query::compute_graph_health(query_package_path);
