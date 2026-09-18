@@ -307,6 +307,10 @@ int main(int argc, char** argv) {
         query_cmd::print_context_result(result);
       }
     } else if (query_mode == "loudness") {
+      if ((query_start_us >= 0) != (query_end_us >= 0)) {
+        std::cerr << "--start-us and --end-us must be provided together.\n";
+        return 1;
+      }
       std::optional<std::string> target_filter;
       if (!query_target.empty()) {
         target_filter = query_target;
@@ -314,6 +318,10 @@ int main(int argc, char** argv) {
       query_cmd::print_loudness(query_package_path, target_filter,
                                 query_start_us, query_end_us, query_json);
     } else if (query_mode == "spectrum") {
+      if ((query_start_us >= 0) != (query_end_us >= 0)) {
+        std::cerr << "--start-us and --end-us must be provided together.\n";
+        return 1;
+      }
       std::optional<std::string> target_filter;
       if (!query_target.empty()) {
         target_filter = query_target;
