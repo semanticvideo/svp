@@ -1,5 +1,7 @@
 #pragma once
 
+#include "svp/audio/loudness_meter.hpp"
+#include "svp/audio/spectrum_analyzer.hpp"
 #include "svp/media/media_probe.hpp"
 
 #include <cstdint>
@@ -46,6 +48,35 @@ struct WaveformArtifactPlan {
   std::int64_t window_duration_us = 10000;
 };
 
+struct LoudnessStreamTarget {
+  std::string source_audio_stream_id;
+  std::int32_t source_stream_index = 0;
+  std::int32_t channels = 0;
+  std::int32_t sample_rate = 0;
+  std::int64_t stream_start_us = 0;
+  std::string input_ref;
+};
+
+struct LoudnessArtifactPlan {
+  std::string task_id;
+  std::vector<std::string> depends_on;
+  std::string processor_id;
+  std::vector<LoudnessStreamTarget> targets;
+  std::string output_ref;
+  std::string summary_output_ref;
+  std::int64_t window_duration_us = kLoudnessWindowDurationUs;
+};
+
+struct SpectrumArtifactPlan {
+  std::string task_id;
+  std::vector<std::string> depends_on;
+  std::string processor_id;
+  std::vector<LoudnessStreamTarget> targets;
+  std::string output_ref;
+  std::string summary_output_ref;
+  std::int64_t window_duration_us = kSpectrumWindowDurationUs;
+};
+
 struct AudioProvenanceArtifactPlan {
   std::string task_id;
   std::vector<std::string> depends_on;
@@ -55,6 +86,7 @@ struct AudioProvenanceArtifactPlan {
 struct AudioExtractionPlan {
   std::filesystem::path source_path;
   std::filesystem::path ffmpeg_path = "ffmpeg";
+  std::filesystem::path ffprobe_path = "ffprobe";
   bool ffmpeg_available = false;
   bool source_audio_present = false;
   std::vector<AudioExtractionCommandPlan> original_streams;
@@ -62,6 +94,8 @@ struct AudioExtractionPlan {
   AnalysisAudioCommandPlan analysis_audio;
   AudioAbsenceArtifactPlan audio_absence;
   WaveformArtifactPlan waveform;
+  LoudnessArtifactPlan loudness;
+  SpectrumArtifactPlan spectrum;
   AudioProvenanceArtifactPlan processor_provenance;
   std::vector<std::string> blockers;
 };
@@ -70,7 +104,8 @@ struct AudioExtractionPlan {
     const std::filesystem::path& source_path,
     const svp::media::MediaProbe& probe,
     bool ffmpeg_available,
-    const std::filesystem::path& ffmpeg_path = "ffmpeg");
+    const std::filesystem::path& ffmpeg_path = "ffmpeg",
+    const std::filesystem::path& ffprobe_path = "ffprobe");
 
 [[nodiscard]] nlohmann::json audio_extraction_plan_to_json(
     const AudioExtractionPlan& plan);

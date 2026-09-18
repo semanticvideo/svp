@@ -38,6 +38,8 @@ struct AudioExtractionRun {
   AudioExtractionCommandRun analysis_audio;
   AudioDerivedArtifactRun audio_absence;
   AudioDerivedArtifactRun waveform;
+  AudioDerivedArtifactRun loudness;
+  AudioDerivedArtifactRun spectrum;
   AudioDerivedArtifactRun processor_provenance;
   std::vector<std::string> blockers;
   bool extraction_run = false;
@@ -46,6 +48,8 @@ struct AudioExtractionRun {
   bool analysis_audio_written = false;
   bool audio_absence_written = false;
   bool waveform_written = false;
+  bool loudness_written = false;
+  bool spectrum_written = false;
   bool processor_provenance_written = false;
 };
 

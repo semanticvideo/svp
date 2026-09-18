@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp.dev/schemas/loudness-summary.schema.json",
+  "title": "loudness-summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "measurement_standard",
+    "window_us",
+    "streams",
+    "processor_id"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": [
+        "svp-loudness-summary-v1"
+      ]
+    },
+    "measurement_standard": {
+      "type": "string",
+      "enum": [
+        "ITU-R BS.1770-4"
+      ]
+    },
+    "window_us": {
+      "type": "integer",
+      "enum": [
+        400000
+      ]
+    },
+    "streams": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target_id",
+          "integrated_lufs",
+          "loudness_range_lu",
+          "lra_low_lufs",
+          "lra_high_lufs",
+          "true_peak_dbtp",
+          "max_momentary_lufs",
+          "max_shortterm_lufs",
+          "channels",
+          "sample_rate"
+        ],
+        "properties": {
+          "target_id": {
+            "type": "string"
+          },
+          "integrated_lufs": {},
+          "loudness_range_lu": {},
+          "lra_low_lufs": {},
+          "lra_high_lufs": {},
+          "true_peak_dbtp": {},
+          "max_momentary_lufs": {},
+          "max_shortterm_lufs": {},
+          "channels": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sample_rate": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "processor_id": {
+      "type": "string"
+    }
+  }
+}

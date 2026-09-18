@@ -5,7 +5,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <iostream>
+#include <sstream>
 #include <string_view>
 
 namespace query_cmd {
@@ -641,6 +643,257 @@ void print_context_result(const svp::query::ContextResult& result) {
       std::cout << "  id=" << edge.relationship_id;
     }
     std::cout << "\n";
+  }
+}
+
+void print_loudness(const std::filesystem::path& package_path,
+                    const std::optional<std::string>& target_id,
+                    std::int64_t start_us,
+                    std::int64_t end_us,
+                    bool json_output) {
+  if (start_us >= 0 && end_us >= 0) {
+    const auto range =
+        svp::query::loudness_range(package_path, start_us, end_us, target_id);
+    if (json_output) {
+      nlohmann::json streams = nlohmann::json::array();
+      for (const auto& stream : range.streams) {
+        streams.push_back({
+            {"target_id", stream.target_id},
+            {"integrated_lufs", stream.integrated_lufs},
+            {"true_peak_dbtp", stream.true_peak_dbtp},
+            {"window_count", stream.window_count},
+            {"covered_us", stream.covered_us},
+        });
+      }
+      std::cout << nlohmann::json{
+          {"present", range.present},
+          {"approximation", range.approximation},
+          {"start_us", range.start_us},
+          {"end_us", range.end_us},
+          {"streams", streams},
+          {"error", range.error_message},
+      }.dump(2) << "\n";
+      return;
+    }
+
+    if (!range.present) {
+      std::cout << "Loudness: layer not present\n";
+      return;
+    }
+    if (!range.error_message.empty()) {
+      std::cout << "Loudness range query failed: " << range.error_message
+                << "\n";
+      return;
+    }
+    std::cout << "Loudness range [" << start_us << "us, " << end_us
+              << "us) — approximate, aggregated from stored windows\n";
+    for (const auto& stream : range.streams) {
+      std::cout << "  " << stream.target_id;
+      if (stream.integrated_lufs.has_value()) {
+        std::cout << " integrated=" << *stream.integrated_lufs << " LUFS";
+      } else {
+        std::cout << " integrated=n/a";
+      }
+      if (stream.true_peak_dbtp.has_value()) {
+        std::cout << " true_peak=" << *stream.true_peak_dbtp << " dBTP";
+      }
+      std::cout << " windows=" << stream.window_count << "\n";
+    }
+    return;
+  }
+
+  const auto summary = svp::query::loudness_summary(package_path);
+  if (json_output) {
+    nlohmann::json out = {{"present", summary.present},
+                          {"parsed", summary.parsed}};
+    if (summary.parsed) {
+      out["record"] = summary.record;
+    }
+    if (!summary.error_message.empty()) {
+      out["error"] = summary.error_message;
+    }
+    std::cout << out.dump(2) << "\n";
+    return;
+  }
+
+  if (!summary.present) {
+    std::cout << "Loudness: summary not present\n";
+    return;
+  }
+  if (!summary.parsed) {
+    std::cout << "Loudness summary parse failed: " << summary.error_message
+              << "\n";
+    return;
+  }
+
+  std::cout << "Loudness summary ("
+            << summary.record.value("measurement_standard", "?") << ")\n";
+  const auto streams_it = summary.record.find("streams");
+  if (streams_it != summary.record.end() && streams_it->is_array()) {
+    for (const auto& stream : *streams_it) {
+      std::cout << "  " << stream.value("target_id", "?");
+      if (stream.contains("integrated_lufs") &&
+          stream.at("integrated_lufs").is_number()) {
+        std::cout << " integrated=" << stream.at("integrated_lufs").get<double>()
+                  << " LUFS";
+      } else {
+        std::cout << " integrated=n/a";
+      }
+      if (stream.contains("loudness_range_lu") &&
+          stream.at("loudness_range_lu").is_number()) {
+        std::cout << " lra=" << stream.at("loudness_range_lu").get<double>()
+                  << " LU";
+      }
+      if (stream.contains("true_peak_dbtp") &&
+          stream.at("true_peak_dbtp").is_number()) {
+        std::cout << " true_peak=" << stream.at("true_peak_dbtp").get<double>()
+                  << " dBTP";
+      }
+      std::cout << " channels=" << stream.value("channels", 0)
+                << " rate=" << stream.value("sample_rate", 0) << "\n";
+    }
+  }
+}
+
+namespace {
+
+nlohmann::json band_array_json(
+    const std::array<std::optional<double>, svp::query::kSpectrumBandCount>&
+        values) {
+  nlohmann::json bands = nlohmann::json::array();
+  for (const std::optional<double>& value : values) {
+    bands.push_back(value.has_value() ? nlohmann::json(*value)
+                                      : nlohmann::json(nullptr));
+  }
+  return bands;
+}
+
+std::string band_string(const std::optional<double>& value) {
+  if (!value.has_value()) {
+    return "null";
+  }
+  std::ostringstream out;
+  out << *value;
+  return out.str();
+}
+
+}  // namespace
+
+void print_spectrum(const std::filesystem::path& package_path,
+                    const std::optional<std::string>& target_id,
+                    std::int64_t start_us,
+                    std::int64_t end_us,
+                    bool json_output) {
+  if (start_us >= 0 && end_us >= 0) {
+    const auto range =
+        svp::query::spectrum_range(package_path, start_us, end_us, target_id);
+    if (json_output) {
+      nlohmann::json streams = nlohmann::json::array();
+      for (const auto& stream : range.streams) {
+        streams.push_back({
+            {"target_id", stream.target_id},
+            {"mean_band_dbfs", band_array_json(stream.mean_band_dbfs)},
+            {"max_band_dbfs", band_array_json(stream.max_band_dbfs)},
+            {"window_count", stream.window_count},
+            {"covered_us", stream.covered_us},
+        });
+      }
+      std::cout << nlohmann::json{
+          {"present", range.present},
+          {"approximation", range.approximation},
+          {"start_us", range.start_us},
+          {"end_us", range.end_us},
+          {"streams", streams},
+          {"error", range.error_message},
+      }.dump(2) << "\n";
+      return;
+    }
+
+    if (!range.present) {
+      std::cout << "Spectrum: layer not present\n";
+      return;
+    }
+    if (!range.error_message.empty()) {
+      std::cout << "Spectrum range query failed: " << range.error_message
+                << "\n";
+      return;
+    }
+    std::cout << "Spectrum range [" << start_us << "us, " << end_us
+              << "us) — approximate, aggregated from stored windows\n";
+    for (const auto& stream : range.streams) {
+      std::cout << "  " << stream.target_id
+                << " windows=" << stream.window_count << "\n";
+      std::cout << "    mean_dbfs:";
+      for (const std::optional<double>& value : stream.mean_band_dbfs) {
+        std::cout << " " << band_string(value);
+      }
+      std::cout << "\n    max_dbfs: ";
+      for (const std::optional<double>& value : stream.max_band_dbfs) {
+        std::cout << " " << band_string(value);
+      }
+      std::cout << "\n";
+    }
+    return;
+  }
+
+  const auto summary = svp::query::spectrum_summary(package_path);
+  if (json_output) {
+    nlohmann::json out = {{"present", summary.present},
+                          {"parsed", summary.parsed}};
+    if (summary.parsed) {
+      out["record"] = summary.record;
+    }
+    if (!summary.error_message.empty()) {
+      out["error"] = summary.error_message;
+    }
+    std::cout << out.dump(2) << "\n";
+    return;
+  }
+
+  if (!summary.present) {
+    std::cout << "Spectrum: summary not present\n";
+    return;
+  }
+  if (!summary.parsed) {
+    std::cout << "Spectrum summary parse failed: " << summary.error_message
+              << "\n";
+    return;
+  }
+
+  std::cout << "Spectrum summary ("
+            << summary.record.value("measurement_standard", "?") << ")\n";
+  const auto centers_it = summary.record.find("band_centers_hz");
+  if (centers_it != summary.record.end() && centers_it->is_array()) {
+    std::cout << "  band_centers_hz:";
+    for (const auto& center : *centers_it) {
+      if (center.is_number()) {
+        std::cout << " " << center.get<double>();
+      }
+    }
+    std::cout << "\n";
+  }
+  const auto streams_it = summary.record.find("streams");
+  if (streams_it != summary.record.end() && streams_it->is_array()) {
+    for (const auto& stream : *streams_it) {
+      std::cout << "  " << stream.value("target_id", "?");
+      std::cout << " channels=" << stream.value("channels", 0)
+                << " rate=" << stream.value("sample_rate", 0) << "\n";
+      for (const char* field : {"mean_band_dbfs", "max_band_dbfs"}) {
+        const auto bands_it = stream.find(field);
+        if (bands_it == stream.end() || !bands_it->is_array()) {
+          continue;
+        }
+        std::cout << "    " << field << ":";
+        for (const auto& value : *bands_it) {
+          if (value.is_number()) {
+            std::cout << " " << value.get<double>();
+          } else {
+            std::cout << " null";
+          }
+        }
+        std::cout << "\n";
+      }
+    }
   }
 }
 

@@ -752,6 +752,106 @@
       "section": "embedded-svpi-isobmff-v1-9",
       "description": "The embedded SVPI media binding does not match the clean ISO BMFF bytes represented by the transport.",
       "introduced": "embedded-svpi-isobmff-1"
+    },
+    {
+      "code": "ERR_MEDIA_INVALID_LOUDNESS_RECORD",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.3",
+      "description": "A loudness record does not validate against loudness-observation.schema.json.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_MEDIA_INVALID_LOUDNESS_TIMING",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.3",
+      "description": "A loudness record has invalid window timing, ordering, or overlap.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_MEDIA_INVALID_LOUDNESS_VALUE",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.3",
+      "description": "A loudness or true-peak field is neither a finite number nor null.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_MEDIA_INVALID_LOUDNESS_TARGET",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.3",
+      "description": "A loudness record target_id does not resolve to a recorded audio stream.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_MEDIA_INVALID_LOUDNESS_SUMMARY",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.3",
+      "description": "loudness_summary.json does not validate against loudness-summary.schema.json.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_MEDIA_INVALID_SPECTRUM_RECORD",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.4",
+      "description": "A spectrum record does not validate against spectrum-observation.schema.json.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_MEDIA_INVALID_SPECTRUM_TIMING",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.4",
+      "description": "A spectrum record has invalid window timing, ordering, or overlap.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_MEDIA_INVALID_SPECTRUM_VALUE",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.4",
+      "description": "A spectrum band value is neither a finite number nor null, or the bands array has the wrong length.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_MEDIA_INVALID_SPECTRUM_TARGET",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.4",
+      "description": "A spectrum record target_id does not resolve to a recorded audio stream.",
+      "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_MEDIA_INVALID_SPECTRUM_SUMMARY",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.4",
+      "description": "spectrum_summary.json does not validate against spectrum-summary.schema.json.",
+      "introduced": "1.0-rc.2"
     }
   ]
 }

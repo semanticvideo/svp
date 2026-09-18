@@ -12,6 +12,8 @@
 #include "diarization_validation.hpp"
 #include "entity_record_validation.hpp"
 #include "index_validation.hpp"
+#include "loudness_record_validation.hpp"
+#include "spectrum_record_validation.hpp"
 #include "ocr_color_spec.hpp"
 #include "spec_assets.hpp"
 #include "text_record_validation.hpp"
@@ -19,6 +21,7 @@
 #include <nlohmann/json.hpp>
 
 #include <exception>
+#include <fstream>
 #include <string>
 #include <string_view>
 
@@ -97,6 +100,16 @@ std::string_view invalid_code_for(SpecAssetKind kind) noexcept {
   }
 
   return kTempCodeRegistryInvalid;
+}
+
+nlohmann::json load_json_document(const std::filesystem::path& path) {
+  std::ifstream input{path};
+  if (!input) {
+    throw std::runtime_error("could not open JSON asset: " + path.string());
+  }
+  nlohmann::json document;
+  input >> document;
+  return document;
 }
 
 bool add_spec_asset_findings(ValidationReport& report,
@@ -292,6 +305,20 @@ ValidationReport validate_package(const std::filesystem::path& package_path,
                              ocr_color_spec);
     add_color_record_findings(report, registry, probe.path, layout_result.value(),
                               ocr_color_spec);
+    const auto loudness_observation_schema =
+        load_json_document(schema_root / "loudness-observation.schema.json");
+    const auto loudness_summary_schema =
+        load_json_document(schema_root / "loudness-summary.schema.json");
+    add_loudness_record_findings(report, registry, probe.path, layout_result.value(),
+                                 loudness_observation_schema,
+                                 loudness_summary_schema);
+    const auto spectrum_observation_schema =
+        load_json_document(schema_root / "spectrum-observation.schema.json");
+    const auto spectrum_summary_schema =
+        load_json_document(schema_root / "spectrum-summary.schema.json");
+    add_spectrum_record_findings(report, registry, probe.path, layout_result.value(),
+                                 spectrum_observation_schema,
+                                 spectrum_summary_schema);
   } catch (const nlohmann::json::exception& error) {
     const auto registry_root = registry_root_for(resolved_options);
     add_finding(report, make_finding(registry, kTempCodeRegistryInvalid,

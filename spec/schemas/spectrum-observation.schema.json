@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp.dev/schemas/spectrum-observation.schema.json",
+  "title": "spectrum-observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "start_us",
+    "end_us",
+    "start_sec",
+    "end_sec",
+    "target_type",
+    "target_id",
+    "bands",
+    "processor_id"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^spec_[0-9]{8,}$"
+    },
+    "start_us": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "end_us": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "start_sec": {
+      "type": "string"
+    },
+    "end_sec": {
+      "type": "string"
+    },
+    "target_type": {
+      "type": "string",
+      "enum": [
+        "audio_stream"
+      ]
+    },
+    "target_id": {
+      "type": "string"
+    },
+    "bands": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10
+    },
+    "processor_id": {
+      "type": "string"
+    }
+  }
+}

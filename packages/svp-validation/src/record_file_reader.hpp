@@ -22,7 +22,20 @@ struct JsonLinesReadResult {
   }
 };
 
+struct JsonReadResult {
+  nlohmann::json value;
+  std::string error_message;
+
+  [[nodiscard]] bool has_value() const noexcept {
+    return error_message.empty();
+  }
+};
+
 [[nodiscard]] JsonLinesReadResult read_json_lines_from_package(
+    const std::filesystem::path& package_path,
+    const std::string& entry);
+
+[[nodiscard]] JsonReadResult read_json_from_package(
     const std::filesystem::path& package_path,
     const std::string& entry);
 

@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 namespace svp::query {
 namespace {
@@ -19,9 +21,15 @@ struct KnownLayer {
   std::string_view kind;
 };
 
-constexpr std::array<KnownLayer, 22> kKnownLayers{{
+constexpr std::array<KnownLayer, 28> kKnownLayers{{
     {"core", "manifest.json", "json"},
     {"core", "mimetype", "text"},
+    {"media", "media/audio/audio_absence.json", "json"},
+    {"media", "media/audio/waveform.jsonl", "jsonl"},
+    {"media", "media/audio/loudness.jsonl", "jsonl"},
+    {"media", "media/audio/loudness_summary.json", "json"},
+    {"media", "media/audio/spectrum.jsonl", "jsonl"},
+    {"media", "media/audio/spectrum_summary.json", "json"},
     {"transcript", "transcript/transcript.json", "json"},
     {"transcript", "transcript/words.jsonl", "jsonl"},
     {"transcript", "transcript/speakers.jsonl", "jsonl"},
@@ -368,6 +376,281 @@ RelationshipSummary relationship_summary(const std::filesystem::path& package_pa
   }
 
   return summary;
+}
+
+LoudnessRangeResult loudness_range(const std::filesystem::path& package_path,
+                                   std::int64_t start_us,
+                                   std::int64_t end_us,
+                                   const std::optional<std::string>& target_id) {
+  // BS.1770 gating constants: the absolute gate is -70 LUFS and the relative
+  // gate sits 10 LU below the ungated mean. Stored momentary values already
+  // carry the standard's channel-weight normalization, so energy derived from
+  // them needs no further offset.
+  constexpr double kAbsoluteGateLufs = -70.0;
+  constexpr double kRelativeGateOffsetLu = 10.0;
+
+  LoudnessRangeResult result;
+  result.start_us = start_us;
+  result.end_us = end_us;
+
+  const auto jsonl = read_jsonl_entry(package_path, "media/audio/loudness.jsonl");
+  result.present = jsonl.present;
+  if (!jsonl.readable) {
+    result.error_message = jsonl.error_message;
+    return result;
+  }
+  result.readable = true;
+  if (end_us <= start_us) {
+    result.error_message = "end_us must be greater than start_us";
+    return result;
+  }
+
+  struct Window {
+    double momentary_lufs;
+    double energy;
+    std::int64_t overlap_us;
+  };
+  std::unordered_map<std::string, std::vector<Window>> windows_per_stream;
+  std::unordered_map<std::string, double> max_peak_linear_per_stream;
+  std::unordered_map<std::string, std::int64_t> covered_us_per_stream;
+  std::unordered_map<std::string, std::uint64_t> window_count_per_stream;
+
+  for (const auto& record : jsonl.records) {
+    const std::string record_target = json_string(record, "target_id");
+    if (target_id.has_value() && record_target != *target_id) {
+      continue;
+    }
+    const auto start_it = record.find("start_us");
+    const auto end_it = record.find("end_us");
+    if (start_it == record.end() || end_it == record.end() ||
+        !start_it->is_number() || !end_it->is_number()) {
+      continue;
+    }
+    const std::int64_t record_start = start_it->get<std::int64_t>();
+    const std::int64_t record_end = end_it->get<std::int64_t>();
+    if (record_end <= record_start || record_end <= start_us ||
+        record_start >= end_us) {
+      continue;
+    }
+
+    ++window_count_per_stream[record_target];
+    const std::int64_t overlap_us =
+        std::min(record_end, end_us) - std::max(record_start, start_us);
+    covered_us_per_stream[record_target] += overlap_us;
+
+    const auto momentary_it = record.find("momentary_lufs");
+    if (momentary_it != record.end() && momentary_it->is_number()) {
+      const double momentary = momentary_it->get<double>();
+      windows_per_stream[record_target].push_back(
+          Window{momentary, std::pow(10.0, momentary / 10.0), overlap_us});
+    }
+
+    const auto peak_it = record.find("true_peak_dbtp");
+    if (peak_it != record.end() && peak_it->is_number()) {
+      const double linear = std::pow(10.0, peak_it->get<double>() / 20.0);
+      max_peak_linear_per_stream[record_target] =
+          std::max(max_peak_linear_per_stream[record_target], linear);
+    }
+  }
+
+  std::vector<std::string> stream_ids;
+  for (const auto& [id, windows] : windows_per_stream) {
+    stream_ids.push_back(id);
+  }
+  for (const auto& [id, count] : window_count_per_stream) {
+    if (windows_per_stream.find(id) == windows_per_stream.end()) {
+      stream_ids.push_back(id);
+    }
+  }
+  std::ranges::sort(stream_ids);
+  stream_ids.erase(std::unique(stream_ids.begin(), stream_ids.end()),
+                   stream_ids.end());
+
+  for (const std::string& id : stream_ids) {
+    LoudnessRangeStreamResult stream_result;
+    stream_result.target_id = id;
+    stream_result.window_count = window_count_per_stream[id];
+    stream_result.covered_us = covered_us_per_stream[id];
+
+    std::vector<Window> gated;
+    for (const Window& window : windows_per_stream[id]) {
+      if (window.momentary_lufs > kAbsoluteGateLufs) {
+        gated.push_back(window);
+      }
+    }
+
+    if (!gated.empty()) {
+      // Each window contributes energy in proportion to how much of it the
+      // queried range actually covers; normalization divides by total covered
+      // duration so a partially overlapped window does not count fully.
+      double weighted_energy = 0.0;
+      double weighted_us = 0.0;
+      for (const Window& window : gated) {
+        weighted_energy += window.energy * static_cast<double>(window.overlap_us);
+        weighted_us += static_cast<double>(window.overlap_us);
+      }
+      const double ungated_lufs =
+          10.0 * std::log10(weighted_energy / weighted_us);
+      const double relative_gate = ungated_lufs - kRelativeGateOffsetLu;
+
+      double gated_energy = 0.0;
+      double gated_us = 0.0;
+      for (const Window& window : gated) {
+        if (window.momentary_lufs > relative_gate) {
+          gated_energy += window.energy * static_cast<double>(window.overlap_us);
+          gated_us += static_cast<double>(window.overlap_us);
+        }
+      }
+      if (gated_us > 0.0) {
+        stream_result.integrated_lufs =
+            std::round(10.0 * std::log10(gated_energy / gated_us) * 10.0) /
+            10.0;
+      }
+    }
+
+    const double max_peak = max_peak_linear_per_stream[id];
+    if (max_peak > 0.0) {
+      stream_result.true_peak_dbtp =
+          std::round(20.0 * std::log10(max_peak) * 10.0) / 10.0;
+    }
+
+    result.streams.push_back(std::move(stream_result));
+  }
+
+  return result;
+}
+
+LoudnessSummaryInfo loudness_summary(const std::filesystem::path& package_path) {
+  LoudnessSummaryInfo info;
+  const auto json = read_json_entry(package_path, "media/audio/loudness_summary.json");
+  info.present = json.present;
+  if (!json.present || !json.parsed) {
+    info.error_message = json.error_message;
+    return info;
+  }
+  info.parsed = true;
+  info.record = json.value;
+  return info;
+}
+
+SpectrumRangeResult spectrum_range(const std::filesystem::path& package_path,
+                                   std::int64_t start_us,
+                                   std::int64_t end_us,
+                                   const std::optional<std::string>& target_id) {
+  SpectrumRangeResult result;
+  result.start_us = start_us;
+  result.end_us = end_us;
+
+  const auto jsonl = read_jsonl_entry(package_path, "media/audio/spectrum.jsonl");
+  result.present = jsonl.present;
+  if (!jsonl.readable) {
+    result.error_message = jsonl.error_message;
+    return result;
+  }
+  result.readable = true;
+  if (end_us <= start_us) {
+    result.error_message = "end_us must be greater than start_us";
+    return result;
+  }
+
+  struct BandAccumulator {
+    double power_sum = 0.0;
+    double power_max = 0.0;
+    std::int64_t measured_us = 0;
+  };
+
+  std::unordered_map<std::string, std::array<BandAccumulator, kSpectrumBandCount>>
+      bands_per_stream;
+  std::unordered_map<std::string, std::int64_t> covered_us_per_stream;
+  std::unordered_map<std::string, std::uint64_t> window_count_per_stream;
+
+  for (const auto& record : jsonl.records) {
+    const std::string record_target = json_string(record, "target_id");
+    if (target_id.has_value() && record_target != *target_id) {
+      continue;
+    }
+    const auto start_it = record.find("start_us");
+    const auto end_it = record.find("end_us");
+    const auto bands_it = record.find("bands");
+    if (start_it == record.end() || end_it == record.end() ||
+        bands_it == record.end() || !start_it->is_number() ||
+        !end_it->is_number() || !bands_it->is_array()) {
+      continue;
+    }
+    const std::int64_t record_start = start_it->get<std::int64_t>();
+    const std::int64_t record_end = end_it->get<std::int64_t>();
+    if (record_end <= record_start || record_end <= start_us ||
+        record_start >= end_us) {
+      continue;
+    }
+
+    ++window_count_per_stream[record_target];
+    const std::int64_t overlap_us =
+        std::min(record_end, end_us) - std::max(record_start, start_us);
+    covered_us_per_stream[record_target] += overlap_us;
+
+    auto& accumulators = bands_per_stream[record_target];
+    for (std::size_t band = 0;
+         band < bands_it->size() && band < kSpectrumBandCount; ++band) {
+      const nlohmann::json& value = (*bands_it)[band];
+      if (!value.is_number()) {
+        continue;
+      }
+      // Weight each band's energy by how much of the window the range covers.
+      const double power = std::pow(10.0, value.get<double>() / 10.0);
+      accumulators[band].power_sum +=
+          power * static_cast<double>(overlap_us);
+      accumulators[band].power_max =
+          std::max(accumulators[band].power_max, power);
+      accumulators[band].measured_us += overlap_us;
+    }
+  }
+
+  std::vector<std::string> stream_ids;
+  for (const auto& [id, count] : window_count_per_stream) {
+    stream_ids.push_back(id);
+  }
+  std::ranges::sort(stream_ids);
+
+  for (const std::string& id : stream_ids) {
+    SpectrumRangeStreamResult stream_result;
+    stream_result.target_id = id;
+    stream_result.window_count = window_count_per_stream[id];
+    stream_result.covered_us = covered_us_per_stream[id];
+
+    const auto& accumulators = bands_per_stream[id];
+    for (std::size_t band = 0; band < kSpectrumBandCount; ++band) {
+      const BandAccumulator& acc = accumulators[band];
+      if (acc.measured_us > 0 && acc.power_sum > 0.0) {
+        stream_result.mean_band_dbfs[band] =
+            std::round(10.0 * std::log10(acc.power_sum /
+                                         static_cast<double>(acc.measured_us)) *
+                       10.0) /
+            10.0;
+      }
+      if (acc.power_max > 0.0) {
+        stream_result.max_band_dbfs[band] =
+            std::round(10.0 * std::log10(acc.power_max) * 10.0) / 10.0;
+      }
+    }
+
+    result.streams.push_back(std::move(stream_result));
+  }
+
+  return result;
+}
+
+SpectrumSummaryInfo spectrum_summary(const std::filesystem::path& package_path) {
+  SpectrumSummaryInfo info;
+  const auto json = read_json_entry(package_path, "media/audio/spectrum_summary.json");
+  info.present = json.present;
+  if (!json.present || !json.parsed) {
+    info.error_message = json.error_message;
+    return info;
+  }
+  info.parsed = true;
+  info.record = json.value;
+  return info;
 }
 
 }  // namespace svp::query

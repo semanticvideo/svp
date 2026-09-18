@@ -41,5 +41,15 @@ void print_path(const std::filesystem::path& package_path,
                 const svp::query::TraversalOptions& options,
                 bool json_output);
 void print_context_result(const svp::query::ContextResult& result);
+void print_loudness(const std::filesystem::path& package_path,
+                    const std::optional<std::string>& target_id,
+                    std::int64_t start_us,
+                    std::int64_t end_us,
+                    bool json_output);
+void print_spectrum(const std::filesystem::path& package_path,
+                    const std::optional<std::string>& target_id,
+                    std::int64_t start_us,
+                    std::int64_t end_us,
+                    bool json_output);
 
 }  // namespace query_cmd

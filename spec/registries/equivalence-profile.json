@@ -64,6 +64,23 @@
       "bucket_abs_tolerance": 0.005,
       "coverage_total_tolerance": 0.001,
       "dominant_bucket": "exact_unless_tied_within_tolerance"
+    },
+    {
+      "layer": "loudness",
+      "comparison": "loudness_db_tolerance",
+      "timing": "exact_us",
+      "target_id": "exact",
+      "loudness_abs_tolerance_lu": 0.1,
+      "true_peak_abs_tolerance_dbtp": 0.1,
+      "null_fields": "null_matches_only_null"
+    },
+    {
+      "layer": "spectrum",
+      "comparison": "band_dbfs_tolerance",
+      "timing": "exact_us",
+      "target_id": "exact",
+      "band_abs_tolerance_db": 0.1,
+      "null_fields": "null_matches_only_null"
     }
   ]
 }

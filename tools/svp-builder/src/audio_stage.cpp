@@ -30,7 +30,8 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
                                          context.plan.probe,
                                          executable_exists(context.options.ffmpeg_path),
                                          context.options.ffmpeg_path,
-                                         context.model_runtime_available);
+                                         context.model_runtime_available,
+                                         context.options.ffprobe_path);
   nlohmann::json audio_json = svp::audio::audio_stage_plan_to_json(audio_plan);
   emit_stage_started(context, ProgressStageId::audio_extract);
   const svp::audio::AudioExtractionRun extraction_run =
@@ -61,6 +62,10 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
       extraction_run.audio_absence_written;
   audio_json["audio_extraction"]["waveform_written"] =
       extraction_run.waveform_written;
+  audio_json["audio_extraction"]["loudness_written"] =
+      extraction_run.loudness_written;
+  audio_json["audio_extraction"]["spectrum_written"] =
+      extraction_run.spectrum_written;
   audio_json["audio_extraction"]["processor_provenance_written"] =
       extraction_run.processor_provenance_written;
   for (const std::string& blocker : extraction_run.blockers) {

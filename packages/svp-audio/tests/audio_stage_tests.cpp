@@ -277,6 +277,159 @@ void test_audio_extraction_executor_writes_staged_single_stream_outputs() {
   std::filesystem::remove_all(root);
 }
 
+void test_loudness_plan_targets_original_streams_with_400ms_windows() {
+  svp::media::MediaProbe probe;
+  svp::media::VideoStreamProbe video;
+  video.id = "vstream_0001";
+  video.timing.timebase = {1, 1000};
+  probe.video_streams.push_back(video);
+  probe.audio_streams.push_back({"astream_0001", 1, "aac", 48000, 2, {}});
+  probe.audio_streams.push_back({"astream_0002", 2, "aac", 44100, 6, {}});
+  probe.audio_streams[0].timing.timebase = {1, 48000};
+  probe.audio_streams[0].timing.start_pts = 48000;
+  probe.audio_streams[0].timing.duration_pts = 96000;
+  probe.audio_streams[1].timing.timebase = {1, 44100};
+  probe.audio_streams[1].timing.duration_pts = 88200;
+
+  const svp::audio::AudioStagePlan plan =
+      svp::audio::build_audio_stage_plan("sample.mov", probe, true);
+  const nlohmann::json encoded = svp::audio::audio_stage_plan_to_json(plan);
+  const nlohmann::json loudness = encoded["audio_extraction"]["loudness"];
+
+  assert(loudness["task_id"] == "task.audio.loudness.original_streams");
+  assert(loudness["processor_id"] == "proc_loudness_ebur128_0001");
+  assert(loudness["output_ref"] == "media/audio/loudness.jsonl");
+  assert(loudness["summary_output_ref"] == "media/audio/loudness_summary.json");
+  assert(loudness["window_duration_us"] == 400000);
+  assert(loudness["loudness_run"] == false);
+  assert(loudness["loudness_written"] == false);
+
+  const std::vector<std::string> depends_on =
+      loudness["depends_on"].get<std::vector<std::string>>();
+  assert(depends_on.size() == 2);
+  assert(std::find(depends_on.begin(), depends_on.end(),
+                   "task.audio.extract.astream_000") != depends_on.end());
+  assert(std::find(depends_on.begin(), depends_on.end(),
+                   "task.audio.extract.astream_001") != depends_on.end());
+
+  const nlohmann::json targets = loudness["targets"];
+  assert(targets.size() == 2);
+  assert(targets[0]["source_audio_stream_id"] == "astream_0001");
+  assert(targets[0]["source_stream_index"] == 1);
+  assert(targets[0]["channels"] == 2);
+  assert(targets[0]["sample_rate"] == 48000);
+  assert(targets[0]["stream_start_us"] == 1000000);
+  assert(targets[0]["input_ref"] == "media/audio/original_stream_000.flac");
+  assert(targets[1]["source_audio_stream_id"] == "astream_0002");
+  assert(targets[1]["channels"] == 6);
+  assert(targets[1]["sample_rate"] == 44100);
+  assert(targets[1]["stream_start_us"] == 0);
+  assert(targets[1]["input_ref"] == "media/audio/original_stream_001.flac");
+
+  const std::vector<std::string> required_outputs =
+      encoded["required_outputs"].get<std::vector<std::string>>();
+  assert(std::find(required_outputs.begin(), required_outputs.end(),
+                   "media/audio/loudness.jsonl") != required_outputs.end());
+  assert(std::find(required_outputs.begin(), required_outputs.end(),
+                   "media/audio/loudness_summary.json") !=
+         required_outputs.end());
+  const std::vector<std::string> pending_processors =
+      encoded["pending_processors"].get<std::vector<std::string>>();
+  assert(std::find(pending_processors.begin(), pending_processors.end(),
+                   "loudness_ebur128") != pending_processors.end());
+}
+
+void test_loudness_window_record_json_serializes_null_fields() {
+  svp::audio::LoudnessWindowRecord record;
+  record.index = 7;
+  record.start_us = 2800000;
+  record.end_us = 3200000;
+  record.momentary_lufs = -21.4;
+  // shortterm_lufs and true_peak_dbtp intentionally unset -> JSON null.
+
+  const nlohmann::json encoded =
+      svp::audio::loudness_window_record_to_json(record, "astream_0001",
+                                               "proc_loudness_ebur128_0001");
+  assert(encoded["id"] == "loud_00000007");
+  assert(encoded["start_us"] == 2800000);
+  assert(encoded["end_us"] == 3200000);
+  assert(encoded["start_sec"] == "2.800");
+  assert(encoded["end_sec"] == "3.200");
+  assert(encoded["target_type"] == "audio_stream");
+  assert(encoded["target_id"] == "astream_0001");
+  assert(encoded["momentary_lufs"] == -21.4);
+  assert(encoded["shortterm_lufs"].is_null());
+  assert(encoded["true_peak_dbtp"].is_null());
+  assert(encoded["processor_id"] == "proc_loudness_ebur128_0001");
+
+  const nlohmann::json summary = svp::audio::loudness_summary_to_json(
+      {}, 400000, "proc_loudness_ebur128_0001");
+  assert(summary["measurement_standard"] == "ITU-R BS.1770-4");
+  assert(summary["window_us"] == 400000);
+  assert(summary["streams"].empty());
+  assert(summary["processor_id"] == "proc_loudness_ebur128_0001");
+}
+
+void test_loudness_executor_writes_empty_artifacts_when_no_audio() {
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path() / "svp-audio-loudness-empty-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+
+  svp::audio::AudioExtractionPlan plan;
+  plan.ffmpeg_available = true;
+  plan.loudness.task_id = "task.audio.loudness.original_streams";
+  plan.loudness.processor_id = "proc_loudness_ebur128_0001";
+  plan.loudness.output_ref = "media/audio/loudness.jsonl";
+  plan.loudness.summary_output_ref = "media/audio/loudness_summary.json";
+  plan.processor_provenance.task_id = "task.audio.provenance.plan";
+  plan.processor_provenance.output_ref = "provenance/processors.jsonl";
+
+  const std::filesystem::path staging_root = root / "staging";
+  const svp::audio::AudioExtractionRun run =
+      svp::audio::execute_audio_extraction_plan(plan, staging_root);
+  const nlohmann::json encoded = svp::audio::audio_extraction_run_to_json(run);
+
+  assert(encoded["loudness_written"] == true);
+  assert(encoded["loudness"]["written"] == true);
+
+  const std::filesystem::path jsonl_path =
+      staging_root / "media/audio/loudness.jsonl";
+  assert(std::filesystem::exists(jsonl_path));
+  {
+    std::ifstream input(jsonl_path);
+    std::string line;
+    assert(!std::getline(input, line));
+  }
+
+  const std::filesystem::path summary_path =
+      staging_root / "media/audio/loudness_summary.json";
+  assert(std::filesystem::exists(summary_path));
+  {
+    std::ifstream input(summary_path);
+    const nlohmann::json summary = nlohmann::json::parse(input);
+    assert(summary["streams"].empty());
+    assert(summary["window_us"] == 400000);
+  }
+
+  {
+    std::ifstream input(staging_root / "provenance/processors.jsonl");
+    std::string line;
+    std::getline(input, line);
+    std::getline(input, line);
+    std::getline(input, line);
+    std::getline(input, line);
+    const nlohmann::json loudness_processor = nlohmann::json::parse(line);
+    assert(loudness_processor["id"] == "proc_loudness_ebur128_0001");
+    assert(loudness_processor["runtime"] == "ffmpeg_cli");
+    assert(loudness_processor["measurement_standard"] == "ITU-R BS.1770-4");
+    assert(loudness_processor["window_duration_us"] == 400000);
+    assert(loudness_processor["completed"] == true);
+  }
+
+  std::filesystem::remove_all(root);
+}
+
 void test_audio_extraction_executor_leaves_multi_stream_analysis_unrun() {
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "svp-audio-executor-blocked-test";

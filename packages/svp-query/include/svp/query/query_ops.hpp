@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -76,6 +77,59 @@ struct RelationshipSummary {
   std::string error_message;
 };
 
+struct LoudnessRangeStreamResult {
+  std::string target_id;
+  std::optional<double> integrated_lufs;
+  std::optional<double> true_peak_dbtp;
+  std::uint64_t window_count = 0;
+  std::int64_t covered_us = 0;
+};
+
+struct LoudnessRangeResult {
+  bool present = false;
+  bool readable = false;
+  bool approximation = true;
+  std::int64_t start_us = 0;
+  std::int64_t end_us = 0;
+  std::vector<LoudnessRangeStreamResult> streams;
+  std::string error_message;
+};
+
+struct LoudnessSummaryInfo {
+  bool present = false;
+  bool parsed = false;
+  nlohmann::json record;
+  std::string error_message;
+};
+
+// Band count is fixed by the package schema at ten IEC 61260 octave bands.
+inline constexpr std::size_t kSpectrumBandCount = 10;
+
+struct SpectrumRangeStreamResult {
+  std::string target_id;
+  std::array<std::optional<double>, kSpectrumBandCount> mean_band_dbfs{};
+  std::array<std::optional<double>, kSpectrumBandCount> max_band_dbfs{};
+  std::uint64_t window_count = 0;
+  std::int64_t covered_us = 0;
+};
+
+struct SpectrumRangeResult {
+  bool present = false;
+  bool readable = false;
+  bool approximation = true;
+  std::int64_t start_us = 0;
+  std::int64_t end_us = 0;
+  std::vector<SpectrumRangeStreamResult> streams;
+  std::string error_message;
+};
+
+struct SpectrumSummaryInfo {
+  bool present = false;
+  bool parsed = false;
+  nlohmann::json record;
+  std::string error_message;
+};
+
 [[nodiscard]] PackageLayerSummary list_layers(const std::filesystem::path& package_path);
 
 [[nodiscard]] TranscriptSummaryResult transcript_summary(
@@ -107,6 +161,31 @@ struct RelationshipSummary {
     std::size_t max_results);
 
 [[nodiscard]] RelationshipSummary relationship_summary(
+    const std::filesystem::path& package_path);
+
+// Approximates BS.1770 integrated loudness over [start_us, end_us) by
+// energy-averaging stored per-window momentary loudness values and reapplying
+// the absolute and relative gates. This is an aggregation of stored windows,
+// not a fresh measurement of the audio slice.
+[[nodiscard]] LoudnessRangeResult loudness_range(
+    const std::filesystem::path& package_path,
+    std::int64_t start_us,
+    std::int64_t end_us,
+    const std::optional<std::string>& target_id = std::nullopt);
+
+[[nodiscard]] LoudnessSummaryInfo loudness_summary(
+    const std::filesystem::path& package_path);
+
+// Approximates per-band spectral energy over [start_us, end_us) by
+// energy-averaging stored per-window octave-band levels. This is an
+// aggregation of stored windows, not a fresh measurement of the audio slice.
+[[nodiscard]] SpectrumRangeResult spectrum_range(
+    const std::filesystem::path& package_path,
+    std::int64_t start_us,
+    std::int64_t end_us,
+    const std::optional<std::string>& target_id = std::nullopt);
+
+[[nodiscard]] SpectrumSummaryInfo spectrum_summary(
     const std::filesystem::path& package_path);
 
 }  // namespace svp::query

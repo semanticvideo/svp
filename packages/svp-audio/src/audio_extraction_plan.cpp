@@ -233,6 +233,58 @@ nlohmann::json waveform_plan_to_json(const WaveformArtifactPlan& plan) {
   };
 }
 
+nlohmann::json loudness_plan_to_json(const LoudnessArtifactPlan& plan) {
+  nlohmann::json targets = nlohmann::json::array();
+  for (const LoudnessStreamTarget& target : plan.targets) {
+    targets.push_back({
+        {"source_audio_stream_id", target.source_audio_stream_id},
+        {"source_stream_index", target.source_stream_index},
+        {"channels", target.channels},
+        {"sample_rate", target.sample_rate},
+        {"stream_start_us", target.stream_start_us},
+        {"input_ref", target.input_ref},
+    });
+  }
+  return {
+      {"task_id", plan.task_id},
+      {"depends_on", plan.depends_on},
+      {"processor_id", plan.processor_id},
+      {"targets", targets},
+      {"output_ref", plan.output_ref},
+      {"summary_output_ref", plan.summary_output_ref},
+      {"window_duration_us", plan.window_duration_us},
+      {"loudness_run", false},
+      {"loudness_written", false},
+      {"pending_reason", "loudness measurement requires staged original audio streams"},
+  };
+}
+
+nlohmann::json spectrum_plan_to_json(const SpectrumArtifactPlan& plan) {
+  nlohmann::json targets = nlohmann::json::array();
+  for (const LoudnessStreamTarget& target : plan.targets) {
+    targets.push_back({
+        {"source_audio_stream_id", target.source_audio_stream_id},
+        {"source_stream_index", target.source_stream_index},
+        {"channels", target.channels},
+        {"sample_rate", target.sample_rate},
+        {"stream_start_us", target.stream_start_us},
+        {"input_ref", target.input_ref},
+    });
+  }
+  return {
+      {"task_id", plan.task_id},
+      {"depends_on", plan.depends_on},
+      {"processor_id", plan.processor_id},
+      {"targets", targets},
+      {"output_ref", plan.output_ref},
+      {"summary_output_ref", plan.summary_output_ref},
+      {"window_duration_us", plan.window_duration_us},
+      {"spectrum_run", false},
+      {"spectrum_written", false},
+      {"pending_reason", "spectrum measurement requires staged original audio streams"},
+  };
+}
+
 nlohmann::json provenance_plan_to_json(const AudioProvenanceArtifactPlan& plan) {
   return {
       {"task_id", plan.task_id},
@@ -248,10 +300,12 @@ nlohmann::json provenance_plan_to_json(const AudioProvenanceArtifactPlan& plan) 
 AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& source_path,
                                                 const svp::media::MediaProbe& probe,
                                                 bool ffmpeg_available,
-                                                const std::filesystem::path& ffmpeg_path) {
+                                                const std::filesystem::path& ffmpeg_path,
+                                                const std::filesystem::path& ffprobe_path) {
   AudioExtractionPlan plan;
   plan.source_path = source_path;
   plan.ffmpeg_path = ffmpeg_path;
+  plan.ffprobe_path = ffprobe_path;
   plan.ffmpeg_available = ffmpeg_available;
   plan.source_audio_present = !probe.audio_streams.empty();
   std::vector<const svp::media::AudioStreamProbe*> analysis_streams;
@@ -360,6 +414,30 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
   plan.waveform.input_ref = plan.analysis_audio.output_ref;
   plan.waveform.output_ref = "media/audio/waveform.jsonl";
 
+  plan.loudness.task_id = "task.audio.loudness.original_streams";
+  plan.loudness.depends_on = extraction_task_ids;
+  plan.loudness.processor_id = "proc_loudness_ebur128_0001";
+  plan.loudness.output_ref = "media/audio/loudness.jsonl";
+  plan.loudness.summary_output_ref = "media/audio/loudness_summary.json";
+  for (std::size_t index = 0; index < analysis_streams.size(); ++index) {
+    const svp::media::AudioStreamProbe& stream = *analysis_streams[index];
+    plan.loudness.targets.push_back(LoudnessStreamTarget{
+        stream.id,
+        stream.index,
+        stream.channels,
+        stream.sample_rate,
+        normalized_stream_start_us(stream, *presentation_origin),
+        stream_output_ref(index),
+    });
+  }
+
+  plan.spectrum.task_id = "task.audio.spectrum.original_streams";
+  plan.spectrum.depends_on = extraction_task_ids;
+  plan.spectrum.processor_id = "proc_spectrum_octave_0001";
+  plan.spectrum.output_ref = "media/audio/spectrum.jsonl";
+  plan.spectrum.summary_output_ref = "media/audio/spectrum_summary.json";
+  plan.spectrum.targets = plan.loudness.targets;
+
   plan.processor_provenance.task_id = "task.audio.provenance.plan";
   plan.processor_provenance.depends_on = extraction_task_ids;
   for (const auto& microphone : plan.microphone_analysis_streams) {
@@ -370,6 +448,8 @@ AudioExtractionPlan build_audio_extraction_plan(const std::filesystem::path& sou
   }
   plan.processor_provenance.depends_on.push_back(plan.audio_absence.task_id);
   plan.processor_provenance.depends_on.push_back(plan.waveform.task_id);
+  plan.processor_provenance.depends_on.push_back(plan.loudness.task_id);
+  plan.processor_provenance.depends_on.push_back(plan.spectrum.task_id);
   plan.processor_provenance.output_ref = "provenance/processors.jsonl";
 
   if (!ffmpeg_available) {
@@ -414,6 +494,8 @@ nlohmann::json audio_extraction_plan_to_json(const AudioExtractionPlan& plan) {
         {"command_available", !plan.analysis_audio.arguments.empty()}}},
       {"audio_absence", audio_absence_plan_to_json(plan.audio_absence)},
       {"waveform", waveform_plan_to_json(plan.waveform)},
+      {"loudness", loudness_plan_to_json(plan.loudness)},
+      {"spectrum", spectrum_plan_to_json(plan.spectrum)},
       {"processor_provenance", provenance_plan_to_json(plan.processor_provenance)},
       {"blockers", plan.blockers},
       {"extraction_run", false},

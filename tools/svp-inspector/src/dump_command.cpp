@@ -21,6 +21,8 @@ const std::vector<DumpTarget>& dump_targets() {
   static const std::vector<DumpTarget> targets{
       {"manifest", "manifest.json"},
       {"index_manifest", "index/index_manifest.json"},
+      {"loudness_summary", "media/audio/loudness_summary.json"},
+      {"spectrum_summary", "media/audio/spectrum_summary.json"},
   };
   return targets;
 }
@@ -75,7 +77,8 @@ int run(const std::filesystem::path& package_path, std::string_view section) {
   const auto* target = find_dump_target(section);
   if (target == nullptr) {
     std::cerr << "Unsupported dump section: " << section
-              << " (expected manifest, index_manifest, or all)\n";
+              << " (expected manifest, index_manifest, loudness_summary, "
+                 "spectrum_summary, or all)\n";
     return 2;
   }
 
