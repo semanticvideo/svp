@@ -53,6 +53,7 @@ add_library(svp-audio
   src/sherpa_diarization/word_assignment/speaker_fingerprints.cpp
   src/sherpa_diarization/word_assignment/speaker_ids.cpp
   src/sherpa_diarization/word_assignment/strong_segment_lock.cpp
+  src/spectrum_analyzer.cpp
   src/sherpa_diarization/word_assignment/word_local_boundary_marking.cpp
   src/sherpa_diarization/word_assignment_replay.cpp
   src/sherpa_diarization/word_refinement.cpp
@@ -79,6 +80,8 @@ add_library(svp::audio ALIAS svp-audio)
 target_include_directories(svp-audio
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
 target_compile_features(svp-audio PUBLIC cxx_std_20)
@@ -108,6 +111,7 @@ if(BUILD_TESTING)
     tests/real_diarization_fixture_tests.cpp
     tests/sequence_decoder_assignment_tests.cpp
     tests/speaker_count_estimator_tests.cpp
+    tests/spectrum_analyzer_tests.cpp
     tests/strong_segment_lock_tests.cpp
     tests/transcript_record_tests.cpp
     tests/transcript_speaker_summary_tests.cpp

@@ -359,6 +359,34 @@ nlohmann::json loudness_processor_record(const AudioExtractionPlan& plan,
   };
 }
 
+nlohmann::json spectrum_processor_record(const AudioExtractionPlan& plan,
+                                         const AudioExtractionRun& run) {
+  nlohmann::json input_refs = nlohmann::json::array();
+  for (const AudioExtractionCommandRun& command_run : run.original_streams) {
+    if (command_run.success) {
+      input_refs.push_back(command_run.output_ref);
+    }
+  }
+
+  return {
+      {"id", plan.spectrum.processor_id},
+      {"name", "Octave-band spectrum measurement"},
+      {"version", "foundation"},
+      {"input_refs", input_refs},
+      {"output_refs",
+       {plan.spectrum.output_ref, plan.spectrum.summary_output_ref}},
+      {"model_refs", nlohmann::json::array()},
+      {"task_ids", {plan.spectrum.task_id}},
+      {"runtime", "native"},
+      {"execution_provider", "cpu"},
+      {"measurement_standard", "IEC 61260 octave bands"},
+      {"window_duration_us", plan.spectrum.window_duration_us},
+      {"band_centers_hz", kSpectrumBandCentersHz},
+      {"foundation_status", run.spectrum_written ? "staged" : "planned"},
+      {"completed", run.spectrum_written},
+  };
+}
+
 AudioDerivedArtifactRun stage_audio_absence(const AudioExtractionPlan& plan,
                                             AudioExtractionRun& run,
                                             const std::filesystem::path& staging_root) {
@@ -394,7 +422,8 @@ AudioDerivedArtifactRun stage_processor_provenance(const AudioExtractionPlan& pl
                    {extraction_processor_record(plan, run),
                     absence_processor_record(plan, run),
                     waveform_processor_record(plan, run),
-                    loudness_processor_record(plan, run)});
+                    loudness_processor_record(plan, run),
+                    spectrum_processor_record(plan, run)});
   artifact.written = true;
   return artifact;
 }
@@ -511,6 +540,82 @@ AudioDerivedArtifactRun stage_loudness_artifact(const AudioExtractionPlan& plan,
   return artifact;
 }
 
+AudioDerivedArtifactRun stage_spectrum_artifact(const AudioExtractionPlan& plan,
+                                                const AudioExtractionRun& run,
+                                                const std::filesystem::path& staging_root) {
+  AudioDerivedArtifactRun artifact;
+  artifact.task_id = plan.spectrum.task_id;
+  artifact.output_ref = plan.spectrum.output_ref;
+  if (!is_safe_output_ref(artifact.output_ref) ||
+      !is_safe_output_ref(plan.spectrum.summary_output_ref)) {
+    artifact.skipped_reason =
+        "spectrum output_ref or summary_output_ref is not a safe relative package path";
+    return artifact;
+  }
+  for (const LoudnessStreamTarget& target : plan.spectrum.targets) {
+    if (!is_safe_output_ref(target.input_ref)) {
+      artifact.skipped_reason =
+          "spectrum target input_ref is not a safe relative package path";
+      return artifact;
+    }
+  }
+
+  if (!plan.ffmpeg_available) {
+    artifact.skipped_reason = "ffmpeg is not available";
+    return artifact;
+  }
+
+  std::vector<nlohmann::json> json_records;
+  std::vector<SpectrumStreamSummary> stream_summaries;
+  std::int64_t ordinal = 0;
+  std::string measurement_error;
+
+  for (const LoudnessStreamTarget& target : plan.spectrum.targets) {
+    const std::filesystem::path input_path =
+        staged_path_for_ref(staging_root, target.input_ref);
+    if (!std::filesystem::exists(input_path)) {
+      continue;
+    }
+    try {
+      SpectrumMeasurement measurement = measure_spectrum(
+          plan.ffmpeg_path, input_path, target.stream_start_us,
+          target.sample_rate, target.channels,
+          target.source_audio_stream_id);
+      for (SpectrumWindowRecord& record : measurement.windows) {
+        record.index = ordinal++;
+        json_records.push_back(spectrum_window_record_to_json(
+            record, target.source_audio_stream_id, plan.spectrum.processor_id));
+      }
+      stream_summaries.push_back(std::move(measurement.summary));
+    } catch (const std::exception& error) {
+      if (measurement_error.empty()) {
+        measurement_error = error.what();
+      }
+    }
+  }
+
+  if (!plan.spectrum.targets.empty() && stream_summaries.empty()) {
+    artifact.skipped_reason = measurement_error.empty()
+                                  ? "no original audio streams were staged"
+                                  : measurement_error;
+    return artifact;
+  }
+
+  artifact.staged_output_path = staged_path_for_ref(staging_root, artifact.output_ref);
+  try {
+    write_jsonl_file(artifact.staged_output_path, json_records);
+    write_json_file(
+        staged_path_for_ref(staging_root, plan.spectrum.summary_output_ref),
+        spectrum_summary_to_json(stream_summaries, plan.spectrum.window_duration_us,
+                                 plan.spectrum.processor_id));
+    artifact.written = true;
+  } catch (const std::exception& error) {
+    artifact.skipped_reason = error.what();
+  }
+
+  return artifact;
+}
+
 }  // namespace
 
 AudioExtractionRun execute_audio_extraction_plan(const AudioExtractionPlan& plan,
@@ -580,6 +685,11 @@ AudioExtractionRun execute_audio_extraction_plan(const AudioExtractionPlan& plan
   if (!run.loudness_written && !run.loudness.skipped_reason.empty()) {
     run.blockers.push_back(plan.loudness.task_id + ": " + run.loudness.skipped_reason);
   }
+  run.spectrum = stage_spectrum_artifact(plan, run, staging_root);
+  run.spectrum_written = run.spectrum.written;
+  if (!run.spectrum_written && !run.spectrum.skipped_reason.empty()) {
+    run.blockers.push_back(plan.spectrum.task_id + ": " + run.spectrum.skipped_reason);
+  }
   run.processor_provenance = stage_processor_provenance(plan, run, staging_root);
   run.processor_provenance_written = run.processor_provenance.written;
   if (!run.processor_provenance_written && !run.processor_provenance.skipped_reason.empty()) {
@@ -608,6 +718,7 @@ nlohmann::json audio_extraction_run_to_json(const AudioExtractionRun& run) {
       {"audio_absence", derived_artifact_run_to_json(run.audio_absence)},
       {"waveform", derived_artifact_run_to_json(run.waveform)},
       {"loudness", derived_artifact_run_to_json(run.loudness)},
+      {"spectrum", derived_artifact_run_to_json(run.spectrum)},
       {"processor_provenance",
        derived_artifact_run_to_json(run.processor_provenance)},
       {"blockers", run.blockers},
@@ -619,6 +730,7 @@ nlohmann::json audio_extraction_run_to_json(const AudioExtractionRun& run) {
       {"audio_absence_written", run.audio_absence_written},
       {"waveform_written", run.waveform_written},
       {"loudness_written", run.loudness_written},
+      {"spectrum_written", run.spectrum_written},
       {"processor_provenance_written", run.processor_provenance_written},
   };
 }

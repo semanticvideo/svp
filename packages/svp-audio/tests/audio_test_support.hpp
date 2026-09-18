@@ -6,6 +6,7 @@
 #include "svp/audio/audio_stage_plan.hpp"
 #include "svp/audio/diarization_boundary.hpp"
 #include "svp/audio/loudness_meter.hpp"
+#include "svp/audio/spectrum_analyzer.hpp"
 #include "svp/audio/sherpa_diarization.hpp"
 #include "svp/audio/transcript_records.hpp"
 #include "svp/audio/transcript_writer.hpp"

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/audio/loudness_meter.hpp"
+#include "svp/audio/spectrum_analyzer.hpp"
 #include "svp/media/media_probe.hpp"
 
 #include <cstdint>
@@ -66,6 +67,16 @@ struct LoudnessArtifactPlan {
   std::int64_t window_duration_us = kLoudnessWindowDurationUs;
 };
 
+struct SpectrumArtifactPlan {
+  std::string task_id;
+  std::vector<std::string> depends_on;
+  std::string processor_id;
+  std::vector<LoudnessStreamTarget> targets;
+  std::string output_ref;
+  std::string summary_output_ref;
+  std::int64_t window_duration_us = kSpectrumWindowDurationUs;
+};
+
 struct AudioProvenanceArtifactPlan {
   std::string task_id;
   std::vector<std::string> depends_on;
@@ -84,6 +95,7 @@ struct AudioExtractionPlan {
   AudioAbsenceArtifactPlan audio_absence;
   WaveformArtifactPlan waveform;
   LoudnessArtifactPlan loudness;
+  SpectrumArtifactPlan spectrum;
   AudioProvenanceArtifactPlan processor_provenance;
   std::vector<std::string> blockers;
 };

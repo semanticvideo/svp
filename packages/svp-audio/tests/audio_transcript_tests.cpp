@@ -12,6 +12,16 @@ int main() {
   test_loudness_plan_targets_original_streams_with_400ms_windows();
   test_loudness_window_record_json_serializes_null_fields();
   test_loudness_executor_writes_empty_artifacts_when_no_audio();
+  test_spectrum_full_scale_sine_lands_in_its_band_at_zero_dbfs();
+  test_spectrum_quiet_sine_reports_band_at_negative_dbfs();
+  test_spectrum_window_grid_matches_loudness_timing();
+  test_spectrum_bands_above_nyquist_are_null();
+  test_spectrum_stereo_averages_channel_energy();
+  test_spectrum_silence_reports_null_bands();
+  test_spectrum_summary_energy_averages_across_windows();
+  test_spectrum_record_and_summary_json_serialization();
+  test_spectrum_plan_targets_original_streams_with_loudness_grid();
+  test_spectrum_executor_writes_empty_artifacts_when_no_audio();
   test_audio_extraction_executor_leaves_multi_stream_analysis_unrun();
   test_vad_task_plan_uses_stable_thirty_second_boundaries();
   test_vad_execution_boundary_preserves_honest_unrun_state();
