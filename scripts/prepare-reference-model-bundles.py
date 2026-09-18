@@ -312,9 +312,17 @@ def main() -> None:
     if set(catalog_models) != EXPECTED_MODEL_IDS:
         raise SystemExit("catalog must contain exactly the ten approved models")
     bundle_inputs = load_bundle_inputs(args.bundle_inputs)
+    reuse_locked_ids = set()
+    if args.reuse_cache is not None:
+        reuse_lock_path = args.reuse_cache / "model-lock.json"
+        if reuse_lock_path.is_file():
+            reuse_lock = json.loads(reuse_lock_path.read_text(encoding="utf-8"))
+            reuse_locked_ids = {
+                model["model_id"] for model in reuse_lock.get("models", [])
+            }
     generated = []
     for model_id in bundle_inputs:
-        if args.reuse_cache is not None and (
+        if model_id in reuse_locked_ids and (
             args.reuse_cache / model_id
         ).is_dir():
             generated.append(
