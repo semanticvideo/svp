@@ -62,6 +62,10 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
       extraction_run.audio_absence_written;
   audio_json["audio_extraction"]["waveform_written"] =
       extraction_run.waveform_written;
+  audio_json["audio_extraction"]["loudness_written"] =
+      extraction_run.loudness_written;
+  audio_json["audio_extraction"]["spectrum_written"] =
+      extraction_run.spectrum_written;
   audio_json["audio_extraction"]["processor_provenance_written"] =
       extraction_run.processor_provenance_written;
   for (const std::string& blocker : extraction_run.blockers) {
