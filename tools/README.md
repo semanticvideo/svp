@@ -16,6 +16,25 @@ until it is inspectable and validator-clean for the target artifact type.
 
 Validates package structure, schemas, binary blocks, hashes, SQLite logical row streams, validation code usage, and equivalence behavior.
 
+### Package equivalence (RC2 Sections 5.16 and 17.5)
+
+```
+svp-validator validate --equivalent <a.svp> <b.svp> [--json] [--ignore-build-metadata]
+svp-validator validate --equivalent <a.svpi> <b.svpi> [--json] [--ignore-build-metadata]
+```
+
+Reports exactly one of `byte_identical`, `structurally_equivalent`,
+`numerically_equivalent`, or `not_equivalent` under the Default Equivalence
+Profile v1, with per-entry findings (rule, first differing record or field,
+measured value and tolerance). Exit status is 0 for the three equivalent
+classes and 1 for `not_equivalent`.
+
+Wall-clock and build-host path fields (for example `manifest.json`
+`created_utc`) are compared exactly by default. `--ignore-build-metadata`
+normalizes only the fields in the comparator's build-metadata registry and
+lists every normalized field in the report. Embedded SVPI transport
+containers are not accepted; compare their extracted `.svpi` sidecars.
+
 ## svp-inspector
 
 Human-readable and agent-readable package inspection CLI.

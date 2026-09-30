@@ -1,14 +1,18 @@
 #include "svp/core/version.hpp"
 #include "svp/package/package_probe.hpp"
+#include "svp/validation/package_equivalence.hpp"
 #include "svp/validation/embedded_svpi_transport_validator.hpp"
 #include "svp/validation/report_json.hpp"
 #include "svp/validation/svpi_validator.hpp"
 #include "svp/validation/validator.hpp"
 
+#include "equivalence_output.hpp"
+
 #include <CLI/CLI.hpp>
 
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -72,19 +76,52 @@ int main(int argc, char** argv) {
   std::string package_path;
   bool json_output = false;
   std::string validation_codes_path;
+  std::vector<std::string> equivalent_paths;
+  bool ignore_build_metadata = false;
 
   auto* validate = app.add_subcommand(
       "validate", "Validate an SVP, SVPI, or Embedded SVPI Transport");
-  validate->add_option(
+  auto* package_option = validate->add_option(
       "package", package_path,
-      "Path to an SVP, SVPI, or ISO BMFF media container")->required();
-  validate->add_flag("--json", json_output, "Emit a machine-readable validation report");
-  validate->add_option("--validation-codes", validation_codes_path,
-                       "Path to the validation-code registry");
+      "Path to an SVP, SVPI, or ISO BMFF media container");
+  validate->add_flag("--json", json_output, "Emit a machine-readable report");
+  auto* codes_option = validate->add_option("--validation-codes", validation_codes_path,
+                                            "Path to the validation-code registry");
+  auto* equivalent_option = validate->add_option(
+      "--equivalent", equivalent_paths,
+      "Compare two .svp packages (or two .svpi sidecars) under the RC2 "
+      "Default Equivalence Profile v1 and report byte_identical, "
+      "structurally_equivalent, numerically_equivalent, or not_equivalent");
+  equivalent_option->expected(2);
+  equivalent_option->excludes(package_option);
+  equivalent_option->excludes(codes_option);
+  validate->add_flag(
+      "--ignore-build-metadata", ignore_build_metadata,
+      "With --equivalent: normalize registered wall-clock and build-host path "
+      "fields before comparing; every normalized field is reported")
+      ->needs(equivalent_option);
 
   CLI11_PARSE(app, argc, argv);
 
+  if (*validate && !equivalent_paths.empty()) {
+    const auto report = svp::validation::compare_packages(
+        equivalent_paths[0], equivalent_paths[1],
+        svp::validation::EquivalenceOptions{
+            .normalize_build_metadata = ignore_build_metadata,
+        });
+    if (json_output) {
+      nlohmann::json json = report;
+      std::cout << json.dump(2) << "\n";
+    } else {
+      svp::validator_cli::print_equivalence_report(std::cout, report);
+    }
+    return svp::validation::exit_code(report);
+  }
+
   if (*validate) {
+    if (package_path.empty()) {
+      return validate->exit(CLI::RequiredError(package_option->get_name()));
+    }
     const auto probe = svp::package::probe_package(package_path);
     const auto report = (probe.iso_bmff.signature_present ||
                          (!probe.has_svp_extension &&

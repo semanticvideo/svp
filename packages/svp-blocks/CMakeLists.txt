@@ -4,6 +4,7 @@ find_path(ZSTD_INCLUDE_DIR NAMES zstd.h REQUIRED)
 find_library(ZSTD_LIBRARY NAMES zstd REQUIRED)
 
 add_library(svp-blocks
+  src/block_payload.cpp
   src/block_stream.cpp
   src/block_writer.cpp
 )

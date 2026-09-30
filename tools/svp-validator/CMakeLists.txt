@@ -1,6 +1,7 @@
 find_package(CLI11 CONFIG REQUIRED)
 
 add_executable(svp-validator
+  src/equivalence_output.cpp
   src/main.cpp
 )
 
@@ -32,5 +33,23 @@ if(BUILD_TESTING)
             $<TARGET_FILE:svp-validator>
             ${CMAKE_SOURCE_DIR}/fixtures/phase-04-ocr-color/valid/dashboard_number.svp
             ${SVP_RUNTIME_RESOURCE_ROOT}/registries/validation-codes.json
+  )
+
+  set(SVP_EQUIVALENCE_FIXTURE_DIR ${CMAKE_SOURCE_DIR}/fixtures/phase-04-ocr-color)
+  add_test(NAME svp-validator-equivalent-byte-identical
+    COMMAND svp-validator validate --json --equivalent
+            ${SVP_EQUIVALENCE_FIXTURE_DIR}/valid/dashboard_number.svp
+            ${SVP_EQUIVALENCE_FIXTURE_DIR}/valid/dashboard_number.svp
+  )
+  set_tests_properties(svp-validator-equivalent-byte-identical PROPERTIES
+    PASS_REGULAR_EXPRESSION "\"classification\": \"byte_identical\""
+  )
+  add_test(NAME svp-validator-equivalent-not-equivalent
+    COMMAND svp-validator validate --equivalent
+            ${SVP_EQUIVALENCE_FIXTURE_DIR}/valid/dashboard_number.svp
+            ${SVP_EQUIVALENCE_FIXTURE_DIR}/invalid/invalid_color_totals.svp
+  )
+  set_tests_properties(svp-validator-equivalent-not-equivalent PROPERTIES
+    WILL_FAIL TRUE
   )
 endif()
