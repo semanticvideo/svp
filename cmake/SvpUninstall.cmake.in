@@ -23,6 +23,10 @@ endif()
 
 set(svp_resource_directories)
 set(svp_data_directories)
+# Directories of an installed runtime bundle, up to and including
+# <prefix>/libexec/svp; the generic libexec directory itself is kept.
+set(svp_runtime_marker "/@CMAKE_INSTALL_LIBEXECDIR@/svp/runtime/")
+set(svp_runtime_directories)
 
 foreach(manifest_entry IN LISTS manifest_entries)
   cmake_path(IS_ABSOLUTE manifest_entry manifest_entry_is_absolute)
@@ -47,6 +51,19 @@ foreach(manifest_entry IN LISTS manifest_entries)
         "${install_destdir}${manifest_svp_directory}"
       )
     endif()
+  endif()
+
+  string(FIND "${manifest_entry}" "${svp_runtime_marker}" runtime_marker_index)
+  if(NOT runtime_marker_index EQUAL -1)
+    string(LENGTH "/@CMAKE_INSTALL_LIBEXECDIR@/svp" svp_libexec_length)
+    math(EXPR svp_libexec_end "${runtime_marker_index} + ${svp_libexec_length}")
+    string(SUBSTRING "${manifest_entry}" 0 ${svp_libexec_end} svp_libexec_directory)
+    cmake_path(GET manifest_entry PARENT_PATH runtime_directory)
+    while(NOT runtime_directory STREQUAL svp_libexec_directory)
+      list(APPEND svp_runtime_directories "${install_destdir}${runtime_directory}")
+      cmake_path(GET runtime_directory PARENT_PATH runtime_directory)
+    endwhile()
+    list(APPEND svp_runtime_directories "${install_destdir}${svp_libexec_directory}")
   endif()
 
   set(installed_path "${install_destdir}${manifest_entry}")
@@ -77,6 +94,10 @@ endforeach()
 
 list(REMOVE_DUPLICATES svp_resource_directories)
 list(REMOVE_DUPLICATES svp_data_directories)
+list(REMOVE_DUPLICATES svp_runtime_directories)
+# A directory sorts before every path it prefixes, so descending order removes
+# children before their parents.
+list(SORT svp_runtime_directories ORDER DESCENDING)
 
 function(remove_empty_svp_directory directory)
   if(IS_SYMLINK "${directory}")
@@ -114,4 +135,8 @@ endforeach()
 
 foreach(data_directory IN LISTS svp_data_directories)
   remove_empty_svp_directory("${data_directory}")
+endforeach()
+
+foreach(runtime_directory IN LISTS svp_runtime_directories)
+  remove_empty_svp_directory("${runtime_directory}")
 endforeach()
