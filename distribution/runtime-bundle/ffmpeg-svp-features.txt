@@ -1,0 +1,67 @@
+# FFmpeg components SVP invokes. build-ffmpeg.sh fails if the built ffmpeg or
+# ffprobe lacks any of them. Format: <kind> <name>, where kind is one of
+# decoder, encoder, filter, demuxer, muxer, indev.
+#
+# Source of each entry (keep in sync when SVP adds an ffmpeg invocation):
+#   packages/svp-media/src/media_probe.cpp               ffprobe -show_format -show_streams
+#   packages/svp-audio/src/audio_extraction_plan.cpp     flac + pcm_s16le, amix, aresample, asetpts
+#   packages/svp-audio/src/loudness_meter.cpp            ffprobe -f lavfi amovie=...,ebur128
+#   packages/svp-audio/src/spectrum_analyzer.cpp         -f f32le -acodec pcm_f32le
+#   packages/svp-vision/src/canonical_frame_input.cpp    -ss seek, scale, rawvideo rgb24
+#   packages/svp-vision/src/visual_entity_frame_decoder.cpp  fps, scale, rawvideo rgb24
+#   packages/svp-vision/src/evidence_crop.cpp            crop, scale, format, mjpeg or png image
+#   packages/svp-vision/src/ocr_generation/crop_hardening.cpp  decode jpeg crop, scale, rgb24
+#
+# Source decoders are the ones Homebrew ffmpeg 9.0.2 selects today for common
+# inputs (native decoders, libdav1d for AV1). Any other native decoder that
+# FFmpeg builds by default is also present because the build does not narrow
+# the internal component set.
+
+decoder h264
+decoder hevc
+decoder prores
+decoder vp9
+decoder libdav1d
+decoder aac
+decoder mp3float
+decoder opus
+decoder flac
+decoder pcm_s16le
+decoder mjpeg
+decoder png
+
+encoder flac
+encoder pcm_s16le
+encoder pcm_f32le
+encoder rawvideo
+encoder mjpeg
+encoder png
+
+filter scale
+filter fps
+filter crop
+filter format
+filter amix
+filter aresample
+filter asetpts
+filter ebur128
+filter amovie
+
+demuxer mov
+demuxer matroska
+demuxer wav
+demuxer flac
+demuxer mp3
+demuxer ogg
+demuxer image2
+demuxer jpeg_pipe
+demuxer png_pipe
+
+muxer wav
+muxer flac
+muxer rawvideo
+muxer f32le
+muxer image2
+muxer framemd5
+
+indev lavfi
