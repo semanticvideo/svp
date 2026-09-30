@@ -1,4 +1,5 @@
 #include "svp/builder/build_run_report.hpp"
+#include "svp/package/output_directory.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -135,9 +136,7 @@ void write_build_run_report(const std::filesystem::path& path,
                             const BuildRunReportRecorder& recorder,
                             const BuildRunSummary& summary) {
   const std::string text = render_build_run_report_json(recorder, summary);
-  if (path.has_parent_path()) {
-    std::filesystem::create_directories(path.parent_path());
-  }
+  svp::package::ensure_parent_directory(path);
   std::ofstream output(path, std::ios::binary | std::ios::trunc);
   output << text;
   output.flush();

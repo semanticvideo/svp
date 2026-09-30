@@ -1,5 +1,7 @@
 #include "cli_run_telemetry.hpp"
 
+#include "svp/builder/build_pipeline.hpp"
+
 #include <exception>
 #include <iostream>
 #include <utility>
@@ -31,12 +33,15 @@ CliRunTelemetry::progress_sink() const {
 
 int CliRunTelemetry::finish(int exit_code) {
   finished_ = true;
-  write_report(exit_code);
+  const bool report_written = write_report(exit_code);
+  if (exit_code == 0 && !report_written) {
+    return svp::builder::kBuildFailedExitCode;
+  }
   return exit_code;
 }
 
-void CliRunTelemetry::write_report(std::optional<int> exit_code) noexcept {
-  if (!recorder_) return;
+bool CliRunTelemetry::write_report(std::optional<int> exit_code) noexcept {
+  if (!recorder_) return true;
   try {
     svp::builder::BuildRunSummary summary{
         .command = command_,
@@ -46,7 +51,9 @@ void CliRunTelemetry::write_report(std::optional<int> exit_code) noexcept {
         .final_resources = svp::builder::sample_process_resources(),
     };
     svp::builder::write_build_run_report(run_report_path_, *recorder_, summary);
+    return true;
   } catch (const std::exception& error) {
     std::cerr << "svp-builder: " << error.what() << "\n";
+    return false;
   }
 }

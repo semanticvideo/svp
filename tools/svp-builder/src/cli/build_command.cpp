@@ -64,8 +64,8 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
 
   const svp::builder::BuildPipelineResult result =
       svp::builder::BuildPipeline{}.run(pipeline_options);
-  telemetry.finish(result.exit_code);
-  if (result.exit_code == 0 &&
+  const int exit_code = telemetry.finish(result.exit_code);
+  if (exit_code == 0 &&
       *parsed_stage == svp::builder::BuildStage::package_skeleton) {
     std::cout << format_cli_completion(
                      build_artifact_label(options.output_format), "created",
@@ -73,5 +73,5 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
                      std::chrono::steady_clock::now() - started_at)
               << "\n";
   }
-  return result.exit_code;
+  return exit_code;
 }

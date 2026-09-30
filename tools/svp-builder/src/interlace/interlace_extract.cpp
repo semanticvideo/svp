@@ -11,6 +11,7 @@
 #include "svp/package/index_writer.hpp"
 #include "svp/validation/validator.hpp"
 #include "svp/validation/svpi_validator.hpp"
+#include "svp/package/output_directory.hpp"
 
 #include <nlohmann/json.hpp>
 #include <zip.h>
@@ -48,7 +49,7 @@ std::string make_utc_timestamp() {
 
 void write_jsonl(const std::filesystem::path& path,
                  const std::vector<nlohmann::json>& records) {
-  std::filesystem::create_directories(path.parent_path());
+  svp::package::ensure_parent_directory(path);
   std::ofstream out(path);
   for (const auto& record : records) {
     out << record.dump() << "\n";
@@ -62,7 +63,7 @@ bool extract_zip_entry(zip_t* archive, const std::string& entry_name,
     return false;
   }
 
-  std::filesystem::create_directories(output_path.parent_path());
+  svp::package::ensure_parent_directory(output_path);
   std::ofstream out(output_path, std::ios::binary);
   if (!out) {
     zip_fclose(file);

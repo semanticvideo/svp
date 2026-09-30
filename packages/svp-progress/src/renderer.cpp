@@ -120,11 +120,15 @@ class PlainSink final : public Sink {
   void emit(const Event& event) override {
     std::lock_guard<std::mutex> lock(mutex_);
     if (event.kind == EventKind::artifact_written) return;
-    stream_ << format_event_line(event);
+    // Compose the whole line first so it reaches the stream in one insertion
+    // (one write on an unbuffered fd stream) instead of interleaving pieces.
+    std::string line = format_event_line(event);
     if (!event.message.empty() && event.kind != EventKind::warning) {
-      stream_ << "  " << event.message;
+      line += "  ";
+      line += event.message;
     }
-    stream_ << '\n';
+    line += '\n';
+    stream_ << line;
   }
 
  private:
@@ -154,7 +158,7 @@ class JsonSink final : public Sink {
     if (!event.scope_label.empty()) value["scope_label"] = event.scope_label;
     if (event.t_ms) value["t_ms"] = *event.t_ms;
     if (event.seq) value["seq"] = *event.seq;
-    stream_ << value.dump() << '\n';
+    stream_ << value.dump() + '\n';
   }
 
  private:

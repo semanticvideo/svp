@@ -13,6 +13,7 @@
 #include "svp/package/index_writer.hpp"
 #include "svp/validation/svpi_validator.hpp"
 #include "svp/validation/report_json.hpp"
+#include "svp/package/output_directory.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -38,7 +39,7 @@ std::string make_utc_timestamp() {
 
 void write_jsonl(const std::filesystem::path& path,
                  const std::vector<nlohmann::json>& records) {
-  std::filesystem::create_directories(path.parent_path());
+  svp::package::ensure_parent_directory(path);
   std::ofstream out(path);
   for (const auto& record : records) {
     out << record.dump() << "\n";
@@ -104,7 +105,7 @@ nlohmann::json make_core_only_sections(const std::string& state) {
 
 void append_jsonl_if_exists(const std::filesystem::path& path,
                             const std::vector<nlohmann::json>& records) {
-  std::filesystem::create_directories(path.parent_path());
+  svp::package::ensure_parent_directory(path);
   std::ofstream out(path, std::ios::app);
   for (const auto& record : records) {
     out << record.dump() << "\n";

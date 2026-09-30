@@ -10,6 +10,7 @@
 #include "svp/package/index_writer.hpp"
 #include "svp/validation/svpi_validator.hpp"
 #include "svp/validation/report_json.hpp"
+#include "svp/package/output_directory.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -28,7 +29,7 @@ namespace {
 
 void write_jsonl(const std::filesystem::path& path,
                  const std::vector<nlohmann::json>& records) {
-  std::filesystem::create_directories(path.parent_path());
+  svp::package::ensure_parent_directory(path);
   std::ofstream out(path);
   for (const auto& record : records) {
     out << record.dump() << "\n";
@@ -245,7 +246,7 @@ CompleteIdentityResult interlace_complete_identity(const CompleteIdentityOptions
     if (!file) continue;
 
     auto dest = staging_dir / name;
-    std::filesystem::create_directories(dest.parent_path());
+    svp::package::ensure_parent_directory(dest);
     std::ofstream out(dest, std::ios::binary);
     std::array<char, 64 * 1024> buffer{};
     zip_int64_t count;

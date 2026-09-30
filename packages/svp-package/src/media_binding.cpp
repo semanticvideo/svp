@@ -1,4 +1,5 @@
 #include "svp/package/media_binding.hpp"
+#include "svp/package/output_directory.hpp"
 
 #include <blake3.h>
 
@@ -195,7 +196,7 @@ nlohmann::json to_json(const MediaBindingDocument& doc) {
 bool write_media_binding(
     const std::filesystem::path& output_path,
     const MediaBindingDocument& doc) {
-  std::filesystem::create_directories(output_path.parent_path());
+  ensure_parent_directory(output_path);
   std::ofstream out(output_path);
   if (!out) {
     return false;

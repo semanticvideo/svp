@@ -1,6 +1,7 @@
 #include "svp/package/package_writer.hpp"
 
 #include "svp/core/memory_diagnostics.hpp"
+#include "svp/package/output_directory.hpp"
 
 #include <zip.h>
 
@@ -68,7 +69,7 @@ bool write_package_skeleton(
     const nlohmann::json& manifest_json,
     const PackageWriterOptions& options) {
   try {
-    std::filesystem::create_directories(package_path.parent_path());
+    ensure_parent_directory(package_path);
     std::filesystem::path temp_path = package_path.string() + ".tmp";
     svp::core::check_memory_limit("package.write.begin", {
         {"package_path", package_path.string()},
