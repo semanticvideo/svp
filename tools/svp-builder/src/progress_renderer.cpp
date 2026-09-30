@@ -39,6 +39,8 @@ svp::progress::Event neutral_event(const ProgressEvent& event) {
       .scope_id = event.scope_id,
       .scope_label = event.scope_label,
       .row_order = static_cast<std::int64_t>(event.stage_id),
+      .t_ms = event.t_ms,
+      .seq = event.seq,
   };
 }
 

@@ -31,6 +31,30 @@ int main() {
   assert(json.str().find("\"stage\":\"models\"") != std::string::npos);
   assert(json.str().find("\"stage_label\":\"Models\"") != std::string::npos);
 
+  assert(json.str().find("\"t_ms\"") == std::string::npos);
+  assert(json.str().find("\"seq\"") == std::string::npos);
+
+  std::ostringstream timed_json;
+  auto timed_json_sink = svp::progress::make_sink(
+      svp::progress::Mode::json, timed_json, false);
+  timed_json_sink->emit(Event{.kind = EventKind::started,
+                              .stage_id = "models",
+                              .stage_label = "Models",
+                              .t_ms = 1234,
+                              .seq = 7});
+  assert(timed_json.str().find("\"t_ms\":1234") != std::string::npos);
+  assert(timed_json.str().find("\"seq\":7") != std::string::npos);
+
+  std::ostringstream timed_plain;
+  auto timed_plain_sink = svp::progress::make_sink(
+      svp::progress::Mode::plain, timed_plain, false);
+  timed_plain_sink->emit(Event{.kind = EventKind::started,
+                               .stage_id = "models",
+                               .stage_label = "Models",
+                               .t_ms = 1234,
+                               .seq = 7});
+  assert(timed_plain.str() == "Models  [working]\n");
+
   assert(svp::progress::parse_mode("auto") == svp::progress::Mode::auto_);
   assert(!svp::progress::parse_mode("invalid"));
   return 0;

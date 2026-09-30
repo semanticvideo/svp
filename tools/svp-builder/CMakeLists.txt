@@ -8,13 +8,17 @@ add_library(svp-builder-lib
   src/build_pipeline_io.cpp
   src/build_progress.cpp
   src/build_progress_catalog.cpp
+  src/build_run_report_json.cpp
+  src/build_run_report_recorder.cpp
   src/build_stage_metadata.cpp
   src/foundation_color_stage.cpp
   src/foundation_ocr_stage.cpp
   src/microphone_asr_stage.cpp
   src/model_cache_preflight.cpp
   src/package_skeleton_stage.cpp
+  src/process_resources.cpp
   src/progress_renderer.cpp
+  src/progress_timeline.cpp
   src/vision_plan_stage.cpp
   src/interlace/interlace_create.cpp
   src/interlace/interlace_validate.cpp
@@ -71,6 +75,7 @@ add_executable(svp-builder
   src/cli/cli_register.cpp
   src/cli/cli_elapsed.cpp
   src/cli/cli_progress.cpp
+  src/cli/cli_run_telemetry.cpp
   src/cli/cli_completion.cpp
   src/cli/probe_command.cpp
   src/cli/build_command.cpp
@@ -121,6 +126,14 @@ if(BUILD_TESTING)
     tests/progress_renderer_tests.cpp
   )
 
+  add_executable(svp-builder-progress-timeline-tests
+    tests/progress_timeline_tests.cpp
+  )
+
+  add_executable(svp-builder-run-report-tests
+    tests/build_run_report_tests.cpp
+  )
+
   add_executable(svp-builder-cli-elapsed-tests
     tests/cli_elapsed_tests.cpp
     src/cli/cli_completion.cpp
@@ -148,6 +161,10 @@ if(BUILD_TESTING)
   target_compile_options(svp-builder-model-cache-preflight-tests PRIVATE -UNDEBUG)
   target_compile_features(svp-builder-progress-renderer-tests PRIVATE cxx_std_20)
   target_compile_options(svp-builder-progress-renderer-tests PRIVATE -UNDEBUG)
+  target_compile_features(svp-builder-progress-timeline-tests PRIVATE cxx_std_20)
+  target_compile_options(svp-builder-progress-timeline-tests PRIVATE -UNDEBUG)
+  target_compile_features(svp-builder-run-report-tests PRIVATE cxx_std_20)
+  target_compile_options(svp-builder-run-report-tests PRIVATE -UNDEBUG)
   target_compile_features(svp-builder-cli-elapsed-tests PRIVATE cxx_std_20)
   target_compile_options(svp-builder-cli-elapsed-tests PRIVATE -UNDEBUG)
   target_compile_features(svp-transport-output-policy-tests PRIVATE cxx_std_20)
@@ -179,6 +196,18 @@ if(BUILD_TESTING)
   target_link_libraries(svp-builder-progress-renderer-tests
     PRIVATE
       svp::builder
+  )
+
+  target_link_libraries(svp-builder-progress-timeline-tests
+    PRIVATE
+      svp::builder
+      nlohmann_json::nlohmann_json
+  )
+
+  target_link_libraries(svp-builder-run-report-tests
+    PRIVATE
+      svp::builder
+      nlohmann_json::nlohmann_json
   )
 
   target_include_directories(svp-builder-cli-elapsed-tests PRIVATE
@@ -231,6 +260,9 @@ if(BUILD_TESTING)
         "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache"
   )
   add_test(NAME svp-builder-progress-renderer-tests COMMAND svp-builder-progress-renderer-tests)
+  add_test(NAME svp-builder-progress-timeline-tests
+           COMMAND svp-builder-progress-timeline-tests)
+  add_test(NAME svp-builder-run-report-tests COMMAND svp-builder-run-report-tests)
   add_test(NAME svp-builder-cli-elapsed-tests COMMAND svp-builder-cli-elapsed-tests)
   add_test(NAME svp-transport-output-policy-tests
            COMMAND svp-transport-output-policy-tests)

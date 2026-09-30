@@ -1,5 +1,6 @@
 #include "cli_context.hpp"
 #include "cli_completion.hpp"
+#include "cli_run_telemetry.hpp"
 
 #include "svp/builder/interlace.hpp"
 #include "svp/builder/interlace_batch.hpp"
@@ -7,12 +8,17 @@
 
 #include <iostream>
 #include <chrono>
+#include <utility>
 
 int run_interlace_command(const InterlaceCliOptions& opts) {
   // interlace create
   if (*opts.ic_create_sub) {
-    auto sink = resolve_cli_progress_sink(opts.ic_progress_mode, opts.ic_quiet, opts.ic_create_sub);
-    if (!sink) return 2;
+    auto render_sink = resolve_cli_render_sink(
+        opts.ic_progress_mode, opts.ic_quiet, opts.ic_create_sub);
+    if (!render_sink) return 2;
+    CliRunTelemetry telemetry("interlace create", std::move(render_sink),
+                              opts.ic_run_report_path);
+    auto sink = telemetry.progress_sink();
 
     svp::builder::InterlaceCreateOptions ic_opts;
     ic_opts.source_path = opts.ic_source;
@@ -34,9 +40,10 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
 
     const auto started_at = std::chrono::steady_clock::now();
     auto result = svp::builder::interlace_create(ic_opts);
+    const int exit_code = telemetry.finish(result.success ? 0 : 1);
     if (!result.success) {
       std::cerr << "interlace create failed: " << result.error_message << "\n";
-      return 1;
+      return exit_code;
     }
     std::cout << "BLAKE3 state: " << result.blake3_state << "\n";
     std::cout << "Validation status: " << result.binding_state << "\n";

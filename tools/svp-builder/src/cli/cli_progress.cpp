@@ -1,14 +1,16 @@
 #include "cli_context.hpp"
 
 #include "svp/builder/progress_renderer.hpp"
+#include "svp/builder/progress_timeline.hpp"
 
 #include <unistd.h>
 
 #include <cstdio>
 #include <iostream>
 #include <optional>
+#include <utility>
 
-std::shared_ptr<svp::builder::BuildProgressSink> resolve_cli_progress_sink(
+std::shared_ptr<svp::builder::BuildProgressSink> resolve_cli_render_sink(
     const std::string& mode,
     bool quiet,
     CLI::App* subcommand) {
@@ -35,4 +37,13 @@ std::shared_ptr<svp::builder::BuildProgressSink> resolve_cli_progress_sink(
   const bool stderr_is_tty = isatty(fileno(stderr)) != 0;
   return svp::builder::make_progress_sink(
       *resolved_mode, std::cerr, stderr_is_tty, fileno(stderr));
+}
+
+std::shared_ptr<svp::builder::BuildProgressSink> resolve_cli_progress_sink(
+    const std::string& mode,
+    bool quiet,
+    CLI::App* subcommand) {
+  auto render_sink = resolve_cli_render_sink(mode, quiet, subcommand);
+  if (!render_sink) return nullptr;
+  return svp::builder::make_timestamped_progress_sink({std::move(render_sink)});
 }

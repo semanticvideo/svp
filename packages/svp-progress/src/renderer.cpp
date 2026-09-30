@@ -152,6 +152,8 @@ class JsonSink final : public Sink {
     if (!event.unit.empty()) value["unit"] = event.unit;
     if (!event.scope_id.empty()) value["scope_id"] = event.scope_id;
     if (!event.scope_label.empty()) value["scope_label"] = event.scope_label;
+    if (event.t_ms) value["t_ms"] = *event.t_ms;
+    if (event.seq) value["seq"] = *event.seq;
     stream_ << value.dump() << '\n';
   }
 
