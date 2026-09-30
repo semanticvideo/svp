@@ -53,11 +53,13 @@ VisualEntityPipelineResult run_visual_entity_pipeline(
   auto embedding_runtime = load_visual_entity_embedding_runtime(
       model_cache_root,
       options.embedding_model_id,
-      execution_provider);
+      execution_provider,
+      options.embedding_threads);
   auto depth_runtime = load_depth_inference_runtime(
       model_cache_root,
       svp::models::kDepthAnythingV2SmallModelId,
-      execution_provider);
+      execution_provider,
+      options.depth_threads);
   auto detector_options = options.detector;
   detector_options.execution_provider = execution_provider;
   auto detector_runtime = load_visual_entity_detector(

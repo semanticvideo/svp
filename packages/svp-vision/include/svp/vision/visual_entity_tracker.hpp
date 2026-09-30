@@ -145,6 +145,9 @@ struct VisualEntityTrackerOptions {
   // --- Visual embedding model ---
   std::string embedding_model_id = svp::models::kNomicEmbedVisionV15ModelId;
   std::string execution_provider = "cpu";
+  // ThreadPlan visual_entity_embedding role; used when embedding_runtime is
+  // not supplied.
+  svp::models::OrtThreadCounts embedding_threads;
   VisualEntityEmbeddingRuntime* embedding_runtime = nullptr;
   std::vector<ExternalEntityProposal> external_proposals;
 
@@ -171,7 +174,8 @@ struct VisualEntityTrackerOptions {
 load_visual_entity_embedding_runtime(
     const std::filesystem::path& model_cache_root,
     const std::string& model_id,
-    const std::string& execution_provider);
+    const std::string& execution_provider,
+    const svp::models::OrtThreadCounts& threads);
 
 struct TrackedRegion {
   std::string region_id;

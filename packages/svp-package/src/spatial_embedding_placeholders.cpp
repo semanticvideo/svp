@@ -224,6 +224,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     svp::vision::FrameCatalog* frame_catalog,
     SpatialProgressCallback on_progress,
     const svp::vision::InferencePerformanceOptions& performance,
+    const svp::models::ThreadPlan& thread_plan,
     std::string_view visual_tracking_quality,
     bool serial_model_stages,
     std::vector<nlohmann::json>* processor_records) {
@@ -278,14 +279,15 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     ocr_opts.crop_coverage_policy = "one_per_observation";
     ocr_opts.crop_min_jpeg_quality = 50;
     ocr_opts.performance_profile = performance.ocr_performance_profile;
-    ocr_opts.recognition_parallel_workers =
-        svp::vision::recognition_workers_for_ocr_profile(
-            performance.ocr_performance_profile);
+    ocr_opts.recognition_parallel_workers = thread_plan.ocr_recognition_workers;
+    ocr_opts.detection_threads = thread_plan.ocr_detection;
+    ocr_opts.recognition_threads = thread_plan.ocr_recognition;
     ocr_opts.frame_catalog = frame_catalog;
     attach_ocr_progress_callbacks(ocr_opts, on_progress);
 
     svp::vision::DepthGenerationOptions depth_opts;
     depth_opts.model_cache_root = model_cache_root;
+    depth_opts.threads = thread_plan.depth;
     depth_opts.raster_width = raster_w;
     depth_opts.raster_height = raster_h;
     depth_opts.frame_input = decoded_frames;
@@ -351,6 +353,7 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
 
     svp::vision::EmbeddingGenerationOptions emb_opts;
     emb_opts.model_cache_root = model_cache_root;
+    emb_opts.threads = thread_plan.text_embedding;
     if (on_progress) {
       emb_opts.on_progress = [&on_progress](std::size_t current, std::size_t total) {
         on_progress("text_embeddings", current, total, "");
@@ -417,6 +420,9 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
 
       svp::vision::VisualEntityPipelineOptions entity_options;
       entity_options.execution_provider = "cpu";
+      entity_options.detector.threads = thread_plan.visual_entity_detection;
+      entity_options.depth_threads = thread_plan.depth;
+      entity_options.embedding_threads = thread_plan.visual_entity_embedding;
       const auto parsed_quality =
           svp::vision::parse_visual_tracking_quality(visual_tracking_quality);
       if (!parsed_quality) {
@@ -537,9 +543,9 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
   ocr_opts.ffmpeg_path = ffmpeg_path;
   ocr_opts.media_plan = media_plan;
   ocr_opts.performance_profile = performance.ocr_performance_profile;
-  ocr_opts.recognition_parallel_workers =
-      svp::vision::recognition_workers_for_ocr_profile(
-          performance.ocr_performance_profile);
+  ocr_opts.recognition_parallel_workers = thread_plan.ocr_recognition_workers;
+  ocr_opts.detection_threads = thread_plan.ocr_detection;
+  ocr_opts.recognition_threads = thread_plan.ocr_recognition;
   ocr_opts.canonical_raster_width = static_cast<int>(raster_w);
   ocr_opts.canonical_raster_height = static_cast<int>(raster_h);
   if (media_plan != nullptr) {

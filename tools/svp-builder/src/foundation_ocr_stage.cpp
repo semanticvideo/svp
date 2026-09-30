@@ -26,8 +26,9 @@ void run_foundation_ocr_stage(BuildPipelineContext& context) {
   ocr_opts.performance_profile =
       context.options.performance.ocr_performance_profile;
   ocr_opts.recognition_parallel_workers =
-      svp::vision::recognition_workers_for_ocr_profile(
-          context.options.performance.ocr_performance_profile);
+      context.thread_plan.ocr_recognition_workers;
+  ocr_opts.detection_threads = context.thread_plan.ocr_detection;
+  ocr_opts.recognition_threads = context.thread_plan.ocr_recognition;
   ocr_opts.recognition_parallel_min_boxes = 16;
   const auto ocr_dims =
       svp::vision::ocr_decode_frame_dimensions(context.plan);

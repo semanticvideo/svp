@@ -22,6 +22,7 @@ WhisperInferenceResult run_whisper_inference(
     const std::string& chunk_id,
     std::int64_t chunk_start_us,
     std::int64_t chunk_end_us,
+    const WhisperRuntimeThreads& threads,
     const std::filesystem::path& aligner_model_dir) {
   try {
     const auto ggml_model = find_whisper_ggml_model(model_dir);
@@ -33,7 +34,7 @@ WhisperInferenceResult run_whisper_inference(
     }
     (void)chunk_id;
     return run_whisper_cpp_inference(wav_path, *ggml_model, vad_model_path,
-                                     chunk_start_us, chunk_end_us,
+                                     chunk_start_us, chunk_end_us, threads,
                                      aligner_model_dir);
   } catch (const std::exception& e) {
     WhisperInferenceResult result;

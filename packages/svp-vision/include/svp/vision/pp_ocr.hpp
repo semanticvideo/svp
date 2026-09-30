@@ -64,16 +64,14 @@ struct PpOcrOptions {
   int rec_image_height = 48;
   int rec_max_width = 3200;
   double min_text_score = 0.0;
-  int intra_op_num_threads = 0;
-  int inter_op_num_threads = 0;
   int graph_optimization_level = -1;
   std::string execution_mode;
-  int det_intra_op_num_threads = 0;
-  int det_inter_op_num_threads = 0;
+  // Session threads from the build's ThreadPlan (ocr_detection and
+  // ocr_recognition roles).
+  svp::models::OrtThreadCounts det_threads;
   int det_graph_optimization_level = -1;
   std::string det_execution_mode;
-  int rec_intra_op_num_threads = 0;
-  int rec_inter_op_num_threads = 0;
+  svp::models::OrtThreadCounts rec_threads;
   int rec_graph_optimization_level = -1;
   std::string rec_execution_mode;
   int recognition_parallel_workers = 1;

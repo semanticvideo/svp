@@ -20,6 +20,8 @@ struct EmbeddingGenerationOptions {
   std::string text_model_id = svp::models::kNomicEmbedTextV15ModelId;
   std::string vision_model_id = svp::models::kNomicEmbedVisionV15ModelId;
   std::string execution_provider = "cpu";
+  // ThreadPlan text_embedding role.
+  svp::models::OrtThreadCounts threads;
   std::uint32_t embedding_dim = 768;
   std::function<void(std::size_t current, std::size_t total)> on_progress;
 };

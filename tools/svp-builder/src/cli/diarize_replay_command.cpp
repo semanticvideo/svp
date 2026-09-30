@@ -297,7 +297,8 @@ int run_microphone_reconciliation_replay(
     }
     if (!options.skip_fingerprints) {
       const svp::audio::SherpaDiarizationResult diarization =
-          svp::audio::run_sherpa_diarization(wav_path, model_dir);
+          svp::audio::run_sherpa_diarization(wav_path, model_dir,
+                                         local_sherpa_threads());
       if (!diarization.ran) {
         throw std::runtime_error("microphone replay diarization failed for " +
                                  wav_path.string());
@@ -542,7 +543,7 @@ int run_diarize_replay_command(const DiarizeReplayCliOptions& options) {
     const auto t0 = std::chrono::steady_clock::now();
     const std::vector<std::string> assignments =
         svp::audio::replay_word_speaker_assignments(
-            wav_path, model_dir, words, diar_result);
+            wav_path, model_dir, local_sherpa_threads(), words, diar_result);
     const auto t1 = std::chrono::steady_clock::now();
     const auto elapsed_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();

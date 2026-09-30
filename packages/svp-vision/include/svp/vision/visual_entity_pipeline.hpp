@@ -31,6 +31,10 @@ struct VisualEntityPipelineOptions {
   VisualEntityDetectorOptions detector;
   std::string embedding_model_id = svp::models::kNomicEmbedVisionV15ModelId;
   std::string execution_provider = "cpu";
+  // ThreadPlan depth and visual_entity_embedding roles; the detector's role
+  // travels in `detector.threads`.
+  svp::models::OrtThreadCounts depth_threads;
+  svp::models::OrtThreadCounts embedding_threads;
   VisualEntityPipelineProgress on_progress;
 };
 

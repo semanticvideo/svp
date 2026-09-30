@@ -40,6 +40,8 @@ struct InterlaceCreateResult {
   std::string error_message;
   std::string blake3_state;
   std::string binding_state;
+  // The runtime thread plan the package build ran with.
+  std::optional<svp::models::ThreadPlanResolution> thread_plan;
 };
 
 [[nodiscard]] InterlaceCreateResult interlace_create(

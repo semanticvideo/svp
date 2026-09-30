@@ -16,6 +16,15 @@ struct BatchValidateResult;
 struct CompleteIdentityBatchResult;
 }
 
+// Diarization commands run outside a build, so they use the sherpa entry of
+// this host's local thread plan (OCR does not run in them).
+inline svp::models::SherpaThreadCounts local_sherpa_threads() {
+  return svp::models::resolve_local_thread_plan(
+             svp::models::detect_host_cpu_topology(),
+             /*ocr_recognition_workers=*/1)
+      .sherpa;
+}
+
 struct ProbeCliOptions {
   std::string source_path;
   std::string probe_json_path;

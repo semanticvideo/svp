@@ -16,7 +16,6 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -29,7 +28,6 @@ namespace svp::audio {
 #if defined(SVP_AUDIO_WHISPER_CPP_AVAILABLE)
 namespace {
 
-constexpr unsigned int kMaximumInferenceThreads = 8;
 constexpr std::int64_t kWhisperCentisecondsPerSecond = 100;
 constexpr std::int64_t kWhisperCentisecondsToMicroseconds = 10'000;
 constexpr std::int64_t kWhisperVadProcessedGapMilliseconds = 100;
@@ -166,13 +164,6 @@ CachedWhisperModel& cached_model() {
   return model;
 }
 
-int inference_thread_count() {
-  const unsigned int available = std::thread::hardware_concurrency();
-  return static_cast<int>(std::max(
-      1U, std::min(available == 0 ? 1U : available,
-                   kMaximumInferenceThreads)));
-}
-
 WhisperContext load_context(const std::filesystem::path& model_path,
                             whisper_context_params params) {
   WhisperContext loaded(
@@ -259,12 +250,14 @@ void append_vad_mapping_point(VadTimeMapper& mapper,
 VadTimeMapper build_vad_time_mapper(
     const std::filesystem::path& vad_model_path,
     const std::vector<float>& samples,
-    whisper_vad_params vad_params) {
+    whisper_vad_params vad_params,
+    int vad_threads) {
   VadTimeMapper mapper;
   if (samples.empty()) return mapper;
 
   whisper_vad_context_params context_params =
       whisper_vad_default_context_params();
+  context_params.n_threads = vad_threads;
   const std::string vad_model_path_string = vad_model_path.string();
   WhisperVadContext vad_context(
       whisper_vad_init_from_file_with_params(
@@ -488,6 +481,7 @@ void clamp_word_ends_to_next_onset(std::vector<AsrWord>& words) {
 struct CachedPhonemeAligner {
   std::mutex mutex;
   std::filesystem::path path;
+  svp::models::OrtThreadCounts threads;
   std::optional<CtcForcedAligner> aligner;
   std::optional<PhonemeLexicon> lexicon;
 };
@@ -511,6 +505,7 @@ std::int64_t seconds_to_chunk_us(double seconds, std::int64_t chunk_start_us,
 void apply_phoneme_alignment(WhisperInferenceResult& result,
                              const std::vector<float>& samples,
                              const std::filesystem::path& bundle_dir,
+                             const svp::models::OrtThreadCounts& threads,
                              std::int64_t chunk_start_us,
                              std::int64_t chunk_end_us) {
   std::vector<AsrWord>& words = result.all_words;
@@ -518,12 +513,14 @@ void apply_phoneme_alignment(WhisperInferenceResult& result,
 
   CachedPhonemeAligner& cache = cached_aligner();
   std::scoped_lock lock(cache.mutex);
-  if (!cache.aligner.has_value() || cache.path != bundle_dir) {
+  if (!cache.aligner.has_value() || cache.path != bundle_dir ||
+      cache.threads != threads) {
     PhonemeLexicon lexicon = PhonemeLexicon::load_from_bundle(bundle_dir);
-    CtcForcedAligner aligner = CtcForcedAligner::load(bundle_dir);
+    CtcForcedAligner aligner = CtcForcedAligner::load(bundle_dir, threads);
     cache.lexicon = std::move(lexicon);
     cache.aligner = std::move(aligner);
     cache.path = bundle_dir;
+    cache.threads = threads;
   }
 
   std::vector<CtcAlignmentToken> tokens;
@@ -708,8 +705,13 @@ WhisperInferenceResult run_whisper_cpp_inference(
     const std::filesystem::path& vad_model_path,
     std::int64_t chunk_start_us,
     std::int64_t chunk_end_us,
+    const WhisperRuntimeThreads& threads,
     const std::filesystem::path& aligner_bundle_dir) {
 #if defined(SVP_AUDIO_WHISPER_CPP_AVAILABLE)
+  if (threads.whisper.decode <= 0 || threads.whisper.vad <= 0) {
+    throw std::invalid_argument(
+        "whisper.cpp needs positive decode and VAD thread counts");
+  }
   WhisperInferenceResult result;
   const std::vector<float> samples = read_whisper_pcm16_mono_wav(wav_path);
   if (samples.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
@@ -722,7 +724,7 @@ WhisperInferenceResult run_whisper_cpp_inference(
 
   whisper_full_params params =
       whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-  params.n_threads = inference_thread_count();
+  params.n_threads = threads.whisper.decode;
   params.language = "en";
   params.translate = false;
   params.no_context = true;
@@ -738,7 +740,7 @@ WhisperInferenceResult run_whisper_cpp_inference(
   params.vad_model_path = vad_model_path_string.c_str();
   params.vad_params = whisper_vad_default_params();
   const VadTimeMapper vad_time_mapper = build_vad_time_mapper(
-      vad_model_path, samples, params.vad_params);
+      vad_model_path, samples, params.vad_params, threads.whisper.vad);
 
   if (whisper_full(context, params, samples.data(),
                    static_cast<int>(samples.size())) != 0) {
@@ -766,7 +768,8 @@ WhisperInferenceResult run_whisper_cpp_inference(
   if (!aligner_bundle_dir.empty()) {
     try {
       apply_phoneme_alignment(result, samples, aligner_bundle_dir,
-                              chunk_start_us, chunk_end_us);
+                              threads.forced_alignment, chunk_start_us,
+                              chunk_end_us);
     } catch (const std::exception&) {
       result.alignment_status = "fallback";
     }
@@ -779,6 +782,7 @@ WhisperInferenceResult run_whisper_cpp_inference(
   (void)ggml_model_path;
   (void)vad_model_path;
   (void)aligner_bundle_dir;
+  (void)threads;
   (void)chunk_start_us;
   (void)chunk_end_us;
   WhisperInferenceResult result;

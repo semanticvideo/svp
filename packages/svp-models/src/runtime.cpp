@@ -141,11 +141,11 @@ OnnxSession OnnxSession::load(const ModelBundleManifest& manifest,
   }
 
   Ort::SessionOptions session_options;
-  if (options.intra_op_num_threads > 0) {
-    session_options.SetIntraOpNumThreads(options.intra_op_num_threads);
+  if (options.threads.intra_op > 0) {
+    session_options.SetIntraOpNumThreads(options.threads.intra_op);
   }
-  if (options.inter_op_num_threads > 0) {
-    session_options.SetInterOpNumThreads(options.inter_op_num_threads);
+  if (options.threads.inter_op > 0) {
+    session_options.SetInterOpNumThreads(options.threads.inter_op);
   }
   switch (options.graph_optimization_level) {
     case 0:

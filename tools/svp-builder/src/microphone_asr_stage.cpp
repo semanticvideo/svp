@@ -110,6 +110,7 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
     bool asr_model_verified,
     const std::filesystem::path& staging_dir,
     const std::filesystem::path& model_cache_root,
+    const svp::models::ThreadPlan& thread_plan,
     MicrophoneAsrProgressCallback progress,
     MicrophoneDiarizationProgressCallbacks diarization_progress) {
   MicrophoneAsrStageResult result;
@@ -151,6 +152,7 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
     svp::audio::AsrExecutionBoundary executed =
         svp::audio::execute_asr_boundary(
             boundary, staging_dir, model_cache_root,
+            svp::audio::whisper_runtime_threads(thread_plan),
             [progress, completed_chunks_before_stream, total_chunks](
                 std::size_t current, std::size_t) {
               if (progress) {
@@ -242,7 +244,7 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
       const svp::audio::SherpaDiarizationResult diarization =
           svp::audio::run_sherpa_diarization(
               staging_dir / transcript.analysis_audio_ref,
-              fingerprint_model_dir, {},
+              fingerprint_model_dir, thread_plan.sherpa, {},
               [diarization_progress, completed_fingerprint_chunks,
                total_fingerprint_chunks](std::size_t current, std::size_t) {
                 if (diarization_progress.progress &&

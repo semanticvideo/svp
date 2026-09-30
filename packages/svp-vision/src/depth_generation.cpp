@@ -135,7 +135,8 @@ std::vector<float> bilinear_resize_depth(
 DepthInferenceRuntime load_depth_inference_runtime(
     const std::filesystem::path& model_cache_root,
     const std::string& model_id,
-    const std::string& execution_provider) {
+    const std::string& execution_provider,
+    const svp::models::OrtThreadCounts& threads) {
   DepthInferenceRuntime runtime;
   runtime.model_id = model_id;
   runtime.execution_provider = execution_provider;
@@ -165,6 +166,7 @@ DepthInferenceRuntime load_depth_inference_runtime(
     }
     svp::models::OnnxSessionOptions session_options;
     session_options.execution_provider = execution_provider;
+    session_options.threads = threads;
     auto session = svp::models::OnnxSession::load(
         manifest, *bundle_dir, session_options);
     runtime.session =
@@ -366,6 +368,7 @@ DepthGenerationResult generate_depth_blocks(
   try {
     svp::models::OnnxSessionOptions session_opts;
     session_opts.execution_provider = options.execution_provider;
+    session_opts.threads = options.threads;
     session = svp::models::OnnxSession::load(manifest, *bundle_dir, session_opts);
   } catch (const std::exception& e) {
     result.blocker = std::string("Failed to load ONNX session: ") + e.what();

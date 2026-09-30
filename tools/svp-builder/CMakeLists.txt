@@ -12,6 +12,7 @@ add_library(svp-builder-lib
   src/build_run_report_json.cpp
   src/build_run_report_recorder.cpp
   src/build_stage_metadata.cpp
+  src/build_thread_plan.cpp
   src/foundation_color_stage.cpp
   src/foundation_ocr_stage.cpp
   src/microphone_asr_stage.cpp
@@ -152,6 +153,10 @@ if(BUILD_TESTING)
     tests/build_run_report_tests.cpp
   )
 
+  add_executable(svp-builder-thread-plan-tests
+    tests/build_thread_plan_tests.cpp
+  )
+
   add_executable(svp-builder-cli-elapsed-tests
     tests/cli_elapsed_tests.cpp
     src/cli/cli_completion.cpp
@@ -183,6 +188,8 @@ if(BUILD_TESTING)
   target_compile_options(svp-builder-progress-timeline-tests PRIVATE -UNDEBUG)
   target_compile_features(svp-builder-run-report-tests PRIVATE cxx_std_20)
   target_compile_options(svp-builder-run-report-tests PRIVATE -UNDEBUG)
+  target_compile_features(svp-builder-thread-plan-tests PRIVATE cxx_std_20)
+  target_compile_options(svp-builder-thread-plan-tests PRIVATE -UNDEBUG)
   target_compile_features(svp-builder-cli-elapsed-tests PRIVATE cxx_std_20)
   target_compile_options(svp-builder-cli-elapsed-tests PRIVATE -UNDEBUG)
   target_compile_features(svp-transport-output-policy-tests PRIVATE cxx_std_20)
@@ -233,6 +240,12 @@ if(BUILD_TESTING)
   )
 
   target_link_libraries(svp-builder-run-report-tests
+    PRIVATE
+      svp::builder
+      nlohmann_json::nlohmann_json
+  )
+
+  target_link_libraries(svp-builder-thread-plan-tests
     PRIVATE
       svp::builder
       nlohmann_json::nlohmann_json
@@ -296,6 +309,8 @@ if(BUILD_TESTING)
   add_test(NAME svp-builder-progress-timeline-tests
            COMMAND svp-builder-progress-timeline-tests)
   add_test(NAME svp-builder-run-report-tests COMMAND svp-builder-run-report-tests)
+  add_test(NAME svp-builder-thread-plan-tests COMMAND svp-builder-thread-plan-tests
+           WORKING_DIRECTORY ${SVP_BUILDER_RUNTIME_RESOURCE_TEST_CWD})
   add_test(NAME svp-builder-cli-elapsed-tests COMMAND svp-builder-cli-elapsed-tests)
   add_test(NAME svp-transport-output-policy-tests
            COMMAND svp-transport-output-policy-tests)

@@ -344,6 +344,7 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
 
   BuildPipeline pipeline;
   auto pipeline_result = pipeline.run(pipeline_opts);
+  result.thread_plan = pipeline_result.thread_plan;
 
   if (pipeline_result.failure == BuildPipelineFailure::model_cache_preflight) {
     result.error_message = pipeline_result.error_message;

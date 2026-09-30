@@ -285,6 +285,7 @@ EmbeddingGenerationResult generate_embedding_blocks(
   try {
     svp::models::OnnxSessionOptions session_opts;
     session_opts.execution_provider = options.execution_provider;
+    session_opts.threads = options.threads;
     session = svp::models::OnnxSession::load(manifest, *bundle_dir, session_opts);
   } catch (const std::exception& e) {
     result.blocker = std::string("Failed to load ONNX session: ") + e.what();

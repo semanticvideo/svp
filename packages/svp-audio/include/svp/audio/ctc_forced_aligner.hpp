@@ -1,5 +1,7 @@
 #pragma once
 
+#include "svp/models/thread_plan.hpp"
+
 #include <cstddef>
 #include <filesystem>
 #include <memory>
@@ -30,8 +32,10 @@ class CtcForcedAligner {
   // bundle_dir must contain model.svpmodel.json plus the ONNX weights,
   // vocabulary, and pronunciation dictionary files declared by the bundle
   // manifest. Throws on missing or invalid artifacts.
+  // `threads` is the ThreadPlan forced_alignment role.
   [[nodiscard]] static CtcForcedAligner load(
-      const std::filesystem::path& bundle_dir);
+      const std::filesystem::path& bundle_dir,
+      const svp::models::OrtThreadCounts& threads);
 
   // Aligns 16 kHz mono float samples to the given phone token sequence.
   // Returns one span per token in input order. Throws on runtime failure.

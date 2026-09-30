@@ -79,6 +79,28 @@ target_link_libraries(svp-models-identity
     svp::core
 )
 
+# Explicit runtime thread counts (ThreadPlan). No ONNX Runtime dependency, so
+# contract-only libraries can carry a plan without linking model runtimes.
+add_library(svp-models-thread-plan
+  src/thread_plan.cpp
+  src/thread_plan_json.cpp
+  src/thread_plan_overrides.cpp
+)
+
+add_library(svp::models_thread_plan ALIAS svp-models-thread-plan)
+
+target_include_directories(svp-models-thread-plan
+  PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_compile_features(svp-models-thread-plan PUBLIC cxx_std_20)
+
+target_link_libraries(svp-models-thread-plan
+  PUBLIC
+    nlohmann_json::nlohmann_json
+)
+
 add_library(svp-models
   src/bundle_digest.cpp
   src/cache.cpp
@@ -128,6 +150,7 @@ target_link_libraries(svp-models
     nlohmann_json::nlohmann_json
     svp::core
     svp::models_identity
+    svp::models_thread_plan
   PRIVATE
     ${BLAKE3_LIBRARY}
 )
@@ -164,4 +187,19 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-models-model-lock-tests
            COMMAND svp-models-model-lock-tests)
+
+  add_executable(svp-models-thread-plan-tests
+    tests/thread_plan_tests.cpp
+  )
+
+  target_compile_features(svp-models-thread-plan-tests PRIVATE cxx_std_20)
+  target_compile_options(svp-models-thread-plan-tests PRIVATE -UNDEBUG)
+
+  target_link_libraries(svp-models-thread-plan-tests
+    PRIVATE
+      svp::models_thread_plan
+  )
+
+  add_test(NAME svp-models-thread-plan-tests
+           COMMAND svp-models-thread-plan-tests)
 endif()

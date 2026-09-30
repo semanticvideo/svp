@@ -219,6 +219,7 @@ int32_t dominant_speaker_from_segments(
 std::vector<std::string> refine_word_speakers_by_embedding(
     const std::filesystem::path& wav_path,
     const std::filesystem::path& model_dir,
+    const svp::models::SherpaThreadCounts& threads,
     const std::vector<AsrWord>& words,
     const SherpaDiarizationResult& diar_result) {
 
@@ -292,7 +293,7 @@ std::vector<std::string> refine_word_speakers_by_embedding(
   SherpaOnnxSpeakerEmbeddingExtractorConfig emb_config;
   std::memset(&emb_config, 0, sizeof(emb_config));
   emb_config.model = emb_path.c_str();
-  emb_config.num_threads = 1;
+  emb_config.num_threads = threads.embedding;
   emb_config.debug = 0;
   emb_config.provider = "cpu";
 

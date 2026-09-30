@@ -62,7 +62,8 @@ VadExecutionBoundary build_vad_execution_boundary(const VadTaskPlan& plan,
 }
 
 VadExecutionBoundary execute_vad_boundary(const VadExecutionBoundary& boundary,
-                                           const std::filesystem::path& staging_root) {
+                                           const std::filesystem::path& staging_root,
+                                           const svp::models::OrtThreadCounts& threads) {
   VadExecutionBoundary result = boundary;
 
   // If there are already blockers (excluding the model runtime checker itself if we are trying to run), keep vad_run=false
@@ -115,6 +116,7 @@ VadExecutionBoundary execute_vad_boundary(const VadExecutionBoundary& boundary,
     };
     svp::models::OnnxSessionOptions options;
     options.execution_provider = result.execution_provider;
+    options.threads = threads;
 
     auto session = svp::models::OnnxSession::load(manifest, staging_root, options);
 

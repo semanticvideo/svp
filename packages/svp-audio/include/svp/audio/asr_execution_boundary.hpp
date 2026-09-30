@@ -1,5 +1,6 @@
 #pragma once
 
+#include "svp/audio/whisper_runtime_threads.hpp"
 #include "svp/models/reference_processor_model_ids.hpp"
 
 #include "svp/audio/asr_chunk_planner.hpp"
@@ -91,6 +92,7 @@ using AsrChunkProgressCallback =
     AsrExecutionBoundary boundary,
     const std::filesystem::path& staging_root,
     const std::filesystem::path& model_cache_root,
+    const WhisperRuntimeThreads& threads,
     AsrChunkProgressCallback on_chunk_progress = {});
 
 [[nodiscard]] nlohmann::json asr_execution_boundary_to_json(

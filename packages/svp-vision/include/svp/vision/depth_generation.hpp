@@ -28,7 +28,8 @@ struct DepthInferenceRuntime {
 [[nodiscard]] DepthInferenceRuntime load_depth_inference_runtime(
     const std::filesystem::path& model_cache_root,
     const std::string& model_id,
-    const std::string& execution_provider);
+    const std::string& execution_provider,
+    const svp::models::OrtThreadCounts& threads);
 
 [[nodiscard]] std::vector<std::uint16_t> infer_depth_frame(
     DepthInferenceRuntime& runtime,
@@ -38,6 +39,8 @@ struct DepthGenerationOptions {
   std::filesystem::path model_cache_root;
   std::string model_id = svp::models::kDepthAnythingV2SmallModelId;
   std::string execution_provider = "cpu";
+  // ThreadPlan depth role.
+  svp::models::OrtThreadCounts threads;
   std::uint32_t raster_width = 0;
   std::uint32_t raster_height = 0;
   DecodedCanonicalFrames frame_input;

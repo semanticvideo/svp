@@ -2,6 +2,7 @@
 
 #include "svp/builder/build_progress.hpp"
 #include "svp/builder/process_resources.hpp"
+#include "svp/models/thread_plan.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -61,6 +62,8 @@ struct BuildRunSummary {
   std::int64_t total_wall_ms = 0;
   std::uint64_t event_count = 0;
   std::optional<ProcessResourceSample> final_resources;
+  // The runtime thread plan the build ran with, when it got that far.
+  std::optional<svp::models::ThreadPlanResolution> thread_plan;
 };
 
 std::string render_build_run_report_json(const BuildRunReportRecorder& recorder,

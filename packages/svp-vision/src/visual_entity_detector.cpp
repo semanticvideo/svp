@@ -149,6 +149,7 @@ VisualEntityDetectorRuntime load_visual_entity_detector(
     }
     svp::models::OnnxSessionOptions session_options;
     session_options.execution_provider = options.execution_provider;
+    session_options.threads = options.threads;
     auto session = svp::models::OnnxSession::load(
         manifest, *model_dir, session_options);
     runtime.session =

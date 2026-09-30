@@ -229,15 +229,13 @@ PpOcrSession create_pp_ocr_session(const PpOcrOptions& options) {
 
   svp::models::OnnxSessionOptions det_sess_opts;
   det_sess_opts.execution_provider = options.execution_provider;
-  det_sess_opts.intra_op_num_threads = options.det_intra_op_num_threads;
-  det_sess_opts.inter_op_num_threads = options.det_inter_op_num_threads;
+  det_sess_opts.threads = options.det_threads;
   det_sess_opts.graph_optimization_level = options.det_graph_optimization_level;
   det_sess_opts.execution_mode = options.det_execution_mode;
 
   svp::models::OnnxSessionOptions rec_sess_opts;
   rec_sess_opts.execution_provider = options.execution_provider;
-  rec_sess_opts.intra_op_num_threads = options.rec_intra_op_num_threads;
-  rec_sess_opts.inter_op_num_threads = options.rec_inter_op_num_threads;
+  rec_sess_opts.threads = options.rec_threads;
   rec_sess_opts.graph_optimization_level = options.rec_graph_optimization_level;
   rec_sess_opts.execution_mode = options.rec_execution_mode;
 

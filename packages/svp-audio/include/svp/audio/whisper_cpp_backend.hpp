@@ -20,6 +20,7 @@ void release_phoneme_aligner() noexcept;
     const std::filesystem::path& vad_model_path,
     std::int64_t chunk_start_us,
     std::int64_t chunk_end_us,
+    const WhisperRuntimeThreads& threads,
     const std::filesystem::path& aligner_bundle_dir = {});
 
 }  // namespace svp::audio

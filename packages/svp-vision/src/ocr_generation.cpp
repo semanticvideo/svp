@@ -182,34 +182,21 @@ OcrGenerationResult generate_ocr_observations(
       options.recognition_parallel_min_boxes;
   pp_ocr_opts.execution_provider = execution_provider_env_or_default(
       "SVP_OCR_EXECUTION_PROVIDER", pp_ocr_opts.execution_provider);
-  pp_ocr_opts.intra_op_num_threads = positive_env_int_or_default(
-      "SVP_OCR_ONNX_INTRA_OP_THREADS", pp_ocr_opts.intra_op_num_threads);
-  pp_ocr_opts.inter_op_num_threads = positive_env_int_or_default(
-      "SVP_OCR_ONNX_INTER_OP_THREADS", pp_ocr_opts.inter_op_num_threads);
   pp_ocr_opts.graph_optimization_level = graph_opt_env_or_default(
       "SVP_OCR_ONNX_GRAPH_OPT_LEVEL", pp_ocr_opts.graph_optimization_level);
   pp_ocr_opts.execution_mode = execution_mode_env_or_default(
       "SVP_OCR_ONNX_EXECUTION_MODE", pp_ocr_opts.execution_mode);
-  pp_ocr_opts.det_intra_op_num_threads = positive_env_int_or_default(
-      "SVP_OCR_DET_ONNX_INTRA_OP_THREADS", pp_ocr_opts.intra_op_num_threads);
-  pp_ocr_opts.det_inter_op_num_threads = positive_env_int_or_default(
-      "SVP_OCR_DET_ONNX_INTER_OP_THREADS", pp_ocr_opts.inter_op_num_threads);
+  pp_ocr_opts.det_threads = options.detection_threads;
   pp_ocr_opts.det_graph_optimization_level = graph_opt_env_or_default(
       "SVP_OCR_DET_ONNX_GRAPH_OPT_LEVEL", pp_ocr_opts.graph_optimization_level);
   pp_ocr_opts.det_execution_mode = execution_mode_env_or_default(
       "SVP_OCR_DET_ONNX_EXECUTION_MODE", pp_ocr_opts.execution_mode);
-  pp_ocr_opts.rec_intra_op_num_threads = positive_env_int_or_default(
-      "SVP_OCR_REC_ONNX_INTRA_OP_THREADS", pp_ocr_opts.intra_op_num_threads);
-  pp_ocr_opts.rec_inter_op_num_threads = positive_env_int_or_default(
-      "SVP_OCR_REC_ONNX_INTER_OP_THREADS", pp_ocr_opts.inter_op_num_threads);
+  pp_ocr_opts.rec_threads = options.recognition_threads;
   pp_ocr_opts.rec_graph_optimization_level = graph_opt_env_or_default(
       "SVP_OCR_REC_ONNX_GRAPH_OPT_LEVEL", pp_ocr_opts.graph_optimization_level);
   pp_ocr_opts.rec_execution_mode = execution_mode_env_or_default(
       "SVP_OCR_REC_ONNX_EXECUTION_MODE", pp_ocr_opts.execution_mode);
   if (svp::core::memory_diagnostics_enabled()) {
-    pp_ocr_opts.recognition_parallel_workers = positive_env_int_or_default(
-        "SVP_OCR_RECOGNITION_PARALLEL_WORKERS",
-        pp_ocr_opts.recognition_parallel_workers);
     pp_ocr_opts.recognition_parallel_min_boxes = positive_env_int_or_default(
         "SVP_OCR_RECOGNITION_PARALLEL_MIN_BOXES",
         pp_ocr_opts.recognition_parallel_min_boxes);
@@ -220,16 +207,14 @@ OcrGenerationResult generate_ocr_observations(
       {"available", pp_ocr_session.available ? "true" : "false"},
       {"blocker", pp_ocr_session.blocker},
       {"execution_provider", pp_ocr_opts.execution_provider},
-      {"intra_op_num_threads", std::to_string(pp_ocr_opts.intra_op_num_threads)},
-      {"inter_op_num_threads", std::to_string(pp_ocr_opts.inter_op_num_threads)},
       {"graph_optimization_level", std::to_string(pp_ocr_opts.graph_optimization_level)},
       {"execution_mode", pp_ocr_opts.execution_mode},
-      {"det_intra_op_num_threads", std::to_string(pp_ocr_opts.det_intra_op_num_threads)},
-      {"det_inter_op_num_threads", std::to_string(pp_ocr_opts.det_inter_op_num_threads)},
+      {"det_intra_op_num_threads", std::to_string(pp_ocr_opts.det_threads.intra_op)},
+      {"det_inter_op_num_threads", std::to_string(pp_ocr_opts.det_threads.inter_op)},
       {"det_graph_optimization_level", std::to_string(pp_ocr_opts.det_graph_optimization_level)},
       {"det_execution_mode", pp_ocr_opts.det_execution_mode},
-      {"rec_intra_op_num_threads", std::to_string(pp_ocr_opts.rec_intra_op_num_threads)},
-      {"rec_inter_op_num_threads", std::to_string(pp_ocr_opts.rec_inter_op_num_threads)},
+      {"rec_intra_op_num_threads", std::to_string(pp_ocr_opts.rec_threads.intra_op)},
+      {"rec_inter_op_num_threads", std::to_string(pp_ocr_opts.rec_threads.inter_op)},
       {"rec_graph_optimization_level", std::to_string(pp_ocr_opts.rec_graph_optimization_level)},
       {"rec_execution_mode", pp_ocr_opts.rec_execution_mode},
       {"performance_profile", options.performance_profile},

@@ -267,6 +267,7 @@ AsrExecutionBoundary build_asr_execution_boundary(const AsrChunkPlanResult& chun
 AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
                                           const std::filesystem::path& staging_root,
                                           const std::filesystem::path& model_cache_root,
+                                          const WhisperRuntimeThreads& threads,
                                           AsrChunkProgressCallback on_chunk_progress) {
   std::filesystem::path vad_model_path;
   try {
@@ -379,7 +380,7 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
       try {
         whisper_result = run_whisper_inference(
             chunk_wav, model_dir, vad_model_path, chunk.chunk_id, 0,
-            context.slice_end_us - context.slice_start_us,
+            context.slice_end_us - context.slice_start_us, threads,
             aligner_model_dir);
       } catch (...) {
         std::error_code cleanup_error;

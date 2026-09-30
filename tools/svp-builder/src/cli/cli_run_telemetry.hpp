@@ -27,6 +27,10 @@ class CliRunTelemetry {
   [[nodiscard]] std::shared_ptr<svp::builder::BuildProgressSink>
   progress_sink() const;
 
+  // Records the build's resolved thread plan in the run report.
+  void record_thread_plan(
+      std::optional<svp::models::ThreadPlanResolution> thread_plan);
+
   // Writes the run report (if requested) and returns the command's exit code:
   // `exit_code` unchanged, except that a successful command whose requested
   // report could not be written fails with kBuildFailedExitCode.
@@ -40,5 +44,6 @@ class CliRunTelemetry {
   std::filesystem::path run_report_path_;
   std::shared_ptr<svp::builder::BuildRunReportRecorder> recorder_;
   std::shared_ptr<svp::builder::TimestampedProgressSink> timeline_;
+  std::optional<svp::models::ThreadPlanResolution> thread_plan_;
   bool finished_ = false;
 };

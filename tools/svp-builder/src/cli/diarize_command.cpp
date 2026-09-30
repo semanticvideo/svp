@@ -88,7 +88,8 @@ int run_diarize_command(const DiarizeCliOptions& options) {
   const auto t0 = std::chrono::steady_clock::now();
 
   svp::audio::SherpaDiarizationResult result =
-      svp::audio::run_sherpa_diarization(wav_path, model_dir);
+      svp::audio::run_sherpa_diarization(wav_path, model_dir,
+                                         local_sherpa_threads());
 
   const auto t1 = std::chrono::steady_clock::now();
   const auto elapsed_ms =

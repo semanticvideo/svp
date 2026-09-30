@@ -129,6 +129,10 @@ std::string render_build_run_report_json(const BuildRunReportRecorder& recorder,
   if (summary.final_resources) {
     report["process"] = resources_json(*summary.final_resources);
   }
+  if (summary.thread_plan) {
+    report["thread_plan"] =
+        svp::models::thread_plan_resolution_to_json(*summary.thread_plan);
+  }
   return report.dump(2) + "\n";
 }
 

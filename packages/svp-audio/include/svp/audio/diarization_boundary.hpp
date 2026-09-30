@@ -64,6 +64,7 @@ struct DiarizationExecutionBoundary {
     DiarizationExecutionBoundary boundary,
     const std::filesystem::path& staging_root,
     const std::filesystem::path& model_cache_root,
+    const svp::models::SherpaThreadCounts& threads,
     bool allow_fallback = false,
     bool force_single_speaker = false,
     const std::vector<AsrWord>& words = {},
