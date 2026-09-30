@@ -32,6 +32,14 @@ frame sampling, depth generation, embeddings, masks, and visual entity support.
 Model cache, manifest, hash, verification, lock-file, and ONNX Runtime session
 handling.
 
+## svp-exec
+
+Execution contracts for distributed builds: `ArtifactRef`, `TaskSpec`, and
+`TaskResult` records with their canonical JSON codecs, `parameters_blake3`,
+`cache_key` (RC2 §20.3), and `output_digest` constructions, the
+transport-independent frame codec, and the task type registry. Nothing links it
+yet; builder integration, scheduling, and transport come later.
+
 ## svp-package
 
 ZIP64 package reading/writing and required layout handling for both `.svp` and
