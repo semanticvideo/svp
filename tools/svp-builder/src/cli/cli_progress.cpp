@@ -2,10 +2,10 @@
 
 #include "svp/builder/progress_renderer.hpp"
 #include "svp/builder/progress_timeline.hpp"
+#include "svp/progress/original_stderr.hpp"
 
 #include <unistd.h>
 
-#include <cstdio>
 #include <iostream>
 #include <optional>
 #include <utility>
@@ -34,9 +34,14 @@ std::shared_ptr<svp::builder::BuildProgressSink> resolve_cli_render_sink(
     return nullptr;
   }
 
-  const bool stderr_is_tty = isatty(fileno(stderr)) != 0;
+  // Progress goes to the stderr captured at startup, never to whatever fd 2
+  // points at right now: stages silence native library logs by briefly
+  // redirecting fd 2 to /dev/null while the other lane keeps emitting events.
+  svp::progress::FdStream& progress_stream = svp::progress::original_stderr();
+  const bool stderr_is_tty = isatty(progress_stream.fd()) != 0;
   return svp::builder::make_progress_sink(
-      *resolved_mode, std::cerr, stderr_is_tty, fileno(stderr));
+      *resolved_mode, progress_stream.stream(), stderr_is_tty,
+      progress_stream.fd());
 }
 
 std::shared_ptr<svp::builder::BuildProgressSink> resolve_cli_progress_sink(

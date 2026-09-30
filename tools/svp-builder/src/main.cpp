@@ -1,6 +1,7 @@
 #include "cli/cli_context.hpp"
 #include "staging_cleanup.hpp"
 #include "svp/core/version.hpp"
+#include "svp/progress/original_stderr.hpp"
 
 #include <CLI/CLI.hpp>
 
@@ -8,6 +9,9 @@
 #include <iostream>
 
 int main(int argc, char** argv) {
+  // Capture the progress destination before any worker thread can briefly
+  // redirect fd 2 (see svp/progress/original_stderr.hpp).
+  svp::progress::original_stderr();
   svp::builder::install_staging_interrupt_cleanup();
 
   CLI::App app{"SVP builder"};
