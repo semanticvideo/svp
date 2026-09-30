@@ -48,6 +48,14 @@ When tests are run, report:
 
 If code changed and tests could not be run, explain why.
 
+## Hardware and Cluster Independence
+
+- Never assume a machine count, model, or topology. SVP must work on one Mac or any number of Macs, with any Apple Silicon chip, core count, or memory size, as long as the macOS version matches.
+- One Mac with no workers is a fully supported configuration, not a degraded mode.
+- Spread work from each machine's measured capacity and live resources, never from a hard-coded worker count, slot count, chip model, host name, or address.
+- Output must not depend on how many machines ran a build or which ones.
+- Tests, benchmarks, and reports may name the machines they ran on; code, defaults, and policies must not.
+
 ## Builds, Dependencies, and Build Machines
 
 - Agents may configure (`cmake --preset …`), build, and test in their own checkout or worktree, using the preset's build directory inside that worktree.
