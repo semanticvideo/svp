@@ -136,3 +136,79 @@ if(BUILD_TESTING)
              COMMAND svp-exec-${SVP_EXEC_TEST_NAME}-tests)
   endforeach()
 endif()
+
+# ---------------------------------------------------------------------------
+# Task graph, scheduler, and executors (plan §3.5, §4.3-§4.5).
+# ---------------------------------------------------------------------------
+find_package(Threads REQUIRED)
+
+target_sources(svp-exec
+  PRIVATE
+    src/child_process.cpp
+    src/clock.cpp
+    src/executor.cpp
+    src/fd_frame_io.cpp
+    src/in_memory_result_commit_sink.cpp
+    src/in_process_executor.cpp
+    src/lease_frames.cpp
+    src/lease_heartbeats.cpp
+    src/lease_policy.cpp
+    src/loopback_executor.cpp
+    src/ordered_reduction.cpp
+    src/ready_set.cpp
+    src/result_verification.cpp
+    src/retry_policy.cpp
+    src/scheduler.cpp
+    src/scheduler_dispatch.cpp
+    src/scheduler_inbox.cpp
+    src/scheduler_names.cpp
+    src/scheduler_policy.cpp
+    src/scheduler_run.cpp
+    src/task_attempt_runner.cpp
+    src/task_graph.cpp
+    src/worker_loop.cpp
+)
+
+target_link_libraries(svp-exec PUBLIC Threads::Threads)
+
+if(BUILD_TESTING)
+  # Toy task type and in-memory store shared by the scheduler tests and the
+  # loopback test worker.
+  add_library(svp-exec-toy-tasks STATIC
+    tests/toy/in_memory_artifact_store.cpp
+    tests/toy/toy_tasks.cpp
+  )
+  target_compile_features(svp-exec-toy-tasks PUBLIC cxx_std_20)
+  target_include_directories(svp-exec-toy-tasks PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/toy
+  )
+  target_link_libraries(svp-exec-toy-tasks PUBLIC svp::exec)
+
+  add_executable(svp-exec-test-worker tests/toy/test_worker_main.cpp)
+  target_link_libraries(svp-exec-test-worker PRIVATE svp-exec-toy-tasks)
+
+  set(SVP_EXEC_SCHEDULER_TESTS
+    task_graph
+    scheduler
+    worker_loop
+    loopback_executor
+  )
+  foreach(SVP_EXEC_TEST IN LISTS SVP_EXEC_SCHEDULER_TESTS)
+    string(REPLACE "_" "-" SVP_EXEC_TEST_NAME "${SVP_EXEC_TEST}")
+    add_executable(svp-exec-${SVP_EXEC_TEST_NAME}-tests
+      tests/${SVP_EXEC_TEST}_tests.cpp
+    )
+    target_include_directories(svp-exec-${SVP_EXEC_TEST_NAME}-tests PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    )
+    target_link_libraries(svp-exec-${SVP_EXEC_TEST_NAME}-tests
+      PRIVATE
+        svp-exec-toy-tasks
+    )
+    add_test(NAME svp-exec-${SVP_EXEC_TEST_NAME}-tests
+             COMMAND svp-exec-${SVP_EXEC_TEST_NAME}-tests
+                     $<TARGET_FILE:svp-exec-test-worker>)
+    set_tests_properties(svp-exec-${SVP_EXEC_TEST_NAME}-tests PROPERTIES TIMEOUT 60)
+  endforeach()
+  add_dependencies(svp-exec-loopback-executor-tests svp-exec-test-worker)
+endif()
