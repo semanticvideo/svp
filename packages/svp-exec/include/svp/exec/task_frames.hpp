@@ -9,8 +9,8 @@
 namespace svp::exec {
 
 // Carriage of TaskSpec and TaskResult in frames. Only the record is defined
-// here; lease fields and the other per-message semantics of plan §4.3 belong
-// to the scheduler work.
+// here; the lease-carrying ASSIGN the scheduler sends, and HEARTBEAT, CANCEL,
+// and SHUTDOWN, are in lease_frames.hpp.
 //
 // ASSIGN body: {"task_spec": <TaskSpec JSON>}, no payloads.
 // RESULT body: {"task_result": <TaskResult JSON>}, payload i holds the bytes
