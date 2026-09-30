@@ -9,7 +9,7 @@ void test_diarization_boundary_fallback_when_model_unavailable() {
 
   // With allow_fallback=true, fallback segment is produced.
   const svp::audio::DiarizationExecutionBoundary executed =
-      svp::audio::execute_diarization_boundary(std::move(boundary), "", "", true);
+      svp::audio::execute_diarization_boundary(std::move(boundary), "", "", audio_test_thread_plan().sherpa, true);
   assert(executed.diarization_status == svp::audio::DiarizationStatus::fallback_one_speaker);
   assert(executed.speaker_count == 1);
   assert(executed.speaker_segments.size() == 1);
@@ -28,7 +28,7 @@ void test_diarization_boundary_no_fallback_when_model_unavailable() {
 
   // With allow_fallback=false (default), no fallback segment is produced.
   const svp::audio::DiarizationExecutionBoundary executed =
-      svp::audio::execute_diarization_boundary(std::move(boundary), "", "");
+      svp::audio::execute_diarization_boundary(std::move(boundary), "", "", audio_test_thread_plan().sherpa);
   assert(executed.diarization_status == svp::audio::DiarizationStatus::unavailable);
   assert(executed.speaker_count == 0);
   assert(executed.speaker_segments.empty());
@@ -41,7 +41,7 @@ void test_diarization_boundary_unavailable_when_no_audio() {
   assert(boundary.diarization_status == svp::audio::DiarizationStatus::unavailable);
 
   const svp::audio::DiarizationExecutionBoundary executed =
-      svp::audio::execute_diarization_boundary(std::move(boundary), "", "");
+      svp::audio::execute_diarization_boundary(std::move(boundary), "", "", audio_test_thread_plan().sherpa);
   assert(executed.diarization_status == svp::audio::DiarizationStatus::unavailable);
   assert(executed.speaker_segments.empty());
   assert(executed.speaker_count == 0);
@@ -51,7 +51,7 @@ void test_diarization_boundary_json_serialization() {
   svp::audio::DiarizationExecutionBoundary boundary =
       svp::audio::build_diarization_boundary(
           true, true, false, false, 30000000);
-  boundary = svp::audio::execute_diarization_boundary(std::move(boundary), "", "", true);
+  boundary = svp::audio::execute_diarization_boundary(std::move(boundary), "", "", audio_test_thread_plan().sherpa, true);
   const nlohmann::json json =
       svp::audio::diarization_execution_boundary_to_json(boundary);
 
@@ -147,7 +147,7 @@ void test_force_single_speaker_emits_one_segment_and_one_speaker() {
 
   const svp::audio::DiarizationExecutionBoundary executed =
       svp::audio::execute_diarization_boundary(
-          std::move(boundary), "", "", false, true);
+          std::move(boundary), "", "", audio_test_thread_plan().sherpa, false, true);
 
   assert(executed.diarization_status ==
          svp::audio::DiarizationStatus::user_declared_single_speaker);
@@ -167,7 +167,7 @@ void test_force_single_speaker_is_distinct_from_fallback() {
           true, true, false, false, 30000000);
   const svp::audio::DiarizationExecutionBoundary fallback_executed =
       svp::audio::execute_diarization_boundary(
-          std::move(fallback_boundary), "", "", true, false);
+          std::move(fallback_boundary), "", "", audio_test_thread_plan().sherpa, true, false);
   assert(fallback_executed.diarization_status ==
          svp::audio::DiarizationStatus::fallback_one_speaker);
 
@@ -177,7 +177,7 @@ void test_force_single_speaker_is_distinct_from_fallback() {
           true, true, false, false, 30000000);
   const svp::audio::DiarizationExecutionBoundary force_executed =
       svp::audio::execute_diarization_boundary(
-          std::move(force_boundary), "", "", false, true);
+          std::move(force_boundary), "", "", audio_test_thread_plan().sherpa, false, true);
   assert(force_executed.diarization_status ==
          svp::audio::DiarizationStatus::user_declared_single_speaker);
 
@@ -201,7 +201,7 @@ void test_force_single_speaker_does_not_require_sherpa_availability() {
 
   const svp::audio::DiarizationExecutionBoundary executed =
       svp::audio::execute_diarization_boundary(
-          std::move(boundary), "", "", false, true);
+          std::move(boundary), "", "", audio_test_thread_plan().sherpa, false, true);
 
   assert(executed.diarization_status ==
          svp::audio::DiarizationStatus::user_declared_single_speaker);
@@ -221,7 +221,7 @@ void test_force_single_speaker_wins_over_allow_fallback() {
   // Both flags set — force_single_speaker should win
   const svp::audio::DiarizationExecutionBoundary executed =
       svp::audio::execute_diarization_boundary(
-          std::move(boundary), "", "", true, true);
+          std::move(boundary), "", "", audio_test_thread_plan().sherpa, true, true);
 
   assert(executed.diarization_status ==
          svp::audio::DiarizationStatus::user_declared_single_speaker);
@@ -237,7 +237,7 @@ void test_force_single_speaker_json_reports_user_declared_status() {
       svp::audio::build_diarization_boundary(
           true, true, false, false, 30000000);
   boundary = svp::audio::execute_diarization_boundary(
-      std::move(boundary), "", "", false, true);
+      std::move(boundary), "", "", audio_test_thread_plan().sherpa, false, true);
   const nlohmann::json json =
       svp::audio::diarization_execution_boundary_to_json(boundary);
 
@@ -356,7 +356,7 @@ void test_normal_sherpa_path_unchanged_when_force_not_set() {
 
   const svp::audio::DiarizationExecutionBoundary executed =
       svp::audio::execute_diarization_boundary(
-          std::move(boundary), "", "", false, false);
+          std::move(boundary), "", "", audio_test_thread_plan().sherpa, false, false);
   assert(executed.diarization_status ==
          svp::audio::DiarizationStatus::unavailable);
   assert(executed.speaker_count == 0);
@@ -368,7 +368,7 @@ void test_normal_sherpa_path_unchanged_when_force_not_set() {
           true, true, false, false, 30000000);
   const svp::audio::DiarizationExecutionBoundary fallback_executed =
       svp::audio::execute_diarization_boundary(
-          std::move(fallback_boundary), "", "", true, false);
+          std::move(fallback_boundary), "", "", audio_test_thread_plan().sherpa, true, false);
   assert(fallback_executed.diarization_status ==
          svp::audio::DiarizationStatus::fallback_one_speaker);
 }

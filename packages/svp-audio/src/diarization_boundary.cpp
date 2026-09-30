@@ -126,6 +126,7 @@ DiarizationExecutionBoundary execute_diarization_boundary(
     DiarizationExecutionBoundary boundary,
     const std::filesystem::path& staging_root,
     const std::filesystem::path& model_cache_root,
+    const svp::models::SherpaThreadCounts& threads,
     bool allow_fallback,
     bool force_single_speaker,
     const std::vector<AsrWord>& words,
@@ -219,7 +220,7 @@ DiarizationExecutionBoundary execute_diarization_boundary(
   }
 
   SherpaDiarizationResult diar_result =
-      run_sherpa_diarization(wav_path, model_dir, words,
+      run_sherpa_diarization(wav_path, model_dir, threads, words,
                              std::move(on_progress));
 
   if (!diar_result.ran) {

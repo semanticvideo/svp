@@ -5,6 +5,7 @@
 #include "svp/vision/foundation_ocr_staging.hpp"
 #include "svp/vision/frame_catalog.hpp"
 #include "svp/vision/ocr_temporal_sampling.hpp"
+#include "svp/models/thread_plan.hpp"
 
 #include <filesystem>
 #include <functional>
@@ -31,7 +32,11 @@ struct OcrGenerationOptions {
   int ocr_frame_width = 0;
   int ocr_frame_height = 0;
   std::string performance_profile;
+  // From the build's ThreadPlan (ocr_recognition_workers, ocr_detection,
+  // ocr_recognition). Environment overrides are applied to the plan, not here.
   int recognition_parallel_workers = 1;
+  svp::models::OrtThreadCounts detection_threads;
+  svp::models::OrtThreadCounts recognition_threads;
   int recognition_parallel_min_boxes = 16;
   int canonical_raster_width = 0;
   int canonical_raster_height = 0;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/models/manifest.hpp"
+#include "svp/models/thread_plan.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -15,8 +16,9 @@ void set_onnx_verbose(bool verbose);
 
 struct OnnxSessionOptions {
   std::string execution_provider = "cpu";
-  int intra_op_num_threads = 0;
-  int inter_op_num_threads = 0;
+  // kRuntimeChoosesThreadCount leaves the pool size to ONNX Runtime; builds
+  // pass the role's entry from their ThreadPlan.
+  OrtThreadCounts threads;
   int graph_optimization_level = -1;
   std::string execution_mode;
 };

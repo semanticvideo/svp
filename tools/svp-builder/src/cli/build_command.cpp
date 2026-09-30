@@ -64,6 +64,7 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
 
   const svp::builder::BuildPipelineResult result =
       svp::builder::BuildPipeline{}.run(pipeline_options);
+  telemetry.record_thread_plan(result.thread_plan);
   const int exit_code = telemetry.finish(result.exit_code);
   if (exit_code == 0 &&
       *parsed_stage == svp::builder::BuildStage::package_skeleton) {

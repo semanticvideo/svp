@@ -41,6 +41,7 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
 
     const auto started_at = std::chrono::steady_clock::now();
     auto result = svp::builder::interlace_create(ic_opts);
+    telemetry.record_thread_plan(result.thread_plan);
     const int exit_code = telemetry.finish(
         result.success ? 0 : svp::builder::kBuildFailedExitCode);
     if (!result.success) {

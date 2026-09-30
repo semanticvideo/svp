@@ -46,7 +46,8 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
                                                extraction_run.waveform_written,
                                                context.model_runtime_available);
   const svp::audio::VadExecutionBoundary executed_boundary =
-      svp::audio::execute_vad_boundary(vad_boundary, context.staging_dir);
+      svp::audio::execute_vad_boundary(vad_boundary, context.staging_dir,
+                                       context.thread_plan.speech_activity);
   emit_stage_completed(context, ProgressStageId::audio_extract);
 
   audio_json["audio_extraction"]["execution"] = extraction_run_json;
@@ -125,7 +126,7 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
     MicrophoneAsrStageResult microphone_result = run_microphone_asr_stage(
         audio_plan.extraction_plan, extraction_run, media_duration_us,
         asr_runtime_available, asr_model_available, asr_model_verified,
-        context.staging_dir, model_cache_root,
+        context.staging_dir, model_cache_root, context.thread_plan,
         [&context](std::size_t current, std::size_t total) {
           emit_stage_progress(context, ProgressStageId::asr,
                               static_cast<std::uint64_t>(current),
@@ -172,6 +173,7 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
             asr_model_verified);
     executed_asr_boundary = svp::audio::execute_asr_boundary(
         asr_boundary, context.staging_dir, model_cache_root,
+        svp::audio::whisper_runtime_threads(context.thread_plan),
         [&context](std::size_t current, std::size_t total) {
           if (total > 0) {
             emit_stage_progress(context, ProgressStageId::asr,
@@ -258,6 +260,7 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
   emit_stage_started(context, ProgressStageId::diarization);
   diar_boundary = svp::audio::execute_diarization_boundary(
       std::move(diar_boundary), context.staging_dir, model_cache_root,
+      context.thread_plan.sherpa,
       context.options.allow_fallback_diarization,
       context.options.force_single_speaker,
       executed_asr_boundary.reconciled_words,

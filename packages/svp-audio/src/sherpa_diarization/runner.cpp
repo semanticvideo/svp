@@ -63,9 +63,15 @@ std::size_t diarization_chunk_count(
 SherpaDiarizationResult run_sherpa_diarization(
     const std::filesystem::path& wav_path,
     const std::filesystem::path& model_dir,
+    const svp::models::SherpaThreadCounts& threads,
     const std::vector<AsrWord>& words,
     DiarizationProgressCallback on_progress) {
   SherpaDiarizationResult result;
+  if (threads.segmentation <= 0 || threads.embedding <= 0) {
+    result.blockers.push_back(
+        "sherpa-onnx needs positive segmentation and embedding thread counts");
+    return result;
+  }
 
   const SherpaDiarizationApi& api = get_api();
   if (!api.lib_handle || !api.create) {
@@ -115,11 +121,11 @@ SherpaDiarizationResult run_sherpa_diarization(
   SherpaOnnxOfflineSpeakerDiarizationConfig config;
   std::memset(&config, 0, sizeof(config));
   config.segmentation.pyannote.model = seg_path.c_str();
-  config.segmentation.num_threads = 1;
+  config.segmentation.num_threads = threads.segmentation;
   config.segmentation.debug = 0;
   config.segmentation.provider = "cpu";
   config.embedding.model = emb_path.c_str();
-  config.embedding.num_threads = 1;
+  config.embedding.num_threads = threads.embedding;
   config.embedding.debug = 0;
   config.embedding.provider = "cpu";
   config.clustering.num_clusters = -1;
@@ -135,7 +141,7 @@ SherpaDiarizationResult run_sherpa_diarization(
   SherpaOnnxSpeakerEmbeddingExtractorConfig emb_config;
   std::memset(&emb_config, 0, sizeof(emb_config));
   emb_config.model = emb_path.c_str();
-  emb_config.num_threads = 1;
+  emb_config.num_threads = threads.embedding;
   emb_config.debug = 0;
   emb_config.provider = "cpu";
 

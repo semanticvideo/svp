@@ -562,7 +562,8 @@ void test_execute_vad_boundary_handles_runtime_unavailable_honestly() {
     const svp::audio::VadExecutionBoundary boundary =
         svp::audio::build_vad_execution_boundary(plan, true, true, false);
     const svp::audio::VadExecutionBoundary result =
-        svp::audio::execute_vad_boundary(boundary, root);
+        svp::audio::execute_vad_boundary(
+            boundary, root, audio_test_thread_plan().speech_activity);
     assert(result.vad_run == false);
     assert(result.speech_regions_written == false);
     assert(result.speech_region_count == 0);
@@ -573,7 +574,8 @@ void test_execute_vad_boundary_handles_runtime_unavailable_honestly() {
     const svp::audio::VadExecutionBoundary boundary =
         svp::audio::build_vad_execution_boundary(plan, true, true, true);
     const svp::audio::VadExecutionBoundary result =
-        svp::audio::execute_vad_boundary(boundary, root);
+        svp::audio::execute_vad_boundary(
+            boundary, root, audio_test_thread_plan().speech_activity);
     assert(result.vad_run == false);
     assert(result.speech_regions_written == false);
     assert(result.speech_region_count == 0);

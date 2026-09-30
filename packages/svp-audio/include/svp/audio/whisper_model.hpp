@@ -1,5 +1,6 @@
 #pragma once
 
+#include "svp/audio/whisper_runtime_threads.hpp"
 #include "svp/audio/asr_chunk_planner.hpp"
 
 #include <filesystem>
@@ -35,6 +36,7 @@ struct WhisperInferenceResult {
     const std::string& chunk_id,
     std::int64_t chunk_start_us,
     std::int64_t chunk_end_us,
+    const WhisperRuntimeThreads& threads,
     const std::filesystem::path& aligner_model_dir = {});
 
 [[nodiscard]] bool is_whisper_runtime_available();

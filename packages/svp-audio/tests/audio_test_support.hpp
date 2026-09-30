@@ -72,3 +72,10 @@ inline svp::audio::SherpaDiarizationSegment test_diarization_segment(
     int32_t speaker_id) {
   return {start_sec, start_sec + duration_sec, speaker_id};
 }
+
+// Tests call runtime boundaries directly, so they use this host's local
+// thread plan exactly as a local build would.
+inline svp::models::ThreadPlan audio_test_thread_plan() {
+  return svp::models::resolve_local_thread_plan(
+      svp::models::detect_host_cpu_topology(), /*ocr_recognition_workers=*/1);
+}

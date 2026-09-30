@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 #include <string_view>
 #include <vector>
+#include "svp/models/thread_plan.hpp"
 #include "svp/vision/inference_performance.hpp"
 #include "svp/vision/visual_tracking_quality.hpp"
 
@@ -81,6 +82,9 @@ struct SpatialEmbeddingPlaceholderSummary {
     svp::vision::FrameCatalog* frame_catalog = nullptr,
     SpatialProgressCallback on_progress = {},
     const svp::vision::InferencePerformanceOptions& performance = {},
+    // Runtime thread counts for OCR, depth, embeddings, and visual tracking.
+    // Builds pass the plan they resolved at start.
+    const svp::models::ThreadPlan& thread_plan = {},
     std::string_view visual_tracking_quality =
         svp::vision::kDefaultVisualTrackingQualityName,
     bool serial_model_stages = false,

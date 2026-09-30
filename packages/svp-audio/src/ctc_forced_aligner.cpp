@@ -78,7 +78,8 @@ CtcForcedAligner::CtcForcedAligner(std::shared_ptr<Impl> impl)
     : impl_(std::move(impl)) {}
 
 CtcForcedAligner CtcForcedAligner::load(
-    const std::filesystem::path& bundle_dir) {
+    const std::filesystem::path& bundle_dir,
+    const svp::models::OrtThreadCounts& threads) {
   const std::filesystem::path manifest_path =
       bundle_dir / "model.svpmodel.json";
   if (!std::filesystem::exists(manifest_path)) {
@@ -91,6 +92,7 @@ CtcForcedAligner CtcForcedAligner::load(
   auto impl = std::make_shared<Impl>();
   svp::models::OnnxSessionOptions options;
   options.execution_provider = "cpu";
+  options.threads = threads;
   impl->session = svp::models::OnnxSession::load(manifest, bundle_dir, options);
 
   const std::filesystem::path vocab_path =

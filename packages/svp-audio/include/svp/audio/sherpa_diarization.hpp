@@ -2,6 +2,7 @@
 
 #include "svp/audio/asr_chunk_planner.hpp"
 #include "svp/audio/transcript_records.hpp"
+#include "svp/models/thread_plan.hpp"
 
 #include <filesystem>
 #include <functional>
@@ -59,21 +60,26 @@ struct ReconciliationResult {
     const std::vector<std::vector<float>>& similarity_matrix,
     const std::vector<int32_t>& cluster_ids);
 
+// `threads` is the ThreadPlan sherpa entry; every sherpa-onnx session the
+// call creates uses it.
 [[nodiscard]] SherpaDiarizationResult run_sherpa_diarization(
     const std::filesystem::path& wav_path,
     const std::filesystem::path& model_dir,
+    const svp::models::SherpaThreadCounts& threads,
     const std::vector<AsrWord>& words = {},
     DiarizationProgressCallback on_progress = {});
 
 [[nodiscard]] std::vector<std::string> refine_word_speakers_by_embedding(
     const std::filesystem::path& wav_path,
     const std::filesystem::path& model_dir,
+    const svp::models::SherpaThreadCounts& threads,
     const std::vector<AsrWord>& words,
     const SherpaDiarizationResult& diar_result);
 
 [[nodiscard]] std::vector<std::string> replay_word_speaker_assignments(
     const std::filesystem::path& wav_path,
     const std::filesystem::path& model_dir,
+    const svp::models::SherpaThreadCounts& threads,
     const std::vector<AsrWord>& words,
     const SherpaDiarizationResult& diar_result);
 

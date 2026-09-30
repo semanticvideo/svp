@@ -1,5 +1,6 @@
 #include "svp/builder/build_pipeline.hpp"
 #include "svp/builder/build_progress.hpp"
+#include "svp/builder/build_thread_plan.hpp"
 #include "svp/builder/model_cache_preflight.hpp"
 
 #include "build_frame_plan.hpp"
@@ -58,6 +59,11 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
   if (!sink) {
     sink = default_progress_sink();
   }
+  std::optional<svp::models::ThreadPlanResolution> resolved_thread_plan;
+  const auto with_plan = [&resolved_thread_plan](BuildPipelineResult result) {
+    result.thread_plan = resolved_thread_plan;
+    return result;
+  };
 
   try {
     std::ostringstream diag_name;
@@ -88,6 +94,15 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
       verify_authoritative_model_cache(effective_options.model_cache_dir);
     }
 
+    // Every runtime thread count for this build is fixed here, once, and
+    // passed to each stage. Memory diagnostics must be configured first: they
+    // gate the recognition-worker override.
+    resolved_thread_plan = resolve_build_thread_plan(
+        effective_options, svp::models::detect_host_cpu_topology(),
+        svp::models::process_environment_lookup(),
+        svp::core::memory_diagnostics_enabled());
+    const svp::models::ThreadPlan& thread_plan = resolved_thread_plan->plan;
+
     sink->emit(make_stage_started(ProgressStageId::media_probe));
     const svp::media::MediaIngestPlan plan =
         svp::media::build_media_ingest_plan(
@@ -117,7 +132,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     }
 
     BuildPipelineContext context{effective_options, stage_plan, plan, staging_dir,
-                                 model_runtime_available, output,
+                                 thread_plan, model_runtime_available, output,
                                  svp::vision::FrameCatalog{}, *sink};
     // Frame IDs come from the plan, not from which stage decodes first.
     plan_build_frames(context.frame_catalog, stage_plan, plan,
@@ -138,7 +153,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         const PackageVisionStageResult vision_result =
             run_package_vision_stage(context);
         if (const std::optional<int> audio_exit = run_audio_stage(context)) {
-          return {.exit_code = *audio_exit};
+          return with_plan({.exit_code = *audio_exit});
         }
         package_result = run_package_final_stage(context, vision_result);
       } else {
@@ -149,7 +164,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         nlohmann::json audio_output = output;
         BuildPipelineContext audio_context{
             effective_options, stage_plan, plan, staging_dir,
-            model_runtime_available, audio_output,
+            thread_plan, model_runtime_available, audio_output,
             svp::vision::FrameCatalog{}, *sink};
 
         const BuilderConcurrencyPolicy policy =
@@ -173,14 +188,14 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
           output["audio_foundation"] = audio_output["audio_foundation"];
         }
         if (audio_exit) {
-          return {.exit_code = *audio_exit};
+          return with_plan({.exit_code = *audio_exit});
         }
 
         package_result = run_package_final_stage(context, vision_result);
       }
     } else if (stage_plan.run_audio) {
       if (const std::optional<int> audio_exit = run_audio_stage(context)) {
-        return {.exit_code = *audio_exit};
+        return with_plan({.exit_code = *audio_exit});
       }
     }
     if (!stage_plan.run_package_skeleton && stage_plan.run_vision_plan) {
@@ -205,6 +220,8 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         {"ocr_performance", effective_options.performance.ocr_performance_profile},
         {"visual_tracking_quality", effective_options.visual_tracking_quality},
         {"valid_svp_package_written", package_result.validator_passes},
+        {"thread_plan",
+         svp::models::thread_plan_resolution_to_json(*resolved_thread_plan)},
     };
 
     if (stage_plan.run_package_skeleton) {
@@ -245,33 +262,33 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
       const std::string message =
           "failed to write SVP package: " + package_result.package_path.string();
       std::cerr << "svp-builder: " << message << "\n";
-      return {.exit_code = kBuildFailedExitCode,
+      return with_plan({.exit_code = kBuildFailedExitCode,
               .failure = BuildPipelineFailure::package_write,
-              .error_message = message};
+              .error_message = message});
     }
     if (stage_plan.run_package_skeleton && !package_result.validator_passes) {
       svp::core::check_memory_limit("builder.run.complete.validator_failed");
-      return {.exit_code = package_result.validator_exit_code};
+      return with_plan({.exit_code = package_result.validator_exit_code});
     }
     svp::core::check_memory_limit("builder.run.complete");
     staging_guard.cleanup_on_success();
-    return {.exit_code = 0};
+    return with_plan({.exit_code = 0});
   } catch (const ModelCachePreflightError& error) {
     svp::core::trace_memory_event("builder.run.exception", {
         {"error", error.what()}
     });
     std::cerr << "svp-builder: " << error.what() << "\n";
-    return {.exit_code = kBuildFailedExitCode,
+    return with_plan({.exit_code = kBuildFailedExitCode,
             .failure = BuildPipelineFailure::model_cache_preflight,
-            .error_message = error.what()};
+            .error_message = error.what()});
   } catch (const std::exception& error) {
     svp::core::trace_memory_event("builder.run.exception", {
         {"error", error.what()}
     });
     std::cerr << "svp-builder: " << error.what() << "\n";
-    return {.exit_code = kBuildFailedExitCode,
+    return with_plan({.exit_code = kBuildFailedExitCode,
             .failure = BuildPipelineFailure::processing,
-            .error_message = error.what()};
+            .error_message = error.what()});
   }
 }
 

@@ -728,7 +728,8 @@ std::string make_track_id(int idx) {
 VisualEntityEmbeddingRuntime load_visual_entity_embedding_runtime(
     const std::filesystem::path& model_cache_root,
     const std::string& model_id,
-    const std::string& execution_provider) {
+    const std::string& execution_provider,
+    const svp::models::OrtThreadCounts& threads) {
   VisualEntityEmbeddingRuntime runtime;
   if (model_cache_root.empty()) {
     runtime.limitations_note =
@@ -756,6 +757,7 @@ VisualEntityEmbeddingRuntime load_visual_entity_embedding_runtime(
 
     svp::models::OnnxSessionOptions session_options;
     session_options.execution_provider = execution_provider;
+    session_options.threads = threads;
     auto session = svp::models::OnnxSession::load(
         manifest, *model_dir, session_options);
     runtime.session =
@@ -950,7 +952,8 @@ EntityTrackResult run_visual_entity_tracker(
     owned_embedding_runtime = load_visual_entity_embedding_runtime(
         model_cache_root,
         options.embedding_model_id,
-        options.execution_provider);
+        options.execution_provider,
+        options.embedding_threads);
     embedding_runtime = &owned_embedding_runtime;
   }
   svp::models::OnnxSession* embedding_session =

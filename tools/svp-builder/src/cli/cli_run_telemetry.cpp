@@ -31,6 +31,11 @@ CliRunTelemetry::progress_sink() const {
   return timeline_;
 }
 
+void CliRunTelemetry::record_thread_plan(
+    std::optional<svp::models::ThreadPlanResolution> thread_plan) {
+  thread_plan_ = std::move(thread_plan);
+}
+
 int CliRunTelemetry::finish(int exit_code) {
   finished_ = true;
   const bool report_written = write_report(exit_code);
@@ -49,6 +54,7 @@ bool CliRunTelemetry::write_report(std::optional<int> exit_code) noexcept {
         .total_wall_ms = timeline_->elapsed_ms(),
         .event_count = timeline_->emitted_count(),
         .final_resources = svp::builder::sample_process_resources(),
+        .thread_plan = thread_plan_,
     };
     svp::builder::write_build_run_report(run_report_path_, *recorder_, summary);
     return true;

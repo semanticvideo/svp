@@ -19,6 +19,7 @@ struct BuildPipelineContext {
   const BuildStageExecutionPlan& stage_plan;
   const svp::media::MediaIngestPlan& plan;
   const std::filesystem::path& staging_dir;
+  const svp::models::ThreadPlan& thread_plan;
   bool model_runtime_available = false;
   nlohmann::json& output;
   svp::vision::FrameCatalog frame_catalog;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/audio/vad_task_plan.hpp"
+#include "svp/models/thread_plan.hpp"
 
 #include <cstddef>
 #include <nlohmann/json_fwd.hpp>
@@ -33,9 +34,11 @@ struct VadExecutionBoundary {
     bool waveform_available,
     bool model_runtime_available);
 
+// `threads` is the ThreadPlan speech_activity role.
 [[nodiscard]] VadExecutionBoundary execute_vad_boundary(
     const VadExecutionBoundary& boundary,
-    const std::filesystem::path& staging_root);
+    const std::filesystem::path& staging_root,
+    const svp::models::OrtThreadCounts& threads);
 
 [[nodiscard]] nlohmann::json vad_execution_boundary_to_json(
     const VadExecutionBoundary& boundary);

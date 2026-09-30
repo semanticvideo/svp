@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/builder/build_progress.hpp"
+#include "svp/models/thread_plan.hpp"
 #include "svp/vision/inference_performance.hpp"
 #include "svp/vision/visual_tracking_quality.hpp"
 
@@ -58,6 +59,9 @@ struct BuildPipelineOptions {
   bool force_single_speaker = false;
   bool serial_pipeline = false;
   bool reset_staging_before_stages = false;
+  // Runtime thread counts to use as given (a distributed coordinator's plan).
+  // Empty: the build resolves its plan from the host once at start.
+  std::optional<svp::models::ThreadPlan> thread_plan;
   std::shared_ptr<BuildProgressSink> progress_sink;
   bool quiet = false;
   bool verbose = false;
@@ -81,6 +85,9 @@ struct BuildPipelineResult {
   int exit_code = 0;
   BuildPipelineFailure failure = BuildPipelineFailure::none;
   std::string error_message;
+  // The plan every stage ran with; empty if the build failed before
+  // resolving it.
+  std::optional<svp::models::ThreadPlanResolution> thread_plan;
 };
 
 std::vector<std::string_view> supported_build_stage_names();

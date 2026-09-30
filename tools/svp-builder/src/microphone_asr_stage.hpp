@@ -3,6 +3,7 @@
 #include "svp/audio/asr_execution_boundary.hpp"
 #include "svp/audio/audio_extraction_executor.hpp"
 #include "svp/audio/audio_extraction_plan.hpp"
+#include "svp/models/thread_plan.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -36,6 +37,7 @@ struct MicrophoneDiarizationProgressCallbacks {
     bool asr_model_verified,
     const std::filesystem::path& staging_dir,
     const std::filesystem::path& model_cache_root,
+    const svp::models::ThreadPlan& thread_plan,
     MicrophoneAsrProgressCallback progress = {},
     MicrophoneDiarizationProgressCallbacks diarization_progress = {});
 

@@ -30,7 +30,7 @@ void test_real_sherpa_diarization_speaker_count_fixtures_when_enabled() {
     std::vector<std::pair<std::size_t, std::size_t>> progress;
     const svp::audio::SherpaDiarizationResult result =
         svp::audio::run_sherpa_diarization(
-            fixture, model_dir_env, {},
+            fixture, model_dir_env, audio_test_thread_plan().sherpa, {},
             [&progress](std::size_t current, std::size_t total) {
               progress.emplace_back(current, total);
             });
@@ -116,7 +116,8 @@ void assert_real_asr_fixture_word_attribution(
           svp::audio::verify_asr_model_files(
               "model_whisper_small_en", model_cache_root));
   asr_boundary = svp::audio::execute_asr_boundary(
-      std::move(asr_boundary), staging_root, model_cache_root);
+      std::move(asr_boundary), staging_root, model_cache_root,
+      svp::audio::whisper_runtime_threads(audio_test_thread_plan()));
   if (asr_boundary.asr_status != svp::audio::AsrStatus::ran) {
     throw std::runtime_error("real ASR did not run for fixture: " +
                              fixture_case.filename);
@@ -144,6 +145,7 @@ void assert_real_asr_fixture_word_attribution(
       std::move(diar_boundary),
       staging_root,
       model_cache_root,
+      audio_test_thread_plan().sherpa,
       false,
       false,
       asr_boundary.reconciled_words);

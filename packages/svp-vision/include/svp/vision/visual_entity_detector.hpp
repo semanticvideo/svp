@@ -24,6 +24,8 @@ struct VisualEntityDetection {
 struct VisualEntityDetectorOptions {
   std::string model_id = svp::models::kRfDetrNanoCocoModelId;
   std::string execution_provider = "cpu";
+  // ThreadPlan visual_entity_detection role.
+  svp::models::OrtThreadCounts threads;
   // Candidate floor. Weak boxes are available to continue an established
   // track, but the tracker applies a separate 0.15 discovery threshold before
   // allowing a detector-only box to create an entity.

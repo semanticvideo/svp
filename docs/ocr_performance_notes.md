@@ -95,6 +95,13 @@ The tested branch currently includes instrumentation and runtime knobs for OCR p
 - `SVP_OCR_DIAG_TIMESTAMPS_US`
 - `SVP_BUILDER_MEMORY_LIMIT_MB`
 
+The thread-count knobs (`SVP_OCR_*ONNX_INTRA_OP_THREADS`,
+`SVP_OCR_*ONNX_INTER_OP_THREADS`, and `SVP_OCR_RECOGNITION_PARALLEL_WORKERS`
+with memory diagnostics enabled) now override the build's thread plan (see
+"Explicit Thread Plan" below) and are listed under
+`builder_command.thread_plan.environment_overrides` in the builder foundation
+JSON and in `--run-report`.
+
 CPU diagnostics were added to memory diagnostics so each diagnostics event can record process CPU time:
 
 - `user_cpu_ms`
@@ -470,3 +477,40 @@ Four-profile conclusion:
 - `background` is the default low-impact practical option: it preserved behavior, stayed below 1 GB peak on both heavy windows, and improved speed versus `serial`.
 - `conservative` remains the faster bounded one-off profile.
 - `fast` remains the foreground speed profile.
+
+## Explicit Thread Plan
+
+Every runtime thread count a build uses is now resolved once at build start
+into a `ThreadPlan` (`packages/svp-models/include/svp/models/thread_plan.hpp`)
+and passed to each consumer: ONNX Runtime intra/inter-op per model role, PP-OCR
+recognition workers, whisper.cpp decode and VAD threads, and sherpa-onnx
+threads. OpenCV is recorded as `auto` because SVP never calls
+`cv::setNumThreads`. A local build resolves the plan from the host so its values
+equal what each runtime chose before; a supplied plan (a future distributed
+coordinator's) is used as given, so output does not depend on a worker's cores.
+
+ONNX Runtime default thread count, measured on an Apple M4 (10 logical CPUs,
+4 performance + 6 efficiency cores), ONNX Runtime 1.23.2 from vcpkg:
+
+- Source: with intra-op 0, ONNX Runtime sizes the pool from
+  `PosixEnv::GetNumPhysicalCpuCores()`. Its cpuinfo path is compiled out on
+  `__APPLE__` (`onnxruntime/core/platform/posix/env.cc`), so the value is
+  `max(1, hardware_concurrency() / 2)`: 5 here. It is not the physical,
+  performance, or total core count.
+- Evidence: OCR-only builds on the 8 heaviest Gator frames (timestamps
+  235, 255, 265, 355, 515, 525, 565, 575 s; 494 observations):
+
+| `SVP_OCR_ONNX_INTRA_OP_THREADS` | Peak process threads | User CPU | OCR outputs vs unset |
+| --- | ---: | ---: | --- |
+| unset (0) | 12 | 697 s | Control (a second run was byte-identical) |
+| 5 | 12 | 697 s | Byte-identical |
+| 4 | 10 | 562 s | Confidence values differ |
+| 6 | 14 | 745 s | Confidence values differ |
+| 10 | 22 | 1,077 s | Confidence values differ |
+
+Each intra-op step adds one pool thread to each of the two OCR sessions, so
+the thread counts place the default at 5. The local plan therefore pins
+ONNX Runtime at `max(1, logical_cpus / 2)` on macOS. On other platforms ONNX
+Runtime uses cpuinfo, which SVP does not reproduce, so the plan keeps `auto`
+there and reports `host_independent: false`; a distributed coordinator must
+send concrete values.
