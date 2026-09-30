@@ -37,8 +37,13 @@ handling.
 Execution contracts for distributed builds: `ArtifactRef`, `TaskSpec`, and
 `TaskResult` records with their canonical JSON codecs, `parameters_blake3`,
 `cache_key` (RC2 §20.3), and `output_digest` constructions, the
-transport-independent frame codec, and the task type registry. Nothing links it
-yet; builder integration, scheduling, and transport come later.
+transport-independent frame codec, and the task type registry. It also holds
+the build storage layer: the global content-addressed cache (`CasStore`, RC2
+§20.3 roots, `blobs/b3/<2 hex>/<62 hex>`, verified writes, LRU eviction with
+pins, RC2 §20.5.2 non-fatal errors) and the RC2 §20.4 recovery journal
+(`RecoveryJournal`: `<output>-journal/` with `build.sqlite` in WAL mode,
+verified artifact commits, resume, and §20.5.1 cleanup). Nothing links it yet;
+builder integration, scheduling, and transport come later.
 
 ## svp-package
 

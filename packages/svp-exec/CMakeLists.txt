@@ -71,3 +71,68 @@ if(BUILD_TESTING)
              COMMAND svp-exec-${SVP_EXEC_TEST_NAME}-tests)
   endforeach()
 endif()
+
+# --- Content-addressed store and recovery journal ----------------------------
+# RC2 §20.3 (content-addressable memoization), §20.4 (recovery journal),
+# §20.5 (journal cleanup, cache eviction); plan §4.6. POSIX file primitives
+# (flock, fsync/F_FULLFSYNC) and SQLite.
+find_package(SQLite3 REQUIRED)
+
+target_sources(svp-exec
+  PRIVATE
+    src/blake3_stream.cpp
+    src/cache_error.cpp
+    src/cache_root.cpp
+    src/cas_eviction.cpp
+    src/cas_layout.cpp
+    src/cas_pin.cpp
+    src/cas_store.cpp
+    src/durable_io.cpp
+    src/file_lock.cpp
+    src/journal_artifact_store.cpp
+    src/journal_cleanup.cpp
+    src/journal_distributed_records.cpp
+    src/journal_error.cpp
+    src/journal_layout.cpp
+    src/journal_manifest.cpp
+    src/journal_records.cpp
+    src/journal_resume.cpp
+    src/journal_schema.cpp
+    src/journal_tasks.cpp
+    src/recovery_journal.cpp
+    src/source_fingerprint.cpp
+    src/sqlite_database.cpp
+    src/task_state.cpp
+    src/utc_clock.cpp
+    src/verified_blob.cpp
+)
+
+target_link_libraries(svp-exec PRIVATE SQLite::SQLite3)
+
+if(BUILD_TESTING)
+  set(SVP_EXEC_STORAGE_TESTS
+    cas_store
+    cas_eviction
+    recovery_journal
+    journal_resume
+  )
+
+  foreach(SVP_EXEC_TEST IN LISTS SVP_EXEC_STORAGE_TESTS)
+    string(REPLACE "_" "-" SVP_EXEC_TEST_NAME "${SVP_EXEC_TEST}")
+    add_executable(svp-exec-${SVP_EXEC_TEST_NAME}-tests
+      tests/${SVP_EXEC_TEST}_tests.cpp
+    )
+    target_compile_features(svp-exec-${SVP_EXEC_TEST_NAME}-tests PRIVATE cxx_std_20)
+    target_include_directories(svp-exec-${SVP_EXEC_TEST_NAME}-tests PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    )
+    # Tests inspect build.sqlite directly to check the RC2 §20.4 schema.
+    target_link_libraries(svp-exec-${SVP_EXEC_TEST_NAME}-tests
+      PRIVATE
+        svp::exec
+        SQLite::SQLite3
+    )
+    add_test(NAME svp-exec-${SVP_EXEC_TEST_NAME}-tests
+             COMMAND svp-exec-${SVP_EXEC_TEST_NAME}-tests)
+  endforeach()
+endif()
