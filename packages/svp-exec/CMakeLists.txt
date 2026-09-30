@@ -41,7 +41,7 @@ target_link_libraries(svp-exec
     nlohmann_json::nlohmann_json
   PRIVATE
     svp::core
-    svp::models
+    svp::models_identity
     ${BLAKE3_LIBRARY}
 )
 

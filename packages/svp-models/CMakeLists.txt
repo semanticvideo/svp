@@ -58,6 +58,27 @@ if(SVP_MODEL_ONNX_RUNTIME_AVAILABLE)
     NAMES coreml_proto)
 endif()
 
+# Canonical model identity rules (model_id, model_bundle_id). Kept in its own
+# target with no ONNX Runtime or BLAKE3 dependency so contract-only libraries
+# (svp-exec) can validate model identities without linking the model runtime.
+add_library(svp-models-identity
+  src/model_id.cpp
+)
+
+add_library(svp::models_identity ALIAS svp-models-identity)
+
+target_include_directories(svp-models-identity
+  PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_compile_features(svp-models-identity PUBLIC cxx_std_20)
+
+target_link_libraries(svp-models-identity
+  PUBLIC
+    svp::core
+)
+
 add_library(svp-models
   src/bundle_digest.cpp
   src/cache.cpp
@@ -66,7 +87,6 @@ add_library(svp-models
   src/error.cpp
   src/hash.cpp
   src/manifest.cpp
-  src/model_id.cpp
   src/model_lock.cpp
   src/reference_model_set.cpp
   src/runtime.cpp
@@ -107,6 +127,7 @@ target_link_libraries(svp-models
   PUBLIC
     nlohmann_json::nlohmann_json
     svp::core
+    svp::models_identity
   PRIVATE
     ${BLAKE3_LIBRARY}
 )
