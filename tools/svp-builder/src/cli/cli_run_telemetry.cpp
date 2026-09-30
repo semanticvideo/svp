@@ -10,9 +10,11 @@
 CliRunTelemetry::CliRunTelemetry(
     std::string command,
     std::shared_ptr<svp::builder::BuildProgressSink> render_sink,
-    std::filesystem::path run_report_path)
+    std::filesystem::path run_report_path,
+    std::optional<svp::builder::RuntimeToolSelection> runtime_tools)
     : command_(std::move(command)),
-      run_report_path_(std::move(run_report_path)) {
+      run_report_path_(std::move(run_report_path)),
+      runtime_tools_(std::move(runtime_tools)) {
   std::vector<std::shared_ptr<svp::builder::BuildProgressSink>> downstream{
       std::move(render_sink)};
   if (!run_report_path_.empty()) {
@@ -55,6 +57,7 @@ bool CliRunTelemetry::write_report(std::optional<int> exit_code) noexcept {
         .event_count = timeline_->emitted_count(),
         .final_resources = svp::builder::sample_process_resources(),
         .thread_plan = thread_plan_,
+        .runtime_tools = runtime_tools_,
     };
     svp::builder::write_build_run_report(run_report_path_, *recorder_, summary);
     return true;

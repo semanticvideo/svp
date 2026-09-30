@@ -5,6 +5,7 @@
 
 #include "build_frame_plan.hpp"
 #include "build_pipeline_internal.hpp"
+#include "runtime_tools_json.hpp"
 #include "staging_cleanup.hpp"
 #include "svp/audio/sherpa_diarization.hpp"
 #include "svp/audio/whisper_model.hpp"
@@ -223,6 +224,10 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         {"thread_plan",
          svp::models::thread_plan_resolution_to_json(*resolved_thread_plan)},
     };
+    if (effective_options.runtime_tools) {
+      output["builder_command"]["runtime_tools"] =
+          runtime_tools_json(*effective_options.runtime_tools);
+    }
 
     if (stage_plan.run_package_skeleton) {
       output["builder_command"]["package_path"] =

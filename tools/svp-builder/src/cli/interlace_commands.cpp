@@ -18,7 +18,7 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
         opts.ic_progress_mode, opts.ic_quiet, opts.ic_create_sub);
     if (!render_sink) return 2;
     CliRunTelemetry telemetry("interlace create", std::move(render_sink),
-                              opts.ic_run_report_path);
+                              opts.ic_run_report_path, opts.ic_runtime_tools);
     auto sink = telemetry.progress_sink();
 
     svp::builder::InterlaceCreateOptions ic_opts;

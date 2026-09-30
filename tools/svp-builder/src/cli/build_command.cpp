@@ -26,7 +26,7 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
       options.progress_mode, options.quiet, build_subcommand);
   if (!render_sink) return 2;
   CliRunTelemetry telemetry("build", std::move(render_sink),
-                            options.run_report_path);
+                            options.run_report_path, options.runtime_tools);
   auto progress_sink = telemetry.progress_sink();
 
   const auto started_at = std::chrono::steady_clock::now();
@@ -59,6 +59,7 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
   pipeline_options.force_single_speaker = options.force_single_speaker;
   pipeline_options.serial_pipeline = options.serial_pipeline;
   pipeline_options.progress_sink = progress_sink;
+  pipeline_options.runtime_tools = options.runtime_tools;
   pipeline_options.quiet = options.quiet;
   pipeline_options.verbose = options.verbose;
 

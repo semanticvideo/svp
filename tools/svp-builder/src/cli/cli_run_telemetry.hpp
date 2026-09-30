@@ -3,6 +3,7 @@
 #include "svp/builder/build_progress.hpp"
 #include "svp/builder/build_run_report.hpp"
 #include "svp/builder/progress_timeline.hpp"
+#include "svp/builder/runtime_tools.hpp"
 
 #include <filesystem>
 #include <memory>
@@ -18,7 +19,9 @@ class CliRunTelemetry {
  public:
   CliRunTelemetry(std::string command,
                   std::shared_ptr<svp::builder::BuildProgressSink> render_sink,
-                  std::filesystem::path run_report_path);
+                  std::filesystem::path run_report_path,
+                  std::optional<svp::builder::RuntimeToolSelection> runtime_tools =
+                      std::nullopt);
   ~CliRunTelemetry();
 
   CliRunTelemetry(const CliRunTelemetry&) = delete;
@@ -42,6 +45,7 @@ class CliRunTelemetry {
 
   std::string command_;
   std::filesystem::path run_report_path_;
+  std::optional<svp::builder::RuntimeToolSelection> runtime_tools_;
   std::shared_ptr<svp::builder::BuildRunReportRecorder> recorder_;
   std::shared_ptr<svp::builder::TimestampedProgressSink> timeline_;
   std::optional<svp::models::ThreadPlanResolution> thread_plan_;

@@ -3,6 +3,7 @@
 #include "svp/builder/build_progress.hpp"
 #include "svp/builder/process_resources.hpp"
 #include "svp/models/thread_plan.hpp"
+#include "svp/builder/runtime_tools.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -64,6 +65,8 @@ struct BuildRunSummary {
   std::optional<ProcessResourceSample> final_resources;
   // The runtime thread plan the build ran with, when it got that far.
   std::optional<svp::models::ThreadPlanResolution> thread_plan;
+  // Where the command's external tools came from (`runtime_tools`).
+  std::optional<RuntimeToolSelection> runtime_tools;
 };
 
 std::string render_build_run_report_json(const BuildRunReportRecorder& recorder,

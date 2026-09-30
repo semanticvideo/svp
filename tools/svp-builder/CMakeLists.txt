@@ -21,6 +21,8 @@ add_library(svp-builder-lib
   src/process_resources.cpp
   src/progress_renderer.cpp
   src/progress_timeline.cpp
+  src/runtime_tools.cpp
+  src/runtime_tools_json.cpp
   src/vision_plan_stage.cpp
   src/interlace/interlace_create.cpp
   src/interlace/interlace_validate.cpp
@@ -63,6 +65,7 @@ target_link_libraries(svp-builder-lib
     nlohmann_json::nlohmann_json
     svp::audio
     svp::core
+    svp::exec
     svp::media
     svp::models
     svp::package
@@ -88,6 +91,7 @@ add_executable(svp-builder
   src/cli/transport_commands.cpp
   src/cli/interlace_output.cpp
   src/cli/main_dispatch.cpp
+  src/cli/cli_runtime_tools.cpp
 )
 
 target_compile_features(svp-builder PRIVATE cxx_std_20)
@@ -165,6 +169,20 @@ if(BUILD_TESTING)
 
   add_executable(svp-transport-output-policy-tests
     tests/transport_output_policy_tests.cpp
+  )
+
+  add_executable(svp-builder-runtime-tools-tests
+    tests/runtime_tools_tests.cpp
+  )
+  target_include_directories(svp-builder-runtime-tools-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_compile_features(svp-builder-runtime-tools-tests PRIVATE cxx_std_20)
+  target_link_libraries(svp-builder-runtime-tools-tests
+    PRIVATE
+      svp::builder
+      svp::exec
+      nlohmann_json::nlohmann_json
   )
 
   add_executable(svp-interlace-tests
@@ -311,6 +329,7 @@ if(BUILD_TESTING)
   add_test(NAME svp-builder-run-report-tests COMMAND svp-builder-run-report-tests)
   add_test(NAME svp-builder-thread-plan-tests COMMAND svp-builder-thread-plan-tests
            WORKING_DIRECTORY ${SVP_BUILDER_RUNTIME_RESOURCE_TEST_CWD})
+  add_test(NAME svp-builder-runtime-tools-tests COMMAND svp-builder-runtime-tools-tests)
   add_test(NAME svp-builder-cli-elapsed-tests COMMAND svp-builder-cli-elapsed-tests)
   add_test(NAME svp-transport-output-policy-tests
            COMMAND svp-transport-output-policy-tests)

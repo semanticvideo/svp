@@ -1,10 +1,14 @@
 #pragma once
 
+#include "cli_runtime_tools.hpp"
 #include "svp/builder/build_pipeline.hpp"
+#include "svp/builder/runtime_tools.hpp"
 
 #include <CLI/CLI.hpp>
 
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace svp::builder {
 class BuildProgressSink;
@@ -70,6 +74,8 @@ struct BuildCliOptions {
   bool quiet = false;
   bool verbose = false;
   bool overwrite = false;
+  // Filled by apply_cli_runtime_tools() after parsing.
+  std::optional<svp::builder::RuntimeToolSelection> runtime_tools;
 };
 
 struct InterlaceCliOptions {
@@ -93,6 +99,8 @@ struct InterlaceCliOptions {
   std::string ic_progress_mode = "auto";
   std::string ic_run_report_path;
   bool ic_quiet = false;
+  // Filled by apply_cli_runtime_tools() after parsing.
+  std::optional<svp::builder::RuntimeToolSelection> ic_runtime_tools;
 
   // interlace validate
   std::string iv_svpi;
@@ -228,6 +236,9 @@ struct CliContext {
 
   DiarizeCliOptions diarize_opts;
   DiarizeReplayCliOptions diarize_replay_opts;
+
+  // Every --ffmpeg/--ffprobe/--sherpa-lib option (cli_runtime_tools.hpp).
+  std::vector<RuntimeToolBinding> runtime_tool_bindings;
 
   CLI::App* probe_subcommand = nullptr;
   CLI::App* build_subcommand = nullptr;

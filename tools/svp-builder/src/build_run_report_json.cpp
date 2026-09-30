@@ -1,4 +1,6 @@
 #include "svp/builder/build_run_report.hpp"
+
+#include "runtime_tools_json.hpp"
 #include "svp/package/output_directory.hpp"
 
 #include <nlohmann/json.hpp>
@@ -132,6 +134,9 @@ std::string render_build_run_report_json(const BuildRunReportRecorder& recorder,
   if (summary.thread_plan) {
     report["thread_plan"] =
         svp::models::thread_plan_resolution_to_json(*summary.thread_plan);
+  }
+  if (summary.runtime_tools) {
+    report["runtime_tools"] = runtime_tools_json(*summary.runtime_tools);
   }
   return report.dump(2) + "\n";
 }
