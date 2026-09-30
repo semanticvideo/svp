@@ -5,10 +5,8 @@
 #include "svp/vision/ocr_generation.hpp"
 #include "svp/vision/visual_entity_tracker.hpp"
 
-#include <cmath>
 #include <cstdint>
 #include <filesystem>
-#include <utility>
 
 namespace svp::builder {
 
@@ -31,28 +29,10 @@ void run_foundation_ocr_stage(BuildPipelineContext& context) {
       svp::vision::recognition_workers_for_ocr_profile(
           context.options.performance.ocr_performance_profile);
   ocr_opts.recognition_parallel_min_boxes = 16;
-  {
-    int src_w = static_cast<int>(context.plan.primary_video_stream.width);
-    int src_h = static_cast<int>(context.plan.primary_video_stream.height);
-    if (std::abs(context.plan.primary_video_stream.rotation_degrees) == 90) {
-      std::swap(src_w, src_h);
-    }
-    const int max_ocr_dim = 1920;
-    if (src_w > max_ocr_dim || src_h > max_ocr_dim) {
-      if (src_w >= src_h) {
-        ocr_opts.ocr_frame_width = max_ocr_dim;
-        ocr_opts.ocr_frame_height = static_cast<int>(
-            std::round(static_cast<double>(src_h) * max_ocr_dim / src_w));
-      } else {
-        ocr_opts.ocr_frame_height = max_ocr_dim;
-        ocr_opts.ocr_frame_width = static_cast<int>(
-            std::round(static_cast<double>(src_w) * max_ocr_dim / src_h));
-      }
-    } else {
-      ocr_opts.ocr_frame_width = src_w;
-      ocr_opts.ocr_frame_height = src_h;
-    }
-  }
+  const auto ocr_dims =
+      svp::vision::ocr_decode_frame_dimensions(context.plan);
+  ocr_opts.ocr_frame_width = ocr_dims.width;
+  ocr_opts.ocr_frame_height = ocr_dims.height;
 
   ocr_opts.frame_catalog = &context.frame_catalog;
   ocr_opts.generate_evidence_crops = true;

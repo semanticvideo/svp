@@ -4,6 +4,7 @@ find_package(libzip CONFIG REQUIRED)
 
 add_library(svp-builder-lib
   src/audio_stage.cpp
+  src/build_frame_plan.cpp
   src/build_pipeline.cpp
   src/build_pipeline_io.cpp
   src/build_progress.cpp
@@ -116,6 +117,19 @@ if(BUILD_TESTING)
 
   add_executable(svp-builder-pipeline-tests
     tests/build_pipeline_tests.cpp
+  )
+
+  add_executable(svp-builder-frame-plan-tests
+    tests/build_frame_plan_tests.cpp
+  )
+  target_include_directories(svp-builder-frame-plan-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_compile_features(svp-builder-frame-plan-tests PRIVATE cxx_std_20)
+  target_link_libraries(svp-builder-frame-plan-tests
+    PRIVATE
+      svp::builder
+      svp::vision
   )
 
   add_executable(svp-builder-model-cache-preflight-tests
@@ -257,6 +271,8 @@ if(BUILD_TESTING)
   add_test(NAME svp-builder-reference-model-ids-tests
            COMMAND svp-builder-reference-model-ids-tests
                    ${CMAKE_SOURCE_DIR}/spec/registries/reference-model-set.json)
+  add_test(NAME svp-builder-frame-plan-tests
+           COMMAND svp-builder-frame-plan-tests)
   add_test(NAME svp-builder-pipeline-tests COMMAND svp-builder-pipeline-tests
            WORKING_DIRECTORY ${SVP_BUILDER_RUNTIME_RESOURCE_TEST_CWD})
   add_test(NAME svp-builder-model-cache-preflight-tests

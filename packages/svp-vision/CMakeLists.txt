@@ -5,6 +5,7 @@ add_library(svp-vision
   src/canonical_frame_input.cpp
   src/color_frame_sampling.cpp
   src/frame_catalog.cpp
+  src/frame_plan.cpp
   src/color_observation_records.cpp
   src/color_quantization.cpp
   src/depth_generation.cpp
@@ -104,6 +105,20 @@ target_link_libraries(svp-visual-entity-diagnostic
 )
 
 if(BUILD_TESTING)
+  add_executable(svp-vision-frame-plan-tests
+    tests/frame_plan_tests.cpp
+  )
+
+  target_compile_features(svp-vision-frame-plan-tests PRIVATE cxx_std_20)
+
+  target_link_libraries(svp-vision-frame-plan-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-frame-plan-tests
+           COMMAND svp-vision-frame-plan-tests)
+
   add_executable(svp-vision-visual-entity-sampling-tests
     tests/visual_entity_sampling_tests.cpp
   )

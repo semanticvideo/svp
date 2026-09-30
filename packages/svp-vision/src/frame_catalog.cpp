@@ -20,7 +20,15 @@ std::string FrameCatalog::register_frame(std::int64_t timestamp_us,
     entry.purposes.insert(purpose);
     if (keyframe)
       entry.keyframe = true;
+    if (locked_to_plan_)
+      entry.decoded = true;
     return entry.frame_id;
+  }
+
+  if (locked_to_plan_) {
+    throw UnplannedFrameError(
+        "frame at " + std::to_string(timestamp_us) + "us (purpose '" +
+        purpose + "') is not in the locked frame plan");
   }
 
   const std::size_t index = entries_.size();
@@ -30,9 +38,22 @@ std::string FrameCatalog::register_frame(std::int64_t timestamp_us,
   entry.timestamp_us = timestamp_us;
   entry.keyframe = keyframe;
   entry.purposes.insert(purpose);
+  entry.decoded = true;
   timestamp_to_index_[timestamp_us] = index;
   entries_.push_back(std::move(entry));
   return entries_.back().frame_id;
+}
+
+void FrameCatalog::lock_to_plan() {
+  if (locked_to_plan_)
+    return;
+  locked_to_plan_ = true;
+  for (auto& entry : entries_)
+    entry.decoded = false;
+}
+
+bool FrameCatalog::locked_to_plan() const {
+  return locked_to_plan_;
 }
 
 std::optional<std::size_t> FrameCatalog::get_frame_index(
@@ -52,12 +73,27 @@ std::optional<std::size_t> FrameCatalog::get_frame_index(
   return entries_[it->second].frame_index;
 }
 
-const std::vector<FrameCatalogEntry>& FrameCatalog::entries() const {
+std::vector<FrameCatalogEntry> FrameCatalog::entries() const {
+  std::vector<FrameCatalogEntry> decoded;
+  decoded.reserve(entries_.size());
+  for (const auto& entry : entries_) {
+    if (entry.decoded)
+      decoded.push_back(entry);
+  }
+  return decoded;
+}
+
+const std::vector<FrameCatalogEntry>& FrameCatalog::planned_entries() const {
   return entries_;
 }
 
 std::size_t FrameCatalog::size() const {
-  return entries_.size();
+  std::size_t decoded = 0;
+  for (const auto& entry : entries_) {
+    if (entry.decoded)
+      ++decoded;
+  }
+  return decoded;
 }
 
 }  // namespace svp::vision

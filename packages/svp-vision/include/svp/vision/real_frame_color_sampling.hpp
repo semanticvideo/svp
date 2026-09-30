@@ -10,6 +10,12 @@
 
 namespace svp::vision {
 
+// Number of canonical frames decoded for the color sampling path. More frames
+// than kCanonicalDecodedFrameCount are used so that color-change-based scene
+// segmentation has enough temporal resolution to detect boundaries in a
+// 30-second video. The frame plan reproduces this schedule up front.
+inline constexpr int kColorDecodedFrameCount = 15;
+
 // Result of attempting to sample real decoded frames from the source media.
 //
 // real_decoding_attempted - true when ffmpeg was found and pre-conditions were

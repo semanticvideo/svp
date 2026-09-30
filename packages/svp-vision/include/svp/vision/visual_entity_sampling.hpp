@@ -1,5 +1,7 @@
 #pragma once
 
+#include "svp/vision/visual_tracking_quality.hpp"
+
 #include <cstdint>
 #include <vector>
 
@@ -16,6 +18,14 @@ struct VisualEntitySamplingWindow {
   std::int64_t end_us = 0;
   std::vector<std::int64_t> timestamps_us;
 };
+
+// Sampling cadence and windowing owned by a visual tracking quality policy.
+[[nodiscard]] inline constexpr VisualEntitySamplingOptions
+visual_entity_sampling_options(const VisualTrackingQualityPolicy& policy) noexcept {
+  return {policy.sample_interval_us,
+          policy.window_duration_us,
+          policy.window_overlap_us};
+}
 
 // Produces deterministic cadence-aligned timestamps through the supplied
 // duration. Each decode window is independently bounded and adjacent windows

@@ -101,6 +101,19 @@ struct OcrSourceFrameDimensions {
     int stored_height,
     int rotation_degrees);
 
+// Longest side of the frames decoded for OCR text detection. Source display
+// dimensions are kept when both sides fit; otherwise the frame is scaled to
+// this bound, preserving aspect ratio, to keep text readable while bounding
+// per-frame OCR cost.
+inline constexpr int kOcrMaxFrameDimension = 1920;
+
+// Frame dimensions used to decode OCR samples for a media plan: the source
+// dimensions (swapped for a +/-90 degree rotation) capped at
+// kOcrMaxFrameDimension. Shared by every OCR stage entry point and the frame
+// plan so they agree on whether OCR decodes its own samples.
+[[nodiscard]] OcrSourceFrameDimensions ocr_decode_frame_dimensions(
+    const svp::media::MediaIngestPlan& media_plan);
+
 [[nodiscard]] OcrGenerationResult generate_ocr_observations(
     const OcrGenerationOptions& options,
     const DecodedCanonicalFrames& frame_input,

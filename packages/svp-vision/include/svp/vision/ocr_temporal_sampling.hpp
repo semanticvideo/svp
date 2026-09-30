@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -51,6 +52,29 @@ struct OcrTemporalSamplingResult {
 [[nodiscard]] OcrTemporalSamplingResult compute_ocr_temporal_timestamps(
     std::int64_t duration_us,
     const OcrSamplingConfig& config);
+
+// Environment variable that replaces the OCR sample schedule with an explicit
+// comma-separated list of microsecond timestamps. Diagnostic only; never a
+// production coverage claim.
+inline constexpr const char* kOcrDiagnosticTimestampsEnv =
+    "SVP_OCR_DIAG_TIMESTAMPS_US";
+
+// Parses a diagnostic timestamp list ("0,1500000,..."). Returns nullopt for
+// null, empty, negative, or malformed input. The result is sorted and unique.
+[[nodiscard]] std::optional<std::vector<std::int64_t>>
+parse_ocr_diagnostic_timestamps(const char* value);
+
+// Reads kOcrDiagnosticTimestampsEnv from the process environment.
+[[nodiscard]] std::optional<std::vector<std::int64_t>>
+ocr_diagnostic_timestamp_override();
+
+// The OCR sample schedule actually used by OCR generation: the temporal
+// schedule for the duration, replaced by the diagnostic override when one is
+// supplied. Shared by OCR generation and the frame plan so both agree.
+[[nodiscard]] OcrTemporalSamplingResult plan_ocr_temporal_sampling(
+    std::int64_t duration_us,
+    const OcrSamplingConfig& config,
+    const std::optional<std::vector<std::int64_t>>& diagnostic_override);
 
 [[nodiscard]] nlohmann::json ocr_temporal_sampling_result_to_json(
     const OcrTemporalSamplingResult& result);

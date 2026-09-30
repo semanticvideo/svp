@@ -266,27 +266,10 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
     // Use the source display dimensions capped at 1920x1080 to preserve
     // text readability while keeping processing reasonable.
     if (media_plan != nullptr) {
-      int src_w = static_cast<int>(media_plan->primary_video_stream.width);
-      int src_h = static_cast<int>(media_plan->primary_video_stream.height);
-      // Account for rotation: if rotation is 90 or 270, swap dimensions
-      if (std::abs(media_plan->primary_video_stream.rotation_degrees) == 90) {
-        std::swap(src_w, src_h);
-      }
-      const int max_ocr_dim = 1920;
-      if (src_w > max_ocr_dim || src_h > max_ocr_dim) {
-        if (src_w >= src_h) {
-          ocr_opts.ocr_frame_width = max_ocr_dim;
-          ocr_opts.ocr_frame_height = static_cast<int>(
-              std::round(static_cast<double>(src_h) * max_ocr_dim / src_w));
-        } else {
-          ocr_opts.ocr_frame_height = max_ocr_dim;
-          ocr_opts.ocr_frame_width = static_cast<int>(
-              std::round(static_cast<double>(src_w) * max_ocr_dim / src_h));
-        }
-      } else {
-        ocr_opts.ocr_frame_width = src_w;
-        ocr_opts.ocr_frame_height = src_h;
-      }
+      const auto ocr_dims =
+          svp::vision::ocr_decode_frame_dimensions(*media_plan);
+      ocr_opts.ocr_frame_width = ocr_dims.width;
+      ocr_opts.ocr_frame_height = ocr_dims.height;
     }
 
     // Enable evidence crop generation for text regions.
@@ -560,26 +543,9 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
   ocr_opts.canonical_raster_width = static_cast<int>(raster_w);
   ocr_opts.canonical_raster_height = static_cast<int>(raster_h);
   if (media_plan != nullptr) {
-    int src_w = static_cast<int>(media_plan->primary_video_stream.width);
-    int src_h = static_cast<int>(media_plan->primary_video_stream.height);
-    if (std::abs(media_plan->primary_video_stream.rotation_degrees) == 90) {
-      std::swap(src_w, src_h);
-    }
-    const int max_ocr_dim = 1920;
-    if (src_w > max_ocr_dim || src_h > max_ocr_dim) {
-      if (src_w >= src_h) {
-        ocr_opts.ocr_frame_width = max_ocr_dim;
-        ocr_opts.ocr_frame_height = static_cast<int>(
-            std::round(static_cast<double>(src_h) * max_ocr_dim / src_w));
-      } else {
-        ocr_opts.ocr_frame_height = max_ocr_dim;
-        ocr_opts.ocr_frame_width = static_cast<int>(
-            std::round(static_cast<double>(src_w) * max_ocr_dim / src_h));
-      }
-    } else {
-      ocr_opts.ocr_frame_width = src_w;
-      ocr_opts.ocr_frame_height = src_h;
-    }
+    const auto ocr_dims = svp::vision::ocr_decode_frame_dimensions(*media_plan);
+    ocr_opts.ocr_frame_width = ocr_dims.width;
+    ocr_opts.ocr_frame_height = ocr_dims.height;
   }
 
   ocr_opts.frame_catalog = frame_catalog;

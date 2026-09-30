@@ -19,6 +19,6 @@ namespace svp::vision {
     int height,
     const std::vector<std::int64_t>& timestamps_us,
     FrameCatalog* frame_catalog = nullptr,
-    const std::string& purpose = "visual_entity_tracking");
+    const std::string& purpose = kVisualEntityTrackingFramePurpose);
 
 }  // namespace svp::vision

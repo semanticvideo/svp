@@ -13,9 +13,6 @@
 namespace svp::vision {
 namespace {
 
-// Maximum number of canonical frames to decode per build run.
-constexpr int kMaxDecodedFrames = 5;
-
 // A seek that lands within this margin of the end of the file is clamped
 // back so ffmpeg does not seek past the last decodable frame.
 constexpr std::int64_t kEndMarginUs = 100000;  // 100 ms
@@ -133,6 +130,8 @@ std::vector<Srgb8Pixel> decode_frame_at(const std::filesystem::path& ffmpeg_path
   return pixels;
 }
 
+}  // namespace
+
 std::vector<std::int64_t> deterministic_seek_timestamps_us(
     std::int64_t duration_us,
     int count) {
@@ -152,8 +151,6 @@ std::vector<std::int64_t> deterministic_seek_timestamps_us(
   }
   return timestamps;
 }
-
-}  // namespace
 
 std::int64_t compute_media_duration_us(const media::MediaIngestPlan& plan) {
   const media::VideoStreamProbe& stream = plan.primary_video_stream;
@@ -181,9 +178,9 @@ DecodedCanonicalFrames decode_canonical_frames(
       plan, ffmpeg_path,
       plan.canonical_raster.width,
       plan.canonical_raster.height,
-      kMaxDecodedFrames,
+      kCanonicalDecodedFrameCount,
       frame_catalog,
-      "canonical");
+      kCanonicalFramePurpose);
 }
 
 DecodedCanonicalFrames decode_frames_at_resolution(
@@ -222,7 +219,8 @@ DecodedCanonicalFrames decode_frames_at_resolution(
 
   result.decoding_attempted = true;
 
-  const int frame_count = max_frames > 0 ? max_frames : kMaxDecodedFrames;
+  const int frame_count =
+      max_frames > 0 ? max_frames : kCanonicalDecodedFrameCount;
   const std::vector<std::int64_t> timestamps =
       deterministic_seek_timestamps_us(duration_us, frame_count);
 
