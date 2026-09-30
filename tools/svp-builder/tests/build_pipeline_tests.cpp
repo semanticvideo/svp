@@ -2,6 +2,7 @@
 #include "svp/builder/build_progress.hpp"
 #include "svp/builder/progress_renderer.hpp"
 #include "model_cache_test_fixture.hpp"
+#include "pipeline_input_fixture.hpp"
 #include "staging_cleanup.hpp"
 
 #include <nlohmann/json.hpp>
@@ -155,61 +156,8 @@ class CapturingProgressSink : public svp::builder::BuildProgressSink {
   std::vector<svp::builder::ProgressEvent> events;
 };
 
-std::filesystem::path write_minimal_probe_json(
-    const std::filesystem::path& dir) {
-  const std::filesystem::path probe_path = dir / "probe.json";
-  std::ofstream out(probe_path);
-  out << R"({
-    "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
-    "container_timing": {
-      "timebase": "1/1000000",
-      "start_pts": 0,
-      "duration_pts": 3000000
-    },
-    "video_streams": [
-      {
-        "id": "vstream_0001",
-        "index": 0,
-        "codec_name": "h264",
-        "width": 1920,
-        "height": 1080,
-        "pixel_aspect_ratio": "1:1",
-        "timing": {
-          "timebase": "1/30000",
-          "start_pts": 0,
-          "duration_pts": 90090,
-          "avg_frame_rate": "30000/1001",
-          "frame_count": 90
-        }
-      }
-    ],
-    "audio_streams": [
-      {
-        "id": "astream_0001",
-        "index": 1,
-        "codec_name": "aac",
-        "sample_rate": 48000,
-        "channels": 2,
-        "timing": {
-          "timebase": "1/48000",
-          "start_pts": 0,
-          "duration_pts": 144000
-        }
-      }
-    ]
-  })";
-  out.close();
-  return probe_path;
-}
-
-std::filesystem::path write_mock_media_file(
-    const std::filesystem::path& dir) {
-  const std::filesystem::path media_path = dir / "test_video.mp4";
-  std::ofstream out(media_path, std::ios::binary);
-  out << "mock media bytes";
-  out.close();
-  return media_path;
-}
+using svp::builder::test::write_minimal_probe_json;
+using svp::builder::test::write_mock_media_file;
 
 void test_stage_catalog_ids_and_labels_from_one_source() {
   const std::vector<svp::builder::ProgressStageId> stages =
@@ -457,6 +405,9 @@ void test_pipeline_package_write_failure_emits_stage_failed_no_validate() {
   assert(found_pkg_failed);
   assert(!found_pkg_completed);
   assert(!found_validate);
+  // A package that was never written must fail the build, not exit 0.
+  assert(result.exit_code == svp::builder::kBuildFailedExitCode);
+  assert(result.failure == svp::builder::BuildPipelineFailure::package_write);
 
   std::filesystem::remove_all(tmp_dir);
 }

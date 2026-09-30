@@ -67,7 +67,15 @@ enum class BuildPipelineFailure {
   none,
   model_cache_preflight,
   processing,
+  // The requested package artifact could not be written (for example the
+  // output directory is missing or not writable).
+  package_write,
 };
+
+// Exit status for a build that could not produce what was requested: a
+// processing error or an artifact that could not be written. Validator
+// verdicts on a package that was written are passed through unchanged instead.
+inline constexpr int kBuildFailedExitCode = 1;
 
 struct BuildPipelineResult {
   int exit_code = 0;

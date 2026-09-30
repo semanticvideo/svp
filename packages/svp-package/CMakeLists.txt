@@ -22,6 +22,7 @@ add_library(svp-package
   src/embedded_svpi_writer.cpp
   src/embedded_svpi_extract.cpp
   src/embedded_svpi_strip.cpp
+  src/output_directory.cpp
   src/package_writer.cpp
   src/index_logical_rows.cpp
   src/index_writer.cpp

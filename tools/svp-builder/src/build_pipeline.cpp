@@ -234,8 +234,17 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
       print_build_progress(context, package_result);
     }
 
-    if (stage_plan.run_package_skeleton && package_result.package_written &&
-        !package_result.validator_passes) {
+    if (stage_plan.run_package_skeleton && !package_result.package_written) {
+      // A package that was never written is a failed build, whatever the
+      // earlier stages reported; never let it fall through to success.
+      const std::string message =
+          "failed to write SVP package: " + package_result.package_path.string();
+      std::cerr << "svp-builder: " << message << "\n";
+      return {.exit_code = kBuildFailedExitCode,
+              .failure = BuildPipelineFailure::package_write,
+              .error_message = message};
+    }
+    if (stage_plan.run_package_skeleton && !package_result.validator_passes) {
       svp::core::check_memory_limit("builder.run.complete.validator_failed");
       return {.exit_code = package_result.validator_exit_code};
     }
@@ -247,7 +256,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         {"error", error.what()}
     });
     std::cerr << "svp-builder: " << error.what() << "\n";
-    return {.exit_code = 1,
+    return {.exit_code = kBuildFailedExitCode,
             .failure = BuildPipelineFailure::model_cache_preflight,
             .error_message = error.what()};
   } catch (const std::exception& error) {
@@ -255,7 +264,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         {"error", error.what()}
     });
     std::cerr << "svp-builder: " << error.what() << "\n";
-    return {.exit_code = 1,
+    return {.exit_code = kBuildFailedExitCode,
             .failure = BuildPipelineFailure::processing,
             .error_message = error.what()};
   }

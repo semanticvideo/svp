@@ -2,6 +2,7 @@
 #include "cli_completion.hpp"
 #include "cli_run_telemetry.hpp"
 
+#include "svp/builder/build_pipeline.hpp"
 #include "svp/builder/interlace.hpp"
 #include "svp/builder/interlace_batch.hpp"
 #include "svp/validation/report_json.hpp"
@@ -40,11 +41,13 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
 
     const auto started_at = std::chrono::steady_clock::now();
     auto result = svp::builder::interlace_create(ic_opts);
-    const int exit_code = telemetry.finish(result.success ? 0 : 1);
+    const int exit_code = telemetry.finish(
+        result.success ? 0 : svp::builder::kBuildFailedExitCode);
     if (!result.success) {
       std::cerr << "interlace create failed: " << result.error_message << "\n";
       return exit_code;
     }
+    if (exit_code != 0) return exit_code;
     std::cout << "BLAKE3 state: " << result.blake3_state << "\n";
     std::cout << "Validation status: " << result.binding_state << "\n";
     std::cout << format_cli_completion(

@@ -1,5 +1,6 @@
 #include "svp/package/svpi_writer.hpp"
 #include "svp/package/svpi_media_policy.hpp"
+#include "svp/package/output_directory.hpp"
 
 #include <zip.h>
 
@@ -70,7 +71,7 @@ bool write_svpi_package(
     const MediaBindingDocument& media_binding,
     const SvpiWriterOptions& options) {
   try {
-    std::filesystem::create_directories(package_path.parent_path());
+    ensure_parent_directory(package_path);
     std::filesystem::path temp_path = package_path.string() + ".tmp";
 
     std::string mimetype_content(std::string{kSvpiMimetype});

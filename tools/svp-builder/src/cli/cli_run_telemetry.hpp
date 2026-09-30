@@ -27,11 +27,14 @@ class CliRunTelemetry {
   [[nodiscard]] std::shared_ptr<svp::builder::BuildProgressSink>
   progress_sink() const;
 
-  // Writes the run report (if requested) and returns `exit_code` unchanged.
-  int finish(int exit_code);
+  // Writes the run report (if requested) and returns the command's exit code:
+  // `exit_code` unchanged, except that a successful command whose requested
+  // report could not be written fails with kBuildFailedExitCode.
+  [[nodiscard]] int finish(int exit_code);
 
  private:
-  void write_report(std::optional<int> exit_code) noexcept;
+  // Returns false only when a requested report could not be written.
+  bool write_report(std::optional<int> exit_code) noexcept;
 
   std::string command_;
   std::filesystem::path run_report_path_;

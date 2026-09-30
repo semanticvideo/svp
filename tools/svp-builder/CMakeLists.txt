@@ -126,6 +126,10 @@ if(BUILD_TESTING)
     tests/progress_renderer_tests.cpp
   )
 
+  add_executable(svp-builder-output-path-tests
+    tests/output_path_tests.cpp
+  )
+
   add_executable(svp-builder-progress-timeline-tests
     tests/progress_timeline_tests.cpp
   )
@@ -198,6 +202,16 @@ if(BUILD_TESTING)
       svp::builder
   )
 
+  target_compile_features(svp-builder-output-path-tests PRIVATE cxx_std_20)
+  target_compile_options(svp-builder-output-path-tests PRIVATE -UNDEBUG)
+  target_link_libraries(svp-builder-output-path-tests
+    PRIVATE
+      svp::builder
+      svp::models
+      svp::package
+      svp::validation
+  )
+
   target_link_libraries(svp-builder-progress-timeline-tests
     PRIVATE
       svp::builder
@@ -260,6 +274,9 @@ if(BUILD_TESTING)
         "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache"
   )
   add_test(NAME svp-builder-progress-renderer-tests COMMAND svp-builder-progress-renderer-tests)
+  add_test(NAME svp-builder-output-path-tests
+           COMMAND svp-builder-output-path-tests $<TARGET_FILE:svp-builder>
+           WORKING_DIRECTORY ${SVP_BUILDER_RUNTIME_RESOURCE_TEST_CWD})
   add_test(NAME svp-builder-progress-timeline-tests
            COMMAND svp-builder-progress-timeline-tests)
   add_test(NAME svp-builder-run-report-tests COMMAND svp-builder-run-report-tests)
