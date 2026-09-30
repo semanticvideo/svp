@@ -36,3 +36,35 @@ Apache-2.0 license. Every installed model bundle carries its own `LICENSE` and
 `NOTICE`, and those files must remain with the bundle. Installer bootstrap
 components are documented in
 [`distribution/reference-models/INSTALL_BOOTSTRAP_LICENSES.md`](distribution/reference-models/INSTALL_BOOTSTRAP_LICENSES.md).
+
+## Runtime bundle components
+
+`distribution/runtime-bundle/` builds SVP's own media and diarization runtime
+so a Mac needs nothing installed besides macOS. Building and using it
+internally has no extra obligation. Publishing a built bundle redistributes
+the components below: the release notice must include each component's
+license text, and FFmpeg's corresponding source must be offered
+(`build-ffmpeg.sh --with-source` copies the verified source archives into the
+bundle).
+
+| Component | Version | License | Shipped as |
+| --- | --- | --- | --- |
+| FFmpeg | 9.0.2 | LGPL-2.1-or-later (built `--disable-gpl --disable-nonfree`) | `ffmpeg`, `ffprobe` (static) |
+| dav1d | 1.5.4 | BSD-2-Clause | linked into `ffmpeg`, `ffprobe` |
+| sherpa-onnx | 1.13.5 | Apache-2.0 | `libsherpa-onnx-c-api.dylib` |
+| ONNX Runtime (Microsoft release) | 1.27.1 | MIT | `libonnxruntime.1.dylib` |
+
+Compiled into the sherpa-onnx library, at the versions pinned by sherpa-onnx
+1.13.5:
+
+| Component | License |
+| --- | --- |
+| kaldi-native-fbank | Apache-2.0 |
+| kaldi-decoder | Apache-2.0 |
+| kaldifst | Apache-2.0 |
+| OpenFst | Apache-2.0 |
+| simple-sentencepiece | Apache-2.0 |
+| KISS FFT | BSD-3-Clause |
+| Eigen | MPL-2.0 (some files BSD or other MPL-2.0-compatible licenses) |
+| hclust-cpp (fastcluster) | BSD-2-Clause |
+| nlohmann/json | MIT |
