@@ -32,6 +32,12 @@ struct Event {
   std::string scope_id;
   std::string scope_label;
   std::optional<std::int64_t> row_order;
+  // Emission timing stamped by the producer: milliseconds on a monotonic
+  // clock since the producer's run started, and a strictly increasing event
+  // sequence number. Machine-readable sinks report them; human renderers
+  // ignore them.
+  std::optional<std::int64_t> t_ms;
+  std::optional<std::uint64_t> seq;
 };
 
 }  // namespace svp::progress

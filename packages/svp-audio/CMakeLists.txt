@@ -16,6 +16,7 @@ add_library(svp-audio
   src/asr_chunk_planner.cpp
   src/asr_chunk_reconciliation.cpp
   src/asr_execution_boundary.cpp
+  src/asr_slice_workspace.cpp
   src/audio_extraction_executor.cpp
   src/ctc_forced_aligner.cpp
   src/audio_extraction_plan.cpp
@@ -101,6 +102,7 @@ target_link_libraries(svp-audio
 if(BUILD_TESTING)
   add_executable(svp-audio-tests
     tests/asr_boundary_tests.cpp
+    tests/asr_slice_workspace_tests.cpp
     tests/audio_stage_tests.cpp
     tests/diarization_boundary_tests.cpp
     tests/diarization_reconciliation_tests.cpp

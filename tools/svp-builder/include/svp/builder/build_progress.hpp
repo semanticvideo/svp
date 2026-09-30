@@ -70,6 +70,10 @@ struct ProgressEvent {
   std::string unit;
   std::string scope_id;
   std::string scope_label;
+  // Stamped by TimestampedProgressSink (progress_timeline.hpp); empty on
+  // events that have not passed through a timeline.
+  std::optional<std::int64_t> t_ms;
+  std::optional<std::uint64_t> seq;
 };
 
 class BuildProgressSink {

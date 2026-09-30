@@ -77,6 +77,9 @@ void register_cli(CLI::App& app, CliContext& context) {
   build->add_option("--progress", build_opts.progress_mode,
                     "Progress output mode: auto, plain, json, none")
       ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
+  build->add_option("--run-report", build_opts.run_report_path,
+                    "Write a JSON per-stage timing and resource report to this path "
+                    "(written even when the build fails)");
   build->add_flag("--quiet", build_opts.quiet,
                   "Suppress progress output; print only final success/failure");
   build->add_flag("--verbose", build_opts.verbose,
@@ -153,6 +156,9 @@ void register_cli(CLI::App& app, CliContext& context) {
   ic_create->add_option("--progress", opts.ic_progress_mode,
       "Progress output mode: auto, plain, json, none")
       ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
+  ic_create->add_option("--run-report", opts.ic_run_report_path,
+      "Write a JSON per-stage timing and resource report to this path "
+      "(written even when creation fails)");
   ic_create->add_flag("--quiet", opts.ic_quiet,
       "Suppress progress output; print only final success/failure");
   context.ic_create = ic_create;

@@ -57,6 +57,7 @@ struct BuildCliOptions {
   bool force_single_speaker = false;
   bool serial_pipeline = false;
   std::string progress_mode = "auto";
+  std::string run_report_path;
   bool quiet = false;
   bool verbose = false;
   bool overwrite = false;
@@ -81,6 +82,7 @@ struct InterlaceCliOptions {
   bool ic_force_single = false;
   bool ic_serial_pipeline = false;
   std::string ic_progress_mode = "auto";
+  std::string ic_run_report_path;
   bool ic_quiet = false;
 
   // interlace validate
@@ -242,6 +244,13 @@ struct CliContext {
 
 void register_cli(CLI::App& app, CliContext& context);
 
+// Human/JSON renderer for --progress/--quiet; nullptr on an invalid mode.
+std::shared_ptr<svp::builder::BuildProgressSink> resolve_cli_render_sink(
+    const std::string& mode,
+    bool quiet,
+    CLI::App* subcommand);
+
+// Renderer wrapped in a progress timeline so every event carries t_ms/seq.
 std::shared_ptr<svp::builder::BuildProgressSink> resolve_cli_progress_sink(
     const std::string& mode,
     bool quiet,

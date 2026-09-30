@@ -1,16 +1,14 @@
 #include "cli_context.hpp"
 #include "cli_completion.hpp"
 #include "build_selected_output.hpp"
+#include "cli_run_telemetry.hpp"
 
 #include "svp/builder/build_pipeline.hpp"
-#include "svp/builder/progress_renderer.hpp"
 
-#include <unistd.h>
-
-#include <cstdio>
 #include <chrono>
 #include <iostream>
 #include <optional>
+#include <utility>
 
 int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand) {
   const std::optional<svp::builder::BuildStage> parsed_stage =
@@ -24,34 +22,17 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
     std::cerr << "warning: --stop-after package-skeleton is deprecated; use --stop-after package\n";
   }
 
-  auto progress_opt = build_subcommand->get_option("--progress");
-  const bool progress_explicitly_set =
-      progress_opt && progress_opt->count() > 0;
-
-  std::optional<svp::builder::ProgressMode> resolved_mode;
-  if (options.quiet) {
-    if (progress_explicitly_set && options.progress_mode == "json") {
-      resolved_mode = svp::builder::ProgressMode::json;
-    } else {
-      resolved_mode = svp::builder::ProgressMode::none;
-    }
-  } else {
-    resolved_mode = svp::builder::parse_progress_mode(options.progress_mode);
-  }
-
-  if (!resolved_mode) {
-    std::cerr << "svp-builder: invalid --progress value: "
-              << options.progress_mode << "\n";
-    return 2;
-  }
-
-  const bool stderr_is_tty = isatty(fileno(stderr)) != 0;
-  auto progress_sink = svp::builder::make_progress_sink(
-      *resolved_mode, std::cerr, stderr_is_tty, fileno(stderr));
+  auto render_sink = resolve_cli_render_sink(
+      options.progress_mode, options.quiet, build_subcommand);
+  if (!render_sink) return 2;
+  CliRunTelemetry telemetry("build", std::move(render_sink),
+                            options.run_report_path);
+  auto progress_sink = telemetry.progress_sink();
 
   const auto started_at = std::chrono::steady_clock::now();
   if (options.output_format != "svp") {
-    const int exit_code = run_selected_output_build(options, progress_sink);
+    const int exit_code =
+        telemetry.finish(run_selected_output_build(options, progress_sink));
     if (exit_code == 0) {
       std::cout << format_cli_completion(
                        build_artifact_label(options.output_format), "created",
@@ -83,6 +64,7 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
 
   const svp::builder::BuildPipelineResult result =
       svp::builder::BuildPipeline{}.run(pipeline_options);
+  telemetry.finish(result.exit_code);
   if (result.exit_code == 0 &&
       *parsed_stage == svp::builder::BuildStage::package_skeleton) {
     std::cout << format_cli_completion(

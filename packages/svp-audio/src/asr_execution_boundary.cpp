@@ -1,5 +1,6 @@
 #include "svp/audio/asr_execution_boundary.hpp"
 #include "svp/audio/asr_chunk_context.hpp"
+#include "svp/audio/asr_slice_workspace.hpp"
 #include "svp/audio/transcript_records.hpp"
 #include "svp/audio/wav_slice.hpp"
 #include "svp/audio/whisper_cpp_model.hpp"
@@ -338,8 +339,10 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
       throw std::runtime_error("staged analysis WAV file not found: " + input_wav.string());
     }
 
-    const std::filesystem::path temp_slice_dir =
-        std::filesystem::temp_directory_path() / "svp-asr-chunk-slices";
+    // Per-execution slice directory: concurrent builds must never share or
+    // overwrite each other's chunk slices. Removed when this scope exits.
+    const AsrSliceWorkspace slice_workspace;
+    const std::filesystem::path& temp_slice_dir = slice_workspace.path();
 
     std::vector<std::vector<AsrWord>> chunk_words;
     chunk_words.reserve(boundary.chunk_plan.chunks.size());
