@@ -26,9 +26,14 @@ struct InProcessExecutorOptions {
 
 // Runs registry task functions on a fixed pool of threads in this process
 // through run_task_attempt, the same path the worker loop uses. Heartbeats
-// are sent while a task runs. cancel() drops a queued lease or discards a
-// running lease's result; task functions are never interrupted, so stop()
-// waits for running ones to return.
+// are sent while a task runs. cancel() drops a queued lease, or sets a running
+// attempt's CancellationToken and discards its result; task functions stop
+// only at their own cooperative checks, so stop() (which cancels every running
+// attempt) waits for them to return.
+//
+// loss_quarantine() is LossQuarantine::never: this executor is the
+// coordinator's own process, so losing it to quarantine never routes work
+// anywhere healthier, and in a one-Mac build it is the only executor.
 class InProcessExecutor final : public Executor {
  public:
   InProcessExecutor(const TaskTypeRegistry& registry, TaskArtifactAccess& artifacts,
@@ -39,6 +44,7 @@ class InProcessExecutor final : public Executor {
 
   [[nodiscard]] std::string_view id() const override;
   [[nodiscard]] std::size_t slots() const override;
+  [[nodiscard]] LossQuarantine loss_quarantine() const override;
   void start(ExecutorEvents& events) override;
   void assign(const TaskSpec& spec, const Lease& lease) override;
   void cancel(std::string_view lease_id) override;

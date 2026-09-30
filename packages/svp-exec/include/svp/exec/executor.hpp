@@ -58,6 +58,29 @@ class ExecutorEvents {
                               std::string message) = 0;
 };
 
+// Whether lost attempts (executor_lost, lease expiry, hard deadline) count
+// toward quarantining an executor (plan §4.4 "a worker with repeated failures
+// is quarantined"). An invalid result quarantines every executor at once,
+// whatever this says: bad bytes are never a transient condition.
+enum class LossQuarantine {
+  // RetryPolicy.quarantine_after_executor_failures losses quarantine the
+  // executor. For executors in another process or on another machine, where
+  // repeated losses point at a sick worker that other executors can route
+  // around.
+  after_repeated_losses,
+  // Losses never quarantine. For the coordinator's own in-process executor:
+  // its "losses" are stalls of the coordinator process itself or task
+  // functions stuck past their deadline, which no other slot in the same
+  // process avoids, and quarantining it in a one-Mac build (the only executor,
+  // a fully supported configuration) would turn transient losses into a
+  // guaranteed no_usable_executor failure. RetryPolicy.max_attempts still
+  // bounds each task, so a task that keeps getting lost fails the build by
+  // name instead.
+  never,
+};
+
+[[nodiscard]] std::string_view loss_quarantine_name(LossQuarantine policy) noexcept;
+
 // A place where tasks run (plan §3.1: in-process, loopback, remote).
 // Executors pull work by advertising slots; the scheduler never has more than
 // slots() leases outstanding on one executor. Nothing assumes how many
@@ -71,6 +94,10 @@ class Executor {
   // Stable, unique within a scheduler run; used in traces and quarantine.
   [[nodiscard]] virtual std::string_view id() const = 0;
   [[nodiscard]] virtual std::size_t slots() const = 0;
+  // See LossQuarantine. Fixed for the executor's lifetime.
+  [[nodiscard]] virtual LossQuarantine loss_quarantine() const {
+    return LossQuarantine::after_repeated_losses;
+  }
 
   // Called once before any assign(). `events` outlives stop().
   virtual void start(ExecutorEvents& events) = 0;
@@ -78,8 +105,9 @@ class Executor {
   // Starts one attempt; must not block on the task itself.
   virtual void assign(const TaskSpec& spec, const Lease& lease) = 0;
 
-  // Cooperative cancellation of one lease (plan §4.3 CANCEL). A result may
-  // still arrive afterwards; the scheduler ignores it.
+  // Cooperative cancellation of one lease (plan §4.3 CANCEL): the attempt's
+  // CancellationToken is set so its task function can stop at its next safe
+  // point. A result may still arrive afterwards; the scheduler ignores it.
   virtual void cancel(std::string_view lease_id) = 0;
 
   // The scheduler stopped waiting for this lease because it expired. The

@@ -2,7 +2,9 @@
 
 // Toy task type shared by the scheduler tests (in-process) and the
 // svp-exec-test-worker executable (loopback). Output bytes depend only on
-// task_id and `seed`, so every executor must produce identical outputs.
+// task_id, `seed`, and the content of the task's inputs (each input file is
+// read and its BLAKE3 folded into the output), so every executor must produce
+// identical outputs.
 //
 // Parameters (canonical JSON object):
 //   seed         uint, required
@@ -14,6 +16,9 @@
 // Faults simulate a misbehaving worker, not task logic, so they fire only
 // when the registry was built with ToyFaults::honoured (the test worker);
 // the in-process registry ignores them and behaves normally.
+//
+// The attempt's cancellation token is checked before and after the sleep and
+// before writing output.
 
 #include "in_memory_artifact_store.hpp"
 #include "svp/exec/task_graph.hpp"
@@ -22,6 +27,8 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -45,6 +52,7 @@ enum class ToyFault {
   nondeterministic,    // output bytes differ on every run
   fail_retryable,      // failed TaskResult, retryable
   fail_permanent,      // failed TaskResult, not retryable
+  stall,               // loops until the attempt is cancelled, heartbeats go on
 };
 
 [[nodiscard]] std::string_view toy_fault_name(ToyFault fault);
@@ -58,6 +66,12 @@ struct ToyTaskOptions {
   std::chrono::microseconds max_jitter{0};
 };
 
+// Where a toy task stores its output bytes; returns their ref.
+using ToyOutputWriter = std::function<ArtifactRef(std::vector<std::byte> bytes,
+                                                  std::string media_type, std::string role)>;
+
+void register_toy_tasks(TaskTypeRegistry& registry, ToyOutputWriter write_output,
+                        ToyTaskOptions options);
 void register_toy_tasks(TaskTypeRegistry& registry, InMemoryArtifactStore& store,
                         ToyTaskOptions options);
 
@@ -70,11 +84,15 @@ struct ToyTask {
   std::optional<std::filesystem::path> once_marker;
   std::uint64_t sleep_ms = 0;
   std::uint64_t est_seconds = 1;
+  std::map<std::string, ArtifactRef> inputs;
 };
 
 [[nodiscard]] TaskNode make_toy_node(const ToyTask& task);
 
-// The bytes a correct execution of `task_id` with `seed` produces.
-[[nodiscard]] std::string toy_expected_output(std::string_view task_id, std::uint64_t seed);
+// The bytes a correct execution of `task_id` with `seed` produces, given the
+// content of each input by name.
+[[nodiscard]] std::string toy_expected_output(
+    std::string_view task_id, std::uint64_t seed,
+    const std::map<std::string, std::string>& input_contents = {});
 
 }  // namespace svp::exec::test

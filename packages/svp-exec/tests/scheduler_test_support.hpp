@@ -2,7 +2,7 @@
 
 // Shared helpers for the task graph, scheduler, and loopback tests.
 
-#include "exec_test_support.hpp"
+#include "storage_test_support.hpp"
 #include "svp/exec/in_process_executor.hpp"
 #include "svp/exec/ordered_reduction.hpp"
 #include "svp/exec/scheduler.hpp"
@@ -77,23 +77,6 @@ class EventLog {
   mutable std::mutex mutex_;
   std::condition_variable changed_;
   std::vector<AttemptEvent> events_;
-};
-
-struct TemporaryDirectory {
-  std::filesystem::path path;
-
-  explicit TemporaryDirectory(std::string_view name) {
-    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
-    path = std::filesystem::temp_directory_path() /
-           (std::string(name) + "-" + std::to_string(nonce));
-    std::filesystem::create_directories(path);
-  }
-  ~TemporaryDirectory() {
-    std::error_code ignored;
-    std::filesystem::remove_all(path, ignored);
-  }
-  TemporaryDirectory(const TemporaryDirectory&) = delete;
-  TemporaryDirectory& operator=(const TemporaryDirectory&) = delete;
 };
 
 // A toy graph with two reducer lanes and cross-lane dependencies:

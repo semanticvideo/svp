@@ -36,11 +36,14 @@ struct LeaseRecord {
   Lease lease;
   std::chrono::milliseconds granted_at{0};
   std::chrono::milliseconds expires_at{0};
+  // Hard deadline; never renewed (LeasePolicy attempt deadline).
+  std::chrono::milliseconds deadline_at{0};
   bool speculative = false;
 };
 
 struct ExecutorRecord {
   Executor* executor = nullptr;
+  LossQuarantine loss_quarantine = LossQuarantine::after_repeated_losses;
   std::size_t active = 0;
   std::uint64_t failures = 0;
   bool quarantined = false;
@@ -54,6 +57,11 @@ class SchedulerRun {
                std::span<Executor* const> executors, ResultCommitSink& sink,
                const CancellationToken& cancellation, const AttemptObserver& observer);
 
+  // Marks resumed results committed. Call once, before execute(); throws
+  // ExecError(invalid_value) for a result that is not a verified success of a
+  // distinct graph task.
+  void apply_resumed(std::span<const CommittedResult> resumed);
+
   // Runs to completion; executors must already be started with inbox().
   [[nodiscard]] BuildOutcome execute();
   [[nodiscard]] SchedulerInbox& inbox() noexcept { return inbox_; }
@@ -65,11 +73,15 @@ class SchedulerRun {
   void on_finished(FinishedEvent event);
   void on_failed(const FailedEvent& event);
   void on_verified_success(const LeaseRecord& lease, AttemptOutput output);
+  // Ends leases past their expiry (lost worker) or hard deadline (stuck
+  // attempt).
   void expire_leases();
+  void end_lease_at_deadline(const LeaseRecord& lease);
   void attempt_failed(std::size_t task, std::size_t executor, std::string reason);
   void count_executor_failure(std::size_t executor);
   void quarantine(std::size_t executor, const std::string& reason);
   void commit(const LeaseRecord& lease, AttemptOutput output);
+  void mark_ready_dependents(std::size_t completed_task);
   LeaseRecord release(std::map<std::string, LeaseRecord>::iterator lease);
   void fail_build(BuildFailureKind kind, std::string task_id, std::string message);
   void abandon_outstanding_leases();

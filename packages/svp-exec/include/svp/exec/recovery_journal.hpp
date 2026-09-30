@@ -77,6 +77,11 @@ class RecoveryJournal {
   // before any row changes; a mismatch throws (artifact_mismatch) and leaves
   // the task and journal untouched, so the caller records a failed attempt.
   void commit_task(const TaskCommit& commit);
+  // The task's committed output digest and artifact rows; nullopt unless the
+  // task is `committed`. Throws (unknown_task) for an unrecorded task and
+  // (database_error) for a malformed row.
+  [[nodiscard]] std::optional<JournalCommittedTask> committed_task(
+      std::string_view task_id) const;
 
   void record_failure(const std::optional<std::string>& task_id, std::string_view reason);
 

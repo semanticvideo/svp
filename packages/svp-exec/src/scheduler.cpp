@@ -52,9 +52,13 @@ Scheduler::Scheduler(SchedulerPolicy policy, const Clock& clock)
 
 BuildOutcome Scheduler::run(const TaskGraph& graph, std::span<Executor* const> executors,
                             ResultCommitSink& sink, const CancellationToken& cancellation,
-                            const AttemptObserver& observer) const {
+                            const AttemptObserver& observer,
+                            std::span<const CommittedResult> resumed) const {
   validate_executors(executors);
   detail::SchedulerRun run(policy_, clock_, graph, executors, sink, cancellation, observer);
+  // Before any executor starts, so a bad resume input throws with nothing to
+  // stop.
+  run.apply_resumed(resumed);
   const ExecutorsStopper stopper(executors);
   for (Executor* executor : executors) {
     executor->start(run.inbox());

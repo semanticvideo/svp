@@ -1,4 +1,5 @@
-// RecoveryJournal task lifecycle: record, transition, commit.
+// RecoveryJournal task lifecycle: record, transition, commit, and reading a
+// committed task back.
 
 #include "journal_artifact_store.hpp"
 #include "recovery_journal_state.hpp"
@@ -179,6 +180,49 @@ void RecoveryJournal::commit_task(const TaskCommit& commit) {
       .bind(4, commit.task_id)
       .run();
   transaction.commit();
+}
+
+std::optional<JournalCommittedTask> RecoveryJournal::committed_task(
+    std::string_view task_id) const {
+  const detail::JournalState& journal = state();
+  if (require_task_state(journal.database, task_id) != TaskState::committed) {
+    return std::nullopt;
+  }
+  JournalCommittedTask committed{.task_id = std::string(task_id)};
+  {
+    detail::SqliteStatement query =
+        journal.database.prepare("SELECT output_blake3 FROM task WHERE task_id = ?1");
+    query.bind(1, task_id);
+    const std::optional<Blake3Digest> output =
+        query.step() && !query.is_null(0) ? parse_blake3_hex(query.text(0)) : std::nullopt;
+    if (!output) {
+      throw JournalError(JournalErrorCode::database_error,
+                         "committed task " + std::string(task_id) +
+                             " has no well-formed output_blake3");
+    }
+    committed.output_blake3 = *output;
+  }
+  detail::SqliteStatement artifacts = journal.database.prepare(
+      "SELECT artifact_id, relative_path, blake3, byte_length FROM artifact "
+      "WHERE task_id = ?1 ORDER BY artifact_id");
+  artifacts.bind(1, task_id);
+  while (artifacts.step()) {
+    const std::string blake3_column = artifacts.text(2);
+    const std::optional<Blake3Digest> digest = parse_blake3_hex(blake3_column);
+    const std::int64_t byte_length = artifacts.integer(3);
+    if (!digest || byte_length < 0 ||
+        artifacts.text(1) != journal_completed_relative_path(blake3_column)) {
+      throw JournalError(JournalErrorCode::database_error,
+                         "artifact " + artifacts.text(0) + " of task " + std::string(task_id) +
+                             " is not a well-formed completed-blob record");
+    }
+    committed.artifacts.push_back(
+        JournalArtifactRecord{.artifact_id = artifacts.text(0),
+                              .blake3 = *digest,
+                              .byte_length = static_cast<std::uint64_t>(byte_length),
+                              .path = journal.layout.root / artifacts.text(1)});
+  }
+  return committed;
 }
 
 }  // namespace svp::exec

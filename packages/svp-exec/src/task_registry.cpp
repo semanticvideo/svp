@@ -71,11 +71,11 @@ const TaskTypeDefinition& TaskTypeRegistry::admit(const TaskSpec& spec) const {
   return *definition;
 }
 
-TaskResult TaskTypeRegistry::execute(const TaskSpec& spec,
-                                     const ResolvedInputs& inputs) const {
+TaskResult TaskTypeRegistry::execute(const TaskSpec& spec, const ResolvedInputs& inputs,
+                                     const CancellationToken& cancellation) const {
   const TaskTypeDefinition& definition = admit(spec);
   require_inputs_resolved(spec, inputs);
-  TaskResult result = definition.execute(spec, inputs);
+  TaskResult result = definition.execute(spec, inputs, cancellation);
   validate_task_result(result);
   if (result.task_id != spec.task_id) {
     throw ExecError(ExecErrorCode::invalid_value,

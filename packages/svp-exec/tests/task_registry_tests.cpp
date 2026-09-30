@@ -56,8 +56,10 @@ std::string transform(std::string text, bool upper) {
 }
 
 // Toy task: reads its `source` input and returns the case-converted text as
-// its only output.
-TaskResult execute_toy(const TaskSpec& spec, const ResolvedInputs& inputs) {
+// its only output. Checks its cancellation token before reading.
+TaskResult execute_toy(const TaskSpec& spec, const ResolvedInputs& inputs,
+                       const CancellationToken& cancellation) {
+  throw_if_cancelled(cancellation, "before reading source");
   std::ifstream input(inputs.at("source").path, std::ios::binary);
   const std::string text((std::istreambuf_iterator<char>(input)),
                          std::istreambuf_iterator<char>());
@@ -164,10 +166,10 @@ void test_admission_rules() {
   ResolvedInputs wrong_ref = resolve_source(spec, directory.path);
   wrong_ref.at("source").ref.bytes += 1;
   expect_exec_error(ExecErrorCode::unresolved_input,
-                    [&] { static_cast<void>(registry.execute(spec, wrong_ref)); },
+                    [&] { static_cast<void>(registry.execute(spec, wrong_ref, kNotCancelled)); },
                     "input resolved to a different artifact");
   expect_exec_error(ExecErrorCode::unresolved_input,
-                    [&] { static_cast<void>(registry.execute(spec, {})); },
+                    [&] { static_cast<void>(registry.execute(spec, {}, kNotCancelled)); },
                     "missing resolved input");
 }
 
@@ -180,7 +182,7 @@ void test_toy_task_executes() {
   // The spec survives the wire before it runs, as it would on a worker.
   const TaskSpec received = decode_task_spec(encode_task_spec(spec));
   const TaskResult result =
-      registry.execute(received, resolve_source(received, directory.path));
+      registry.execute(received, resolve_source(received, directory.path), kNotCancelled);
 
   const std::vector<std::byte> expected_output = to_bytes("HELLO WORLD");
   expect(result.status == TaskStatus::succeeded, "toy task succeeded");
@@ -204,8 +206,9 @@ void test_toy_task_executes() {
 void test_result_for_another_task_rejected() {
   TaskTypeRegistry registry;
   TaskTypeDefinition confused = toy_definition();
-  confused.execute = [](const TaskSpec& spec, const ResolvedInputs& inputs) {
-    TaskResult result = execute_toy(spec, inputs);
+  confused.execute = [](const TaskSpec& spec, const ResolvedInputs& inputs,
+                        const CancellationToken& cancellation) {
+    TaskResult result = execute_toy(spec, inputs, cancellation);
     result.task_id = "task.someone.else";
     return result;
   };
@@ -215,9 +218,26 @@ void test_result_for_another_task_rejected() {
   expect_exec_error(ExecErrorCode::invalid_value,
                     [&] {
                       static_cast<void>(
-                          registry.execute(spec, resolve_source(spec, directory.path)));
+                          registry.execute(spec, resolve_source(spec, directory.path),
+                                           kNotCancelled));
                     },
                     "result for a different task_id");
+}
+
+// The attempt's token reaches the task function, which stops at its check.
+void test_cancellation_reaches_task() {
+  TaskTypeRegistry registry;
+  registry.register_type(toy_definition());
+  TemporaryDirectory directory;
+  const TaskSpec spec = toy_spec(nlohmann::json{{"case", "upper"}});
+  CancellationToken cancellation;
+  cancellation.request();
+  expect_exec_error(ExecErrorCode::cancelled,
+                    [&] {
+                      static_cast<void>(registry.execute(
+                          spec, resolve_source(spec, directory.path), cancellation));
+                    },
+                    "cancelled attempt");
 }
 
 }  // namespace
@@ -228,5 +248,6 @@ int main() {
       {{"registration_rules", test_registration_rules},
        {"admission_rules", test_admission_rules},
        {"toy_task_executes", test_toy_task_executes},
-       {"result_for_another_task_rejected", test_result_for_another_task_rejected}});
+       {"result_for_another_task_rejected", test_result_for_another_task_rejected},
+       {"cancellation_reaches_task", test_cancellation_reaches_task}});
 }

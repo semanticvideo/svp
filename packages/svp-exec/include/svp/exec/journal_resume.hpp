@@ -1,8 +1,10 @@
 #pragma once
 
+#include "svp/exec/blake3_digest.hpp"
 #include "svp/exec/task_state.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -16,6 +18,7 @@ struct ResumedTask {
   std::string task_id;
   std::string task_type;
   TaskState state = TaskState::planned;
+  std::optional<Blake3Digest> cache_key;
   std::vector<std::string> depends_on;
 };
 

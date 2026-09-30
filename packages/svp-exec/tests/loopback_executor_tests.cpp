@@ -240,6 +240,32 @@ void test_permanent_failure_is_not_retried() {
   expect(outcome.stats.attempts_started == 1, "a permanent failure is not retried");
 }
 
+// A worker task that keeps heartbeating but never finishes reaches its hard
+// deadline: the scheduler sends CANCEL, the worker sets the attempt's token,
+// the task stops, and the retry runs in the same (healthy) worker process.
+void test_deadline_cancels_stuck_task_in_live_worker() {
+  const TemporaryDirectory directory("svp-exec-loopback-deadline");
+  const TaskGraph graph = make_toy_graph({ToyTask{.task_id = "task.toy.single",
+                                                  .seed = 99,
+                                                  .order_key = {.lane = "alpha", .ordinals = {0}},
+                                                  .fault = ToyFault::stall,
+                                                  .once_marker = directory.path / "stalled",
+                                                  .est_seconds = 0}});
+  // Leases far longer than the heartbeat cadence, so only the deadline ends
+  // the stalled attempt; est_seconds 0 makes both floors apply.
+  SchedulerPolicy policy = test_policy();
+  policy.lease.lease_floor = std::chrono::milliseconds(1'000);
+  policy.lease.attempt_deadline_floor = std::chrono::milliseconds(1'500);
+  LoopbackExecutor loopback(loopback_options("loopback"));
+  InMemoryResultCommitSink sink;
+  const BuildOutcome outcome = run(graph, {&loopback}, sink, policy);
+  expect_succeeded(outcome, "stalled worker task retried");
+  expect(outcome.stats.deadlines_exceeded == 1 && outcome.stats.leases_expired == 0,
+         "ended by the deadline, not by lease expiry");
+  expect(loopback.processes_started() == 1, "the live worker was cancelled, not killed");
+  expect(sink.find("task.toy.single")->result.attempt == 2, "attempt 2 committed");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -262,5 +288,7 @@ int main(int argc, char** argv) {
            test_nondeterministic_duplicate_is_an_incident},
           {"retries exhausted names task", test_retries_exhausted_names_task},
           {"permanent failure is not retried", test_permanent_failure_is_not_retried},
+          {"deadline cancels stuck task in live worker",
+           test_deadline_cancels_stuck_task_in_live_worker},
       });
 }

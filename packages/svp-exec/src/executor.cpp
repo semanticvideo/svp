@@ -12,4 +12,14 @@ std::string_view attempt_failure_kind_name(AttemptFailureKind kind) noexcept {
   return "unknown";
 }
 
+std::string_view loss_quarantine_name(LossQuarantine policy) noexcept {
+  switch (policy) {
+    case LossQuarantine::after_repeated_losses:
+      return "after_repeated_losses";
+    case LossQuarantine::never:
+      return "never";
+  }
+  return "unknown";
+}
+
 }  // namespace svp::exec

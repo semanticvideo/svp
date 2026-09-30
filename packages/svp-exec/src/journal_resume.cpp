@@ -209,13 +209,22 @@ std::vector<ResumedTask> reset_incomplete_tasks(detail::SqliteDatabase& database
   std::map<std::string, ResumedTask> tasks;
   {
     detail::SqliteStatement query =
-        database.prepare("SELECT task_id, task_type, status FROM task");
+        database.prepare("SELECT task_id, task_type, status, cache_key FROM task");
     while (query.step()) {
       const auto state = parse_task_state(query.text(2));
+      std::optional<Blake3Digest> cache_key;
+      if (!query.is_null(3)) {
+        cache_key = parse_blake3_prefixed(query.text(3));
+        if (!cache_key) {
+          throw JournalError(JournalErrorCode::database_error,
+                             "task " + query.text(0) + " has a malformed cache_key");
+        }
+      }
       tasks.emplace(query.text(0),
                     ResumedTask{.task_id = query.text(0),
                                 .task_type = query.text(1),
-                                .state = state.value_or(TaskState::planned)});
+                                .state = state.value_or(TaskState::planned),
+                                .cache_key = cache_key});
     }
   }
   {

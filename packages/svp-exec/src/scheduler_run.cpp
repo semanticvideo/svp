@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <string>
 #include <utility>
 
 namespace svp::exec::detail {
@@ -23,14 +24,57 @@ SchedulerRun::SchedulerRun(const SchedulerPolicy& policy, const Clock& clock,
       ready_queue_(graph),
       tasks_(graph.size()) {
   for (Executor* executor : executors) {
-    executors_.push_back(ExecutorRecord{.executor = executor});
+    executors_.push_back(
+        ExecutorRecord{.executor = executor, .loss_quarantine = executor->loss_quarantine()});
+  }
+}
+
+void SchedulerRun::apply_resumed(std::span<const CommittedResult> resumed) {
+  for (const CommittedResult& committed : resumed) {
+    const TaskResult& result = committed.result;
+    const std::optional<std::size_t> index = graph_.find(result.task_id);
+    if (!index) {
+      throw ExecError(ExecErrorCode::invalid_value,
+                      "resumed result names task `" + result.task_id +
+                          "`, which is not in the task graph");
+    }
+    TaskRecord& task = tasks_[*index];
+    if (task.phase == TaskPhase::committed) {
+      throw ExecError(ExecErrorCode::invalid_value,
+                      "task `" + result.task_id + "` is resumed twice");
+    }
+    if (const auto defect = find_result_defect(graph_.node(*index).spec, result.attempt,
+                                               result, committed.payloads)) {
+      throw ExecError(ExecErrorCode::invalid_value,
+                      "resumed result for task `" + result.task_id + "` is invalid: " + *defect);
+    }
+    if (result.status != TaskStatus::succeeded) {
+      throw ExecError(ExecErrorCode::invalid_value,
+                      "resumed result for task `" + result.task_id + "` is not a success");
+    }
+    task.phase = TaskPhase::committed;
+    task.committed_attempt = result.attempt;
+    task.committed_executor_id = committed.executor_id;
+    task.committed_output_digest = result.output_digest;
+    // Dependents are made ready in execute(), once every resumed task is known.
+    static_cast<void>(ready_set_.complete(*index));
+    ++outcome_.stats.resumed;
   }
 }
 
 BuildOutcome SchedulerRun::execute() {
-  for (const std::size_t task : ready_set_.initially_ready()) {
-    tasks_[task].phase = TaskPhase::ready;
-    ready_queue_.insert(task);
+  // Without resumed results this is ReadySet::initially_ready(). With them, a
+  // task is ready when it is not committed and every dependency is.
+  for (std::size_t task = 0; task < graph_.size(); ++task) {
+    if (tasks_[task].phase != TaskPhase::waiting) {
+      continue;
+    }
+    const auto dependencies = graph_.dependencies(task);
+    if (std::all_of(dependencies.begin(), dependencies.end(),
+                    [&](std::size_t dependency) { return ready_set_.is_complete(dependency); })) {
+      tasks_[task].phase = TaskPhase::ready;
+      ready_queue_.insert(task);
+    }
   }
   while (!outcome_.failure) {
     if (cancellation_.requested()) {
@@ -61,7 +105,8 @@ std::chrono::milliseconds SchedulerRun::next_wait() const {
   std::chrono::milliseconds wait = policy_.max_idle_wait;
   const std::chrono::milliseconds now = clock_.now();
   for (const auto& [lease_id, lease] : leases_) {
-    wait = std::min(wait, std::max(std::chrono::milliseconds(0), lease.expires_at - now));
+    const std::chrono::milliseconds next = std::min(lease.expires_at, lease.deadline_at);
+    wait = std::min(wait, std::max(std::chrono::milliseconds(0), next - now));
   }
   return wait;
 }
@@ -179,9 +224,17 @@ void SchedulerRun::commit(const LeaseRecord& lease, AttemptOutput output) {
   ready_queue_.erase(lease.task);
   ++outcome_.stats.committed;
   emit(AttemptEventKind::committed, lease);
-  for (const std::size_t ready : ready_set_.complete(lease.task)) {
-    tasks_[ready].phase = TaskPhase::ready;
-    ready_queue_.insert(ready);
+  mark_ready_dependents(lease.task);
+}
+
+void SchedulerRun::mark_ready_dependents(std::size_t completed_task) {
+  for (const std::size_t ready : ready_set_.complete(completed_task)) {
+    // A resumed dependent may already be committed while a dependency that
+    // resume demoted ran again; it stays committed.
+    if (tasks_[ready].phase == TaskPhase::waiting) {
+      tasks_[ready].phase = TaskPhase::ready;
+      ready_queue_.insert(ready);
+    }
   }
 }
 
@@ -205,16 +258,20 @@ void SchedulerRun::on_failed(const FailedEvent& event) {
 
 void SchedulerRun::expire_leases() {
   const std::chrono::milliseconds now = clock_.now();
-  std::vector<std::string> expired;
+  std::vector<std::string> ended;
   for (const auto& [lease_id, lease] : leases_) {
-    if (lease.expires_at <= now) {
-      expired.push_back(lease_id);
+    if (lease.expires_at <= now || lease.deadline_at <= now) {
+      ended.push_back(lease_id);
     }
   }
-  for (const std::string& lease_id : expired) {
+  for (const std::string& lease_id : ended) {
     const auto found = leases_.find(lease_id);
     if (found == leases_.end() || outcome_.failure) {
       continue;  // Released by an earlier expiry's quarantine.
+    }
+    if (found->second.deadline_at <= now) {
+      end_lease_at_deadline(release(found));
+      continue;
     }
     const LeaseRecord lease = release(found);
     ++outcome_.stats.leases_expired;
@@ -223,6 +280,20 @@ void SchedulerRun::expire_leases() {
     count_executor_failure(lease.executor);
     attempt_failed(lease.task, lease.executor, "lease expired without a heartbeat");
   }
+}
+
+// The attempt is alive (its lease was renewed) but has run past its hard
+// deadline: cancel it cooperatively and treat it as lost. The executor keeps
+// its process; only the attempt is abandoned.
+void SchedulerRun::end_lease_at_deadline(const LeaseRecord& lease) {
+  const std::string detail =
+      "attempt exceeded its hard deadline of " +
+      std::to_string((lease.deadline_at - lease.granted_at).count()) + " ms";
+  ++outcome_.stats.deadlines_exceeded;
+  emit(AttemptEventKind::deadline_exceeded, lease, detail);
+  executors_[lease.executor].executor->cancel(lease.lease.lease_id);
+  count_executor_failure(lease.executor);
+  attempt_failed(lease.task, lease.executor, detail);
 }
 
 void SchedulerRun::attempt_failed(std::size_t task_index, std::size_t executor,
@@ -252,6 +323,9 @@ void SchedulerRun::attempt_failed(std::size_t task_index, std::size_t executor,
 void SchedulerRun::count_executor_failure(std::size_t executor) {
   ExecutorRecord& record = executors_[executor];
   ++record.failures;
+  if (record.loss_quarantine == LossQuarantine::never) {
+    return;  // Only an invalid result quarantines it (see LossQuarantine).
+  }
   if (record.failures >= policy_.retry.quarantine_after_executor_failures) {
     quarantine(executor, std::to_string(record.failures) + " lost or expired attempts");
   }

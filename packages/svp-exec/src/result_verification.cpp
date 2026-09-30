@@ -6,7 +6,12 @@ namespace svp::exec::detail {
 
 std::optional<std::string> find_result_defect(const TaskSpec& spec, std::uint64_t attempt,
                                               const AttemptOutput& output) {
-  const TaskResult& result = output.result;
+  return find_result_defect(spec, attempt, output.result, output.payloads);
+}
+
+std::optional<std::string> find_result_defect(const TaskSpec& spec, std::uint64_t attempt,
+                                              const TaskResult& result,
+                                              std::span<const FramePayload> payloads) {
   try {
     validate_task_result(result);
   } catch (const ExecError& error) {
@@ -19,14 +24,13 @@ std::optional<std::string> find_result_defect(const TaskSpec& spec, std::uint64_
     return "result names attempt " + std::to_string(result.attempt) + ", expected " +
            std::to_string(attempt);
   }
-  if (output.payloads.size() != result.outputs.size()) {
-    return "result carries " + std::to_string(output.payloads.size()) +
+  if (payloads.size() != result.outputs.size()) {
+    return "result carries " + std::to_string(payloads.size()) +
            " payloads for " + std::to_string(result.outputs.size()) + " outputs";
   }
   for (std::size_t index = 0; index < result.outputs.size(); ++index) {
     const ArtifactRef& ref = result.outputs[index];
-    if (output.payloads[index].size() != ref.bytes ||
-        blake3_digest(output.payloads[index]) != ref.blake3) {
+    if (payloads[index].size() != ref.bytes || blake3_digest(payloads[index]) != ref.blake3) {
       return "payload " + std::to_string(index) + " does not match outputs[" +
              std::to_string(index) + "]";
     }

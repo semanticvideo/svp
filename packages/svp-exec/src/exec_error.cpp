@@ -44,6 +44,8 @@ std::string_view exec_error_code_name(ExecErrorCode code) noexcept {
       return "invalid_task_parameters";
     case ExecErrorCode::unresolved_input:
       return "unresolved_input";
+    case ExecErrorCode::cancelled:
+      return "cancelled";
   }
   return "unknown";
 }

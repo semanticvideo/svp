@@ -116,7 +116,8 @@ void test_ordered_reduction() {
     const TaskSpec& spec = graph.node(index).spec;
     AttemptOutput output = run_task_attempt(runtime.registry, runtime.store, spec,
                                             AttemptContext{.attempt = 1,
-                                                           .worker_session_id = "ws_test"});
+                                                           .worker_session_id = "ws_test"},
+                                            kNotCancelled);
     results.push_back(CommittedResult{.result = std::move(output.result),
                                       .payloads = std::move(output.payloads),
                                       .executor_id = "test"});
@@ -165,6 +166,24 @@ void test_lease_policy() {
   expect(lease_duration(policy, std::numeric_limits<std::uint64_t>::max()).count() ==
              std::numeric_limits<std::chrono::milliseconds::rep>::max(),
          "saturates");
+
+  expect(attempt_deadline(policy, 0) == kDefaultAttemptDeadlineFloor,
+         "deadline floor for tiny tasks");
+  expect(attempt_deadline(policy, 600) ==
+             std::chrono::milliseconds(600'000 * kDefaultAttemptDeadlineFactor),
+         "deadline factor x estimate above the floor");
+  for (const std::uint64_t seconds : {0ULL, 1ULL, 60ULL, 3'600ULL}) {
+    expect(attempt_deadline(policy, seconds) >= lease_duration(policy, seconds),
+           "the deadline never ends an attempt before its lease could");
+  }
+  LeasePolicy short_deadline = policy;
+  short_deadline.attempt_deadline_floor = policy.lease_floor - std::chrono::milliseconds(1);
+  expect_exec_error(ExecErrorCode::invalid_value, [&] { validate_lease_policy(short_deadline); },
+                    "deadline floor below the lease floor");
+  short_deadline = policy;
+  short_deadline.attempt_deadline_factor = policy.lease_factor - 1;
+  expect_exec_error(ExecErrorCode::invalid_value, [&] { validate_lease_policy(short_deadline); },
+                    "deadline factor below the lease factor");
 
   LeasePolicy slow_heartbeat = policy;
   slow_heartbeat.heartbeat_interval = policy.lease_floor / 3;

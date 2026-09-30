@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <condition_variable>
 #include <deque>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -29,6 +31,7 @@ struct InProcessExecutor::State {
   void work() {
     while (true) {
       Assignment assignment;
+      std::shared_ptr<CancellationToken> cancellation;
       {
         std::unique_lock lock(mutex);
         changed.wait(lock, [&] { return stopping || !queue.empty(); });
@@ -37,14 +40,16 @@ struct InProcessExecutor::State {
         }
         assignment = std::move(queue.front());
         queue.pop_front();
-        running.insert(assignment.lease.lease_id);
+        cancellation = std::make_shared<CancellationToken>();
+        running.emplace(assignment.lease.lease_id, cancellation);
         heartbeats->add(assignment.lease.lease_id, assignment.lease.heartbeat_interval);
       }
       AttemptOutput output = run_task_attempt(
           registry, artifacts, assignment.spec,
           AttemptContext{.attempt = assignment.lease.attempt,
                          .worker_session_id = options.worker_session_id,
-                         .runtime_id = options.runtime_id});
+                         .runtime_id = options.runtime_id},
+          *cancellation);
       heartbeats->remove(assignment.lease.lease_id);
       bool report = false;
       {
@@ -66,7 +71,8 @@ struct InProcessExecutor::State {
   std::mutex mutex;
   std::condition_variable changed;
   std::deque<Assignment> queue;
-  std::set<std::string, std::less<>> running;
+  // Running leases and each attempt's cancellation token.
+  std::map<std::string, std::shared_ptr<CancellationToken>, std::less<>> running;
   std::set<std::string, std::less<>> dropped;
   bool stopping = false;
   std::optional<detail::LeaseHeartbeats> heartbeats;
@@ -88,6 +94,8 @@ InProcessExecutor::~InProcessExecutor() { stop(); }
 std::string_view InProcessExecutor::id() const { return state_->options.executor_id; }
 
 std::size_t InProcessExecutor::slots() const { return state_->options.threads; }
+
+LossQuarantine InProcessExecutor::loss_quarantine() const { return LossQuarantine::never; }
 
 void InProcessExecutor::start(ExecutorEvents& events) {
   State& state = *state_;
@@ -116,8 +124,9 @@ void InProcessExecutor::cancel(std::string_view lease_id) {
     state.queue.erase(queued);
     return;
   }
-  if (state.running.contains(lease_id)) {
+  if (const auto found = state.running.find(lease_id); found != state.running.end()) {
     state.dropped.emplace(lease_id);
+    found->second->request();
   }
 }
 
@@ -129,6 +138,9 @@ void InProcessExecutor::stop() {
     const std::lock_guard lock(state.mutex);
     state.stopping = true;
     state.queue.clear();
+    for (const auto& [lease_id, cancellation] : state.running) {
+      cancellation->request();
+    }
     state.changed.notify_all();
   }
   for (std::thread& thread : state.threads) {

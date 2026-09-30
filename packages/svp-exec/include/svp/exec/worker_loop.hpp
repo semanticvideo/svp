@@ -46,10 +46,12 @@ inline constexpr std::string_view kWorkerProtocolErrorCode = "protocol_error";
 //   * RESULT carries the TaskResult and its output payloads. A result whose
 //     output bytes do not match its refs is replaced by a permanent failed
 //     result (invalid_value), never sent as a success.
-//   * CANCEL drops the lease: its result is not sent. Task functions are not
-//     interrupted; the process owner enforces a grace period (plan §4.4).
-//   * SHUTDOWN or end of input: every lease is dropped, the loop waits for
-//     running task functions to return, then returns.
+//   * CANCEL drops the lease: its result is not sent and its attempt's
+//     CancellationToken is set, so the task function stops at its next
+//     cooperative check. Task functions are not otherwise interrupted; the
+//     process owner enforces a grace period (plan §4.4).
+//   * SHUTDOWN or end of input: every lease is dropped and cancelled, the
+//     loop waits for running task functions to return, then returns.
 //
 // Does not close either descriptor.
 WorkerLoopExit run_worker_loop(int in_fd, int out_fd, const TaskTypeRegistry& registry,

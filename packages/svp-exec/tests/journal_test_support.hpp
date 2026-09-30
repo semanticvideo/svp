@@ -47,6 +47,17 @@ struct JournalFixture {
     return RecoveryJournal::create(output_path, sample_session(), sources(),
                                    fixed_clock_options());
   }
+
+  // A journal whose build session is `session_id` (task graphs must match it).
+  [[nodiscard]] RecoveryJournal create_for_session(std::string_view session_id) const {
+    BuildSessionRecord session = sample_session();
+    session.id = std::string(session_id);
+    return RecoveryJournal::create(output_path, session, sources(), fixed_clock_options());
+  }
+
+  [[nodiscard]] RecoveryJournal open() const {
+    return RecoveryJournal::open(output_path, fixed_clock_options());
+  }
 };
 
 inline JournalTaskRecord task_record(std::string task_id,

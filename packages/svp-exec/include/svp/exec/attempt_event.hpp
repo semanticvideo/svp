@@ -17,6 +17,9 @@ enum class AttemptEventKind {
   // The attempt failed (task failure, invalid result, executor lost).
   failed,
   expired,
+  // The attempt ran past its hard deadline (LeasePolicy) while its lease was
+  // still renewed; it was cancelled and counted as lost.
+  deadline_exceeded,
   // The executor stopped receiving work for the rest of the run.
   executor_quarantined,
 };

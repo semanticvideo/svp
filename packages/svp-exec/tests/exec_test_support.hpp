@@ -3,6 +3,7 @@
 // Shared helpers for svp-exec tests: assertions, byte conversion, and the
 // sample records whose canonical bytes are pinned as golden vectors.
 
+#include "svp/exec/cancellation_token.hpp"
 #include "svp/exec/exec_error.hpp"
 #include "svp/exec/output_digest.hpp"
 #include "svp/exec/parameters_digest.hpp"
@@ -19,6 +20,9 @@
 #include <vector>
 
 namespace svp::exec::test {
+
+// A cancellation token nobody sets, for direct task and attempt calls.
+inline const CancellationToken kNotCancelled;
 
 inline void expect(bool condition, std::string_view message) {
   if (!condition) {
