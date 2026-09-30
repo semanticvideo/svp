@@ -254,3 +254,32 @@ if(BUILD_TESTING)
     add_dependencies(svp-exec-${SVP_EXEC_TEST_NAME}-tests svp-exec-test-worker)
   endforeach()
 endif()
+
+# ---------------------------------------------------------------------------
+# Runtime identity (plan §3.2, §4.1): the runtime manifest, its runtime_id,
+# and file verification. `svp-runtime-manifest` is run by `cmake --install`
+# when a runtime bundle is installed (cmake/SvpInstall.cmake); it is a build
+# tool, not a public CLI, so it is not installed.
+# ---------------------------------------------------------------------------
+target_sources(svp-exec
+  PRIVATE
+    src/runtime_components.cpp
+    src/runtime_manifest.cpp
+    src/runtime_manifest_assembly.cpp
+    src/runtime_manifest_files.cpp
+)
+
+add_executable(svp-runtime-manifest tools/svp_runtime_manifest_main.cpp)
+target_compile_features(svp-runtime-manifest PRIVATE cxx_std_20)
+target_link_libraries(svp-runtime-manifest PRIVATE svp::exec)
+
+if(BUILD_TESTING)
+  add_executable(svp-exec-runtime-manifest-tests tests/runtime_manifest_tests.cpp)
+  target_compile_features(svp-exec-runtime-manifest-tests PRIVATE cxx_std_20)
+  target_include_directories(svp-exec-runtime-manifest-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests
+  )
+  target_link_libraries(svp-exec-runtime-manifest-tests PRIVATE svp::exec)
+  add_test(NAME svp-exec-runtime-manifest-tests
+           COMMAND svp-exec-runtime-manifest-tests)
+endif()
