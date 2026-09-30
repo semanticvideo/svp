@@ -1,9 +1,11 @@
 #include "exec_test_support.hpp"
 #include "svp/exec/frame.hpp"
 #include "svp/exec/frame_decoder.hpp"
+#include "svp/exec/lease_frames.hpp"
 #include "svp/exec/message_type.hpp"
 #include "svp/exec/task_frames.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -233,9 +235,13 @@ void test_malformed_headers_rejected() {
 
 void test_task_records_travel_in_frames() {
   const TaskSpec spec = sample_task_spec();
-  const Frame assign = decode_frame(encode_frame(make_assign_frame(spec)));
+  const Lease lease{.lease_id = "lease_1",
+                    .attempt = 1,
+                    .duration = std::chrono::milliseconds(30'000),
+                    .heartbeat_interval = std::chrono::milliseconds(5'000)};
+  const Frame assign = decode_frame(encode_frame(make_leased_assign_frame(spec, lease)));
   expect(assign.type == MessageType::assign, "ASSIGN type");
-  expect(task_spec_from_assign_frame(assign) == spec, "TaskSpec through ASSIGN");
+  expect(leased_assignment_from_frame(assign).spec == spec, "TaskSpec through ASSIGN");
 
   const std::vector<std::byte> output = to_bytes("HELLO WORLD");
   TaskResult result = sample_task_result();
@@ -260,13 +266,15 @@ void test_task_records_travel_in_frames() {
                     [&] { static_cast<void>(task_result_from_result_frame(forged)); },
                     "RESULT payload that does not match its output ref");
   expect_exec_error(ExecErrorCode::frame_malformed,
-                    [&] { static_cast<void>(task_spec_from_assign_frame(frame)); },
+                    [&] { static_cast<void>(leased_assignment_from_frame(frame)); },
                     "RESULT read as ASSIGN");
-  Frame extra_member = assign;
-  extra_member.body["lease"] = nlohmann::json::object();
-  expect_exec_error(ExecErrorCode::unknown_field,
-                    [&] { static_cast<void>(task_spec_from_assign_frame(extra_member)); },
-                    "ASSIGN body with an undefined member");
+  // ASSIGN always carries its lease (plan §4.3); a bare TaskSpec body is not
+  // an ASSIGN.
+  Frame lease_less = assign;
+  lease_less.body.erase("lease");
+  expect_exec_error(ExecErrorCode::missing_field,
+                    [&] { static_cast<void>(leased_assignment_from_frame(lease_less)); },
+                    "ASSIGN without a lease");
 }
 
 }  // namespace
