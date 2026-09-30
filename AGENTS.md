@@ -1,6 +1,6 @@
 ## Worktree Rules
 
-- Use a worktree only when the repo owner or orchestrator assigns one.
+- Lead or orchestrator agents may create worktrees and branches for parallel or stacked work. Other agents work in the worktree they are given.
 - Keep generated build folders, caches, and local outputs inside the assigned checkout/worktree or ignored paths.
 - Do not modify another worktree to fix your own build.
 - Report the checkout or worktree path in the handoff.
@@ -48,22 +48,15 @@ When tests are run, report:
 
 If code changed and tests could not be run, explain why.
 
-## Local macOS Build and Install Safety
+## Builds, Dependencies, and Build Machines
 
-When working with local macOS builds or installs:
-
-- Never run `cmake --preset`, `cmake -S`, or any other CMake configure command.
-- Never invoke vcpkg, bootstrap dependencies, or rebuild ONNX Runtime.
-- Never run a build at the same time as a benchmark or another build.
-- If an existing build tree is missing or invalid, stop and report the problem.
-  Do not configure a replacement build tree.
-- If a build or configure command is interrupted or its tool call is canceled,
-  immediately check whether its exact process group is still running. Stop that
-  process group and verify that its CMake, vcpkg, Ninja, and compiler children
-  are gone before doing anything else.
-
-The clean-clone configure instructions in `README.md` are setup documentation,
-not permission for an agent to reconfigure this Mac during an install request.
+- Agents may configure (`cmake --preset …`), build, and test in their own checkout or worktree, using the preset's build directory inside that worktree.
+- Agents may use and bootstrap vcpkg. `VCPKG_ROOT` is `$HOME/.local/share/vcpkg`; `vcpkg.json`'s `builtin-baseline` pins every port. Changing the baseline or ports is a shared-contract change.
+- Reuse the shared vcpkg binary cache (`~/.cache/vcpkg/archives`). Do not delete or rewrite it; it lets a new worktree or machine configure in seconds instead of rebuilding ONNX Runtime and OpenCV.
+- Builds are memory-heavy. Check `memory_pressure` before starting a second concurrent build on the same Mac, and never run a build and a benchmark on the same Mac at the same time.
+- Other Macs may be used as build, test, and benchmark machines over SSH. Keep machine names, addresses, and credentials out of the repository.
+- Install into `~/.local/bin` or the model cache only when the task asks for an install.
+- If a build or configure command is interrupted or its tool call is canceled, immediately check whether its exact process group is still running. Stop that process group and verify that its CMake, vcpkg, and compiler children are gone before doing anything else.
 
 ## SVP Project Priorities
 
@@ -73,5 +66,4 @@ not permission for an agent to reconfigure this Mac during an install request.
 - The spec is the source of truth.
 - Do not silently change RC2 semantics. Document true spec issues for later review.
 - Normal `svp build` operation must not require Python.
-- Do not continue Phase 03+, fixture lab, media ingest, vision pipeline, relationships/index packaging, or first-video-trial work until OCR and structured color observations are represented in the validator, fixtures, builder roadmap, index/query model, and first-trial acceptance criteria.
 - Visible text, numeric values extracted from visible text, and measured color coverage are Core observations in RC2. Do not treat them as labels.
