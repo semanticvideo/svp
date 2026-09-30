@@ -289,15 +289,15 @@ std::string select_rows_query(std::string_view table_name,
   return query.str();
 }
 
-std::uint64_t emit_table_rows(sqlite3& database,
-                              blake3_hasher& hasher,
-                              std::string_view table_name,
-                              const std::vector<TableColumn>& columns) {
+void emit_table_rows(sqlite3& database,
+                     const LogicalTableDescriptor& table,
+                     const std::vector<TableColumn>& columns,
+                     LogicalRowStreamVisitor& visitor) {
   if (columns.empty()) {
-    return 0;
+    return;
   }
 
-  const auto query = select_rows_query(table_name, columns);
+  const auto query = select_rows_query(table.name, columns);
   sqlite3_stmt* raw_statement = nullptr;
   if (sqlite3_prepare_v2(&database, query.c_str(), -1, &raw_statement, nullptr) !=
       SQLITE_OK) {
@@ -305,7 +305,6 @@ std::uint64_t emit_table_rows(sqlite3& database,
   }
 
   std::unique_ptr<sqlite3_stmt, StatementDeleter> statement{raw_statement};
-  std::uint64_t row_count = 0;
   while (true) {
     const auto step = sqlite3_step(statement.get());
     if (step == SQLITE_DONE) {
@@ -319,47 +318,88 @@ std::uint64_t emit_table_rows(sqlite3& database,
     for (int index = 0; index < sqlite3_column_count(statement.get()); ++index) {
       values.push_back(sqlite_value_to_json(*statement, index));
     }
-    update_stream(hasher,
-                  nlohmann::json::array({"row", std::string{table_name}, values}));
-    ++row_count;
+    visitor.on_row(table, values);
   }
-
-  return row_count;
 }
 
+// Serializes the visited stream exactly as svp-logical-row-stream-v1 lines
+// and hashes them with BLAKE3.
+class HashingVisitor final : public LogicalRowStreamVisitor {
+ public:
+  HashingVisitor() {
+    blake3_hasher_init(&hasher_);
+  }
+
+  void on_table(const LogicalTableDescriptor& table) override {
+    update_stream(hasher_, nlohmann::json::array({"table", table.name}));
+    update_stream(hasher_, nlohmann::json::array(
+                               {"schema", table.name, table.schema_fingerprint}));
+    update_stream(hasher_, nlohmann::json::array(
+                               {"columns", table.name, table.column_names}));
+  }
+
+  void on_row(const LogicalTableDescriptor& table,
+              const nlohmann::json& values) override {
+    update_stream(hasher_, nlohmann::json::array({"row", table.name, values}));
+    ++row_count_;
+  }
+
+  [[nodiscard]] std::string digest() {
+    std::array<std::uint8_t, BLAKE3_OUT_LEN> bytes{};
+    blake3_hasher_finalize(&hasher_, bytes.data(), bytes.size());
+    return std::string{kBlake3PatternPrefix} + lower_hex(bytes.data(), bytes.size());
+  }
+
+  [[nodiscard]] std::uint64_t row_count() const noexcept {
+    return row_count_;
+  }
+
+ private:
+  blake3_hasher hasher_{};
+  std::uint64_t row_count_ = 0;
+};
+
 }  // namespace
+
+void visit_logical_row_stream(sqlite3& database,
+                              const std::set<std::string>& table_names,
+                              LogicalRowStreamVisitor& visitor) {
+  for (const auto& table_name : table_names) {
+    const auto columns = read_table_columns(database, table_name);
+    LogicalTableDescriptor table{
+        .name = table_name,
+        .schema_fingerprint = schema_fingerprint_for(database, table_name),
+    };
+    std::vector<TableColumn> key_columns;
+    for (const auto& column : columns) {
+      table.column_names.push_back(column.name);
+      if (column.primary_key_order > 0) {
+        key_columns.push_back(column);
+      }
+    }
+    std::sort(key_columns.begin(), key_columns.end(),
+              [](const TableColumn& left, const TableColumn& right) {
+                return left.primary_key_order < right.primary_key_order;
+              });
+    for (const auto& column : key_columns) {
+      table.primary_key_columns.push_back(column.name);
+    }
+
+    visitor.on_table(table);
+    emit_table_rows(database, table, columns, visitor);
+  }
+}
 
 LogicalRowStreamSummary compute_logical_row_stream_summary(
     sqlite3& database,
     const std::set<std::string>& table_names) {
-  blake3_hasher hasher;
-  blake3_hasher_init(&hasher);
+  HashingVisitor visitor;
+  visit_logical_row_stream(database, table_names, visitor);
 
   LogicalRowStreamSummary summary;
   summary.table_count = table_names.size();
-
-  for (const auto& table_name : table_names) {
-    const auto columns = read_table_columns(database, table_name);
-    nlohmann::json column_names = nlohmann::json::array();
-    for (const auto& column : columns) {
-      column_names.push_back(column.name);
-    }
-
-    update_stream(hasher, nlohmann::json::array({"table", std::string{table_name}}));
-    update_stream(
-        hasher,
-        nlohmann::json::array({"schema", std::string{table_name},
-                               schema_fingerprint_for(database, table_name)}));
-    update_stream(
-        hasher,
-        nlohmann::json::array({"columns", std::string{table_name}, column_names}));
-    summary.row_count += emit_table_rows(database, hasher, table_name, columns);
-  }
-
-  std::array<std::uint8_t, BLAKE3_OUT_LEN> digest{};
-  blake3_hasher_finalize(&hasher, digest.data(), digest.size());
-  summary.blake3 =
-      std::string{kBlake3PatternPrefix} + lower_hex(digest.data(), digest.size());
+  summary.row_count = visitor.row_count();
+  summary.blake3 = visitor.digest();
   return summary;
 }
 

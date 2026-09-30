@@ -12,6 +12,25 @@ add_library(svp-validation
   src/entity_record_validation.cpp
   src/embedded_svpi_transport_validator.cpp
   src/embedded_media_binding_validation.cpp
+  src/equivalence/block_compare.cpp
+  src/equivalence/block_payload_rules.cpp
+  src/equivalence/build_metadata_registry.cpp
+  src/equivalence/canonical_json_compare.cpp
+  src/equivalence/derived_digest_registry.cpp
+  src/equivalence/entry_layers.cpp
+  src/equivalence/equivalence_ledger.cpp
+  src/equivalence/geometry_metrics.cpp
+  src/equivalence/index_compare.cpp
+  src/equivalence/json_entry_preparation.cpp
+  src/equivalence/json_field_rules.cpp
+  src/equivalence/json_pointer_pattern.cpp
+  src/equivalence/json_value_diff.cpp
+  src/equivalence/mask_metrics.cpp
+  src/equivalence/package_archive.cpp
+  src/equivalence/package_equivalence.cpp
+  src/equivalence/package_equivalence_report.cpp
+  src/equivalence/payload_metrics.cpp
+  src/equivalence/sqlite_column_rules.cpp
   src/index_validation.cpp
   src/json_schema_subset.cpp
   src/loudness_record_validation.cpp
@@ -23,6 +42,7 @@ add_library(svp-validation
   src/report_json.cpp
   src/runtime_resources.cpp
   src/spec_assets.cpp
+  src/sqlite_index_access.cpp
   src/text_record_validation.cpp
   src/validator.cpp
   src/svpi_validator.cpp
@@ -34,6 +54,7 @@ target_include_directories(svp-validation
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${BLAKE3_INCLUDE_DIR}
 )
 
@@ -73,6 +94,23 @@ if(BUILD_TESTING)
   add_executable(svp-runtime-resource-tests
     tests/runtime_resource_tests.cpp
   )
+
+  add_executable(svp-package-equivalence-tests
+    tests/package_equivalence_tests.cpp
+  )
+  target_compile_features(svp-package-equivalence-tests PRIVATE cxx_std_20)
+  target_include_directories(svp-package-equivalence-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_link_libraries(svp-package-equivalence-tests PRIVATE
+    svp::validation
+    svp::blocks
+    libzip::zip
+    SQLite::SQLite3
+  )
+  add_test(NAME svp-package-equivalence-tests
+           COMMAND svp-package-equivalence-tests
+                   ${CMAKE_SOURCE_DIR}/spec/registries/equivalence-profile.json)
 
   target_compile_features(svp-diarization-validation-tests PRIVATE cxx_std_20)
   target_compile_features(svp-embedded-svpi-validation-tests PRIVATE cxx_std_20)
