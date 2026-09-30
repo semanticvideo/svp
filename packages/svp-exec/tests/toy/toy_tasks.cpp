@@ -9,6 +9,8 @@
 #include <csignal>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
+#include <map>
 #include <random>
 #include <thread>
 #include <utility>
@@ -19,8 +21,12 @@ namespace {
 constexpr std::array kAllFaults = {
     ToyFault::none,           ToyFault::crash,          ToyFault::corrupt_in_transit,
     ToyFault::hang,           ToyFault::nondeterministic, ToyFault::fail_retryable,
-    ToyFault::fail_permanent,
+    ToyFault::fail_permanent, ToyFault::stall,
 };
+
+// How often a stalled toy task looks at its cancellation token; small so a
+// cancelled stall ends promptly, large enough not to spin a core.
+constexpr std::chrono::milliseconds kStallPollInterval{2};
 
 std::optional<ToyFault> parse_fault(std::string_view name) {
   for (const ToyFault fault : kAllFaults) {
@@ -102,12 +108,24 @@ TaskResult failed_result(const TaskSpec& spec, bool retryable) {
   return result;
 }
 
-TaskResult execute(const TaskSpec& spec, InMemoryArtifactStore& store,
+std::string read_file_text(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  return std::string((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+}
+
+TaskResult execute(const TaskSpec& spec, const ResolvedInputs& inputs,
+                   const CancellationToken& cancellation, const ToyOutputWriter& write_output,
                    const ToyTaskOptions& options) {
   const nlohmann::json& parameters = spec.parameters;
+  throw_if_cancelled(cancellation, "toy task start");
   sleep_jitter(options.max_jitter);
   if (const auto sleep_ms = parameters.find("sleep_ms"); sleep_ms != parameters.end()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms->get<std::uint64_t>()));
+  }
+  throw_if_cancelled(cancellation, "toy task after sleep");
+  std::map<std::string, std::string> input_contents;
+  for (const auto& [name, input] : inputs) {
+    input_contents.emplace(name, read_file_text(input.path));
   }
 
   ToyFault fault = ToyFault::none;
@@ -116,7 +134,8 @@ TaskResult execute(const TaskSpec& spec, InMemoryArtifactStore& store,
     fault = *parse_fault(parameters.at("fault").get<std::string>());
   }
 
-  std::string text = toy_expected_output(spec.task_id, parameters.at("seed").get<std::uint64_t>());
+  std::string text = toy_expected_output(
+      spec.task_id, parameters.at("seed").get<std::uint64_t>(), input_contents);
   TaskResult result = base_result(spec);
   switch (fault) {
     case ToyFault::crash:
@@ -134,10 +153,18 @@ TaskResult execute(const TaskSpec& spec, InMemoryArtifactStore& store,
     case ToyFault::corrupt_in_transit:
       result.diagnostics[std::string(kToyCorruptInTransit)] = true;
       break;
+    case ToyFault::stall:
+      // Alive and heartbeating, but never finishing on its own: only the
+      // attempt's cancellation (e.g. its hard deadline) ends it.
+      while (!cancellation.requested()) {
+        std::this_thread::sleep_for(kStallPollInterval);
+      }
+      break;
     case ToyFault::none:
       break;
   }
-  result.outputs = {store.put(to_bytes(text), "text/plain", "toy_output")};
+  throw_if_cancelled(cancellation, "toy task before output");
+  result.outputs = {write_output(to_bytes(text), "text/plain", "toy_output")};
   result.output_digest = compute_output_digest(result.outputs);
   return result;
 }
@@ -160,25 +187,44 @@ std::string_view toy_fault_name(ToyFault fault) {
       return "fail_retryable";
     case ToyFault::fail_permanent:
       return "fail_permanent";
+    case ToyFault::stall:
+      return "stall";
   }
   return "unknown";
 }
 
-void register_toy_tasks(TaskTypeRegistry& registry, InMemoryArtifactStore& store,
+void register_toy_tasks(TaskTypeRegistry& registry, ToyOutputWriter write_output,
                         ToyTaskOptions options) {
   registry.register_type(TaskTypeDefinition{
       .name = std::string(kToyTaskType),
       .version = 1,
       .validate_parameters = validate_parameters,
-      .execute = [&store, options](const TaskSpec& spec, const ResolvedInputs&) {
-        return execute(spec, store, options);
+      .execute = [write_output = std::move(write_output), options](
+                     const TaskSpec& spec, const ResolvedInputs& inputs,
+                     const CancellationToken& cancellation) {
+        return execute(spec, inputs, cancellation, write_output, options);
       }});
 }
 
-std::string toy_expected_output(std::string_view task_id, std::uint64_t seed) {
+void register_toy_tasks(TaskTypeRegistry& registry, InMemoryArtifactStore& store,
+                        ToyTaskOptions options) {
+  register_toy_tasks(
+      registry,
+      [&store](std::vector<std::byte> bytes, std::string media_type, std::string role) {
+        return store.put(std::move(bytes), std::move(media_type), std::move(role));
+      },
+      options);
+}
+
+std::string toy_expected_output(std::string_view task_id, std::uint64_t seed,
+                                const std::map<std::string, std::string>& input_contents) {
   const std::string material = std::string(task_id) + "#" + std::to_string(seed);
-  return "toy.digest " + std::string(task_id) + " seed=" + std::to_string(seed) +
-         " b3=" + blake3_hex(blake3_digest(material)) + "\n";
+  std::string text = "toy.digest " + std::string(task_id) + " seed=" + std::to_string(seed) +
+                     " b3=" + blake3_hex(blake3_digest(material)) + "\n";
+  for (const auto& [name, content] : input_contents) {
+    text += "  input " + name + " b3=" + blake3_hex(blake3_digest(content)) + "\n";
+  }
+  return text;
 }
 
 TaskNode make_toy_node(const ToyTask& task) {
@@ -200,6 +246,7 @@ TaskNode make_toy_node(const ToyTask& task) {
   spec.task_type_version = 1;
   spec.depends_on = task.depends_on;
   std::sort(spec.depends_on.begin(), spec.depends_on.end());
+  spec.inputs = task.inputs;
   spec.parameters = parameters;
   spec.parameters_blake3 = compute_parameters_blake3(parameters);
   spec.cache_key = blake3_digest(task.task_id);

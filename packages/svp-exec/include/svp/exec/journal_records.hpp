@@ -82,6 +82,23 @@ struct TaskCommit {
   std::optional<CacheHitRecord> cache_hit;
 };
 
+// One committed `artifact` row, read back. `path` is the absolute path of its
+// blob under blobs/completed/; callers re-verify the bytes they read.
+struct JournalArtifactRecord {
+  std::string artifact_id;
+  Blake3Digest blake3{};
+  std::uint64_t byte_length = 0;
+  std::filesystem::path path;
+};
+
+// A task the journal holds as `committed`, with its output digest and
+// artifacts (sorted by artifact_id).
+struct JournalCommittedTask {
+  std::string task_id;
+  Blake3Digest output_blake3{};
+  std::vector<JournalArtifactRecord> artifacts;
+};
+
 // --- Distributed execution (non-normative, plan §4.6) ---
 
 enum class WorkerSessionStatus { active, ended, lost, quarantined };

@@ -85,6 +85,8 @@ void SchedulerRun::grant(std::size_t task_index, std::size_t executor, bool spec
                       .heartbeat_interval = policy_.lease.heartbeat_interval};
   lease.granted_at = clock_.now();
   lease.expires_at = lease.granted_at + lease.lease.duration;
+  lease.deadline_at =
+      lease.granted_at + attempt_deadline(policy_.lease, spec.resources.est_seconds);
 
   task.phase = TaskPhase::leased;
   task.active_leases.insert(lease.lease.lease_id);

@@ -10,7 +10,6 @@
 namespace svp::exec {
 namespace {
 
-constexpr std::string_view kTaskSpecMember = "task_spec";
 constexpr std::string_view kTaskResultMember = "task_result";
 
 const nlohmann::json& single_member_body(const Frame& frame,
@@ -52,22 +51,6 @@ void require_payloads_match(const std::vector<ArtifactRef>& outputs,
 }
 
 }  // namespace
-
-Frame make_assign_frame(const TaskSpec& spec) {
-  return Frame{.type = MessageType::assign,
-               .body = nlohmann::json{{kTaskSpecMember, task_spec_to_json(spec)}},
-               .payloads = {}};
-}
-
-TaskSpec task_spec_from_assign_frame(const Frame& frame) {
-  const nlohmann::json& spec =
-      single_member_body(frame, MessageType::assign, kTaskSpecMember);
-  if (!frame.payloads.empty()) {
-    throw ExecError(ExecErrorCode::frame_malformed,
-                    "ASSIGN frames carry no payloads");
-  }
-  return task_spec_from_json(spec);
-}
 
 Frame make_result_frame(const TaskResult& result,
                         std::vector<FramePayload> output_payloads) {

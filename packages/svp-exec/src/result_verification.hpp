@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 
 namespace svp::exec::detail {
@@ -20,5 +21,8 @@ namespace svp::exec::detail {
 [[nodiscard]] std::optional<std::string> find_result_defect(const TaskSpec& spec,
                                                             std::uint64_t attempt,
                                                             const AttemptOutput& output);
+[[nodiscard]] std::optional<std::string> find_result_defect(
+    const TaskSpec& spec, std::uint64_t attempt, const TaskResult& result,
+    std::span<const FramePayload> payloads);
 
 }  // namespace svp::exec::detail

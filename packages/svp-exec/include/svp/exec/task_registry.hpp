@@ -1,5 +1,6 @@
 #pragma once
 
+#include "svp/exec/cancellation_token.hpp"
 #include "svp/exec/resolved_inputs.hpp"
 #include "svp/exec/task_result.hpp"
 #include "svp/exec/task_spec.hpp"
@@ -19,8 +20,15 @@ namespace svp::exec {
 using TaskParameterValidator =
     std::function<std::optional<std::string>(const nlohmann::json& parameters)>;
 
-using TaskExecuteFunction =
-    std::function<TaskResult(const TaskSpec& spec, const ResolvedInputs& inputs)>;
+// Runs one attempt of a task. `cancellation` is the attempt's own token: the
+// executor sets it when the scheduler cancels the lease (build cancelled,
+// lease lost, or the attempt ran past its hard deadline, see
+// lease_policy.hpp). Task functions check it cooperatively at safe points with
+// throw_if_cancelled(); nothing interrupts them otherwise, so a function that
+// never checks runs to completion and its result is discarded.
+using TaskExecuteFunction = std::function<TaskResult(
+    const TaskSpec& spec, const ResolvedInputs& inputs,
+    const CancellationToken& cancellation)>;
 
 struct TaskTypeDefinition {
   std::string name;
@@ -52,11 +60,11 @@ class TaskTypeRegistry {
   const TaskTypeDefinition& admit(const TaskSpec& spec) const;
 
   // admit(), then requires `inputs` to hold exactly the spec's inputs with
-  // matching refs (ExecError(unresolved_input) otherwise), runs the task, and
-  // validates the result it returns for this task_id
+  // matching refs (ExecError(unresolved_input) otherwise), runs the task with
+  // `cancellation`, and validates the result it returns for this task_id
   // (ExecError(invalid_value) when the task_id differs).
-  [[nodiscard]] TaskResult execute(const TaskSpec& spec,
-                                   const ResolvedInputs& inputs) const;
+  [[nodiscard]] TaskResult execute(const TaskSpec& spec, const ResolvedInputs& inputs,
+                                   const CancellationToken& cancellation) const;
 
  private:
   std::map<std::string, TaskTypeDefinition, std::less<>> types_;

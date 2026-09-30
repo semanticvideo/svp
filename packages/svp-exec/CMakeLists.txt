@@ -7,6 +7,7 @@ add_library(svp-exec
   src/artifact_ref.cpp
   src/blake3_digest.cpp
   src/cache_key.cpp
+  src/cancellation_token.cpp
   src/canonical_json.cpp
   src/exec_error.cpp
   src/frame_decoder.cpp
@@ -211,4 +212,45 @@ if(BUILD_TESTING)
     set_tests_properties(svp-exec-${SVP_EXEC_TEST_NAME}-tests PROPERTIES TIMEOUT 60)
   endforeach()
   add_dependencies(svp-exec-loopback-executor-tests svp-exec-test-worker)
+endif()
+
+# ---------------------------------------------------------------------------
+# Journal and cache wiring for the scheduler (plan §4.4-§4.6): the journal
+# commit sink, the CAS-backed task artifact access, and scheduler resume.
+# ---------------------------------------------------------------------------
+target_sources(svp-exec
+  PRIVATE
+    src/cas_task_artifact_access.cpp
+    src/committed_result_record.cpp
+    src/journal_committed_results.cpp
+    src/journal_result_commit_sink.cpp
+    src/journal_scheduler_resume.cpp
+)
+
+if(BUILD_TESTING)
+  set(SVP_EXEC_INTEGRATION_TESTS
+    cas_task_artifact_access
+    journal_result_commit_sink
+    resume_e2e
+  )
+  foreach(SVP_EXEC_TEST IN LISTS SVP_EXEC_INTEGRATION_TESTS)
+    string(REPLACE "_" "-" SVP_EXEC_TEST_NAME "${SVP_EXEC_TEST}")
+    add_executable(svp-exec-${SVP_EXEC_TEST_NAME}-tests
+      tests/${SVP_EXEC_TEST}_tests.cpp
+    )
+    target_include_directories(svp-exec-${SVP_EXEC_TEST_NAME}-tests PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    )
+    # Tests inspect build.sqlite directly.
+    target_link_libraries(svp-exec-${SVP_EXEC_TEST_NAME}-tests
+      PRIVATE
+        svp-exec-toy-tasks
+        SQLite::SQLite3
+    )
+    add_test(NAME svp-exec-${SVP_EXEC_TEST_NAME}-tests
+             COMMAND svp-exec-${SVP_EXEC_TEST_NAME}-tests
+                     $<TARGET_FILE:svp-exec-test-worker>)
+    set_tests_properties(svp-exec-${SVP_EXEC_TEST_NAME}-tests PROPERTIES TIMEOUT 120)
+    add_dependencies(svp-exec-${SVP_EXEC_TEST_NAME}-tests svp-exec-test-worker)
+  endforeach()
 endif()

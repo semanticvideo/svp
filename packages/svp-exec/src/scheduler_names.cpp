@@ -45,6 +45,8 @@ std::string_view attempt_event_kind_name(AttemptEventKind kind) noexcept {
       return "failed";
     case AttemptEventKind::expired:
       return "expired";
+    case AttemptEventKind::deadline_exceeded:
+      return "deadline_exceeded";
     case AttemptEventKind::executor_quarantined:
       return "executor_quarantined";
   }

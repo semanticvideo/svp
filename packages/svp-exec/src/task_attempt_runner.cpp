@@ -11,7 +11,7 @@ namespace svp::exec {
 namespace {
 
 bool is_retryable_exec_error(ExecErrorCode code) noexcept {
-  return code == ExecErrorCode::unresolved_input;
+  return code == ExecErrorCode::unresolved_input || code == ExecErrorCode::cancelled;
 }
 
 std::uint64_t elapsed_ms(std::chrono::steady_clock::time_point start) {
@@ -46,11 +46,14 @@ AttemptOutput failed_attempt(const TaskSpec& spec, const AttemptContext& context
 
 AttemptOutput run_task_attempt(const TaskTypeRegistry& registry,
                                TaskArtifactAccess& artifacts, const TaskSpec& spec,
-                               const AttemptContext& context) {
+                               const AttemptContext& context,
+                               const CancellationToken& cancellation) {
   try {
+    throw_if_cancelled(cancellation, "attempt start");
     const ResolvedInputs inputs = artifacts.resolve_inputs(spec);
+    throw_if_cancelled(cancellation, "inputs resolved");
     const auto started = std::chrono::steady_clock::now();
-    TaskResult result = registry.execute(spec, inputs);
+    TaskResult result = registry.execute(spec, inputs, cancellation);
     const std::uint64_t compute_ms = elapsed_ms(started);
 
     result.attempt = context.attempt;

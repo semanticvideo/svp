@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/exec/blake3_digest.hpp"
+#include "svp/exec/cancellation_token.hpp"
 #include "svp/exec/executor.hpp"
 #include "svp/exec/task_artifact_access.hpp"
 #include "svp/exec/task_registry.hpp"
@@ -27,18 +28,22 @@ inline constexpr std::string_view kTaskExceptionErrorCode = "task_exception";
 // and remote execution call the same function). Resolves inputs, runs the
 // registered task function through TaskTypeRegistry::execute (admission,
 // parameter validation, result validation), stamps attempt and execution
-// identity, and reads the output bytes.
+// identity, and reads the output bytes. `cancellation` is the attempt's
+// token; it is checked before inputs are resolved and before the task runs,
+// and handed to the task function to check cooperatively.
 //
 // Never throws for task-level problems; they become a failed TaskResult:
-//   * ExecError: error.code is the ExecErrorCode name. Retryable only for
-//     unresolved_input (bytes may arrive later); every other code is a
-//     contract violation that repeats identically on every node running the
-//     same runtime (plan §3.1 rule 2), so it is permanent.
+//   * ExecError: error.code is the ExecErrorCode name. Retryable for
+//     unresolved_input (bytes may arrive later) and cancelled (the attempt,
+//     not the task, was stopped); every other code is a contract violation
+//     that repeats identically on every node running the same runtime (plan
+//     §3.1 rule 2), so it is permanent.
 //   * any other std::exception: kTaskExceptionErrorCode, retryable (resource
 //     exhaustion and I/O errors can be transient).
 [[nodiscard]] AttemptOutput run_task_attempt(const TaskTypeRegistry& registry,
                                              TaskArtifactAccess& artifacts,
                                              const TaskSpec& spec,
-                                             const AttemptContext& context);
+                                             const AttemptContext& context,
+                                             const CancellationToken& cancellation);
 
 }  // namespace svp::exec

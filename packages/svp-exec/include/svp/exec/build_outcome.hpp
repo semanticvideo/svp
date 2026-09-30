@@ -12,7 +12,8 @@
 namespace svp::exec {
 
 enum class BuildStatus {
-  // Every task committed exactly one verified result.
+  // Every task committed exactly one verified result (in this run or, on
+  // resume, in the run it continues).
   succeeded,
   failed,
   // The cancellation token was set; committed results stay committed.
@@ -54,12 +55,18 @@ struct DeterminismIncident {
 };
 
 struct SchedulerStats {
+  // Results committed during this run (sink.commit calls).
   std::uint64_t committed = 0;
+  // Results committed by an earlier, interrupted run and passed in on resume;
+  // their tasks were not run again.
+  std::uint64_t resumed = 0;
   std::uint64_t attempts_started = 0;
   std::uint64_t speculative_attempts = 0;
   // Failed attempts that were followed by another attempt.
   std::uint64_t retries = 0;
   std::uint64_t leases_expired = 0;
+  // Attempts cancelled at their hard deadline (LeasePolicy).
+  std::uint64_t deadlines_exceeded = 0;
   std::uint64_t invalid_results = 0;
   // Later verified results whose digest equals the committed one.
   std::uint64_t duplicates_discarded = 0;

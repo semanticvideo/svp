@@ -20,11 +20,13 @@ using Responder = std::function<void(const TaskSpec&, const Lease&, ExecutorEven
 // and the test drives events() itself.
 class ScriptedExecutor final : public Executor {
  public:
-  ScriptedExecutor(std::string id, Responder respond = {})
-      : id_(std::move(id)), respond_(std::move(respond)) {}
+  ScriptedExecutor(std::string id, Responder respond = {},
+                   LossQuarantine loss_quarantine = LossQuarantine::after_repeated_losses)
+      : id_(std::move(id)), respond_(std::move(respond)), loss_quarantine_(loss_quarantine) {}
 
   std::string_view id() const override { return id_; }
   std::size_t slots() const override { return 1; }
+  LossQuarantine loss_quarantine() const override { return loss_quarantine_; }
   void start(ExecutorEvents& events) override { events_ = &events; }
   void assign(const TaskSpec& spec, const Lease& lease) override {
     {
@@ -55,6 +57,7 @@ class ScriptedExecutor final : public Executor {
  private:
   std::string id_;
   Responder respond_;
+  LossQuarantine loss_quarantine_;
   ExecutorEvents* events_ = nullptr;
   mutable std::mutex mutex_;
   std::vector<Lease> assignments_;
@@ -64,7 +67,8 @@ class ScriptedExecutor final : public Executor {
 // A correct output for `spec` at `lease.attempt`, computed in-process.
 AttemptOutput correct_output(ToyRuntime& runtime, const TaskSpec& spec, const Lease& lease) {
   return run_task_attempt(runtime.registry, runtime.store, spec,
-                          AttemptContext{.attempt = lease.attempt, .worker_session_id = "ws_scripted"});
+                          AttemptContext{.attempt = lease.attempt, .worker_session_id = "ws_scripted"},
+                          kNotCancelled);
 }
 
 TaskGraph single_task_graph() {
@@ -435,6 +439,97 @@ void test_repeated_losses_quarantine_executor() {
   expect(sink.size() == graph.size(), "all tasks committed");
 }
 
+// Loses attempt 1 of every task, then answers correctly: each task needs one
+// retry, and the executor collects one loss per task.
+Responder lose_first_attempts(ToyRuntime& runtime) {
+  return [&runtime](const TaskSpec& spec, const Lease& lease, ExecutorEvents& events) {
+    if (lease.attempt == 1) {
+      events.attempt_failed(lease.lease_id, AttemptFailureKind::executor_lost, "worker slept");
+    } else {
+      events.attempt_finished(lease.lease_id, correct_output(runtime, spec, lease));
+    }
+  };
+}
+
+// The only executor collects more transient losses than the quarantine
+// threshold. Declared LossQuarantine::never, it keeps working and the build
+// succeeds; per-task max_attempts still bounds each task.
+void test_losses_never_quarantine_a_never_executor() {
+  const TaskGraph graph = make_toy_graph(two_lane_toy_tasks(2));
+  expect(graph.size() > kDefaultQuarantineAfterExecutorFailures,
+         "more losses than the quarantine threshold");
+  ToyRuntime runtime;
+  ScriptedExecutor local("local", lose_first_attempts(runtime), LossQuarantine::never);
+  InMemoryResultCommitSink sink;
+  const BuildOutcome outcome = run_sync(graph, {&local}, sink);
+  expect_succeeded(outcome, "single never-quarantined executor with transient losses");
+  expect(outcome.stats.quarantined_executors.empty(), "not quarantined for losses");
+  expect(outcome.stats.retries == graph.size(), "one retry per task");
+
+  // The same losses on a remote-style executor quarantine it, and with no
+  // other executor the build cannot finish.
+  ScriptedExecutor remote("remote", lose_first_attempts(runtime));
+  InMemoryResultCommitSink remote_sink;
+  const BuildOutcome remote_outcome = run_sync(graph, {&remote}, remote_sink);
+  expect(remote_outcome.failure &&
+             remote_outcome.failure->kind == BuildFailureKind::no_usable_executor,
+         "after_repeated_losses quarantines after the threshold");
+}
+
+// Invalid results still quarantine a LossQuarantine::never executor at once.
+void test_invalid_result_quarantines_a_never_executor() {
+  const TaskGraph graph = single_task_graph();
+  ScriptedExecutor local("local", [](const TaskSpec&, const Lease& lease, ExecutorEvents& events) {
+    events.attempt_failed(lease.lease_id, AttemptFailureKind::invalid_result, "bad payload");
+  }, LossQuarantine::never);
+  InMemoryResultCommitSink sink;
+  const BuildOutcome outcome = run_sync(graph, {&local}, sink);
+  expect(outcome.stats.quarantined_executors == std::vector<std::string>{"local"},
+         "an invalid result quarantines regardless of loss policy");
+}
+
+void test_in_process_executor_is_never_quarantined_for_losses() {
+  ToyRuntime runtime;
+  InProcessExecutor executor(runtime.registry, runtime.store, {.threads = 1});
+  expect(executor.loss_quarantine() == LossQuarantine::never, "in-process loss policy");
+}
+
+// Real-time policy for deadline tests: leases far longer than the heartbeat
+// cadence (so only the deadline can end an attempt), and a deadline short
+// enough to keep the test quick. Tasks use est_seconds 0, so both floors apply.
+SchedulerPolicy deadline_policy() {
+  SchedulerPolicy policy = test_policy();
+  policy.lease.lease_floor = std::chrono::milliseconds(1'000);
+  policy.lease.attempt_deadline_floor = std::chrono::milliseconds(1'500);
+  return policy;
+}
+
+// A task that is alive (heartbeating) but never finishes is cancelled at its
+// hard deadline, counted as lost, and retried; the retry commits.
+void test_deadline_cancels_a_live_stuck_attempt() {
+  const TemporaryDirectory directory("svp-exec-scheduler-deadline");
+  ToyTask stuck{.task_id = "task.toy.stuck",
+                .seed = 11,
+                .order_key = {.lane = "alpha", .ordinals = {0}},
+                .fault = ToyFault::stall,
+                .once_marker = directory.path / "stalled",
+                .est_seconds = 0};
+  const TaskGraph graph = make_toy_graph({stuck});
+  ToyRuntime runtime(ToyTaskOptions{.faults = ToyFaults::honoured});
+  InProcessExecutor executor(runtime.registry, runtime.store, {.threads = 1});
+  InMemoryResultCommitSink sink;
+  EventLog log;
+  const BuildOutcome outcome = run_sync(graph, {&executor}, sink, deadline_policy(), log.observer());
+  expect_succeeded(outcome, "stuck attempt retried");
+  expect(outcome.stats.deadlines_exceeded == 1, "one deadline");
+  expect(outcome.stats.leases_expired == 0, "heartbeats kept the lease alive");
+  expect(log.count(AttemptEventKind::deadline_exceeded) == 1, "deadline event");
+  expect(outcome.stats.quarantined_executors.empty(), "the in-process executor stays usable");
+  const CommittedResult* committed = sink.find("task.toy.stuck");
+  expect(committed != nullptr && committed->result.attempt == 2, "attempt 2 committed");
+  expect_payload_is_correct(*committed, 11);
+}
+
 }  // namespace
 
 int main() {
@@ -459,5 +554,13 @@ int main() {
                        {"no usable executor", test_no_usable_executor},
                        {"repeated losses quarantine executor",
                         test_repeated_losses_quarantine_executor},
+                       {"losses never quarantine a never executor",
+                        test_losses_never_quarantine_a_never_executor},
+                       {"invalid result quarantines a never executor",
+                        test_invalid_result_quarantines_a_never_executor},
+                       {"in-process executor is never quarantined for losses",
+                        test_in_process_executor_is_never_quarantined_for_losses},
+                       {"deadline cancels a live stuck attempt",
+                        test_deadline_cancels_a_live_stuck_attempt},
                    });
 }

@@ -24,14 +24,23 @@ namespace svp::exec {
 //     a free slot, never exceeding slots().
 //   * Every lease lasts lease_duration(policy.lease, est_seconds) and is
 //     renewed by heartbeats; an expired lease is a failed attempt.
+//   * Every attempt also has a hard deadline, attempt_deadline(policy.lease,
+//     est_seconds) after its grant, that heartbeats do not renew. An attempt
+//     still outstanding at its deadline is cancelled (the executor sets its
+//     CancellationToken) and treated as lost.
 //   * A result is verified before commit: TaskResult schema and
 //     output_digest, task_id, attempt, and each payload's length and BLAKE3.
 //     An invalid result is a failed attempt and quarantines the executor.
 //   * Failed attempts (retryable failure, invalid result, executor lost,
-//     lease expiry) are retried, preferring an executor that has not failed
-//     the task; policy.retry.max_attempts failures fail the build naming the
-//     task. A non-retryable failure fails the build at once. A failed or
-//     invalid result is never committed.
+//     lease expiry, deadline) are retried, preferring an executor that has not
+//     failed the task; policy.retry.max_attempts failures fail the build
+//     naming the task. A non-retryable failure fails the build at once. A
+//     failed or invalid result is never committed.
+//   * Lost attempts (executor lost, lease expiry, deadline) quarantine an
+//     executor after policy.retry.quarantine_after_executor_failures of them
+//     only when its loss_quarantine() is after_repeated_losses; an executor
+//     that declares LossQuarantine::never (the in-process executor) is
+//     quarantined only for invalid results.
 //   * The first verified result for a task is committed to the sink, exactly
 //     once. A later verified result with the same output_digest is discarded
 //     and counted; a different digest is a determinism incident and fails the
@@ -42,6 +51,12 @@ namespace svp::exec {
 //   * The cancellation token is checked between dispatch rounds; once set,
 //     no new lease is granted, outstanding leases are cancelled, and run()
 //     returns cancelled.
+//   * Resume (plan §7.3 "coordinator crash"): `resumed` holds the verified
+//     results an interrupted run already committed (see
+//     resume_scheduler_state in journal_scheduler_resume.hpp). Their tasks
+//     start committed: they are never leased, never handed to the sink again,
+//     and count toward their dependents' readiness. A later duplicate cannot
+//     occur because no attempt of theirs is started.
 //
 // Executors are started at the beginning of run() and stopped before it
 // returns, on every path. The sink and observer are called on the calling
@@ -52,12 +67,15 @@ class Scheduler {
   Scheduler(SchedulerPolicy policy, const Clock& clock);
 
   // Throws ExecError(invalid_value) when there are no executors, an executor
-  // is null, advertises zero slots, or repeats an id.
+  // is null, advertises zero slots, or repeats an id, and when a `resumed`
+  // result names a task outside the graph, repeats a task, or is not a
+  // verified success (schema, output_digest, payload lengths and BLAKE3).
   [[nodiscard]] BuildOutcome run(const TaskGraph& graph,
                                  std::span<Executor* const> executors,
                                  ResultCommitSink& sink,
                                  const CancellationToken& cancellation,
-                                 const AttemptObserver& observer = {}) const;
+                                 const AttemptObserver& observer = {},
+                                 std::span<const CommittedResult> resumed = {}) const;
 
  private:
   SchedulerPolicy policy_;

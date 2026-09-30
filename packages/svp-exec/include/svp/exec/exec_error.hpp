@@ -29,6 +29,9 @@ enum class ExecErrorCode {
   duplicate_task_type,
   invalid_task_parameters,
   unresolved_input,
+  // A task function stopped early because its attempt was cancelled (plan
+  // §4.4: cancel, lease loss, or the attempt's hard deadline).
+  cancelled,
 };
 
 [[nodiscard]] std::string_view exec_error_code_name(ExecErrorCode code) noexcept;

@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <chrono>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -23,6 +24,9 @@ namespace {
 
 struct RunningLease {
   bool dropped = false;
+  // The attempt's token; set when the lease is dropped (CANCEL, SHUTDOWN, or
+  // end of input) so the task function can stop at its next check.
+  std::shared_ptr<CancellationToken> cancellation = std::make_shared<CancellationToken>();
 };
 
 // Everything the reader thread, task threads, and heartbeat thread share.
@@ -51,9 +55,13 @@ class WorkerSession {
     if (leases_.contains(lease_id)) {
       return false;
     }
-    leases_.emplace(lease_id, RunningLease{});
+    RunningLease lease;
+    std::shared_ptr<CancellationToken> cancellation = lease.cancellation;
+    leases_.emplace(lease_id, std::move(lease));
     heartbeats_.add(lease_id, assignment.lease.heartbeat_interval);
-    std::thread thread([this, assignment = std::move(assignment)] { run(assignment); });
+    std::thread thread([this, assignment = std::move(assignment), cancellation] {
+      run(assignment, *cancellation);
+    });
     const std::thread::id thread_id = thread.get_id();
     threads_.emplace(thread_id, std::move(thread));
     return true;
@@ -63,6 +71,7 @@ class WorkerSession {
     const std::lock_guard lock(mutex_);
     if (const auto found = leases_.find(lease_id); found != leases_.end()) {
       found->second.dropped = true;
+      found->second.cancellation->request();
       heartbeats_.remove(lease_id);
     }
   }
@@ -79,6 +88,7 @@ class WorkerSession {
       closed_ = true;
       for (auto& [lease_id, lease] : leases_) {
         lease.dropped = true;
+        lease.cancellation->request();
         heartbeats_.remove(lease_id);
       }
     }
@@ -94,12 +104,13 @@ class WorkerSession {
   }
 
  private:
-  void run(const LeasedAssignment& assignment) {
+  void run(const LeasedAssignment& assignment, const CancellationToken& cancellation) {
     AttemptOutput output = run_task_attempt(
         registry_, artifacts_, assignment.spec,
         AttemptContext{.attempt = assignment.lease.attempt,
                        .worker_session_id = options_.worker_session_id,
-                       .runtime_id = options_.runtime_id});
+                       .runtime_id = options_.runtime_id},
+        cancellation);
     std::optional<Frame> frame;
     try {
       frame = make_result_frame(output.result, std::move(output.payloads));
