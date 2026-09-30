@@ -293,8 +293,8 @@
       "source_slug": "onnx-community/wav2vec2-lv-60-espeak-cv-ft-ONNX + MontrealCorpusTools/mfa-models english_mfa dictionary",
       "source_revision": "c69750f5043e5e1f8a71ab95dd3b98338c280c92+dictionary-english_mfa-v3.1.0",
       "license": "Apache-2.0 AND CC-BY-4.0",
-      "model_bundle_id": "model_wav2vec2_espeak_phoneme@ae45363-w2v2-espeak-int8-opset14+blake3_2c1e3439aff8",
-      "bundle_blake3": "blake3:2c1e3439aff88ca28745459021af91e7e6810949046d7b197e5b1e52d4d05baf",
+      "model_bundle_id": "model_wav2vec2_espeak_phoneme@ae45363-w2v2-espeak-int8-opset14+blake3_25a30753fe78",
+      "bundle_blake3": "blake3:25a30753fe78f0b0ef83a9c59e504d81a340abfffa6179488fee6975653c45de",
       "required_files": [
         {
           "path": "wav2vec2-espeak-int8.onnx",
@@ -319,7 +319,7 @@
         {
           "path": "NOTICE",
           "role": "notice",
-          "blake3": "blake3:14a37b73ace77bf94badc4d9a021d228e4c00b2f14be8eda001414cd45c3f1be"
+          "blake3": "blake3:70e6d673dac896d366ddfe59bdeab2078647cf779302cd7ba7dc818a256e3836"
         }
       ],
       "required_for": [
