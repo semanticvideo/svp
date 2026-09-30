@@ -14,6 +14,19 @@ namespace svp::vision {
 using FrameProgressCallback =
     std::function<void(int current, int total)>;
 
+// Number of canonical frames decoded once per build and shared by depth
+// generation and the OCR fallback input. Owned here because the frame plan
+// must reproduce the same schedule before any stage runs.
+inline constexpr int kCanonicalDecodedFrameCount = 5;
+
+// Deterministic seek schedule shared by the canonical and color decodes:
+// count timestamps at the midpoints of count equal slices of
+// [0, duration - 100 ms end margin). Empty when count or duration is not
+// positive.
+[[nodiscard]] std::vector<std::int64_t> deterministic_seek_timestamps_us(
+    std::int64_t duration_us,
+    int count);
+
 // Result of decoding real canonical RGB frames from source media.
 //
 // This is the shared frame-decoding module used by both the color pipeline
@@ -71,7 +84,7 @@ struct DecodedCanonicalFrames {
     int target_height,
     int max_frames,
     FrameCatalog* frame_catalog = nullptr,
-    const std::string& purpose = "canonical",
+    const std::string& purpose = kCanonicalFramePurpose,
     FrameProgressCallback on_progress = {});
 
 // Extract the media duration in microseconds from the MediaIngestPlan.
@@ -88,7 +101,7 @@ struct DecodedCanonicalFrames {
     int target_height,
     const std::vector<std::int64_t>& timestamps_us,
     FrameCatalog* frame_catalog = nullptr,
-    const std::string& purpose = "canonical",
+    const std::string& purpose = kCanonicalFramePurpose,
     FrameProgressCallback on_progress = {});
 
 // Decode frames at explicit timestamps and invoke on_frame for each decoded
@@ -102,6 +115,6 @@ struct DecodedCanonicalFrames {
     const std::vector<std::int64_t>& timestamps_us,
     const std::function<void(const ColorRasterFrame&, std::size_t)>& on_frame,
     FrameCatalog* frame_catalog = nullptr,
-    const std::string& purpose = "canonical");
+    const std::string& purpose = kCanonicalFramePurpose);
 
 }  // namespace svp::vision

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 
 namespace svp::vision {
 
@@ -128,6 +129,53 @@ OcrTemporalSamplingResult compute_ocr_temporal_timestamps(
 
   result.timestamps_us = std::move(timestamps);
   result.sample_count = static_cast<int>(result.timestamps_us.size());
+  return result;
+}
+
+std::optional<std::vector<std::int64_t>> parse_ocr_diagnostic_timestamps(
+    const char* value) {
+  if (value == nullptr || *value == '\0') return std::nullopt;
+
+  std::vector<std::int64_t> timestamps;
+  const char* cursor = value;
+  while (*cursor != '\0') {
+    char* end = nullptr;
+    const long long parsed = std::strtoll(cursor, &end, 10);
+    if (end == cursor || parsed < 0) return std::nullopt;
+    timestamps.push_back(static_cast<std::int64_t>(parsed));
+    cursor = end;
+    if (*cursor == ',') {
+      ++cursor;
+    } else if (*cursor != '\0') {
+      return std::nullopt;
+    }
+  }
+  if (timestamps.empty()) return std::nullopt;
+  std::sort(timestamps.begin(), timestamps.end());
+  timestamps.erase(std::unique(timestamps.begin(), timestamps.end()),
+                   timestamps.end());
+  return timestamps;
+}
+
+std::optional<std::vector<std::int64_t>> ocr_diagnostic_timestamp_override() {
+  return parse_ocr_diagnostic_timestamps(
+      std::getenv(kOcrDiagnosticTimestampsEnv));
+}
+
+OcrTemporalSamplingResult plan_ocr_temporal_sampling(
+    std::int64_t duration_us,
+    const OcrSamplingConfig& config,
+    const std::optional<std::vector<std::int64_t>>& diagnostic_override) {
+  OcrTemporalSamplingResult result =
+      compute_ocr_temporal_timestamps(duration_us, config);
+  if (diagnostic_override.has_value()) {
+    result.timestamps_us = *diagnostic_override;
+    result.sample_count = static_cast<int>(result.timestamps_us.size());
+    result.temporal_coverage_note =
+        std::string("Diagnostic OCR timestamp override via ") +
+        kOcrDiagnosticTimestampsEnv +
+        "; not for production coverage claims.";
+  }
   return result;
 }
 

@@ -25,10 +25,8 @@ VisualEntityPipelineResult run_visual_entity_pipeline(
   }
 
   const auto quality_policy = visual_tracking_quality_policy(options.quality);
-  const VisualEntitySamplingOptions sampling{
-      quality_policy.sample_interval_us,
-      quality_policy.window_duration_us,
-      quality_policy.window_overlap_us};
+  const VisualEntitySamplingOptions sampling =
+      visual_entity_sampling_options(quality_policy);
   VisualEntityDepthScheduleOptions depth_schedule = options.depth_schedule;
   depth_schedule.periodic_interval_us = quality_policy.depth_interval_us;
   const std::string& execution_provider = options.execution_provider;
@@ -105,7 +103,7 @@ VisualEntityPipelineResult run_visual_entity_pipeline(
         media_plan.canonical_raster.height,
         window.timestamps_us,
         frame_catalog,
-        "visual_entity_tracking");
+        kVisualEntityTrackingFramePurpose);
     result.frames_attempted += decoded.frames_attempted;
     result.frames_decoded += decoded.frames_decoded;
     result.frames_missed += decoded.frames_missed;

@@ -2,6 +2,7 @@
 #include "svp/builder/build_progress.hpp"
 #include "svp/builder/model_cache_preflight.hpp"
 
+#include "build_frame_plan.hpp"
 #include "build_pipeline_internal.hpp"
 #include "staging_cleanup.hpp"
 #include "svp/audio/sherpa_diarization.hpp"
@@ -118,6 +119,10 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     BuildPipelineContext context{effective_options, stage_plan, plan, staging_dir,
                                  model_runtime_available, output,
                                  svp::vision::FrameCatalog{}, *sink};
+    // Frame IDs come from the plan, not from which stage decodes first.
+    plan_build_frames(context.frame_catalog, stage_plan, plan,
+                      effective_options.visual_tracking_quality,
+                      model_runtime_available);
 
     PackageSkeletonStageResult package_result;
     package_result.json_output_path = options.output_path;

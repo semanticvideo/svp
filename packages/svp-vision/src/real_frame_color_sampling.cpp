@@ -6,12 +6,6 @@
 
 namespace svp::vision {
 
-// Maximum number of canonical frames to decode for the color sampling path.
-// More frames than the default decode_canonical_frames() count (5) are used
-// here so that color-change-based scene segmentation has enough temporal
-// resolution to detect boundaries in a 30-second video.
-constexpr int kColorMaxDecodedFrames = 15;
-
 RealFrameSamplingResult build_real_frame_color_sampling_input(
     const media::MediaIngestPlan& plan,
     const std::filesystem::path& ffmpeg_path,
@@ -24,9 +18,9 @@ RealFrameSamplingResult build_real_frame_color_sampling_input(
           plan, ffmpeg_path,
           plan.canonical_raster.width,
           plan.canonical_raster.height,
-          kColorMaxDecodedFrames,
+          kColorDecodedFrameCount,
           frame_catalog,
-          "color",
+          kColorFramePurpose,
           on_progress);
 
   result.real_decoding_attempted = decoded.decoding_attempted;

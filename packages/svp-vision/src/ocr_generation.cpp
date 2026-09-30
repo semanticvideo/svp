@@ -9,6 +9,7 @@
 #include "svp/vision/pp_ocr.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -134,32 +135,6 @@ std::string execution_provider_env_or_default(const char* name,
   return fallback;
 }
 
-std::optional<std::vector<std::int64_t>> env_timestamp_list_us(
-    const char* name) {
-  const char* value = std::getenv(name);
-  if (value == nullptr || *value == '\0') return std::nullopt;
-
-  std::vector<std::int64_t> timestamps;
-  const char* cursor = value;
-  while (*cursor != '\0') {
-    char* end = nullptr;
-    const long long parsed = std::strtoll(cursor, &end, 10);
-    if (end == cursor || parsed < 0) return std::nullopt;
-    timestamps.push_back(static_cast<std::int64_t>(parsed));
-    cursor = end;
-    if (*cursor == ',') {
-      ++cursor;
-    } else if (*cursor != '\0') {
-      return std::nullopt;
-    }
-  }
-  if (timestamps.empty()) return std::nullopt;
-  std::sort(timestamps.begin(), timestamps.end());
-  timestamps.erase(std::unique(timestamps.begin(), timestamps.end()),
-                   timestamps.end());
-  return timestamps;
-}
-
 }  // namespace
 
 OcrSourceFrameDimensions derive_ocr_source_frame_dimensions(
@@ -172,6 +147,26 @@ OcrSourceFrameDimensions derive_ocr_source_frame_dimensions(
   return swaps_axes
       ? OcrSourceFrameDimensions{stored_height, stored_width}
       : OcrSourceFrameDimensions{stored_width, stored_height};
+}
+
+OcrSourceFrameDimensions ocr_decode_frame_dimensions(
+    const svp::media::MediaIngestPlan& media_plan) {
+  int src_w = static_cast<int>(media_plan.primary_video_stream.width);
+  int src_h = static_cast<int>(media_plan.primary_video_stream.height);
+  if (std::abs(media_plan.primary_video_stream.rotation_degrees) == 90) {
+    std::swap(src_w, src_h);
+  }
+  if (src_w <= kOcrMaxFrameDimension && src_h <= kOcrMaxFrameDimension) {
+    return {src_w, src_h};
+  }
+  if (src_w >= src_h) {
+    return {kOcrMaxFrameDimension,
+            static_cast<int>(std::round(static_cast<double>(src_h) *
+                                        kOcrMaxFrameDimension / src_w))};
+  }
+  return {static_cast<int>(std::round(static_cast<double>(src_w) *
+                                      kOcrMaxFrameDimension / src_h)),
+          kOcrMaxFrameDimension};
 }
 
 OcrGenerationResult generate_ocr_observations(
@@ -261,18 +256,9 @@ OcrGenerationResult generate_ocr_observations(
       options.ocr_frame_width > 0 && options.ocr_frame_height > 0) {
     const std::int64_t duration_us =
         compute_media_duration_us(*options.media_plan);
-    result.temporal_sampling =
-        compute_ocr_temporal_timestamps(duration_us, options.sampling_config);
-    const auto diagnostic_timestamps =
-        env_timestamp_list_us("SVP_OCR_DIAG_TIMESTAMPS_US");
-    if (diagnostic_timestamps.has_value()) {
-      result.temporal_sampling.timestamps_us = *diagnostic_timestamps;
-      result.temporal_sampling.sample_count =
-          static_cast<int>(result.temporal_sampling.timestamps_us.size());
-      result.temporal_sampling.temporal_coverage_note =
-          "Diagnostic OCR timestamp override via SVP_OCR_DIAG_TIMESTAMPS_US; "
-          "not for production coverage claims.";
-    }
+    result.temporal_sampling = plan_ocr_temporal_sampling(
+        duration_us, options.sampling_config,
+        ocr_diagnostic_timestamp_override());
     if (!result.temporal_sampling.timestamps_us.empty()) {
       use_streamed_high_res_frames = true;
     } else {
@@ -384,7 +370,7 @@ OcrGenerationResult generate_ocr_observations(
     svp::core::check_memory_limit("ocr.generation.streaming_begin", {
         {"sample_count", std::to_string(result.temporal_sampling.timestamps_us.size())},
         {"diagnostic_timestamp_override",
-         std::getenv("SVP_OCR_DIAG_TIMESTAMPS_US") != nullptr ? "true" : "false"},
+         std::getenv(kOcrDiagnosticTimestampsEnv) != nullptr ? "true" : "false"},
         {"ocr_frame_width", std::to_string(options.ocr_frame_width)},
         {"ocr_frame_height", std::to_string(options.ocr_frame_height)}
     });
@@ -396,7 +382,7 @@ OcrGenerationResult generate_ocr_observations(
         result.temporal_sampling.timestamps_us,
         process_ocr_frame,
         options.frame_catalog,
-        "ocr");
+        kOcrFramePurpose);
     result.ocr_frame_input_available =
         streamed_frame_status.decoding_succeeded &&
         streamed_frame_status.frames_decoded > 0;
@@ -607,7 +593,7 @@ DecodedCanonicalFrames decode_ocr_frames_temporal(
       options.ocr_frame_height,
       out_sampling.timestamps_us,
       options.frame_catalog,
-      "ocr");
+      kOcrFramePurpose);
 }
 
 }  // namespace svp::vision
