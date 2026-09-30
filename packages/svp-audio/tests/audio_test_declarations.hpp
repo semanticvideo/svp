@@ -43,6 +43,8 @@ void test_overlap_reconciliation_no_false_dedepe_outside_overlap();
 void test_asr_model_present_vs_verified_distinction();
 void test_overlap_reconciliation_empty_chunks();
 void test_asr_execution_boundary_blocked_when_model_missing();
+void test_asr_slice_workspaces_are_unique_and_removed();
+void test_concurrent_asr_slice_workspaces_do_not_share_slices();
 void test_asr_execution_boundary_blocked_when_runtime_missing();
 void test_asr_execution_boundary_planned_when_all_available();
 void test_asr_execution_boundary_json_reports_decoder_token_softmax_mean();

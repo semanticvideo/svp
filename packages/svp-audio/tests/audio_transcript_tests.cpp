@@ -44,6 +44,8 @@ int main() {
   test_overlap_reconciliation_empty_chunks();
   test_asr_model_present_vs_verified_distinction();
   test_asr_execution_boundary_blocked_when_model_missing();
+  test_asr_slice_workspaces_are_unique_and_removed();
+  test_concurrent_asr_slice_workspaces_do_not_share_slices();
   test_asr_execution_boundary_blocked_when_runtime_missing();
   test_asr_execution_boundary_planned_when_all_available();
   test_asr_execution_boundary_json_reports_decoder_token_softmax_mean();
