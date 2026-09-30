@@ -131,8 +131,15 @@ struct SherpaDiarizationApi {
 
 struct SherpaLibState {
   std::string explicit_path;
+  std::string bundled_path;
   std::string loaded_path;
+  SherpaLibSource loaded_source = SherpaLibSource::none;
   std::vector<std::string> attempted_paths;
+};
+
+struct SherpaLibCandidate {
+  std::string path;
+  SherpaLibSource source = SherpaLibSource::legacy_search;
 };
 
 struct PcmS16MonoWavInfo {
