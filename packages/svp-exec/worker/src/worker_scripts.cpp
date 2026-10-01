@@ -225,7 +225,8 @@ std::string render_daemon_install_script(const DaemonInstall& install) {
       << "launchctl bootout \"system/$label\" >/dev/null 2>&1 || true\n"
       << bootstrap_with_retry("system", "$plist")
       << "launchctl print \"system/$label\" >/dev/null\n"
-      << "rm -rf \"$staging\"\n";
+      << "rm -rf \"$staging\"\n"
+      << "rmdir \"$(dirname \"$staging\")\" 2>/dev/null || true\n";
   return out.str();
 }
 
@@ -248,10 +249,13 @@ std::string render_removal_script(const WorkerRemoval& removal) {
       << "remaining=$(ls \"$root/pairings\" 2>/dev/null | grep -c '\\.json$' || true)\n"
       << "if [ \"$remaining\" = 0 ]; then\n"
       << "  launchctl bootout \"$service\" >/dev/null 2>&1 || true\n"
-      << "  rm -f \"$plist\"\n"
-      << "  created_agents_dir=no\n"
-      << "  [ -f \"$root/" << kCreatedLaunchAgentsMarker << "\" ] && created_agents_dir=yes\n"
-      << "  rm -rf \"$root\"\n"
+      << "  rm -f \"$plist\"\n";
+  if (!daemon) {
+    out << "  created_agents_dir=no\n"
+        << "  [ -f \"$root/" << kCreatedLaunchAgentsMarker
+        << "\" ] && created_agents_dir=yes\n";
+  }
+  out << "  rm -rf \"$root\"\n"
       << "  rmdir \"$(dirname \"$root\")\" 2>/dev/null || true\n";
   if (!daemon) {
     out << "  if [ \"$created_agents_dir\" = yes ]; then rmdir \"$(dirname \"$plist\")\" "

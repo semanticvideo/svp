@@ -111,7 +111,7 @@ SshSession::SshSession(SshTarget target) : target_(std::move(target)) {
 SshSession::~SshSession() {
   // Close the shared connection, if one was opened.
   std::vector<std::string> arguments = ssh_arguments(false);
-  arguments.insert(arguments.end() - 1, {"-O", "exit"});
+  arguments.insert(arguments.end() - 1, {"-q", "-O", "exit"});
   const int null_fd = ::open("/dev/null", O_RDWR | O_CLOEXEC);
   try {
     const pid_t pid = spawn(arguments, null_fd, null_fd, {});

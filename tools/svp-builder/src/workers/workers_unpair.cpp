@@ -36,6 +36,11 @@ int run_workers_unpair(const WorkersCliOptions& options) {
     }
   }
   store.remove(record.key.pairing_id);
+  // The last pairing takes the (then empty) store directory with it.
+  std::error_code ignored;
+  if (std::filesystem::is_empty(store.path(), ignored)) {
+    std::filesystem::remove(store.path(), ignored);
+  }
   std::cout << "unpaired " << record.key.pairing_id << " (" << record.worker.ssh_target << ")"
             << (options.forget ? "; the worker was not contacted" : "") << "\n";
   return 0;
