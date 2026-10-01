@@ -174,6 +174,7 @@ void SchedulerRun::on_finished(FinishedEvent event) {
 }
 
 void SchedulerRun::on_verified_success(const LeaseRecord& lease, AttemptOutput output) {
+  note_executor_recovery(lease);
   TaskRecord& task = tasks_[lease.task];
   if (task.phase != TaskPhase::committed) {
     commit(lease, std::move(output));
@@ -251,7 +252,7 @@ void SchedulerRun::on_failed(const FailedEvent& event) {
     ++outcome_.stats.invalid_results;
     quarantine(lease.executor, reason);
   } else {
-    count_executor_failure(lease.executor);
+    count_executor_loss(lease);
   }
   attempt_failed(lease.task, lease.executor, reason);
 }
@@ -277,7 +278,7 @@ void SchedulerRun::expire_leases() {
     ++outcome_.stats.leases_expired;
     emit(AttemptEventKind::expired, lease);
     executors_[lease.executor].executor->lease_expired(lease_id);
-    count_executor_failure(lease.executor);
+    count_executor_loss(lease);
     attempt_failed(lease.task, lease.executor, "lease expired without a heartbeat");
   }
 }
@@ -292,7 +293,7 @@ void SchedulerRun::end_lease_at_deadline(const LeaseRecord& lease) {
   ++outcome_.stats.deadlines_exceeded;
   emit(AttemptEventKind::deadline_exceeded, lease, detail);
   executors_[lease.executor].executor->cancel(lease.lease.lease_id);
-  count_executor_failure(lease.executor);
+  count_executor_loss(lease);
   attempt_failed(lease.task, lease.executor, detail);
 }
 
@@ -320,14 +321,36 @@ void SchedulerRun::attempt_failed(std::size_t task_index, std::size_t executor,
   ready_queue_.insert(task_index);
 }
 
-void SchedulerRun::count_executor_failure(std::size_t executor) {
-  ExecutorRecord& record = executors_[executor];
-  ++record.failures;
+// A lost attempt is a new loss event only when it was granted after the
+// executor's latest counted event; otherwise it was already in flight then
+// and shares that event's cause (one dropped session loses every lease it
+// held). Counting events rather than attempts keeps the quarantine
+// independent of how many slots the executor's machine advertises.
+void SchedulerRun::count_executor_loss(const LeaseRecord& lease) {
+  ExecutorRecord& record = executors_[lease.executor];
   if (record.loss_quarantine == LossQuarantine::never) {
     return;  // Only an invalid result quarantines it (see LossQuarantine).
   }
-  if (record.failures >= policy_.retry.quarantine_after_executor_failures) {
-    quarantine(executor, std::to_string(record.failures) + " lost or expired attempts");
+  if (lease.grant_sequence < record.loss_horizon) {
+    return;  // Part of the loss event already counted.
+  }
+  ++record.consecutive_loss_events;
+  record.loss_horizon = next_lease_number_;
+  if (record.consecutive_loss_events >= policy_.retry.quarantine_after_loss_events) {
+    quarantine(lease.executor, std::to_string(record.consecutive_loss_events) +
+                                   " consecutive loss events (lost, expired, or "
+                                   "deadline-exceeded attempts) with no verified result "
+                                   "in between");
+  }
+}
+
+// A verified result of an attempt granted after the latest loss event shows
+// the executor works again (for example it reconnected after a crash), so
+// later losses start a new run of consecutive events.
+void SchedulerRun::note_executor_recovery(const LeaseRecord& lease) {
+  ExecutorRecord& record = executors_[lease.executor];
+  if (lease.grant_sequence >= record.loss_horizon) {
+    record.consecutive_loss_events = 0;
   }
 }
 

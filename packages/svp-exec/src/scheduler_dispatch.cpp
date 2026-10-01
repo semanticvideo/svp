@@ -79,6 +79,7 @@ void SchedulerRun::grant(std::size_t task_index, std::size_t executor, bool spec
   lease.task = task_index;
   lease.executor = executor;
   lease.speculative = speculative;
+  lease.grant_sequence = next_lease_number_;
   lease.lease = Lease{.lease_id = "lease_" + std::to_string(next_lease_number_++),
                       .attempt = ++task.attempts_started,
                       .duration = lease_duration(policy_.lease, spec.resources.est_seconds),
