@@ -21,11 +21,15 @@ using Responder = std::function<void(const TaskSpec&, const Lease&, ExecutorEven
 class ScriptedExecutor final : public Executor {
  public:
   ScriptedExecutor(std::string id, Responder respond = {},
-                   LossQuarantine loss_quarantine = LossQuarantine::after_repeated_losses)
-      : id_(std::move(id)), respond_(std::move(respond)), loss_quarantine_(loss_quarantine) {}
+                   LossQuarantine loss_quarantine = LossQuarantine::after_repeated_losses,
+                   std::size_t slots = 1)
+      : id_(std::move(id)),
+        respond_(std::move(respond)),
+        loss_quarantine_(loss_quarantine),
+        slots_(slots) {}
 
   std::string_view id() const override { return id_; }
-  std::size_t slots() const override { return 1; }
+  std::size_t slots() const override { return slots_; }
   LossQuarantine loss_quarantine() const override { return loss_quarantine_; }
   void start(ExecutorEvents& events) override { events_ = &events; }
   void assign(const TaskSpec& spec, const Lease& lease) override {
@@ -58,6 +62,7 @@ class ScriptedExecutor final : public Executor {
   std::string id_;
   Responder respond_;
   LossQuarantine loss_quarantine_;
+  std::size_t slots_;
   ExecutorEvents* events_ = nullptr;
   mutable std::mutex mutex_;
   std::vector<Lease> assignments_;
@@ -432,7 +437,7 @@ void test_repeated_losses_quarantine_executor() {
   InMemoryResultCommitSink sink;
   const BuildOutcome outcome = run_sync(graph, {&lossy, &local}, sink);
   expect_succeeded(outcome, "run with a lossy executor");
-  expect(lossy.assignments().size() == kDefaultQuarantineAfterExecutorFailures,
+  expect(lossy.assignments().size() == kDefaultQuarantineAfterLossEvents,
          "lossy executor quarantined after the threshold");
   expect(outcome.stats.quarantined_executors == std::vector<std::string>{"lossy"},
          "quarantine recorded");
@@ -451,12 +456,134 @@ Responder lose_first_attempts(ToyRuntime& runtime) {
   };
 }
 
+// A worker with several slots, scripted per "fill": it holds leases until
+// every slot is busy, then either crashes (loses every held lease at once, as
+// a dropped session does) or answers them all correctly. `crash_on_fill(n)`
+// decides fill n (0-based). Runs on the scheduler thread inside assign().
+struct FillScript {
+  ToyRuntime* runtime = nullptr;
+  std::size_t slots = 0;
+  std::function<bool(std::size_t fill)> crash_on_fill;
+  std::vector<std::pair<TaskSpec, Lease>> held;
+  std::size_t fills = 0;
+  std::size_t crashes = 0;
+};
+
+Responder respond_per_fill(const std::shared_ptr<FillScript>& script) {
+  return [script](const TaskSpec& spec, const Lease& lease, ExecutorEvents& events) {
+    script->held.emplace_back(spec, lease);
+    if (script->held.size() < script->slots) {
+      return;
+    }
+    const bool crash = script->crash_on_fill(script->fills++);
+    for (const auto& [held_spec, held_lease] : script->held) {
+      if (crash) {
+        events.attempt_failed(held_lease.lease_id, AttemptFailureKind::executor_lost,
+                              "worker crashed");
+      } else {
+        events.attempt_finished(held_lease.lease_id,
+                                correct_output(*script->runtime, held_spec, held_lease));
+      }
+    }
+    script->crashes += crash ? 1 : 0;
+    script->held.clear();
+  };
+}
+
+std::vector<ToyTask> independent_toy_tasks(std::size_t count) {
+  std::vector<ToyTask> tasks;
+  for (std::size_t index = 0; index < count; ++index) {
+    std::string digits = std::to_string(index);
+    tasks.push_back(ToyTask{
+        .task_id = "task.toy.i_" + std::string(3 - digits.size(), '0') + digits,
+        .seed = 3000 + index,
+        .order_key = {.lane = "alpha", .ordinals = {index}}});
+  }
+  return tasks;
+}
+
+// More slots than the quarantine threshold, so one crash loses more leases
+// than the threshold: the bug this policy exists to prevent counted each
+// lease and quarantined the worker for the rest of the build.
+constexpr std::size_t kManySlots = kDefaultQuarantineAfterLossEvents + 1;
+
+// The only executor has many slots and crashes once with all of them busy.
+// That is one loss event: it is not quarantined, the lost tasks are retried
+// on it, and every task commits there.
+void test_one_crash_of_a_many_slot_executor_is_one_loss_event() {
+  const TaskGraph graph = make_toy_graph(independent_toy_tasks(2 * kManySlots));
+  ToyRuntime runtime;
+  auto script = std::make_shared<FillScript>(FillScript{
+      .runtime = &runtime,
+      .slots = kManySlots,
+      .crash_on_fill = [](std::size_t fill) { return fill == 0; }});
+  ScriptedExecutor worker("worker", respond_per_fill(script),
+                          LossQuarantine::after_repeated_losses, kManySlots);
+  InMemoryResultCommitSink sink;
+  const BuildOutcome outcome = run_sync(graph, {&worker}, sink);
+  expect_succeeded(outcome, "single many-slot executor crashing once");
+  expect(script->crashes == 1, "one crash");
+  expect(outcome.stats.quarantined_executors.empty(), "one crash is not repeated losses");
+  expect(outcome.stats.retries == kManySlots, "every lost lease retried");
+  expect(sink.size() == graph.size(), "every task committed");
+  for (const CommittedResult& committed : sink.results()) {
+    expect(committed.executor_id == "worker", "later commits succeed on the crashed worker");
+  }
+}
+
+// A many-slot executor that crashes every time its slots fill is quarantined
+// after the threshold of crashes (events), not after the threshold of lost
+// leases; the in-process executor finishes the build.
+void test_repeated_crashes_quarantine_a_many_slot_executor() {
+  const std::uint64_t threshold = kDefaultQuarantineAfterLossEvents;
+  const TaskGraph graph = make_toy_graph(independent_toy_tasks((threshold + 2) * kManySlots));
+  ToyRuntime runtime;
+  auto script = std::make_shared<FillScript>(FillScript{
+      .runtime = &runtime,
+      .slots = kManySlots,
+      .crash_on_fill = [](std::size_t) { return true; }});
+  ScriptedExecutor crashy("crashy", respond_per_fill(script),
+                          LossQuarantine::after_repeated_losses, kManySlots);
+  InProcessExecutor local(runtime.registry, runtime.store, {.threads = 1});
+  InMemoryResultCommitSink sink;
+  const BuildOutcome outcome = run_sync(graph, {&crashy, &local}, sink);
+  expect_succeeded(outcome, "run with a repeatedly crashing executor");
+  expect(outcome.stats.quarantined_executors == std::vector<std::string>{"crashy"},
+         "repeated crashes quarantine");
+  expect(script->crashes == threshold, "quarantined at the threshold of crashes");
+  expect(crashy.assignments().size() == threshold * kManySlots,
+         "leases lost together counted as one event");
+  expect(sink.size() == graph.size(), "every task committed");
+}
+
+// Crashes separated by verified results are not consecutive: a worker that
+// crashes more often than the threshold but recovers in between keeps
+// working, and the build completes on it alone.
+void test_verified_results_reset_consecutive_loss_events() {
+  const std::uint64_t threshold = kDefaultQuarantineAfterLossEvents;
+  const std::size_t crashes = threshold + 1;
+  const TaskGraph graph = make_toy_graph(independent_toy_tasks(crashes * kManySlots));
+  ToyRuntime runtime;
+  auto script = std::make_shared<FillScript>(FillScript{
+      .runtime = &runtime,
+      .slots = kManySlots,
+      .crash_on_fill = [](std::size_t fill) { return fill % 2 == 0; }});
+  ScriptedExecutor flaky("flaky", respond_per_fill(script),
+                         LossQuarantine::after_repeated_losses, kManySlots);
+  InMemoryResultCommitSink sink;
+  const BuildOutcome outcome = run_sync(graph, {&flaky}, sink);
+  expect_succeeded(outcome, "crashes separated by recoveries");
+  expect(script->crashes == crashes, "more crashes than the threshold");
+  expect(outcome.stats.quarantined_executors.empty(), "recovery resets the count");
+  expect(outcome.stats.retries == graph.size(), "each task lost once and retried");
+}
+
 // The only executor collects more transient losses than the quarantine
 // threshold. Declared LossQuarantine::never, it keeps working and the build
 // succeeds; per-task max_attempts still bounds each task.
 void test_losses_never_quarantine_a_never_executor() {
   const TaskGraph graph = make_toy_graph(two_lane_toy_tasks(2));
-  expect(graph.size() > kDefaultQuarantineAfterExecutorFailures,
+  expect(graph.size() > kDefaultQuarantineAfterLossEvents,
          "more losses than the quarantine threshold");
   ToyRuntime runtime;
   ScriptedExecutor local("local", lose_first_attempts(runtime), LossQuarantine::never);
@@ -466,14 +593,22 @@ void test_losses_never_quarantine_a_never_executor() {
   expect(outcome.stats.quarantined_executors.empty(), "not quarantined for losses");
   expect(outcome.stats.retries == graph.size(), "one retry per task");
 
-  // The same losses on a remote-style executor quarantine it, and with no
-  // other executor the build cannot finish.
-  ScriptedExecutor remote("remote", lose_first_attempts(runtime));
+  // Consecutive losses on a remote-style executor quarantine it, and with no
+  // other executor the build cannot finish. max_attempts is raised above the
+  // threshold so the quarantine, not the task's retry budget, ends the run.
+  ScriptedExecutor remote("remote", [](const TaskSpec&, const Lease& lease,
+                                       ExecutorEvents& events) {
+    events.attempt_failed(lease.lease_id, AttemptFailureKind::executor_lost, "worker slept");
+  });
+  SchedulerPolicy policy = test_policy();
+  policy.retry.max_attempts = kDefaultQuarantineAfterLossEvents + 1;
   InMemoryResultCommitSink remote_sink;
-  const BuildOutcome remote_outcome = run_sync(graph, {&remote}, remote_sink);
+  const BuildOutcome remote_outcome = run_sync(graph, {&remote}, remote_sink, policy);
   expect(remote_outcome.failure &&
              remote_outcome.failure->kind == BuildFailureKind::no_usable_executor,
          "after_repeated_losses quarantines after the threshold");
+  expect(remote.assignments().size() == kDefaultQuarantineAfterLossEvents,
+         "one loss event per single-slot lease");
 }
 
 // Invalid results still quarantine a LossQuarantine::never executor at once.
@@ -554,6 +689,12 @@ int main() {
                        {"no usable executor", test_no_usable_executor},
                        {"repeated losses quarantine executor",
                         test_repeated_losses_quarantine_executor},
+                       {"one crash of a many-slot executor is one loss event",
+                        test_one_crash_of_a_many_slot_executor_is_one_loss_event},
+                       {"repeated crashes quarantine a many-slot executor",
+                        test_repeated_crashes_quarantine_a_many_slot_executor},
+                       {"verified results reset consecutive loss events",
+                        test_verified_results_reset_consecutive_loss_events},
                        {"losses never quarantine a never executor",
                         test_losses_never_quarantine_a_never_executor},
                        {"invalid result quarantines a never executor",

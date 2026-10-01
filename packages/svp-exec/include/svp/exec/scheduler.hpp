@@ -37,10 +37,16 @@ namespace svp::exec {
 //     naming the task. A non-retryable failure fails the build at once. A
 //     failed or invalid result is never committed.
 //   * Lost attempts (executor lost, lease expiry, deadline) quarantine an
-//     executor after policy.retry.quarantine_after_executor_failures of them
-//     only when its loss_quarantine() is after_repeated_losses; an executor
-//     that declares LossQuarantine::never (the in-process executor) is
-//     quarantined only for invalid results.
+//     executor only when its loss_quarantine() is after_repeated_losses,
+//     after policy.retry.quarantine_after_loss_events consecutive loss
+//     events. A loss event is counted when an attempt granted after the
+//     executor's latest counted event is lost; losses of attempts that were
+//     already outstanding at that event belong to it (a dropped session
+//     loses every in-flight lease at once, so one crash of a many-slot
+//     worker is one event). A verified result of an attempt granted after
+//     the latest event shows the executor recovered and resets its count.
+//     An executor that declares LossQuarantine::never (the in-process
+//     executor) is quarantined only for invalid results.
 //   * The first verified result for a task is committed to the sink, exactly
 //     once. A later verified result with the same output_digest is discarded
 //     and counted; a different digest is a determinism incident and fails the

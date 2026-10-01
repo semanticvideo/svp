@@ -70,7 +70,9 @@ struct RemoteExecutorOptions {
 //   * lease_expired() means the session stopped heartbeating: its
 //     connection is torn down and its other leases fail as lost.
 //   * loss_quarantine() is after_repeated_losses: a worker that keeps
-//     dropping sessions is routed around (plan §4.4).
+//     dropping sessions without completing work in between is routed around
+//     (plan §4.4); one dropped session is one loss event however many of its
+//     slots were busy.
 class RemoteExecutor final : public Executor {
  public:
   explicit RemoteExecutor(RemoteExecutorOptions options);

@@ -34,6 +34,9 @@ struct LeaseRecord {
   std::size_t task = 0;
   std::size_t executor = 0;
   Lease lease;
+  // Order in which the scheduler granted this lease (1, 2, ...); compared
+  // with ExecutorRecord::loss_horizon to group losses into events.
+  std::uint64_t grant_sequence = 0;
   std::chrono::milliseconds granted_at{0};
   std::chrono::milliseconds expires_at{0};
   // Hard deadline; never renewed (LeasePolicy attempt deadline).
@@ -45,7 +48,15 @@ struct ExecutorRecord {
   Executor* executor = nullptr;
   LossQuarantine loss_quarantine = LossQuarantine::after_repeated_losses;
   std::size_t active = 0;
-  std::uint64_t failures = 0;
+  // Loss events since the last verified result that followed one (see
+  // scheduler.hpp, loss quarantine). Quarantines at
+  // RetryPolicy::quarantine_after_loss_events.
+  std::uint64_t consecutive_loss_events = 0;
+  // Grant sequence of the first lease issued after the latest counted loss
+  // event. A lease granted before it was already outstanding at that event:
+  // its loss belongs to that event and its success is not yet evidence of
+  // recovery.
+  std::uint64_t loss_horizon = 0;
   bool quarantined = false;
 };
 
@@ -78,7 +89,9 @@ class SchedulerRun {
   void expire_leases();
   void end_lease_at_deadline(const LeaseRecord& lease);
   void attempt_failed(std::size_t task, std::size_t executor, std::string reason);
-  void count_executor_failure(std::size_t executor);
+  // Loss accounting for after_repeated_losses executors.
+  void count_executor_loss(const LeaseRecord& lease);
+  void note_executor_recovery(const LeaseRecord& lease);
   void quarantine(std::size_t executor, const std::string& reason);
   void commit(const LeaseRecord& lease, AttemptOutput output);
   void mark_ready_dependents(std::size_t completed_task);

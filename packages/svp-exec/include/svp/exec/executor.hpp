@@ -63,8 +63,10 @@ class ExecutorEvents {
 // is quarantined"). An invalid result quarantines every executor at once,
 // whatever this says: bad bytes are never a transient condition.
 enum class LossQuarantine {
-  // RetryPolicy.quarantine_after_executor_failures losses quarantine the
-  // executor. For executors in another process or on another machine, where
+  // RetryPolicy.quarantine_after_loss_events consecutive loss events
+  // quarantine the executor (one dropped session is one event however many
+  // leases it held; a verified result after the latest event resets the
+  // count). For executors in another process or on another machine, where
   // repeated losses point at a sick worker that other executors can route
   // around.
   after_repeated_losses,
