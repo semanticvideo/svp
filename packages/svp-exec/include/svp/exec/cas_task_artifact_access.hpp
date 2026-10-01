@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <filesystem>
 #include <optional>
 #include <span>
 #include <string>
@@ -22,6 +23,13 @@ namespace svp::exec {
 //
 //   * resolve_inputs() pins each input, re-hashes its blob (RC2 §5.15 rule 5:
 //     every read verifies), and hands the task the blob's own read-only path.
+//     A pinned blob is re-hashed only when its file changed since this object
+//     last verified it (device, inode, size, or modification time differ):
+//     CAS blobs are written once (pending -> verify -> rename, read-only) and
+//     a pinned one cannot be evicted, so later tasks of a session that read
+//     the same input (every frame batch reads the whole source) do not
+//     re-hash hundreds of megabytes each, while a blob rewritten in place is
+//     still caught.
 //     A blob that is missing, corrupt, or of the wrong length is
 //     ExecError(unresolved_input), which the attempt runner reports as a
 //     retryable failure (bytes may arrive later).
@@ -74,6 +82,17 @@ class CasTaskArtifactAccess final : public TaskArtifactAccess {
   std::optional<CasPinSet> pins_;
   std::vector<CacheError> warnings_;
   std::map<Blake3Digest, std::vector<std::byte>> memory_fallback_;
+  struct FileIdentity {
+    std::uint64_t device = 0;
+    std::uint64_t inode = 0;
+    std::uint64_t size = 0;
+    std::int64_t mtime_ns = 0;
+    bool operator==(const FileIdentity&) const = default;
+  };
+  [[nodiscard]] static std::optional<FileIdentity> file_identity(
+      const std::filesystem::path& path);
+  // Pinned inputs this object verified, with their file as it was then.
+  std::map<Blake3Digest, FileIdentity> verified_inputs_;
   std::uint64_t memory_fallback_bytes_ = 0;
 };
 

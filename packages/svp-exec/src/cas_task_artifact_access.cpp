@@ -1,5 +1,7 @@
 #include "svp/exec/cas_task_artifact_access.hpp"
 
+#include <sys/stat.h>
+
 #include "cas_layout.hpp"
 #include "svp/exec/exec_error.hpp"
 
@@ -47,13 +49,45 @@ void CasTaskArtifactAccess::pin(const Blake3Digest& digest) {
   }
 }
 
+std::optional<CasTaskArtifactAccess::FileIdentity> CasTaskArtifactAccess::file_identity(
+    const std::filesystem::path& path) {
+  struct stat status {};
+  if (::stat(path.c_str(), &status) != 0) {
+    return std::nullopt;
+  }
+#if defined(__APPLE__)
+  const struct timespec& modified = status.st_mtimespec;
+#else
+  const struct timespec& modified = status.st_mtim;
+#endif
+  return FileIdentity{.device = static_cast<std::uint64_t>(status.st_dev),
+                      .inode = static_cast<std::uint64_t>(status.st_ino),
+                      .size = static_cast<std::uint64_t>(status.st_size),
+                      .mtime_ns = static_cast<std::int64_t>(modified.tv_sec) * 1'000'000'000 +
+                                  modified.tv_nsec};
+}
+
 ResolvedInputs CasTaskArtifactAccess::resolve_inputs(const TaskSpec& spec) {
   ResolvedInputs resolved;
   for (const auto& [name, ref] : spec.inputs) {
     pin(ref.blake3);
-    const CacheStatus verified = store_.verify(ref.blake3);
-    if (!verified) {
-      unavailable("input `" + name + "`", ref, verified.error().message);
+    const std::optional<FileIdentity> before =
+        file_identity(detail::cas_blob_path(store_.root(), ref.blake3));
+    bool known_good = false;
+    {
+      const std::lock_guard lock(mutex_);
+      const auto found = verified_inputs_.find(ref.blake3);
+      known_good = before && found != verified_inputs_.end() && found->second == *before;
+    }
+    if (!known_good) {
+      const CacheStatus verified = store_.verify(ref.blake3);
+      if (!verified) {
+        unavailable("input `" + name + "`", ref, verified.error().message);
+      }
+      const std::lock_guard lock(mutex_);
+      if (pins_ && before) {
+        verified_inputs_.insert_or_assign(ref.blake3, *before);
+      }
     }
     fs::path path = detail::cas_blob_path(store_.root(), ref.blake3);
     std::error_code error;
