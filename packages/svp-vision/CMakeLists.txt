@@ -431,6 +431,8 @@ if(BUILD_TESTING)
     cxx_std_20
   )
 
+  target_compile_options(svp-vision-shot-keyframe-embedding-tests PRIVATE -UNDEBUG)
+
   target_include_directories(svp-vision-shot-keyframe-embedding-tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
   )

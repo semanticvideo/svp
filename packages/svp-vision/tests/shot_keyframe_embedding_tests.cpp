@@ -3,6 +3,8 @@
 #include "svp/media/media_ingest_plan.hpp"
 
 #include <cassert>
+#include <cstdlib>
+#include <stdexcept>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -102,6 +104,48 @@ void test_model_load_failure_stops_decoding() {
   fs::remove_all(root);
 }
 
+// A throwing progress callback must propagate, not terminate the process
+// with the decode thread still running. Needs the vision model to load.
+void test_throwing_progress_joins_decoder() {
+  const char* cache_env = std::getenv("SVP_MODEL_CACHE_ROOT");
+  if (cache_env == nullptr || cache_env[0] == '\0') {
+    std::cerr << "skipping throwing-progress test: SVP_MODEL_CACHE_ROOT not set\n";
+    return;
+  }
+  const fs::path bundle = fs::path(cache_env) / "model_nomic_embed_vision_v1_5";
+  if (!fs::exists(bundle / "model.svpmodel.json")) {
+    std::cerr << "skipping throwing-progress test: no vision model at " << bundle << "\n";
+    return;
+  }
+  const fs::path root = make_staging("svp-shot-keyframe-throw");
+  svp::media::MediaIngestPlan plan;
+  plan.source_path = root / "missing-source.mp4";  // every decode misses
+
+  std::vector<ShotKeyframe> keyframes;
+  for (int i = 0; i < 8; ++i) {
+    keyframes.push_back({"shot_" + std::to_string(i), "frame_" + std::to_string(i),
+                         static_cast<std::int64_t>(i) * 1000, 64, 36});
+  }
+  ShotKeyframeEmbeddingRequest request;
+  request.media_plan = &plan;
+  request.ffmpeg_path = root / "missing-ffmpeg";
+  request.model_bundle_dir = bundle;
+  request.execution_provider = "cpu";
+  request.embedding_dim = 768;
+  request.on_keyframe = [](std::size_t, std::size_t) {
+    throw std::runtime_error("progress sink failed");
+  };
+
+  bool threw = false;
+  try {
+    (void)embed_shot_keyframes(keyframes, request);
+  } catch (const std::runtime_error&) {
+    threw = true;
+  }
+  assert(threw);
+  fs::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
@@ -109,6 +153,7 @@ int main() {
   test_missing_timeline_yields_no_keyframes();
   test_missing_inputs_block_without_work();
   test_model_load_failure_stops_decoding();
+  test_throwing_progress_joins_decoder();
   std::cout << "shot keyframe embedding tests passed\n";
   return 0;
 }

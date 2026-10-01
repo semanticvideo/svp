@@ -201,23 +201,31 @@ ShotKeyframeEmbeddings embed_shot_keyframes(
   result.model_bundle_id = manifest_opt->model_bundle_id;
   result.model_blake3 = manifest_opt->bundle_blake3.hex_value();
 
-  std::size_t completed = 0;
-  while (auto item = queue.pop()) {
-    if (!item->input.empty()) {
-      try {
-        std::vector<float> vector = session.run_visual_embedding(
-            item->input.data(), item->input.size(), kVisionEmbeddingInputSide,
-            kVisionEmbeddingInputSide);
-        if (vector.size() == request.embedding_dim) {
-          l2_normalize(vector);
-          result.vectors.push_back(
-              {keyframes[item->keyframe_index].shot_id, std::move(vector)});
+  // The producer must be joined on every exit, including a throwing
+  // progress callback, or ~thread terminates the process.
+  try {
+    std::size_t completed = 0;
+    while (auto item = queue.pop()) {
+      if (!item->input.empty()) {
+        try {
+          std::vector<float> vector = session.run_visual_embedding(
+              item->input.data(), item->input.size(), kVisionEmbeddingInputSide,
+              kVisionEmbeddingInputSide);
+          if (vector.size() == request.embedding_dim) {
+            l2_normalize(vector);
+            result.vectors.push_back(
+                {keyframes[item->keyframe_index].shot_id, std::move(vector)});
+          }
+        } catch (...) {
         }
-      } catch (...) {
       }
+      ++completed;
+      if (request.on_keyframe) request.on_keyframe(completed, keyframes.size());
     }
-    ++completed;
-    if (request.on_keyframe) request.on_keyframe(completed, keyframes.size());
+  } catch (...) {
+    queue.cancel();
+    producer.join();
+    throw;
   }
   producer.join();
   if (result.vectors.empty()) {

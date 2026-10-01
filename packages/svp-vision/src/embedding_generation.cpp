@@ -543,6 +543,15 @@ EmbeddingGenerationResult generate_embedding_blocks(
   }
 
   for (const auto& shot_vector : shot_embeddings.vectors) {
+    if (!validate_embedding(shot_vector.vector, options.embedding_dim)) {
+      result.blocker = std::string("Embedding validation failed for keyframe of ") +
+          shot_vector.shot_id + ": invalid vector (NaN, Inf, zero, or wrong dimension)";
+      result.processor_provenance = make_embedding_processor_provenance(
+          manifest.model_id, manifest.model_bundle_id,
+          options.execution_provider, "error", result.blocker);
+      return result;
+    }
+
     svp::blocks::BlockWriteSpec spec;
     spec.block_type = svp::blocks::BlockType::embedding;
     spec.extent_0 = 1;
