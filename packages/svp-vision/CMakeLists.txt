@@ -10,6 +10,7 @@ add_library(svp-vision
   src/color_quantization.cpp
   src/depth_generation.cpp
   src/embedding_generation.cpp
+  src/embedding_generation/shot_keyframe_embedding.cpp
   src/evidence_crop.cpp
   src/foundation_color_observations.cpp
   src/foundation_color_staging.cpp
@@ -50,6 +51,7 @@ add_library(svp-vision
   src/visual_entity_sampling.cpp
   src/visual_entity_tracker.cpp
   src/visual_entity_window_assembler.cpp
+  src/vision_embedding_input.cpp
   src/mask_writer.cpp
   src/mask_stream_writer.cpp
   src/noise_suppression.cpp
@@ -420,6 +422,26 @@ if(BUILD_TESTING)
            COMMAND svp-vision-embedding-generation-smoke-test)
   set_tests_properties(svp-vision-embedding-generation-smoke-test PROPERTIES
     SKIP_REGULAR_EXPRESSION "^Skipping:")
+
+  add_executable(svp-vision-shot-keyframe-embedding-tests
+    tests/shot_keyframe_embedding_tests.cpp
+  )
+
+  target_compile_features(svp-vision-shot-keyframe-embedding-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_include_directories(svp-vision-shot-keyframe-embedding-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+
+  target_link_libraries(svp-vision-shot-keyframe-embedding-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-shot-keyframe-embedding-tests
+           COMMAND svp-vision-shot-keyframe-embedding-tests)
 
   add_executable(svp-vision-evidence-crop-linking-tests
     tests/evidence_crop_linking_tests.cpp

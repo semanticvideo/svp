@@ -232,6 +232,9 @@ VisionTextEmbeddingStageResult run_vision_text_embedding_stage(
     svp::vision::EmbeddingGenerationOptions emb_opts;
     emb_opts.model_cache_root = settings.model_cache_root;
     emb_opts.threads = settings.thread_plan.text_embedding;
+    emb_opts.media_plan = settings.media_plan;
+    emb_opts.ffmpeg_path = settings.ffmpeg_path;
+    emb_opts.vision_threads = settings.thread_plan.visual_entity_embedding;
     if (on_progress) {
       emb_opts.on_progress = [&on_progress](std::size_t current, std::size_t total) {
         on_progress("text_embeddings", current, total, "");

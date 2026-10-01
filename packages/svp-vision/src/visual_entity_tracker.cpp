@@ -1,4 +1,5 @@
 #include "svp/vision/visual_entity_tracker.hpp"
+#include "svp/vision/vision_embedding_input.hpp"
 #include "svp/vision/noise_suppression.hpp"
 #include "visual_entity_depth_proposals.hpp"
 #include "visual_entity_motion_policy.hpp"
@@ -101,16 +102,6 @@ std::optional<std::pair<std::uint64_t, std::size_t>> read_leb128(
 // Frame conversion helpers
 // ---------------------------------------------------------------------------
 
-cv::Mat srgb8_frame_to_cv_mat(const ColorRasterFrame& frame) {
-  cv::Mat mat(frame.height, frame.width, CV_8UC3);
-  for (int y = 0; y < frame.height; ++y) {
-    for (int x = 0; x < frame.width; ++x) {
-      const auto& px = frame.pixels[static_cast<std::size_t>(y) * frame.width + x];
-      mat.at<cv::Vec3b>(y, x) = cv::Vec3b(px.r, px.g, px.b);
-    }
-  }
-  return mat;
-}
 
 // ---------------------------------------------------------------------------
 // Keyframe selection (§20.6 step 2)
@@ -571,34 +562,7 @@ double cosine_similarity(const std::vector<float>& a, const std::vector<float>& 
   return dot / (std::sqrt(norm_a) * std::sqrt(norm_b));
 }
 
-void l2_normalize(std::vector<float>& vec) {
-  double norm = 0;
-  for (float v : vec) norm += v * v;
-  norm = std::sqrt(norm);
-  if (norm > 0) {
-    for (float& v : vec) v = static_cast<float>(v / norm);
-  }
-}
 
-// Convert sRGB8 pixel buffer to normalized float CHW format for Nomic Embed Vision.
-// CLIP-style preprocessing: rescale to [0,1], normalize with CLIP mean/std.
-// Input is resized to 224x224 before this function is called.
-std::vector<float> frame_to_clip_normalized_chw(
-    const cv::Mat& resized_frame) {
-  const int width = resized_frame.cols;
-  const int height = resized_frame.rows;
-  const std::size_t pixel_count = static_cast<std::size_t>(width) * height;
-  std::vector<float> output(pixel_count * 3);
-  constexpr float kMean[3] = {0.48145466f, 0.4578275f, 0.40821073f};
-  constexpr float kStd[3] = {0.26862954f, 0.26130258f, 0.27577711f};
-  for (int i = 0; i < static_cast<int>(pixel_count); ++i) {
-    const auto* px = resized_frame.ptr<cv::Vec3b>(i / width) + (i % width);
-    output[i] = (static_cast<float>((*px)[0]) / 255.0f - kMean[0]) / kStd[0];
-    output[pixel_count + i] = (static_cast<float>((*px)[1]) / 255.0f - kMean[1]) / kStd[1];
-    output[2 * pixel_count + i] = (static_cast<float>((*px)[2]) / 255.0f - kMean[2]) / kStd[2];
-  }
-  return output;
-}
 
 // Crop a region from a frame for embedding computation
 cv::Mat crop_region(

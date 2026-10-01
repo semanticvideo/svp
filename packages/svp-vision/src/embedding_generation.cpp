@@ -1,5 +1,7 @@
 #include "svp/vision/embedding_generation.hpp"
 
+#include "embedding_generation/shot_keyframe_embedding.hpp"
+
 #include "svp/core/memory_diagnostics.hpp"
 #include "svp/models/cache.hpp"
 #include "svp/models/manifest.hpp"
@@ -8,6 +10,7 @@
 #include "svp/vision/text_tokenizer.hpp"
 
 #include <cmath>
+#include <limits>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -248,15 +251,9 @@ EmbeddingGenerationResult generate_embedding_blocks(
   svp::core::check_memory_limit("text_embedding.inputs_loaded", {
       {"text_input_count", std::to_string(text_inputs.size())}
   });
-  if (text_inputs.empty()) {
-    result.blocker = "No real source-derived text observations found in "
-        "staging (text/text_observations.jsonl); embedding generation is "
-        "blocked until OCR text or other defined embedding input is available";
-    result.processor_provenance = make_embedding_processor_provenance(
-        manifest.model_id, manifest.model_bundle_id,
-        options.execution_provider, "not_run", result.blocker);
-    return result;
-  }
+  // Shot keyframes are embedded after the text observations (RC2 §16.2).
+  const std::vector<detail::ShotKeyframe> shot_keyframes =
+      detail::load_shot_keyframes(staging_dir);
 
   WordPieceTokenizer tokenizer;
   std::filesystem::path vocab_path;
@@ -319,9 +316,9 @@ EmbeddingGenerationResult generate_embedding_blocks(
 
   std::vector<nlohmann::json> index_entries;
 
-  const std::size_t total_text_inputs = text_inputs.size();
+  const std::size_t total_inputs = text_inputs.size() + shot_keyframes.size();
   if (options.on_progress) {
-    options.on_progress(0, total_text_inputs);
+    options.on_progress(0, total_inputs);
   }
 
   for (std::size_t input_index = 0; input_index < text_inputs.size(); ++input_index) {
@@ -509,7 +506,7 @@ EmbeddingGenerationResult generate_embedding_blocks(
     });
 
     if (options.on_progress) {
-      options.on_progress(result.entries.size(), total_text_inputs);
+      options.on_progress(result.entries.size(), total_inputs);
     }
     if (input_index == 0 || ((input_index + 1) % 25) == 0 ||
         input_index + 1 == text_inputs.size()) {
@@ -522,8 +519,99 @@ EmbeddingGenerationResult generate_embedding_blocks(
     }
   }
 
+  const std::size_t text_entry_count = result.entries.size();
+  detail::ShotKeyframeEmbeddings shot_embeddings;
+  shot_embeddings.keyframes_requested = shot_keyframes.size();
+  if (const auto vision_bundle_dir =
+          find_model_bundle_dir(cache_root, options.vision_model_id)) {
+    detail::ShotKeyframeEmbeddingRequest request;
+    request.media_plan = options.media_plan;
+    request.ffmpeg_path = options.ffmpeg_path;
+    request.model_bundle_dir = *vision_bundle_dir;
+    request.execution_provider = options.execution_provider;
+    request.threads = options.vision_threads;
+    request.embedding_dim = options.embedding_dim;
+    request.on_keyframe = [&](std::size_t done, std::size_t) {
+      if (options.on_progress) {
+        options.on_progress(text_entry_count + done, total_inputs);
+      }
+    };
+    shot_embeddings = detail::embed_shot_keyframes(shot_keyframes, request);
+  } else {
+    shot_embeddings.blocker =
+        "vision model bundle not found in cache: " + options.vision_model_id;
+  }
+
+  for (const auto& shot_vector : shot_embeddings.vectors) {
+    svp::blocks::BlockWriteSpec spec;
+    spec.block_type = svp::blocks::BlockType::embedding;
+    spec.extent_0 = 1;
+    spec.extent_1 = options.embedding_dim;
+    spec.extent_2 = 1;
+    spec.dtype = svp::blocks::DType::float32;
+    spec.start_frame = std::numeric_limits<std::uint64_t>::max();
+    spec.frame_count = 0;
+    spec.start_us = -1;
+    spec.end_us = -1;
+
+    svp::blocks::WrittenBlockInfo block_info;
+    try {
+      block_info = svp::blocks::write_block_to_stream(
+          block_out, spec,
+          reinterpret_cast<const std::byte*>(shot_vector.vector.data()),
+          shot_vector.vector.size() * sizeof(float));
+    } catch (const std::exception& e) {
+      result.blocker = std::string("Failed to write keyframe embedding block for ") +
+          shot_vector.shot_id + ": " + e.what();
+      result.processor_provenance = make_embedding_processor_provenance(
+          manifest.model_id, manifest.model_bundle_id,
+          options.execution_provider, "error", result.blocker);
+      return result;
+    }
+
+    EmbeddingEntry entry;
+    entry.id = "embed_keyframe_" + shot_vector.shot_id;
+    entry.set_id = "embedset_vision_nomic_v15";
+    entry.model_id = shot_embeddings.model_id;
+    entry.model_bundle_id = shot_embeddings.model_bundle_id;
+    entry.model_blake3 = shot_embeddings.model_blake3;
+    entry.dim = options.embedding_dim;
+    entry.normalization = "l2";
+    entry.input_ref = shot_vector.shot_id;
+    entry.block_file = "embeddings/embeddings.blocks.svpez";
+    entry.block_offset = block_info.block_offset;
+    entry.block_length = block_info.block_length;
+    entry.payload_offset = block_info.payload_offset;
+    entry.uncompressed_size = block_info.uncompressed_size;
+    entry.compressed_size = block_info.compressed_size;
+    entry.payload_blake3 = hash_to_hex(block_info.payload_blake3);
+    entry.block_blake3 = hash_to_hex(block_info.header_blake3);
+    const std::size_t vector_index = result.entries.size();
+    result.entries.push_back(entry);
+
+    index_entries.push_back({
+        {"id", entry.id},
+        {"embedding_set_id", entry.set_id},
+        {"input_ref", entry.input_ref},
+        {"input_kind", "shot_keyframe"},
+        {"block_file", entry.block_file},
+        {"block_offset", entry.block_offset},
+        {"block_length", entry.block_length},
+        {"payload_offset", entry.payload_offset},
+        {"uncompressed_size", entry.uncompressed_size},
+        {"compressed_size", entry.compressed_size},
+        {"vector_index", vector_index},
+        {"dimension", entry.dim},
+        {"dtype", "float32"},
+        {"payload_blake3", entry.payload_blake3},
+        {"block_blake3", entry.block_blake3}
+    });
+  }
+  const std::size_t keyframe_entry_count = shot_embeddings.vectors.size();
+
   if (result.entries.empty()) {
-    result.blocker = "No valid embeddings were generated from text observations";
+    result.blocker = "No valid embeddings were generated from text observations "
+        "or shot keyframes (" + shot_embeddings.blocker + ")";
     result.processor_provenance = make_embedding_processor_provenance(
         manifest.model_id, manifest.model_bundle_id,
         options.execution_provider, "not_run", result.blocker);
@@ -559,20 +647,32 @@ EmbeddingGenerationResult generate_embedding_blocks(
   result.embeddings_index_written = true;
 
   {
-    nlohmann::json sets_json = {
-        {"sets", nlohmann::json::array({
-            {
-                {"id", "embedset_text_nomic_v15"},
-                {"modality", "text"},
-                {"model_id", manifest.model_id},
-                {"model_blake3", model_blake3},
-                {"dimension", options.embedding_dim},
-                {"dtype", "float32"},
-                {"normalized", true},
-                {"source_slug", "nomic-ai/nomic-embed-text-v1.5"}
-            }
-        })}
-    };
+    nlohmann::json sets = nlohmann::json::array();
+    if (text_entry_count > 0) {
+      sets.push_back({
+          {"id", "embedset_text_nomic_v15"},
+          {"modality", "text"},
+          {"model_id", manifest.model_id},
+          {"model_blake3", model_blake3},
+          {"dimension", options.embedding_dim},
+          {"dtype", "float32"},
+          {"normalized", true},
+          {"source_slug", "nomic-ai/nomic-embed-text-v1.5"}
+      });
+    }
+    if (keyframe_entry_count > 0) {
+      sets.push_back({
+          {"id", "embedset_vision_nomic_v15"},
+          {"modality", "vision"},
+          {"model_id", shot_embeddings.model_id},
+          {"model_blake3", shot_embeddings.model_blake3},
+          {"dimension", options.embedding_dim},
+          {"dtype", "float32"},
+          {"normalized", true},
+          {"source_slug", "nomic-ai/nomic-embed-vision-v1.5"}
+      });
+    }
+    nlohmann::json sets_json = {{"sets", sets}};
     std::ofstream out(emb_sets_path);
     if (!out) {
       result.blocker = "Failed to open embedding sets file: " + emb_sets_path.string();
@@ -586,12 +686,23 @@ EmbeddingGenerationResult generate_embedding_blocks(
   result.embedding_sets_written = true;
   result.embedding_generation_run = true;
 
+  std::string note =
+      "Text embeddings generated from " + std::to_string(text_entry_count) +
+      " source-derived text observations using ONNX Runtime; "
+      "mean pooling with attention mask and L2 normalization applied. "
+      "Shot keyframe image embeddings: " + std::to_string(keyframe_entry_count) +
+      " of " + std::to_string(shot_embeddings.keyframes_requested) +
+      " shots (first frame of each shot, CLIP-normalized 224x224 input, "
+      "L2-normalized)";
+  if (!shot_embeddings.blocker.empty()) {
+    note += "; not embedded: " + shot_embeddings.blocker;
+  }
   result.processor_provenance = make_embedding_processor_provenance(
       manifest.model_id, manifest.model_bundle_id,
-      options.execution_provider, "completed",
-      "Text embeddings generated from " + std::to_string(result.entries.size()) +
-      " source-derived text observations using ONNX Runtime; "
-      "mean pooling with attention mask and L2 normalization applied");
+      options.execution_provider, "completed", note);
+  if (keyframe_entry_count > 0) {
+    result.processor_provenance["model_refs"].push_back(shot_embeddings.model_id);
+  }
 
   return result;
 }
