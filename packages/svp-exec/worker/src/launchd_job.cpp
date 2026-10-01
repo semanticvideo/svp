@@ -44,7 +44,7 @@ void key_string(std::ostringstream& out, std::string_view indent, std::string_vi
 WorkerServiceSpec make_worker_service_spec(WorkerServiceMode mode, const WorkerLayout& layout,
                                            const std::filesystem::path& runtime_dir,
                                            const std::string& user_name,
-                                           const std::filesystem::path& home) {
+                                           const std::filesystem::path& home, std::string path) {
   WorkerServiceSpec spec;
   spec.mode = mode;
   spec.program_arguments = {(runtime_dir / std::string(kSessionProgram)).string(), "worker",
@@ -53,6 +53,7 @@ WorkerServiceSpec make_worker_service_spec(WorkerServiceMode mode, const WorkerL
   spec.log_path = layout.agent_log();
   spec.user_name = user_name;
   spec.home = home;
+  spec.path = std::move(path);
   return spec;
 }
 
@@ -74,10 +75,15 @@ std::string render_launchd_plist(const WorkerServiceSpec& spec) {
          "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
       << "<plist version=\"1.0\">\n<dict>\n";
   constexpr std::string_view kIndent = "  ";
-  if (spec.mode == WorkerServiceMode::system_daemon) {
+  if (spec.mode == WorkerServiceMode::system_daemon || !spec.path.empty()) {
     out << kIndent << "<key>EnvironmentVariables</key>\n"
         << kIndent << "<dict>\n";
-    key_string(out, "    ", "HOME", spec.home.string());
+    if (spec.mode == WorkerServiceMode::system_daemon) {
+      key_string(out, "    ", "HOME", spec.home.string());
+    }
+    if (!spec.path.empty()) {
+      key_string(out, "    ", "PATH", spec.path);
+    }
     out << kIndent << "</dict>\n";
   }
   out << kIndent << "<key>KeepAlive</key>\n"

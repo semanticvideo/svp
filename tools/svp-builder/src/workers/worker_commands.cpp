@@ -1,4 +1,5 @@
 #include "builder_worker_tasks.hpp"
+#include "svp/builder/runtime_tools.hpp"
 #include "coordinator_context.hpp"
 #include "svp/exec/cas_store.hpp"
 #include "svp/exec/cas_task_artifact_access.hpp"
@@ -41,9 +42,10 @@ int run_worker_session(const WorkerCliOptions& options) {
   std::signal(SIGPIPE, SIG_IGN);
   const std::optional<svp::exec::Blake3Digest> runtime_id =
       svp::exec::parse_blake3_prefixed(options.runtime_id);
-  if (!runtime_id || options.cas_root.empty() || options.worker_session_id.empty()) {
-    std::cerr << "svp-builder worker: --serve-fd needs --cas-root, --worker-session-id, and "
-                 "--runtime-id b3:<hex>\n";
+  if (!runtime_id || options.cas_root.empty() || options.worker_session_id.empty() ||
+      options.model_store.empty()) {
+    std::cerr << "svp-builder worker: --serve-fd needs --cas-root, --model-store, "
+                 "--worker-session-id, and --runtime-id b3:<hex>\n";
     return 2;
   }
   svp::exec::CacheResult<svp::exec::CasStore> store = svp::exec::CasStore::at(options.cas_root);
@@ -53,8 +55,19 @@ int run_worker_session(const WorkerCliOptions& options) {
     return 1;
   }
   svp::exec::CasTaskArtifactAccess artifacts(std::move(store).value(), options.worker_session_id);
+  // ffmpeg the way a local build of this runtime resolves it: the bundle
+  // next to this svp-builder, $SVP_FFMPEG, or ffmpeg on the job's PATH.
+  const RuntimeToolChoice ffmpeg = resolve_runtime_tool(
+      RuntimeTool::ffmpeg, std::nullopt, locate_runtime_bundle(current_executable()),
+      process_environment());
   svp::exec::TaskTypeRegistry registry;
-  register_builder_worker_task_types(registry, artifacts);
+  register_builder_worker_task_types(
+      registry, artifacts,
+      WorkerTaskEnvironment{.session_dir = options.session_dir.empty()
+                                               ? std::filesystem::current_path()
+                                               : std::filesystem::path(options.session_dir),
+                            .model_store = options.model_store,
+                            .ffmpeg_path = ffmpeg.path});
   const svp::exec::WorkerLoopExit exit = svp::exec::run_worker_loop(
       options.serve_fd, options.serve_fd, registry, artifacts,
       svp::exec::WorkerLoopOptions{.worker_session_id = options.worker_session_id,

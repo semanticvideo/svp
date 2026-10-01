@@ -258,7 +258,8 @@ class AgentSession {
       throw WorkerError(WorkerErrorCode::io, "cannot create " + scratch_.string());
     }
     process_ = core_.launch(make_session_launch(core_.runtimes().directory_of(hello_.runtime_id),
-                                                core_.layout().cas(), scratch_, session_id_,
+                                                core_.layout().cas(), scratch_,
+                                                core_.layout().models(), session_id_,
                                                 hello_.runtime_id));
     child_writer_ = std::make_unique<FdFrameWriter>(process_->fd, core_.options().frame_limits);
     relay_ = std::thread([this, fd = process_->fd] { relay(fd); });

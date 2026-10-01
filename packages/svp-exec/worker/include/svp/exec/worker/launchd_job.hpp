@@ -41,6 +41,8 @@ struct WorkerServiceSpec {
   // system_daemon only.
   std::string user_name;
   std::filesystem::path home;
+  // The job's PATH; empty leaves launchd's default.
+  std::string path;
 };
 
 // The job for a worker whose agent runs from the runtime `runtime_dir`:
@@ -49,7 +51,8 @@ struct WorkerServiceSpec {
                                                          const WorkerLayout& layout,
                                                          const std::filesystem::path& runtime_dir,
                                                          const std::string& user_name,
-                                                         const std::filesystem::path& home);
+                                                         const std::filesystem::path& home,
+                                                         std::string path = {});
 
 // XML property list (version 1.0). Throws WorkerError(configuration) for a
 // spec missing its label, program, or (daemon) user.

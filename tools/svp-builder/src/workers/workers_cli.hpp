@@ -13,7 +13,7 @@
 //   worker serve --root <dir> [--memory-reserve-floor-mb <n>]
 //       The launchd entry point (worker_agent.hpp).
 //   worker --serve-fd <fd> --cas-root <dir> --session-dir <dir>
-//          --worker-session-id <id> --runtime-id b3:<hex>
+//          --model-store <dir> --worker-session-id <id> --runtime-id b3:<hex>
 //       One session process (session_process.hpp).
 //   worker verify-runtime --runtime-dir <dir> [--expect b3:<hex>]
 //       Verifies a runtime directory against its manifest; prints its id.
@@ -49,6 +49,7 @@ struct WorkerCliOptions {
   int serve_fd = -1;
   std::string cas_root;
   std::string session_dir;
+  std::string model_store;
   std::string worker_session_id;
   std::string runtime_id;
   std::string root;
