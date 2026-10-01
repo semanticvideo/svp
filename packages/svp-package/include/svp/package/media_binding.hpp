@@ -85,6 +85,12 @@ struct MediaBindingDocument {
 [[nodiscard]] nlohmann::json to_json(const MediaBinding& binding);
 [[nodiscard]] nlohmann::json to_json(const MediaBindingDocument& doc);
 
+// Inverse of to_json(const MediaBindingDocument&): to_json of the result
+// equals `value`. Throws std::invalid_argument for an unknown blake3 state and
+// nlohmann::json::exception for a malformed document.
+[[nodiscard]] MediaBindingDocument media_binding_document_from_json(
+    const nlohmann::json& value);
+
 [[nodiscard]] bool write_media_binding(
     const std::filesystem::path& output_path,
     const MediaBindingDocument& doc);
