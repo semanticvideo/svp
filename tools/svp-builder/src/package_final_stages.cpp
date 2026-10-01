@@ -1,10 +1,10 @@
 #include "package_final_stages.hpp"
+#include "processor_provenance.hpp"
 
 #include "svp/package/entity_writer.hpp"
 #include "svp/package/index_writer.hpp"
 #include "svp/package/package_writer.hpp"
 #include "svp/package/relationship_provenance_writer.hpp"
-#include "svp/package/spatial_embedding_placeholders.hpp"
 #include "svp/package/timeline_writer.hpp"
 #include "svp/package/validation_report_storage.hpp"
 #include "svp/validation/report_json.hpp"
@@ -68,9 +68,9 @@ PackageEntitiesStageResult run_package_entities_stage(
     BuildPipelineContext& context,
     const std::vector<nlohmann::json>& vision_processor_records) {
   PackageEntitiesStageResult result;
-  svp::package::merge_processor_records(
-      context.staging_dir / "provenance" / "processors.jsonl",
-      vision_processor_records);
+  // Every lane has finished: compose processors.jsonl from each stage's
+  // records, independent of the order the lanes finished in.
+  compose_processor_provenance(context.staging_dir, vision_processor_records);
 
   // Rewrite frames.jsonl with the complete frame catalog so that every frame
   // ID referenced by OCR, depth, masks, entities, and relationships is present

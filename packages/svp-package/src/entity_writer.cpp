@@ -651,8 +651,8 @@ EntityWriteSummary write_visual_entity_artifacts(
   }
   }
 
-  // Append processor record for visual entity tracker
-  nlohmann::json processor_record;
+  // Processor record for the visual entity tracker, staged by the caller
+  nlohmann::json& processor_record = summary.processor_record;
   processor_record["id"] = tracker_result.processor_id;
   processor_record["name"] = "svp visual entity tracker";
   processor_record["version"] = "svp-visual-entity-tracker-v1";
@@ -682,11 +682,6 @@ EntityWriteSummary write_visual_entity_artifacts(
       tracker_result.confidence_calibration_status;
   processor_record["limitations"] = tracker_result.limitations_note;
   processor_record["parameters"] = tracker_result.parameters_json;
-
-  append_processor_record(
-      staging_dir / "provenance" / "processors.jsonl",
-      processor_record,
-      summary);
 
   return summary;
 }

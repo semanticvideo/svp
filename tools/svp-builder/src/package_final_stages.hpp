@@ -2,7 +2,7 @@
 
 // The package lane after audio and vision join, one function per stage
 // (formerly one run_package_final_stage). In build order:
-//   entities         processor merge, frames.jsonl rewrite, entities/
+//   entities         processors.jsonl, frames.jsonl rewrite, entities/
 //   relationships    relationships/ and provenance/
 //   index            index/
 //   validation       draft package, validation, provenance/validation.json
@@ -29,8 +29,9 @@ struct PackageEntitiesStageResult {
   nlohmann::json entity_artifacts = nlohmann::json::object();
 };
 
-// Merges the vision lane's processor records, rewrites timeline/frames.jsonl
-// from `frame_catalog`, and writes entities.
+// Composes provenance/processors.jsonl from every stage's processor record
+// fragment and the vision lane's records, rewrites timeline/frames.jsonl from
+// `frame_catalog`, and writes entities.
 [[nodiscard]] PackageEntitiesStageResult run_package_entities_stage(
     BuildPipelineContext& context,
     const std::vector<nlohmann::json>& vision_processor_records);

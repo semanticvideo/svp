@@ -1,5 +1,6 @@
 #include "audio_stage.hpp"
 #include "microphone_asr_stage.hpp"
+#include "processor_provenance.hpp"
 
 #include "svp/audio/asr_chunk_planner.hpp"
 #include "svp/audio/asr_execution_boundary.hpp"
@@ -27,14 +28,18 @@ namespace svp::builder {
 namespace {
 
 // The audio plan is a pure function of the source, its probe, and the tools,
-// so the extract and transcribe stages each derive the same plan.
+// so the extract and transcribe stages each derive the same plan. Extraction
+// stages its processor records in its own fragment; the package entities stage
+// composes provenance/processors.jsonl (processor_provenance.hpp).
 svp::audio::AudioStagePlan plan_audio_stage(const BuildPipelineOptions& options,
                                             const svp::media::MediaIngestPlan& plan,
                                             bool model_runtime_available) {
-  return svp::audio::build_audio_stage_plan(options.source_path, plan.probe,
-                                            executable_exists(options.ffmpeg_path),
-                                            options.ffmpeg_path, model_runtime_available,
-                                            options.ffprobe_path);
+  svp::audio::AudioStagePlan audio_plan = svp::audio::build_audio_stage_plan(
+      options.source_path, plan.probe, executable_exists(options.ffmpeg_path),
+      options.ffmpeg_path, model_runtime_available, options.ffprobe_path);
+  audio_plan.extraction_plan.processor_provenance.output_ref =
+      stage_processor_fragment_ref(processor_fragment::kAudioExtract);
+  return audio_plan;
 }
 
 svp::audio::AudioStagePlan plan_audio_stage(const BuildPipelineContext& context) {
@@ -198,11 +203,9 @@ std::optional<int> run_audio_transcribe_stage(BuildPipelineContext& context,
     executed_asr_boundary = std::move(microphone_result.boundary);
     microphone_asr_json = std::move(microphone_result.stream_results);
     if (!microphone_result.processor_record.empty()) {
-      nlohmann::json processor_records = nlohmann::json::array();
-      processor_records.push_back(microphone_result.processor_record);
-      append_jsonl_file(
-          context.staging_dir / "provenance" / "processors.jsonl",
-          processor_records);
+      write_stage_processor_fragment(context.staging_dir,
+                                     processor_fragment::kAudioTranscribe,
+                                     {microphone_result.processor_record});
     }
     if (!microphone_result.reconciliation.empty()) {
       audio_json["microphone_transcript_reconciliation"] =

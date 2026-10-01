@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nlohmann/json.hpp>
+
 #include <cstddef>
 #include <filesystem>
 
@@ -15,6 +17,9 @@ struct TimelineWriteSummary {
   std::size_t frame_count = 0;
   std::size_t shot_count = 0;
   std::size_t scene_count = 0;
+  // The timeline generator's processor record (RC2 §18.1). The caller stages
+  // it; this writer does not touch provenance/processors.jsonl.
+  nlohmann::json processor = nlohmann::json::object();
 };
 
 /**
@@ -26,8 +31,7 @@ struct TimelineWriteSummary {
  * It uses the ColorFrameSamplingInput embedded in the FoundationColorStagingArtifact
  * to prevent double-decoding video frames.
  *
- * Also appends a processor record for the timeline generation to
- * provenance/processors.jsonl.
+ * Returns the timeline generator's processor record in the summary.
  */
 [[nodiscard]] TimelineWriteSummary write_timeline_artifacts(
     const std::filesystem::path& staging_dir,

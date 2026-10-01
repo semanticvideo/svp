@@ -328,6 +328,7 @@ VisionTrackingStageResult run_vision_tracking_stage(
           &streamed_artifacts);
       result.masks_index_written = visual_entity_summary.masks_written;
       result.masks_blocks_written = visual_entity_summary.masks_written;
+      result.processor = visual_entity_summary.processor_record;
     }
   }
 
@@ -382,6 +383,9 @@ VisionLaneOutcome combine_vision_lane_results(
   outcome.processor_records.insert(outcome.processor_records.end(),
                                    lane_processors.begin(), lane_processors.end());
   summary.provenance_records_added += lane_processors.size();
+  if (tracking.processor.is_object()) {
+    outcome.processor_records.push_back(tracking.processor);
+  }
   return outcome;
 }
 

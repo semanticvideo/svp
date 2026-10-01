@@ -13,8 +13,11 @@
 //     └─ run_vision_ocr_stage              (text/)
 //          └─ run_vision_text_embedding_stage   (embeddings/)
 //   run_vision_tracking_stage               (spatial/masks.*, spatial/regions.*,
-//                                            entities/, provenance/processors.jsonl)
+//                                            entities/)
 //   combine_vision_lane_results             (summary + processor records)
+//
+// No stage writes provenance/processors.jsonl: each returns its processor
+// records and combine_vision_lane_results collects them for the caller.
 //
 // Each stage result round-trips through JSON (to_json / *_from_json) so it can
 // cross a task boundary unchanged.
@@ -93,6 +96,9 @@ struct VisionTextEmbeddingStageResult {
 struct VisionTrackingStageResult {
   bool masks_index_written = false;
   bool masks_blocks_written = false;
+  // The visual entity tracker's processor record; null when tracking did not
+  // run.
+  nlohmann::json processor;
 };
 
 // Decodes the canonical frames shared by depth and OCR. Empty (not attempted)
@@ -125,7 +131,8 @@ decode_vision_lane_canonical_frames(const VisionLaneSettings& settings,
     const SpatialProgressCallback& on_progress);
 
 // The lane summary and the processor records the package's final stage
-// merges, in the lane's order (OCR, then depth, then embeddings).
+// merges, in the lane's order (OCR, then depth, then embeddings, then the
+// tracker when tracking ran).
 struct VisionLaneOutcome {
   SpatialEmbeddingPlaceholderSummary summary;
   std::vector<nlohmann::json> processor_records;

@@ -1,5 +1,7 @@
 #include "engine/stage_task_plan.hpp"
 
+#include "processor_provenance.hpp"
+
 #include "svp/exec/cache_key.hpp"
 #include "svp/exec/parameters_digest.hpp"
 
@@ -17,7 +19,13 @@ constexpr std::string_view kStageOrderLane = "pipeline";
 
 constexpr std::string_view kProcessorsJsonl = "provenance/processors.jsonl";
 
+// A lane stage writes its processor records to its own fragment
+// (processor_provenance.hpp), never to processors.jsonl itself.
 StagingScope scope_for(StageTaskKind kind, bool microphone_stream_mode) {
+  namespace fragment = processor_fragment;
+  const auto records_of = [](std::string_view stage) {
+    return stage_processor_fragment_ref(stage);
+  };
   switch (kind) {
     case StageTaskKind::inventory:
     case StageTaskKind::vision_plan:
@@ -26,14 +34,14 @@ StagingScope scope_for(StageTaskKind kind, bool microphone_stream_mode) {
     case StageTaskKind::media_binding:
       return {};
     case StageTaskKind::color:
-      return {{"colors/", "timeline/", std::string(kProcessorsJsonl)}};
+      return {{"colors/", "timeline/", records_of(fragment::kColor)}};
     case StageTaskKind::foundation_ocr:
-      return {{"text/", std::string(kProcessorsJsonl)}};
+      return {{"text/", records_of(fragment::kFoundationOcr)}};
     case StageTaskKind::audio_extract:
-      return {{"media/audio/", std::string(kProcessorsJsonl)}};
+      return {{"media/audio/", records_of(fragment::kAudioExtract)}};
     case StageTaskKind::audio_transcribe:
       if (microphone_stream_mode) {
-        return {{"transcript/", std::string(kProcessorsJsonl)}};
+        return {{"transcript/", records_of(fragment::kAudioTranscribe)}};
       }
       return {{"transcript/"}};
     case StageTaskKind::depth:
@@ -43,10 +51,11 @@ StagingScope scope_for(StageTaskKind kind, bool microphone_stream_mode) {
     case StageTaskKind::text_embeddings:
       return {{"embeddings/"}};
     case StageTaskKind::tracking:
-      return {{"spatial/masks.", "spatial/regions.", "entities/",
-               std::string(kProcessorsJsonl)}};
+      return {{"spatial/masks.", "spatial/regions.", "entities/"}};
     case StageTaskKind::entities:
-      return {{std::string(kProcessorsJsonl), "timeline/frames.jsonl", "entities/"}};
+      // Composes processors.jsonl from the fragments and removes them.
+      return {{std::string(kProcessorsJsonl), std::string(kStageProcessorFragmentDir),
+               "timeline/frames.jsonl", "entities/"}};
     case StageTaskKind::relationships:
       return {{"relationships/", "provenance/"}};
     case StageTaskKind::index:
@@ -85,12 +94,6 @@ void plan_package_lanes(const StageTaskPlanInputs& inputs,
     order.insert(order.end(), vision_lane.begin(), vision_lane.end());
     deps[K::audio_extract] = {K::color};
     deps[K::canonical_frames] = {K::color};
-    // provenance/processors.jsonl writers: extraction rewrites the file, the
-    // microphone path appends to it after ASR, tracking merges into it.
-    deps[K::tracking].push_back(K::audio_extract);
-    if (inputs.microphone_stream_mode) {
-      deps[K::tracking].push_back(K::audio_transcribe);
-    }
   } else {
     // One heavy lane: the audio lane, then the vision lane.
     order.insert(order.end(), audio_lane.begin(), audio_lane.end());

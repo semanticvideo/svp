@@ -2,9 +2,11 @@
 
 // The audio lane as two stages so a resumed build can skip extraction:
 //   extract:    per-stream FLAC, analysis WAV, waveform, loudness, spectrum,
-//               and the VAD boundary (media/audio/, provenance/processors.jsonl);
-//   transcribe: ASR, diarization (or the microphone path), and the transcript
-//               writer (transcript/).
+//               and the VAD boundary (media/audio/, and its processor records
+//               fragment, processor_provenance.hpp);
+//   transcribe: ASR, diarization (or the microphone path, which also stages a
+//               processor records fragment), and the transcript writer
+//               (transcript/).
 // Running extract then transcribe is exactly the former single audio stage.
 
 #include "build_pipeline_internal.hpp"

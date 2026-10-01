@@ -120,8 +120,12 @@ SpatialEmbeddingPlaceholderSummary write_spatial_and_embedding_placeholders(
 
   VisionLaneOutcome outcome = combine_vision_lane_results(
       model_runtime_available, *depth, ocr, embeddings, tracking);
-  collect_or_append_processor_records(
-      processors_path, {depth->processor, embeddings.processor}, processor_records);
+  std::vector<nlohmann::json> lane_processors{depth->processor, embeddings.processor};
+  if (tracking.processor.is_object()) {
+    lane_processors.push_back(tracking.processor);
+  }
+  collect_or_append_processor_records(processors_path, lane_processors,
+                                      processor_records);
   return outcome.summary;
 }
 

@@ -1,4 +1,5 @@
 #include "build_pipeline_internal.hpp"
+#include "processor_provenance.hpp"
 
 #include "svp/package/timeline_writer.hpp"
 #include "svp/vision/foundation_color_staging.hpp"
@@ -17,8 +18,6 @@ void write_foundation_color_staging_files(
                                 artifact.records.color_summary);
   svp::builder::write_json_file(staging_dir / "colors" / "color_absence.json",
                                 artifact.records.color_absence);
-  svp::builder::append_jsonl_file(staging_dir / "provenance" / "processors.jsonl",
-                                  nlohmann::json::array({artifact.processor_provenance}));
 }
 
 }  // namespace
@@ -41,6 +40,9 @@ void run_foundation_color_stage(BuildPipelineContext& context) {
 
   const svp::package::TimelineWriteSummary timeline_summary =
       svp::package::write_timeline_artifacts(context.staging_dir, context.plan, color_artifact);
+  write_stage_processor_fragment(context.staging_dir, processor_fragment::kColor,
+                                 {color_artifact.processor_provenance,
+                                  timeline_summary.processor});
 
   nlohmann::json color_json =
       svp::vision::foundation_color_staging_artifact_to_json(color_artifact);
@@ -57,8 +59,9 @@ void run_foundation_color_stage(BuildPipelineContext& context) {
        (context.staging_dir / "colors" / "color_summary.json").string()},
       {"color_absence_json",
        (context.staging_dir / "colors" / "color_absence.json").string()},
-      {"processors_jsonl",
-       (context.staging_dir / "provenance" / "processors.jsonl").string()},
+      {"processor_records_jsonl",
+       stage_processor_fragment_path(context.staging_dir, processor_fragment::kColor)
+           .string()},
       {"frames_jsonl",
        (context.staging_dir / "timeline" / "frames.jsonl").string()},
       {"shots_jsonl",

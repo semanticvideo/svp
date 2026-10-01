@@ -1259,6 +1259,10 @@ void test_timeline_writer() {
   assert(summary.frame_count == 3);
   assert(summary.shot_count == 2);
   assert(summary.scene_count == 1);
+  // The processor record is returned for the caller to stage, not appended
+  // to provenance/processors.jsonl.
+  assert(summary.processor.value("id", "") == "processor_timeline_generator_0001");
+  assert(!std::filesystem::exists(staging_dir / "provenance" / "processors.jsonl"));
 
   // Check frames.jsonl
   auto frames = read_jsonl_records(staging_dir / "timeline" / "frames.jsonl");
