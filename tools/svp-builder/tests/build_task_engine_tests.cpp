@@ -3,6 +3,7 @@
 // staging capture and restore, the stage output encoding, frame catalog
 // deltas, and the canonical frames codec.
 
+#include "engine/build_assembly.hpp"
 #include "engine/canonical_frames_codec.hpp"
 #include "engine/frame_catalog_delta.hpp"
 #include "engine/stage_task_plan.hpp"
@@ -280,6 +281,41 @@ void test_canonical_frames_round_trip() {
           "canonical frames round-trip");
 }
 
+void test_journal_deleted_only_after_validated_publication() {
+  const auto package_plan =
+      svp::builder::execution_plan_for_stage(svp::builder::BuildStage::package_skeleton);
+  svp::builder::PackageSkeletonStageResult package;
+  package.package_written = true;
+  package.validator_passes = true;
+  require(!unfinished_publication(package_plan, package, std::nullopt),
+          "a written, validated package lets the journal go");
+  package.validator_passes = false;
+  require(unfinished_publication(package_plan, package, std::nullopt).has_value(),
+          "a package that fails strict validation keeps the journal");
+  package.package_written = false;
+  require(unfinished_publication(package_plan, package, std::nullopt).has_value(),
+          "an unwritten package keeps the journal");
+
+  svp::builder::SvpiPublicationResult svpi{.success = true, .validator_passed = false};
+  package.package_written = true;
+  package.validator_passes = true;
+  require(unfinished_publication(package_plan, package, svpi).has_value(),
+          "an SVPI that fails strict validation keeps the journal");
+  svpi.validator_passed = true;
+  require(!unfinished_publication(package_plan, package, svpi),
+          "a written, validated SVPI lets the journal go");
+  svpi.success = false;
+  require(unfinished_publication(package_plan, package, svpi).has_value(),
+          "an unwritten SVPI keeps the journal");
+
+  const auto ingest_plan =
+      svp::builder::execution_plan_for_stage(svp::builder::BuildStage::media_ingest);
+  require(!unfinished_publication(ingest_plan, {}, std::nullopt),
+          "--stop-after builds publish no package");
+  require(kept_journal_note("x", "/tmp/out.svp-journal").find("--fresh") != std::string::npos,
+          "the kept-journal note names --resume and --fresh");
+}
+
 }  // namespace
 
 int main() {
@@ -293,6 +329,7 @@ int main() {
   test_stage_products_round_trip();
   test_frame_catalog_deltas_replay_in_any_order();
   test_canonical_frames_round_trip();
+  test_journal_deleted_only_after_validated_publication();
   if (g_failures != 0) {
     std::cerr << g_failures << " task engine check(s) failed\n";
     return 1;

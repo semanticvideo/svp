@@ -423,13 +423,24 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
       print_build_progress(context, package_result);
     }
 
-    // RC2 §20.5.1: every task completed and the outputs are final, so nothing
-    // is left to resume.
-    started.journal.finish_success(svp::exec::JournalRetention::delete_on_success);
-
     BuildPipelineResult finished;
     if (stage_plan.run_package_skeleton && effective_options.svpi) {
       finished.svpi = engine::svpi_publication_result(results);
+    }
+
+    // RC2 §20.5.1: the journal is deleted only after the published artifact
+    // was finalized and passed strict validation.
+    const std::optional<std::string> unpublished =
+        engine::unfinished_publication(stage_plan, package_result, finished.svpi);
+    std::string journal_note;
+    if (!unpublished) {
+      started.journal.finish_success(svp::exec::JournalRetention::delete_on_success);
+    } else {
+      started.journal.set_build_session_status(build_session_id,
+                                               svp::exec::BuildSessionStatus::failed);
+      started.journal.close();
+      journal_note = engine::kept_journal_note(*unpublished, journal_session.journal_root());
+      std::cerr << "svp-builder: " << journal_note << "\n";
     }
     if (stage_plan.run_package_skeleton && !package_result.package_written) {
       // A package that was never written is a failed build, whatever the
@@ -439,15 +450,17 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
       std::cerr << "svp-builder: " << message << "\n";
       finished.exit_code = kBuildFailedExitCode;
       finished.failure = BuildPipelineFailure::package_write;
-      finished.error_message = message;
+      finished.error_message = message + "; " + journal_note;
       return with_plan(std::move(finished));
     }
     if (stage_plan.run_package_skeleton && !package_result.validator_passes) {
       svp::core::check_memory_limit("builder.run.complete.validator_failed");
       finished.exit_code = package_result.validator_exit_code;
+      finished.error_message = journal_note;
       return with_plan(std::move(finished));
     }
     svp::core::check_memory_limit("builder.run.complete");
+    finished.error_message = journal_note;
     staging_guard.cleanup_on_success();
     return with_plan(std::move(finished));
   } catch (const engine::RecoveryJournalBlocked& error) {

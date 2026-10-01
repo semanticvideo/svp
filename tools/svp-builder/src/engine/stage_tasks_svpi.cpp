@@ -84,6 +84,7 @@ StageStates run_svpi_write_task(const StageTaskEnvironment& environment) {
   }
   StageStates states;
   states[kSvpiResultState] = json_state_bytes({{"success", published.success},
+                                               {"validator_passed", published.validator_passed},
                                                {"error_message", published.error_message},
                                                {"blake3_state", blake3_state},
                                                {"binding_state", published.binding_state}});
@@ -96,6 +97,7 @@ SvpiPublicationResult svpi_publication_result(const CommittedStageResults& resul
       results.json_state(stage_task_id(StageTaskKind::svpi_write), kSvpiResultState);
   return SvpiPublicationResult{
       .success = state.at("success").get<bool>(),
+      .validator_passed = state.at("validator_passed").get<bool>(),
       .error_message = state.at("error_message").get<std::string>(),
       .blake3_state = state.at("blake3_state").get<std::string>(),
       .binding_state = state.at("binding_state").get<std::string>()};

@@ -42,6 +42,8 @@ struct InterlaceCreateResult {
   std::string error_message;
   std::string blake3_state;
   std::string binding_state;
+  // The written SVPI passed strict validation.
+  bool validator_passed = false;
   // The runtime thread plan the package build ran with.
   std::optional<svp::models::ThreadPlanResolution> thread_plan;
   // Why the package build did not complete, when it did not.

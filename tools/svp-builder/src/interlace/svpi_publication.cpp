@@ -168,6 +168,7 @@ InterlaceCreateResult write_svpi_from_staging(
   svp::validation::SvpiValidatorOptions validator_opts;
   auto report = svp::validation::validate_svpi_package(options.output_path, validator_opts);
   result.binding_state = svp::validation::to_string(report.status);
+  result.validator_passed = svp::validation::exit_code(report) == 0;
 
   if (svp::validation::exit_code(report) == 0) {
     sink.emit(make_stage_completed(ProgressStageId::validate));
@@ -251,6 +252,7 @@ InterlaceCreateResult write_core_only_svpi(
   svp::validation::SvpiValidatorOptions validator_opts;
   auto report = svp::validation::validate_svpi_package(options.output_path, validator_opts);
   result.binding_state = svp::validation::to_string(report.status);
+  result.validator_passed = svp::validation::exit_code(report) == 0;
 
   if (svp::validation::exit_code(report) == 0) {
     sink.emit(make_stage_completed(ProgressStageId::validate));

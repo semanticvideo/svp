@@ -484,10 +484,12 @@ package
 
 Every `build` and `interlace create` keeps a recovery journal next to its
 output (`intro.svp-journal/`, RC2 §20.4). Each finished stage is committed to
-it, and the journal is deleted when the build completes.
+it. The journal is deleted once the package (or SVPI) is written and passes
+strict validation (RC2 §20.5.1); if writing or validation fails, the builder
+says so and keeps the journal.
 
-If a build is interrupted (Ctrl-C, SIGTERM, a crash, or a power loss), the
-journal stays:
+If a build is interrupted (Ctrl-C, SIGTERM, a crash, or a power loss) or its
+output fails to publish, the journal stays:
 
 - `--resume` continues the build. It first verifies that the source media
   still matches and that every journaled stage output is intact, then runs only

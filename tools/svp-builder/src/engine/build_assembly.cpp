@@ -64,4 +64,38 @@ std::optional<std::string> published_output_problem(
   return std::nullopt;
 }
 
+std::optional<std::string> unfinished_publication(
+    const BuildStageExecutionPlan& stage_plan,
+    const PackageSkeletonStageResult& package_result,
+    const std::optional<SvpiPublicationResult>& svpi) {
+  if (!stage_plan.run_package_skeleton) {
+    return std::nullopt;
+  }
+  if (svpi) {
+    if (!svpi->success) {
+      return "the SVPI was not written" +
+             (svpi->error_message.empty() ? std::string() : " (" + svpi->error_message + ")");
+    }
+    if (!svpi->validator_passed) {
+      return "the SVPI failed strict validation";
+    }
+    return std::nullopt;
+  }
+  if (!package_result.package_written) {
+    return "the package was not written";
+  }
+  if (!package_result.validator_passes) {
+    return "the package failed strict validation";
+  }
+  return std::nullopt;
+}
+
+std::string kept_journal_note(const std::string& reason,
+                              const std::filesystem::path& journal_root) {
+  return reason + ", so the recovery journal is kept at " + journal_root.string() +
+         " (RC2 section 20.5.1); the next build of this output needs --resume (continues "
+         "from the journal without rerunning completed stages) or --fresh (discards it "
+         "and rebuilds)";
+}
+
 }  // namespace svp::builder::engine

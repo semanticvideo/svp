@@ -31,4 +31,17 @@ namespace svp::builder::engine {
     const std::vector<PlannedStageTask>& tasks, const CommittedStageResults& results,
     const BuildPipelineOptions& options);
 
+// RC2 §20.5.1 decides journal deletion: nullopt when the build's published
+// artifact was finalized and passed strict validation (or the build publishes
+// nothing: --stop-after), otherwise why not. For interlace create the
+// published artifact is the SVPI; for a package build it is the package.
+[[nodiscard]] std::optional<std::string> unfinished_publication(
+    const BuildStageExecutionPlan& stage_plan,
+    const PackageSkeletonStageResult& package_result,
+    const std::optional<SvpiPublicationResult>& svpi);
+
+// The message for a kept journal: why, where, and what the next build needs.
+[[nodiscard]] std::string kept_journal_note(const std::string& reason,
+                                            const std::filesystem::path& journal_root);
+
 }  // namespace svp::builder::engine

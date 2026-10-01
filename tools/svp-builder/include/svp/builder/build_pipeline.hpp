@@ -67,6 +67,7 @@ struct SvpiPublicationOptions {
 
 struct SvpiPublicationResult {
   bool success = false;
+  bool validator_passed = false;
   std::string error_message;
   std::string blake3_state;
   std::string binding_state;
