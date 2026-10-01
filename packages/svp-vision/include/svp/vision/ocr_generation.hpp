@@ -4,7 +4,11 @@
 #include "svp/vision/evidence_crop.hpp"
 #include "svp/vision/foundation_ocr_staging.hpp"
 #include "svp/vision/frame_catalog.hpp"
+#include "svp/vision/ocr_batch_policy.hpp"
+#include "svp/vision/ocr_frame_detections.hpp"
+#include "svp/vision/ocr_sample_plan.hpp"
 #include "svp/vision/ocr_temporal_sampling.hpp"
+#include "svp/vision/pp_ocr.hpp"
 #include "svp/models/thread_plan.hpp"
 
 #include <filesystem>
@@ -46,6 +50,9 @@ struct OcrGenerationOptions {
   std::string crop_coverage_policy = "one_per_observation";
   int crop_min_jpeg_quality = 50;
   OcrSamplingConfig sampling_config;
+  // How generate_ocr_observations cuts the sample plan into frame batches.
+  // Scheduling only: the output is identical for every policy.
+  OcrBatchPolicy batch_policy;
   FrameCatalog* frame_catalog = nullptr;
   FrameProgressCallback on_progress;
   EvidenceCropProgressCallback on_evidence_crop_progress;
@@ -119,9 +126,45 @@ inline constexpr int kOcrMaxFrameDimension = 1920;
 [[nodiscard]] OcrSourceFrameDimensions ocr_decode_frame_dimensions(
     const svp::media::MediaIngestPlan& media_plan);
 
+// The OCR stage. With a media plan and decode size it runs the batched
+// pipeline in this process: plan_ocr_samples, then run_ocr_frame_batch over
+// each batch of options.batch_policy, then the reducer
+// (reduce_ocr_frame_batches). Otherwise it runs OCR over `frame_input`, the
+// caller's canonical frames.
 [[nodiscard]] OcrGenerationResult generate_ocr_observations(
     const OcrGenerationOptions& options,
     const DecodedCanonicalFrames& frame_input,
+    const std::filesystem::path& staging_dir);
+
+// Plan step of the batched OCR stage: the sample schedule for the media
+// duration (or the SVP_OCR_DIAG_TIMESTAMPS_US override) at the options'
+// decode size, computed once before any frame is decoded. nullopt when the
+// options carry no media plan or decode size; `samples` may be empty when
+// the duration is unknown.
+[[nodiscard]] std::optional<OcrSamplePlan> plan_ocr_samples(
+    const OcrGenerationOptions& options);
+
+// PP-OCR options for the stage: model cache and thread counts from the
+// options (the build's ThreadPlan), execution provider, graph optimization,
+// and execution mode from the SVP_OCR_* diagnostic environment overrides.
+// Resolved once on the coordinator and sent to frame batch tasks as explicit
+// parameters, so a worker never consults its own environment or host.
+[[nodiscard]] PpOcrOptions make_ocr_pp_ocr_options(
+    const OcrGenerationOptions& options);
+
+// Reduce step of the batched OCR stage (plan §2.4 item 3): assembles frame
+// batch results by sample ordinal (any partition, any completion order),
+// registers the decoded samples' frames in sample order, then runs the
+// unchanged reconciliation, record emission, evidence crops, and staging.
+// `pp_ocr_session` (created from `pp_ocr_opts`) serves the evidence-crop ROI
+// re-read. Throws OcrFrameBatchReductionError when the batches do not cover
+// the plan exactly.
+[[nodiscard]] OcrGenerationResult reduce_ocr_frame_batches(
+    const OcrGenerationOptions& options,
+    const OcrSamplePlan& plan,
+    std::vector<std::vector<OcrSampleDetections>> batch_results,
+    const PpOcrSession& pp_ocr_session,
+    const PpOcrOptions& pp_ocr_opts,
     const std::filesystem::path& staging_dir);
 
 [[nodiscard]] nlohmann::json ocr_generation_result_to_json(
