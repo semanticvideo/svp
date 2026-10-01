@@ -13,6 +13,7 @@
 #include <future>
 #include <iostream>
 #include <sstream>
+#include <thread>
 
 namespace svp::builder::workers {
 namespace {
@@ -36,6 +37,26 @@ std::string seconds_since(std::chrono::steady_clock::time_point start) {
   return out.str();
 }
 
+// Like a RemoteExecutor session (remote_executor.hpp), keeps trying for the
+// reconnect window: a worker whose job launchd just (re)started can be
+// advertised before it accepts connections. Authentication failures end at
+// once; waiting does not change who holds the secret.
+std::unique_ptr<WorkerConnection> connect_within_window(const remote::PairingKey& key) {
+  const auto give_up =
+      std::chrono::steady_clock::now() + remote::kDefaultReconnectWindow;
+  while (true) {
+    try {
+      return connect_to_worker(key);
+    } catch (const remote::RemoteTransportError& error) {
+      if (error.code() == remote::RemoteErrorCode::authentication_failed ||
+          std::chrono::steady_clock::now() + remote::kDefaultReconnectPause >= give_up) {
+        throw;
+      }
+    }
+    std::this_thread::sleep_for(remote::kDefaultReconnectPause);
+  }
+}
+
 WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSupplies& supplies,
                              const OcrCalibrationSetup& setup, CalibrationClipFile& clip,
                              const CalibrationStore& store,
@@ -47,7 +68,7 @@ WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSuppli
     TransferStats stats;
     std::string route;
     {
-      const std::unique_ptr<WorkerConnection> connection = connect_to_worker(outcome.record.key);
+      const std::unique_ptr<WorkerConnection> connection = connect_within_window(outcome.record.key);
       route = connection->connection.route.route.interface_name + " (" +
               std::string(remote::route_medium_name(connection->connection.route.route.medium)) +
               ")";
@@ -70,8 +91,6 @@ WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSuppli
            << (calibration.measured ? "calibrated now: " : "calibration: ")
            << describe_calibration(calibration.ocr) << ", ready in " << seconds_since(start);
     outcome.detail = detail.str();
-  } catch (const remote::RemoteTransportError& error) {
-    outcome.problem = std::string(remote::remote_error_code_name(error.code())) + ": " + error.what();
   } catch (const std::exception& error) {
     outcome.problem = error.what();
   }
