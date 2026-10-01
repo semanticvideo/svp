@@ -8,6 +8,7 @@ add_library(svp-vision-tasks
   src/ocr_frame_batch_parameters.cpp
   src/ocr_frame_batch_spec.cpp
   src/ocr_frame_batch_task.cpp
+  src/ffmpeg_build_identity.cpp
   src/pp_ocr_session_pool.cpp
 )
 

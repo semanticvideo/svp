@@ -6,6 +6,7 @@
 #include "svp/exec/task_registry.hpp"
 #include "svp/vision/ocr_frame_detections.hpp"
 #include "svp/vision/ocr_generation.hpp"
+#include "svp/vision/tasks/ffmpeg_build_identity.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_parameters.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_spec.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_task.hpp"
@@ -42,6 +43,9 @@ void require_throws(const std::function<void()>& action, const std::string& mess
   require(false, message);
 }
 
+// A well-formed decoder identity no real ffmpeg has.
+const std::string kTestFfmpegBuild = "b3:" + std::string(64, 'a');
+
 vision::PpOcrOptions explicit_pp_ocr() {
   vision::PpOcrOptions options;
   options.det_threads = {.intra_op = 4, .inter_op = 1};
@@ -63,6 +67,7 @@ tasks::OcrFrameBatchParameters small_parameters() {
   parameters.frame_width = 1920;
   parameters.frame_height = 1080;
   parameters.pp_ocr = explicit_pp_ocr();
+  parameters.ffmpeg_build = kTestFfmpegBuild;
   return parameters;
 }
 
@@ -89,6 +94,7 @@ tasks::OcrFrameBatchTaskInputs task_inputs() {
       .model_refs = {fake_ref(pp_ocr.recognizer_model_id, 0x22),
                      fake_ref(pp_ocr.detector_model_id, 0x33)},
       .pp_ocr = pp_ocr,
+      .ffmpeg_build = kTestFfmpegBuild,
       .batch_policy = {},
   };
 }
@@ -96,7 +102,8 @@ tasks::OcrFrameBatchTaskInputs task_inputs() {
 void test_parameters_golden_bytes() {
   const Json value = tasks::ocr_frame_batch_parameters_to_json(small_parameters());
   const std::string expected =
-      R"({"decode":{"frame_height":1080,"frame_width":1920},)"
+      R"({"decode":{"ffmpeg_build":"b3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",)"
+      R"("frame_height":1080,"frame_width":1920},)"
       R"("detector":{"box_thresh":0.6,"execution_mode":"","graph_optimization_level":-1,)"
       R"("limit_side_len":960,"model_id":"model_pp_ocrv6_medium_det",)"
       R"("threads":{"inter_op":1,"intra_op":4},"thresh":0.3,"unclip_ratio":1.5},)"
@@ -142,6 +149,8 @@ void test_parameter_validator_rejects() {
       {"negative timestamp",
        [](Json& v) { v["samples"]["timestamps_us"] = Json::array({-1, 4'000'000}); }},
       {"zero frame width", [](Json& v) { v["decode"]["frame_width"] = 0; }},
+      {"missing decoder identity", [](Json& v) { v["decode"].erase("ffmpeg_build"); }},
+      {"malformed decoder identity", [](Json& v) { v["decode"]["ffmpeg_build"] = "9.0.2"; }},
       {"frame beyond the OCR decode bound",
        [](Json& v) { v["decode"]["frame_width"] = vision::kOcrMaxFrameDimension + 1; }},
       {"threshold above 1", [](Json& v) { v["detector"]["thresh"] = 1.5; }},
@@ -270,27 +279,64 @@ void test_execute_failures() {
   const std::filesystem::path empty_cache =
       std::filesystem::temp_directory_path() / "svp-ocr-task-tests-empty-cache";
   std::filesystem::create_directories(empty_cache);
-  exec::TaskTypeRegistry registry;
-  tasks::register_ocr_frame_batch_task(
-      registry, {.model_cache_root = empty_cache, .ffmpeg_path = "ffmpeg", .write_output = {}});
+  // /bin/echo answers `-version` like a program that is not the coordinator's
+  // ffmpeg: it runs, and its "build" is something else.
+  const std::filesystem::path stand_in_ffmpeg = "/bin/echo";
+  const std::optional<std::string> stand_in_build =
+      tasks::ffmpeg_build_identity(stand_in_ffmpeg);
+  require(stand_in_build.has_value(), "the stand-in decoder has an identity");
+  require(!tasks::ffmpeg_build_identity("/nonexistent/ffmpeg").has_value(),
+          "a missing program has no identity");
 
-  exec::TaskSpec spec = tasks::make_ocr_frame_batch_task_spec(
-      task_inputs(), small_plan(), {.first_ordinal = 0, .count = 1});
   exec::ResolvedInputs inputs;
-  inputs.emplace("source", exec::ResolvedInput{.ref = spec.inputs.at("source"),
-                                               .path = "/nonexistent.mp4"});
   const exec::CancellationToken token;
+  const auto run = [&](const std::filesystem::path& ffmpeg, const std::string& wanted_build,
+                       bool drop_model_ref) {
+    exec::TaskTypeRegistry registry;
+    tasks::register_ocr_frame_batch_task(
+        registry, {.model_cache_root = empty_cache, .ffmpeg_path = ffmpeg, .write_output = {}});
+    tasks::OcrFrameBatchTaskInputs task = task_inputs();
+    task.ffmpeg_build = wanted_build;
+    exec::TaskSpec spec = tasks::make_ocr_frame_batch_task_spec(
+        task, small_plan(), {.first_ordinal = 0, .count = 1});
+    if (drop_model_ref) {
+      spec.model_refs.pop_back();
+    }
+    inputs.clear();
+    inputs.emplace("source", exec::ResolvedInput{.ref = spec.inputs.at("source"),
+                                                 .path = "/nonexistent.mp4"});
+    return registry.execute(spec, inputs, token);
+  };
+  const auto failed_with = [](const exec::TaskResult& result, const std::string& code,
+                              bool retryable) {
+    return result.status == exec::TaskStatus::failed && result.error &&
+           result.error->code == code && result.error->retryable == retryable;
+  };
 
-  const exec::TaskResult unavailable = registry.execute(spec, inputs, token);
-  require(unavailable.status == exec::TaskStatus::failed && unavailable.error &&
-              unavailable.error->code == "ocr_unavailable" && unavailable.error->retryable,
+  require(failed_with(run("/nonexistent/ffmpeg", kTestFfmpegBuild, false),
+                      "decode_unavailable", true),
+          "a runtime without ffmpeg fails retryably");
+  require(failed_with(run(stand_in_ffmpeg, kTestFfmpegBuild, false), "decoder_mismatch", true),
+          "a runtime whose ffmpeg is another build fails retryably");
+  require(failed_with(run(stand_in_ffmpeg, *stand_in_build, false), "ocr_unavailable", true),
           "a worker without the models fails retryably");
-
-  spec.model_refs.pop_back();
-  const exec::TaskResult missing_ref = registry.execute(spec, inputs, token);
-  require(missing_ref.status == exec::TaskStatus::failed && missing_ref.error &&
-              missing_ref.error->code == "invalid_model_refs" && !missing_ref.error->retryable,
+  require(failed_with(run(stand_in_ffmpeg, *stand_in_build, true), "invalid_model_refs", false),
           "model refs that do not name both models are a permanent failure");
+
+  exec::TaskTypeRegistry resolving;
+  tasks::register_ocr_frame_batch_task(
+      resolving, {.model_cache_root = {},
+                  .ffmpeg_path = stand_in_ffmpeg,
+                  .write_output = {},
+                  .model_cache_for = [](const exec::TaskSpec&) -> std::filesystem::path {
+                    throw std::runtime_error("bundle not installed");
+                  }});
+  tasks::OcrFrameBatchTaskInputs task = task_inputs();
+  task.ffmpeg_build = *stand_in_build;
+  const exec::TaskSpec spec = tasks::make_ocr_frame_batch_task_spec(
+      task, small_plan(), {.first_ordinal = 0, .count = 1});
+  require(failed_with(resolving.execute(spec, inputs, token), "model_unavailable", true),
+          "a runtime that cannot provide the named bundles fails retryably");
   std::filesystem::remove_all(empty_cache);
 }
 

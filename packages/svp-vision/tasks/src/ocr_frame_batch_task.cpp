@@ -1,10 +1,10 @@
 #include "svp/vision/tasks/ocr_frame_batch_task.hpp"
 
-#include "pp_ocr_session_pool.hpp"
 #include "svp/exec/blake3_digest.hpp"
 #include "svp/exec/output_digest.hpp"
 #include "svp/vision/ocr_frame_batch.hpp"
 #include "svp/vision/ocr_frame_detections.hpp"
+#include "svp/vision/tasks/ffmpeg_build_identity.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_parameters.hpp"
 
 #include <algorithm>
@@ -99,8 +99,31 @@ TaskResult execute(const TaskSpec& spec, const svp::exec::ResolvedInputs& inputs
                   "model_refs must name exactly the detector and recognizer", false);
   }
 
-  const std::unique_ptr<PpOcrSessionPool::Lease> lease =
-      sessions.acquire(parameters.pp_ocr);
+  PpOcrOptions pp_ocr = parameters.pp_ocr;
+  if (environment.model_cache_for) {
+    try {
+      pp_ocr.model_cache_root = environment.model_cache_for(spec);
+    } catch (const std::exception& error) {
+      return failed(spec, "model_unavailable", error.what(), true);
+    }
+  } else {
+    pp_ocr.model_cache_root = environment.model_cache_root;
+  }
+
+  const std::optional<std::string> decoder =
+      cached_ffmpeg_build_identity(environment.ffmpeg_path);
+  if (!decoder) {
+    return failed(spec, "decode_unavailable",
+                  "cannot run ffmpeg at " + environment.ffmpeg_path.string(), true);
+  }
+  if (*decoder != parameters.ffmpeg_build) {
+    return failed(spec, "decoder_mismatch",
+                  "ffmpeg at " + environment.ffmpeg_path.string() + " is build " + *decoder +
+                      ", the coordinator decodes with " + parameters.ffmpeg_build,
+                  true);
+  }
+
+  const std::unique_ptr<PpOcrSessionPool::Lease> lease = sessions.acquire(pp_ocr);
   const PpOcrSession& session = lease->session();
   if (!session.available) {
     return failed(spec, "ocr_unavailable", session.blocker, true);
@@ -120,8 +143,7 @@ TaskResult execute(const TaskSpec& spec, const svp::exec::ResolvedInputs& inputs
   hooks.before_sample = [&cancellation] {
     svp::exec::throw_if_cancelled(cancellation, "ocr.frame_batch between frames");
   };
-  const OcrFrameBatchOutcome outcome = run_ocr_frame_batch(
-      session, sessions.with_model_cache(parameters.pp_ocr), request, hooks);
+  const OcrFrameBatchOutcome outcome = run_ocr_frame_batch(session, pp_ocr, request, hooks);
   if (!outcome.decoding_attempted) {
     return failed(spec, "decode_unavailable", outcome.skipped_reason, true);
   }
@@ -151,8 +173,11 @@ TaskResult execute(const TaskSpec& spec, const svp::exec::ResolvedInputs& inputs
 }  // namespace
 
 void register_ocr_frame_batch_task(svp::exec::TaskTypeRegistry& registry,
-                                   OcrFrameBatchWorkerEnvironment environment) {
-  auto sessions = std::make_shared<PpOcrSessionPool>(environment.model_cache_root);
+                                   OcrFrameBatchWorkerEnvironment environment,
+                                   std::shared_ptr<PpOcrSessionPool> sessions) {
+  if (!sessions) {
+    sessions = std::make_shared<PpOcrSessionPool>();
+  }
   registry.register_type(svp::exec::TaskTypeDefinition{
       .name = std::string(kOcrFrameBatchTaskType),
       .version = kOcrFrameBatchTaskTypeVersion,

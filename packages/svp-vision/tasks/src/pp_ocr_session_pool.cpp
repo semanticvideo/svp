@@ -1,4 +1,4 @@
-#include "pp_ocr_session_pool.hpp"
+#include "svp/vision/tasks/pp_ocr_session_pool.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -17,6 +17,7 @@ std::string session_key(const PpOcrOptions& options) {
       {"detector_model_id", options.detector_model_id},
       {"execution_provider", options.execution_provider},
       {"manifest_filename", options.manifest_filename},
+      {"model_cache_root", options.model_cache_root.string()},
       {"rec_execution_mode", options.rec_execution_mode},
       {"rec_graph_optimization_level", options.rec_graph_optimization_level},
       {"rec_inter_op", options.rec_threads.inter_op},
@@ -28,9 +29,6 @@ std::string session_key(const PpOcrOptions& options) {
 
 }  // namespace
 
-PpOcrSessionPool::PpOcrSessionPool(std::filesystem::path model_cache_root)
-    : model_cache_root_(std::move(model_cache_root)) {}
-
 PpOcrSessionPool::Lease::Lease(PpOcrSessionPool& pool, std::string key,
                                std::unique_ptr<PpOcrSession> session)
     : pool_(pool), key_(std::move(key)), session_(std::move(session)) {}
@@ -39,15 +37,9 @@ PpOcrSessionPool::Lease::~Lease() {
   pool_.release(key_, std::move(session_));
 }
 
-PpOcrOptions PpOcrSessionPool::with_model_cache(PpOcrOptions options) const {
-  options.model_cache_root = model_cache_root_;
-  return options;
-}
-
 std::unique_ptr<PpOcrSessionPool::Lease> PpOcrSessionPool::acquire(
     const PpOcrOptions& options) {
-  const PpOcrOptions resolved = with_model_cache(options);
-  std::string key = session_key(resolved);
+  std::string key = session_key(options);
   {
     const std::lock_guard lock(mutex_);
     auto idle = idle_.find(key);
@@ -58,8 +50,17 @@ std::unique_ptr<PpOcrSessionPool::Lease> PpOcrSessionPool::acquire(
     }
   }
   // Loading takes seconds; never under the lock.
-  auto session = std::make_unique<PpOcrSession>(create_pp_ocr_session(resolved));
+  auto session = std::make_unique<PpOcrSession>(create_pp_ocr_session(options));
   return std::make_unique<Lease>(*this, std::move(key), std::move(session));
+}
+
+void PpOcrSessionPool::clear_idle() {
+  std::map<std::string, std::vector<std::unique_ptr<PpOcrSession>>> idle;
+  {
+    const std::lock_guard lock(mutex_);
+    idle.swap(idle_);
+  }
+  // Sessions are destroyed here, outside the lock.
 }
 
 void PpOcrSessionPool::release(const std::string& key,

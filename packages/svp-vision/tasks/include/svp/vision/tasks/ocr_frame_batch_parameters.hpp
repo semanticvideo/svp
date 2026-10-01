@@ -31,12 +31,15 @@ struct OcrFrameBatchParameters {
   std::vector<OcrSample> samples;
   int frame_width = 0;
   int frame_height = 0;
+  // ffmpeg_build_identity() of the coordinator's ffmpeg ("b3:<hex>"): the
+  // decoder every executor must use (ffmpeg_build_identity.hpp).
+  std::string ffmpeg_build;
   // model_cache_root and manifest_filename are worker-local and not sent.
   PpOcrOptions pp_ocr;
 };
 
 // Canonical parameters object:
-//   {"decode":{"frame_height","frame_width"},
+//   {"decode":{"ffmpeg_build","frame_height","frame_width"},
 //    "detector":{"box_thresh","execution_mode","graph_optimization_level",
 //                "limit_side_len","model_id","threads":{"inter_op","intra_op"},
 //                "thresh","unclip_ratio"},
@@ -62,7 +65,8 @@ struct OcrFrameBatchParameters {
 // The registry's parameter validator (plan §4.3): nullopt when `value` is a
 // valid parameters object, otherwise why not. Unknown, missing, or mistyped
 // fields; samples that are empty, unequal in length, or not strictly
-// ascending; a decode size outside 1..kOcrMaxFrameDimension; a thread or
+// ascending; an ffmpeg_build that is not "b3:<64 hex>"; a decode size
+// outside 1..kOcrMaxFrameDimension; a thread or
 // worker count below 1; and out-of-range thresholds are all rejected.
 [[nodiscard]] std::optional<std::string> validate_ocr_frame_batch_parameters(
     const nlohmann::json& value);

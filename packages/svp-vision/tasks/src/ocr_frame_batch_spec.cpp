@@ -98,6 +98,7 @@ svp::exec::TaskSpec make_ocr_frame_batch_task_spec(const OcrFrameBatchTaskInputs
   parameters.frame_width = plan.frame_width;
   parameters.frame_height = plan.frame_height;
   parameters.pp_ocr = inputs.pp_ocr;
+  parameters.ffmpeg_build = inputs.ffmpeg_build;
 
   svp::exec::TaskSpec spec;
   spec.build_session_id = inputs.build_session_id;
