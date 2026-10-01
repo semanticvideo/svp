@@ -26,6 +26,10 @@ struct TlsSession {
 // completes a final-context send but the peer never reads end of stream,
 // while cancel() does reach it as end of stream. Sessions therefore end with
 // the protocol's SHUTDOWN frame and then cancel().
+//
+// A connection that fails (for example the peer resets it) is torn down at
+// once: a write in flight throws ExecError(frame_truncated) rather than
+// waiting for a cancel() that may never come.
 class RemoteStream : public ByteStream {
  public:
   // Tears the connection down: a blocked read_some returns 0 and later

@@ -136,6 +136,14 @@ void ensure_receive(const std::shared_ptr<Shared>& shared) {
 void on_state(const std::shared_ptr<Shared>& shared, nw_connection_state_t state,
               nw_error_t error) {
   std::function<void()> notify;
+  // A connection that fails is cancelled at once. Network framework does not
+  // complete a send that is waiting for the peer's window when the
+  // connection fails until the connection is cancelled, so a peer that
+  // resets while write_all waits (a route probe cancelled mid-reply, a
+  // coordinator or worker that goes away) would otherwise block that writer
+  // until the owner cancels from elsewhere. Cancelling completes every
+  // outstanding send and receive.
+  NwRef<nw_connection_t> cancel_failed;
   {
     const std::lock_guard lock(shared->mutex);
     const auto fail = [&](std::string_view prefix) {
@@ -143,6 +151,7 @@ void on_state(const std::shared_ptr<Shared>& shared, nw_connection_state_t state
       shared->failure = std::string(prefix) + describe_nw_error(error);
       shared->failed_in_tls =
           error != nullptr && nw_error_get_error_domain(error) == nw_error_domain_tls;
+      cancel_failed = shared->connection;
     };
     switch (state) {
       case nw_connection_state_waiting:
@@ -167,13 +176,19 @@ void on_state(const std::shared_ptr<Shared>& shared, nw_connection_state_t state
         }
         break;
       case nw_connection_state_cancelled:
-        shared->phase = StreamPhase::cancelled;
+        // A failed stream stays failed so readers report why it ended.
+        if (shared->phase != StreamPhase::failed) {
+          shared->phase = StreamPhase::cancelled;
+        }
         shared->connection.reset();
         break;
       default:
         break;
     }
     notify = shared->on_change;
+  }
+  if (cancel_failed) {
+    nw_connection_cancel(cancel_failed.get());
   }
   shared->changed.notify_all();
   if (notify) {
@@ -318,7 +333,14 @@ void NwStream::write_all(std::span<const std::byte> bytes) {
   std::unique_lock lock(wait->mutex);
   wait->done_changed.wait(lock, [&] { return wait->done; });
   if (!wait->error.empty()) {
-    throw_closed("frame write failed", wait->error);
+    // A send cut off by cancelling a failed connection reports the failure,
+    // not the cancel.
+    std::string failure;
+    {
+      const std::lock_guard shared_lock(shared_->mutex);
+      failure = shared_->failure;
+    }
+    throw_closed("frame write failed", failure.empty() ? wait->error : failure);
   }
 }
 

@@ -54,9 +54,11 @@ if(BUILD_TESTING)
   # whatever interfaces the system advertises on). Each run uses fresh random
   # pairing ids, so parallel runs never find each other's workers.
   add_executable(svp-exec-remote-transport-tests tests/remote_transport_tests.cpp)
+  # src/ for kReceiveAheadBytes, which sizes a write no reader can absorb.
   target_include_directories(svp-exec-remote-transport-tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../tests
     ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
   )
   target_link_libraries(svp-exec-remote-transport-tests PRIVATE svp::exec_remote)
   add_test(NAME svp-exec-remote-transport-tests COMMAND svp-exec-remote-transport-tests)
