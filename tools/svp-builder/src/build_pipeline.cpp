@@ -3,13 +3,33 @@
 #include "svp/builder/build_thread_plan.hpp"
 #include "svp/builder/model_cache_preflight.hpp"
 
+#include "audio_stage.hpp"
 #include "build_frame_plan.hpp"
+#include "build_interrupt.hpp"
 #include "build_pipeline_internal.hpp"
+#include "engine/build_assembly.hpp"
+#include "engine/build_inputs_digest.hpp"
+#include "engine/build_journal_session.hpp"
+#include "engine/committed_stage_results.hpp"
+#include "engine/stage_output_access.hpp"
+#include "engine/stage_task_environment.hpp"
+#include "engine/stage_task_plan.hpp"
+#include "engine/stage_task_registry.hpp"
+#include "engine/stage_tasks.hpp"
+#include "engine/staging_capture_check.hpp"
+#include "engine/whole_stage_scheduler_policy.hpp"
 #include "runtime_tools_json.hpp"
 #include "staging_cleanup.hpp"
 #include "svp/audio/sherpa_diarization.hpp"
 #include "svp/audio/whisper_model.hpp"
 #include "svp/core/memory_diagnostics.hpp"
+#include "svp/exec/blake3_digest.hpp"
+#include "svp/exec/clock.hpp"
+#include "svp/exec/in_process_executor.hpp"
+#include "svp/exec/journal_error.hpp"
+#include "svp/exec/journal_result_commit_sink.hpp"
+#include "svp/exec/scheduler.hpp"
+#include "svp/exec/source_fingerprint.hpp"
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/models/cache.hpp"
 #include "svp/models/runtime.hpp"
@@ -17,12 +37,13 @@
 
 #include <exception>
 #include <filesystem>
-#include <future>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #if defined(__APPLE__)
 #include <unistd.h>
@@ -31,6 +52,27 @@
 namespace svp::builder {
 
 namespace {
+
+// The source every build reads, as the journal's source_fingerprint names it.
+constexpr const char* kPrimarySourceId = "source_000";
+
+// The journal's source fingerprint. A build may run from a probe JSON whose
+// source file is absent (stages that read the source then degrade as they
+// always have); such a source is fingerprinted as zero bytes, so a resume
+// still refuses a journal once the file appears or changes.
+svp::exec::SourceFingerprintRecord fingerprint_build_source(
+    const std::filesystem::path& source_path) {
+  std::error_code error;
+  if (std::filesystem::is_regular_file(source_path, error)) {
+    return svp::exec::fingerprint_source(kPrimarySourceId, source_path);
+  }
+  return svp::exec::SourceFingerprintRecord{
+      .source_id = kPrimarySourceId,
+      .path = source_path.string(),
+      .size_bytes = 0,
+      .mtime_ns = std::nullopt,
+      .blake3 = svp::exec::blake3_digest(std::string_view{})};
+}
 
 bool should_write_builder_foundation_json(
     const BuildPipelineOptions& options,
@@ -53,6 +95,58 @@ void remove_builder_foundation_json(
   }
 }
 
+std::string join_task_ids(const std::vector<svp::exec::CommittedResult>& committed) {
+  std::string ids;
+  for (const svp::exec::CommittedResult& result : committed) {
+    ids += (ids.empty() ? "" : ", ") + result.result.task_id;
+  }
+  return ids;
+}
+
+// Restores what an interrupted build already committed: each task's staging
+// capture, in graph order, and its states for the tasks still to run.
+void restore_committed_tasks(const std::vector<engine::PlannedStageTask>& tasks,
+                             const std::vector<svp::exec::CommittedResult>& committed,
+                             const std::filesystem::path& staging_dir,
+                             engine::CommittedStageResults& results) {
+  std::map<std::string, const engine::PlannedStageTask*> by_id;
+  for (const engine::PlannedStageTask& task : tasks) {
+    by_id.emplace(std::string(engine::stage_task_id(task.kind)), &task);
+  }
+  for (const svp::exec::CommittedResult& result : committed) {
+    const engine::StageTaskProducts products =
+        engine::decode_stage_products(result.result.outputs, result.payloads);
+    engine::restore_staging_scope(staging_dir, by_id.at(result.result.task_id)->scope,
+                                  products.staging);
+    results.record(result.result.task_id, products);
+  }
+}
+
+void report_resume(const engine::StartedJournal& started, std::size_t task_count,
+                   const std::filesystem::path& journal_root, bool quiet) {
+  if (quiet || !started.resume_report) {
+    return;
+  }
+  std::cerr << "svp-builder: resuming from " << journal_root.string() << ": "
+            << started.committed.size() << " of " << task_count
+            << " tasks restored from the journal";
+  if (!started.committed.empty()) {
+    std::cerr << " (" << join_task_ids(started.committed) << ")";
+  }
+  std::cerr << "\n";
+  for (const svp::exec::DemotedTask& demoted : started.resume_report->demoted) {
+    std::cerr << "svp-builder: task " << demoted.task_id
+              << " will run again: its journaled output failed verification ("
+              << svp::exec::demotion_reason_name(demoted.reason) << ")\n";
+  }
+}
+
+int cancelled_exit_code() {
+  constexpr int kSignalExitStatusBase = 128;
+  const int signal_number = build_interrupt_signal();
+  return signal_number == 0 ? kBuildFailedExitCode : kSignalExitStatusBase + signal_number;
+}
+
 }  // namespace
 
 BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) const {
@@ -64,6 +158,14 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
   const auto with_plan = [&resolved_thread_plan](BuildPipelineResult result) {
     result.thread_plan = resolved_thread_plan;
     return result;
+  };
+  // Ctrl-C / SIGTERM cancel this build from here on (build_interrupt.hpp).
+  svp::exec::CancellationToken cancellation;
+  const BuildInterruptScope interrupt_scope(cancellation);
+  const auto cancelled_result = [&with_plan]() {
+    return with_plan({.exit_code = cancelled_exit_code(),
+                      .failure = BuildPipelineFailure::cancelled,
+                      .error_message = "build interrupted"});
   };
 
   try {
@@ -110,7 +212,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
             options.source_path,
             load_or_run_probe(options.source_path, options.probe_json_path,
                               options.ffprobe_path));
-    nlohmann::json output = svp::media::media_ingest_plan_to_json(plan);
+    const nlohmann::json plan_json = svp::media::media_ingest_plan_to_json(plan);
     sink->emit(make_stage_completed(ProgressStageId::media_probe));
 
     const bool user_supplied_staging = !effective_options.staging_dir.empty();
@@ -118,10 +220,14 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         user_supplied_staging
             ? effective_options.staging_dir
             : default_staging_dir_for_output(effective_options.output_path);
-    if (effective_options.reset_staging_before_stages) {
+    // A resumed build rebuilds staging from the journal alone, so whatever an
+    // interrupted run left in a reused staging directory is cleared first.
+    if (effective_options.reset_staging_before_stages ||
+        (user_supplied_staging &&
+         effective_options.journal_mode == RecoveryJournalMode::resume)) {
       std::filesystem::remove_all(staging_dir);
-      std::filesystem::create_directories(staging_dir);
     }
+    std::filesystem::create_directories(staging_dir);
     StagingCleanupGuard staging_guard(staging_dir, user_supplied_staging);
     const bool model_runtime_available = svp::models::OnnxSession::is_available();
     svp::models::set_onnx_verbose(options.verbose);
@@ -132,88 +238,144 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
       svp::audio::set_sherpa_lib_path(effective_options.sherpa_lib_path);
     }
 
-    BuildPipelineContext context{effective_options, stage_plan, plan, staging_dir,
-                                 thread_plan, model_runtime_available, output,
-                                 svp::vision::FrameCatalog{}, *sink};
     // Frame IDs come from the plan, not from which stage decodes first.
-    plan_build_frames(context.frame_catalog, stage_plan, plan,
+    svp::vision::FrameCatalog planned_catalog;
+    plan_build_frames(planned_catalog, stage_plan, plan,
                       effective_options.visual_tracking_quality,
                       model_runtime_available);
 
+    // Plan the build as whole-stage tasks.
+    const BuilderConcurrencyPolicy policy =
+        builder_concurrency_policy(effective_options.performance, 1);
+    const std::vector<engine::PlannedStageTask> tasks = engine::plan_stage_tasks({
+        .stage_plan = stage_plan,
+        .serial_pipeline = effective_options.serial_pipeline,
+        .single_video_heavy_lanes = policy.single_video_heavy_lanes,
+        .microphone_stream_mode =
+            stage_plan.run_audio &&
+            audio_uses_microphone_path(effective_options, plan, model_runtime_available),
+        .svpi_publication = stage_plan.run_package_skeleton && effective_options.svpi.has_value(),
+    });
+    const svp::exec::SourceFingerprintRecord source =
+        fingerprint_build_source(std::filesystem::path(options.source_path));
+    const std::string build_inputs = engine::build_inputs_blake3(
+        engine::describe_build_inputs(effective_options, source, plan_json, thread_plan));
+
+    engine::BuildJournalSession journal_session(
+        effective_options.journal_mode,
+        effective_options.journal_output_path.empty() ? effective_options.output_path
+                                                      : effective_options.journal_output_path);
+    const std::string build_session_id = journal_session.prepare();
+    const svp::exec::TaskGraph graph =
+        engine::make_stage_task_graph(tasks, build_session_id, build_inputs);
+    std::optional<engine::StartedJournal> started_journal;
+    try {
+      started_journal.emplace(journal_session.start(graph, source));
+    } catch (const svp::exec::JournalError& error) {
+      if (error.code() != svp::exec::JournalErrorCode::io_error ||
+          effective_options.journal_mode == RecoveryJournalMode::resume) {
+        throw;
+      }
+      // The journal lives beside the output; if it cannot be created there,
+      // neither can the output.
+      const std::string message =
+          "failed to write SVP package: " +
+          resolve_package_skeleton_output_paths(effective_options.output_path)
+              .package_path.string() +
+          " (cannot create its recovery journal: " + error.what() + ")";
+      std::cerr << "svp-builder: " << message << "\n";
+      return with_plan({.exit_code = kBuildFailedExitCode,
+                        .failure = BuildPipelineFailure::package_write,
+                        .error_message = message});
+    }
+    engine::StartedJournal& started = *started_journal;
+    if (cancellation.requested()) {
+      started.journal.set_build_session_status(build_session_id,
+                                               svp::exec::BuildSessionStatus::interrupted);
+      return cancelled_result();
+    }
+
+    engine::CommittedStageResults results;
+    restore_committed_tasks(tasks, started.committed, staging_dir, results);
+    report_resume(started, tasks.size(), journal_session.journal_root(),
+                  effective_options.quiet);
+
+    const engine::StageTaskEnvironment environment{
+        .options = effective_options,
+        .stage_plan = stage_plan,
+        .plan = plan,
+        .plan_json = plan_json,
+        .staging_dir = staging_dir,
+        .thread_plan = thread_plan,
+        .model_runtime_available = model_runtime_available,
+        .planned_catalog = planned_catalog,
+        .progress_sink = *sink,
+        .results = results};
+    svp::exec::TaskTypeRegistry registry;
+    engine::StageOutputAccess outputs;
+    engine::StageExitRecord stage_exits;
+    engine::register_stage_task_types(registry, tasks, environment, outputs, stage_exits);
+
+    // One slot per task that can run at once: the graph's edges encode the
+    // concurrency policy, so they alone bound concurrency.
+    svp::exec::InProcessExecutor executor(
+        registry, outputs,
+        svp::exec::InProcessExecutorOptions{
+            .executor_id = "in-process",
+            .threads = engine::stage_task_graph_width(tasks),
+            .worker_session_id = "ws_" + build_session_id,
+            .runtime_id = {}});
+    svp::exec::JournalResultCommitSink journal_sink(started.journal);
+    engine::StageResultCommitSink commit_sink(journal_sink, results);
+    const svp::exec::SteadyClock clock;
+    std::vector<svp::exec::Executor*> executors{&executor};
+    const svp::exec::BuildOutcome outcome =
+        svp::exec::Scheduler(engine::whole_stage_scheduler_policy(), clock)
+            .run(graph, executors, commit_sink, cancellation, {}, started.committed);
+
+    if (outcome.status == svp::exec::BuildStatus::cancelled) {
+      started.journal.set_build_session_status(build_session_id,
+                                               svp::exec::BuildSessionStatus::interrupted);
+      started.journal.close();
+      return cancelled_result();
+    }
+    if (outcome.status == svp::exec::BuildStatus::failed) {
+      started.journal.set_build_session_status(build_session_id,
+                                               svp::exec::BuildSessionStatus::failed);
+      started.journal.close();
+      if (const std::optional<int> exit_code = stage_exits.exit_code()) {
+        return with_plan({.exit_code = *exit_code});
+      }
+      const std::string message =
+          outcome.failure ? outcome.failure->message : std::string("build failed");
+      svp::core::trace_memory_event("builder.run.exception", {{"error", message}});
+      std::cerr << "svp-builder: " << message << "\n";
+      return with_plan({.exit_code = kBuildFailedExitCode,
+                        .failure = BuildPipelineFailure::processing,
+                        .error_message = message});
+    }
+
+    if (const std::optional<std::string> problem =
+            engine::published_output_problem(tasks, results, effective_options)) {
+      throw engine::RecoveryJournalBlocked(
+          "--resume: " + *problem + "; pass --fresh to rebuild it");
+    }
+    for (const std::string& problem :
+         engine::unreproducible_staging_entries(staging_dir, tasks, results)) {
+      std::cerr << "svp-builder: warning: the recovery journal would not reproduce "
+                   "staging entry "
+                << problem << "\n";
+    }
+
+    nlohmann::json output = engine::assemble_foundation_json(tasks, results);
     PackageSkeletonStageResult package_result;
     package_result.json_output_path = options.output_path;
-
     if (stage_plan.run_package_skeleton) {
-      if (stage_plan.run_foundation_color) {
-        emit_stage_started(context, ProgressStageId::color);
-        run_foundation_color_stage(context);
-        emit_stage_completed(context, ProgressStageId::color);
-      }
-
-      if (effective_options.serial_pipeline) {
-        const PackageVisionStageResult vision_result =
-            run_package_vision_stage(context);
-        if (const std::optional<int> audio_exit = run_audio_stage(context)) {
-          return with_plan({.exit_code = *audio_exit});
-        }
-        package_result = run_package_final_stage(context, vision_result);
-      } else {
-        auto run_audio_lane = [](BuildPipelineContext& audio_context) {
-          return run_audio_stage(audio_context);
-        };
-
-        nlohmann::json audio_output = output;
-        BuildPipelineContext audio_context{
-            effective_options, stage_plan, plan, staging_dir,
-            thread_plan, model_runtime_available, audio_output,
-            svp::vision::FrameCatalog{}, *sink};
-
-        const BuilderConcurrencyPolicy policy =
-            builder_concurrency_policy(effective_options.performance, 1);
-        PackageVisionStageResult vision_result;
-        std::optional<int> audio_exit;
-        if (policy.single_video_heavy_lanes > 1) {
-          auto audio_future =
-              std::async(std::launch::async, [&run_audio_lane, &audio_context]() {
-                return run_audio_lane(audio_context);
-              });
-          vision_result = run_package_vision_stage(context);
-          audio_exit = audio_future.get();
-        } else {
-          audio_exit = run_audio_lane(audio_context);
-          if (!audio_exit) {
-            vision_result = run_package_vision_stage(context);
-          }
-        }
-        if (audio_output.contains("audio_foundation")) {
-          output["audio_foundation"] = audio_output["audio_foundation"];
-        }
-        if (audio_exit) {
-          return with_plan({.exit_code = *audio_exit});
-        }
-
-        package_result = run_package_final_stage(context, vision_result);
-      }
-    } else if (stage_plan.run_audio) {
-      if (const std::optional<int> audio_exit = run_audio_stage(context)) {
-        return with_plan({.exit_code = *audio_exit});
-      }
+      package_result = engine::committed_package_result(results, effective_options);
     }
-    if (!stage_plan.run_package_skeleton && stage_plan.run_vision_plan) {
-      emit_stage_started(context, ProgressStageId::vision_plan);
-      run_vision_plan_stage(context);
-      emit_stage_completed(context, ProgressStageId::vision_plan);
-    }
-    if (!stage_plan.run_package_skeleton && stage_plan.run_foundation_color) {
-      emit_stage_started(context, ProgressStageId::color);
-      run_foundation_color_stage(context);
-      emit_stage_completed(context, ProgressStageId::color);
-    }
-    if (!stage_plan.run_package_skeleton && stage_plan.run_foundation_ocr) {
-      emit_stage_started(context, ProgressStageId::ocr);
-      run_foundation_ocr_stage(context);
-      emit_stage_completed(context, ProgressStageId::ocr);
-    }
+    BuildPipelineContext context{effective_options, stage_plan, plan, staging_dir,
+                                 thread_plan, model_runtime_available, output,
+                                 planned_catalog, *sink};
 
     output["builder_command"] = {
         {"command", "build"},
@@ -261,23 +423,51 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
       print_build_progress(context, package_result);
     }
 
+    BuildPipelineResult finished;
+    if (stage_plan.run_package_skeleton && effective_options.svpi) {
+      finished.svpi = engine::svpi_publication_result(results);
+    }
+
+    // RC2 §20.5.1: the journal is deleted only after the published artifact
+    // was finalized and passed strict validation.
+    const std::optional<std::string> unpublished =
+        engine::unfinished_publication(stage_plan, package_result, finished.svpi);
+    std::string journal_note;
+    if (!unpublished) {
+      started.journal.finish_success(svp::exec::JournalRetention::delete_on_success);
+    } else {
+      started.journal.set_build_session_status(build_session_id,
+                                               svp::exec::BuildSessionStatus::failed);
+      started.journal.close();
+      journal_note = engine::kept_journal_note(*unpublished, journal_session.journal_root());
+      std::cerr << "svp-builder: " << journal_note << "\n";
+    }
     if (stage_plan.run_package_skeleton && !package_result.package_written) {
       // A package that was never written is a failed build, whatever the
       // earlier stages reported; never let it fall through to success.
       const std::string message =
           "failed to write SVP package: " + package_result.package_path.string();
       std::cerr << "svp-builder: " << message << "\n";
-      return with_plan({.exit_code = kBuildFailedExitCode,
-              .failure = BuildPipelineFailure::package_write,
-              .error_message = message});
+      finished.exit_code = kBuildFailedExitCode;
+      finished.failure = BuildPipelineFailure::package_write;
+      finished.error_message = message + "; " + journal_note;
+      return with_plan(std::move(finished));
     }
     if (stage_plan.run_package_skeleton && !package_result.validator_passes) {
       svp::core::check_memory_limit("builder.run.complete.validator_failed");
-      return with_plan({.exit_code = package_result.validator_exit_code});
+      finished.exit_code = package_result.validator_exit_code;
+      finished.error_message = journal_note;
+      return with_plan(std::move(finished));
     }
     svp::core::check_memory_limit("builder.run.complete");
+    finished.error_message = journal_note;
     staging_guard.cleanup_on_success();
-    return with_plan({.exit_code = 0});
+    return with_plan(std::move(finished));
+  } catch (const engine::RecoveryJournalBlocked& error) {
+    std::cerr << "svp-builder: " << error.what() << "\n";
+    return with_plan({.exit_code = kBuildFailedExitCode,
+                      .failure = BuildPipelineFailure::recovery_journal,
+                      .error_message = error.what()});
   } catch (const ModelCachePreflightError& error) {
     svp::core::trace_memory_event("builder.run.exception", {
         {"error", error.what()}

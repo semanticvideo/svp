@@ -412,6 +412,60 @@ void test_pipeline_package_write_failure_emits_stage_failed_no_validate() {
   std::filesystem::remove_all(tmp_dir);
 }
 
+// RC2 §20.5.1: the journal is deleted only after the package was finalized
+// and passed strict validation. A failed publication keeps it, says so, and
+// the next build of the output must choose --resume or --fresh.
+void test_failed_publication_keeps_recovery_journal() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_journal_kept_on_failure";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path probe_path = write_minimal_probe_json(tmp_dir);
+  const std::filesystem::path pkg_blocker = tmp_dir / "output.svp";
+  std::filesystem::create_directories(pkg_blocker);
+  const std::filesystem::path output_path = tmp_dir / "output.json";
+  const std::filesystem::path journal = tmp_dir / "output.json-journal";
+
+  svp::builder::BuildPipelineOptions options;
+  options.source_path = "test_video.mp4";
+  options.probe_json_path = probe_path.string();
+  options.output_path = output_path;
+  options.staging_dir = tmp_dir / "staging";
+  options.model_cache_dir =
+      svp::builder::test::write_valid_model_cache(tmp_dir / "model-cache");
+  options.stop_after = svp::builder::BuildStage::package_skeleton;
+  options.force_single_speaker = true;
+  options.allow_fallback_diarization = true;
+  options.progress_sink = std::make_shared<CapturingProgressSink>();
+
+  const auto failed = svp::builder::BuildPipeline{}.run(options);
+  assert(failed.failure == svp::builder::BuildPipelineFailure::package_write);
+  assert(std::filesystem::is_directory(journal));
+  assert(failed.error_message.find("recovery journal is kept") != std::string::npos);
+  assert(failed.error_message.find("--resume") != std::string::npos);
+  assert(failed.error_message.find("--fresh") != std::string::npos);
+
+  // Without --resume or --fresh the kept journal blocks the next build.
+  std::filesystem::remove_all(pkg_blocker);
+  const auto blocked = svp::builder::BuildPipeline{}.run(options);
+  assert(blocked.failure == svp::builder::BuildPipelineFailure::recovery_journal);
+  assert(std::filesystem::is_directory(journal));
+
+  // --fresh rebuilds and writes the package. The journal goes only if that
+  // package passes strict validation (the mock media here may not).
+  options.journal_mode = svp::builder::RecoveryJournalMode::fresh;
+  const auto rebuilt = svp::builder::BuildPipeline{}.run(options);
+  assert(std::filesystem::is_regular_file(pkg_blocker));
+  assert(rebuilt.failure == svp::builder::BuildPipelineFailure::none);
+  assert((rebuilt.exit_code == 0) == !std::filesystem::exists(journal));
+  if (rebuilt.exit_code != 0) {
+    assert(rebuilt.error_message.find("failed strict validation") != std::string::npos);
+  }
+
+  std::filesystem::remove_all(tmp_dir);
+  std::cout << "  test_failed_publication_keeps_recovery_journal passed\n";
+}
+
 void test_package_build_removes_default_foundation_json_sidecar() {
   const std::filesystem::path tmp_dir =
       std::filesystem::temp_directory_path() / "svp_package_no_json_sidecar";
@@ -1095,6 +1149,7 @@ int main() {
   test_pipeline_with_capturing_sink_emits_ordered_events();
   test_pipeline_with_default_sink_preserves_behavior();
   test_pipeline_package_write_failure_emits_stage_failed_no_validate();
+  test_failed_publication_keeps_recovery_journal();
   test_package_build_removes_default_foundation_json_sidecar();
   test_verbose_package_build_writes_foundation_json_sidecar();
   test_serial_package_pipeline_runs_audio_before_package_write();

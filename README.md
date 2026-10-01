@@ -480,6 +480,31 @@ foundation-ocr
 package
 ```
 
+### Interrupted builds: `--resume` and `--fresh`
+
+Every `build` and `interlace create` keeps a recovery journal next to its
+output (`intro.svp-journal/`, RC2 §20.4). Each finished stage is committed to
+it. The journal is deleted once the package (or SVPI) is written and passes
+strict validation (RC2 §20.5.1); if writing or validation fails, the builder
+says so and keeps the journal.
+
+If a build is interrupted (Ctrl-C, SIGTERM, a crash, or a power loss) or its
+output fails to publish, the journal stays:
+
+- `--resume` continues the build. It first verifies that the source media
+  still matches and that every journaled stage output is intact, then runs only
+  the stages that had not finished. The result is the same package an
+  uninterrupted build makes. Resume with the same options as the original
+  build; a journal recorded for other inputs or options is refused.
+- `--fresh` deletes the journal and starts over.
+- With neither flag, the builder does not reuse or delete an existing journal.
+  It stops and asks for `--resume` or `--fresh`, so an interrupted build's work
+  is never discarded by accident.
+
+Ctrl-C or SIGTERM stops the build within a few seconds and keeps the journal;
+pressing Ctrl-C a second time stops it immediately, which is equally safe to
+resume.
+
 ## Create and Use SVPI Sidecars
 
 Create a semantic `.svpi` sidecar from source media:

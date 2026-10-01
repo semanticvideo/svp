@@ -28,6 +28,7 @@ svp::builder::InterlaceCreateOptions make_create_options(
   create.allow_fallback_diarization = options.allow_fallback_diarization;
   create.force_single_speaker = options.force_single_speaker;
   create.serial_pipeline = options.serial_pipeline;
+  create.journal_mode = journal_mode_from_flags(options.resume, options.fresh);
   create.progress_sink = progress_sink;
   return create;
 }
@@ -52,7 +53,9 @@ int run_selected_output_build(
         make_create_options(options, options.output_path, progress_sink));
     if (!result.success) {
       std::cerr << "SVPI build failed: " << result.error_message << "\n";
-      return 1;
+      return result.pipeline_failure == svp::builder::BuildPipelineFailure::cancelled
+                 ? result.pipeline_exit_code
+                 : 1;
     }
     return 0;
   }

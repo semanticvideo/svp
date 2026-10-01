@@ -30,10 +30,15 @@ add_library(svp-package
   src/relationship_provenance_writer.cpp
   src/relationship_type_policy.cpp
   src/spatial_embedding_placeholders.cpp
+  src/vision_lane_files.cpp
+  src/vision_lane_placeholders.cpp
+  src/vision_lane_stages.cpp
+  src/vision_lane_stage_json.cpp
   src/timeline_writer.cpp
   src/validation_report_storage.cpp
   src/visual_entity_artifact_writer.cpp
   src/media_binding.cpp
+  src/media_binding_parse.cpp
   src/media_binding_factory.cpp
   src/svpi_writer.cpp
   src/svpi_media_policy.cpp

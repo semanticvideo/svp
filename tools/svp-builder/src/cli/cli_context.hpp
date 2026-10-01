@@ -56,6 +56,14 @@ struct DiarizeReplayCliOptions {
   bool skip_fingerprints = false;
 };
 
+// --resume / --fresh as a journal mode; neither is RecoveryJournalMode::
+// require_new (an existing journal stops the build with instructions).
+inline svp::builder::RecoveryJournalMode journal_mode_from_flags(bool resume, bool fresh) {
+  if (resume) return svp::builder::RecoveryJournalMode::resume;
+  if (fresh) return svp::builder::RecoveryJournalMode::fresh;
+  return svp::builder::RecoveryJournalMode::require_new;
+}
+
 struct BuildCliOptions {
   std::string source_path;
   std::string probe_json_path;
@@ -73,6 +81,9 @@ struct BuildCliOptions {
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
   bool serial_pipeline = false;
+  // --resume / --fresh (RC2 §21), mutually exclusive.
+  bool resume = false;
+  bool fresh = false;
   std::string progress_mode = "auto";
   std::string run_report_path;
   bool quiet = false;
@@ -100,6 +111,8 @@ struct InterlaceCliOptions {
   bool ic_allow_fallback = false;
   bool ic_force_single = false;
   bool ic_serial_pipeline = false;
+  bool ic_resume = false;
+  bool ic_fresh = false;
   std::string ic_progress_mode = "auto";
   std::string ic_run_report_path;
   bool ic_quiet = false;

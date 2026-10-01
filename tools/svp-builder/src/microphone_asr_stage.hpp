@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <functional>
 #include <nlohmann/json.hpp>
+#include <vector>
 
 namespace svp::builder {
 
@@ -30,7 +31,9 @@ struct MicrophoneDiarizationProgressCallbacks {
 
 [[nodiscard]] MicrophoneAsrStageResult run_microphone_asr_stage(
     const svp::audio::AudioExtractionPlan& extraction_plan,
-    const svp::audio::AudioExtractionRun& extraction_run,
+    // Per microphone analysis stream, in plan order: whether extraction
+    // staged it (AudioExtractionRun::microphone_analysis_streams[i].success).
+    const std::vector<bool>& microphone_streams_staged,
     std::int64_t media_duration_us,
     bool model_runtime_available,
     bool asr_model_available,
