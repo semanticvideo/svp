@@ -387,4 +387,8 @@ void register_cli(CLI::App& app, CliContext& context) {
       "Explicitly allow replacing the output path atomically");
   context.transport_strip = transport_strip;
   transport_opts.strip_sub = transport_strip;
+
+#if defined(__APPLE__)
+  svp::builder::workers::register_workers_cli(app, context.workers_opts, context.worker_opts);
+#endif
 }

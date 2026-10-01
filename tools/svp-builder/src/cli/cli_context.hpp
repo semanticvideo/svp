@@ -6,6 +6,10 @@
 
 #include <CLI/CLI.hpp>
 
+#if defined(__APPLE__)
+#include "workers/workers_cli.hpp"
+#endif
+
 #include <optional>
 #include <string>
 #include <vector>
@@ -236,6 +240,12 @@ struct CliContext {
 
   DiarizeCliOptions diarize_opts;
   DiarizeReplayCliOptions diarize_replay_opts;
+
+#if defined(__APPLE__)
+  // `workers ...` and `worker ...` (workers/workers_cli.hpp).
+  svp::builder::workers::WorkersCliOptions workers_opts;
+  svp::builder::workers::WorkerCliOptions worker_opts;
+#endif
 
   // Every --ffmpeg/--ffprobe/--sherpa-lib option (cli_runtime_tools.hpp).
   std::vector<RuntimeToolBinding> runtime_tool_bindings;
