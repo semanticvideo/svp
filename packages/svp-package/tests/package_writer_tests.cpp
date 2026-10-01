@@ -1318,16 +1318,10 @@ void test_timeline_writer() {
   assert(scenes[0]["shot_ids"][0] == "shot_000001");
   assert(scenes[0]["shot_ids"][1] == "shot_000002");
 
-  // Check processors.jsonl
-  auto processors = read_jsonl_records(staging_dir / "provenance" / "processors.jsonl");
-  bool found_timeline_proc = false;
-  for (const auto& proc : processors) {
-    if (proc.value("id", "") == "processor_timeline_generator_0001") {
-      found_timeline_proc = true;
-      assert(proc.value("name", "") == "svp timeline generator");
-    }
-  }
-  assert(found_timeline_proc);
+  // The writer returns its processor record (checked above) and leaves
+  // provenance/processors.jsonl to the stage that merges every stage's records.
+  assert(summary.processor.value("name", "") == "svp timeline generator");
+  assert(!std::filesystem::exists(staging_dir / "provenance" / "processors.jsonl"));
 
   std::filesystem::remove_all(root);
 }
