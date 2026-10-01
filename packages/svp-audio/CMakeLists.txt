@@ -138,4 +138,15 @@ if(BUILD_TESTING)
   )
 
   add_test(NAME svp-audio-tests COMMAND svp-audio-tests)
+
+  # Exits with a whisper.cpp model still cached; passes only if process
+  # teardown is clean (see the file header).
+  add_executable(svp-audio-exit-teardown-test tests/whisper_exit_teardown_main.cpp)
+  target_compile_features(svp-audio-exit-teardown-test PRIVATE cxx_std_20)
+  target_compile_definitions(svp-audio-exit-teardown-test
+    PRIVATE
+      SVP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
+  )
+  target_link_libraries(svp-audio-exit-teardown-test PRIVATE svp::audio)
+  add_test(NAME svp-audio-exit-teardown-test COMMAND svp-audio-exit-teardown-test)
 endif()

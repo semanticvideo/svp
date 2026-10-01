@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstddef>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -21,6 +22,7 @@
 #include <vector>
 
 #if defined(SVP_AUDIO_WHISPER_CPP_AVAILABLE)
+#include <ggml-backend.h>
 #include <whisper.h>
 #endif
 
@@ -83,7 +85,20 @@ struct CachedWhisperModel {
   WhisperContext context;
 };
 
+// The cached context lives until release_whisper_cpp_model() or process exit.
+// With the Metal backend its weights are Metal buffers, each registered in a
+// residency-set collection owned by ggml's Metal device. ggml keeps those
+// devices in function-local statics created the first time its backend
+// registry is used, and destroying a device asserts that every buffer was
+// already freed (ggml_metal_rsets_free). Objects with static storage duration
+// are destroyed in the reverse order of their construction, so a cache
+// constructed before ggml's devices outlives them at exit: any process that
+// exits with a model still cached aborts instead of exiting. Initializing the
+// backend registry before constructing the cache makes the cache, and the
+// buffers it still holds, go first, whatever path led to exit.
 CachedWhisperModel& cached_model() {
+  [[maybe_unused]] static const std::size_t ggml_devices_constructed_first =
+      ggml_backend_dev_count();
   static CachedWhisperModel model;
   return model;
 }
