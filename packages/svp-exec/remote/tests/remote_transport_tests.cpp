@@ -2,16 +2,23 @@
 // rejected, Bonjour discovery by pairing id, cancellation, and teardown.
 
 #include "exec_test_support.hpp"
+#include "nw_stream.hpp"
 #include "pairing_test_support.hpp"
+#include "svp/exec/exec_error.hpp"
 #include "svp/exec/frame_stream.hpp"
 #include "svp/exec/remote/remote_connector.hpp"
 #include "svp/exec/remote/remote_error.hpp"
 #include "svp/exec/remote/remote_listener.hpp"
 
+#include <sys/sysctl.h>
+
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <iostream>
+#include <stdexcept>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -29,6 +36,22 @@ constexpr std::chrono::milliseconds kWaitLimit{10'000};
 constexpr std::chrono::milliseconds kShortDiscovery{1'000};
 // Payload large enough to span many TLS records and receive deliveries.
 constexpr std::size_t kEchoPayloadBytes = 3U * 1024U * 1024U + 17U;
+
+// A single write larger than everything between a writer and a reader that
+// stopped reading can hold: the reader's read-ahead (kReceiveAheadBytes) plus
+// the kernel's send and receive buffers, each at most kern.ipc.maxsockbuf.
+// Such a write cannot complete until the reader reads, so it is provably
+// still in flight when the reader goes away.
+std::size_t unfinishable_write_bytes() {
+  std::uint64_t max_socket_buffer = 0;
+  std::size_t size = sizeof(max_socket_buffer);
+  if (sysctlbyname("kern.ipc.maxsockbuf", &max_socket_buffer, &size, nullptr, 0) != 0 ||
+      max_socket_buffer == 0) {
+    throw std::runtime_error("cannot read kern.ipc.maxsockbuf");
+  }
+  return svp::exec::remote::detail::kReceiveAheadBytes +
+         2U * static_cast<std::size_t>(max_socket_buffer) + 1U;
+}
 
 void echo_frames(RemoteStream& stream, const RemoteSessionInfo&) {
   StreamFrameReader reader(stream);
@@ -105,11 +128,47 @@ void test_tls_psk_round_trip() {
   expect(echoed && *echoed == sent, "frame and payloads came back byte-identical");
 
   connection.stream->cancel();
+  // Counts route probe connections too: those the coordinator cancelled
+  // mid-reply must end as well (see the next test).
   wait_for([&] { return listener.active_sessions() == 0; },
-           "the worker session to see our cancel as end of stream");
+           "the worker session and every route probe to end after our cancel");
   expect(listener.sessions_started() == 1, "one worker session served");
   expect(listener.route_probes_served() >= 1, "routes were measured by probes, not sessions");
   expect(listener.handshakes_rejected() == 0, "no handshake rejected");
+}
+
+// A peer that resets the connection while our write is in flight must fail
+// that write. A send waiting for the peer's window when the connection fails
+// (here: ECONNRESET) is never completed by Network framework until the
+// connection is cancelled, so without that the worker session blocks in
+// write_all until the listener stops. Route probes hit this when the
+// coordinator picks a winner and cancels the probes still replying.
+void test_peer_reset_fails_a_write_in_flight() {
+  const PairingKey key = pairing::random_pairing("svp-transport");
+  const std::size_t write_bytes = unfinishable_write_bytes();
+  std::atomic<bool> write_completed{false};
+  std::atomic<bool> write_failed{false};
+  RemoteListener listener(listener_options(key), [&](RemoteStream& stream, const RemoteSessionInfo&) {
+    const std::vector<std::byte> payload(write_bytes);
+    try {
+      stream.write_all(payload);
+      write_completed = true;
+    } catch (const ExecError&) {
+      write_failed = true;
+    }
+  });
+  listener.start();
+
+  RemoteConnector connector(RemoteConnectorOptions{.pairing = key});
+  RemoteConnection connection = connector.connect();
+  // One byte proves the worker's write is on the wire; it cannot finish
+  // because we read nothing more.
+  std::byte first{};
+  expect(connection.stream->read_some(std::span(&first, 1)) == 1, "the worker started writing");
+  connection.stream->cancel();
+  wait_for([&] { return listener.active_sessions() == 0; },
+           "the worker's write in flight to fail when we reset the connection");
+  expect(write_failed && !write_completed, "the write failed instead of completing");
 }
 
 void test_wrong_secret_is_rejected() {
@@ -220,6 +279,8 @@ int main() {
   return run_tests("svp-exec-remote-transport-tests",
                    {
                        {"TLS-PSK round trip", test_tls_psk_round_trip},
+                       {"peer reset fails a write in flight",
+                        test_peer_reset_fails_a_write_in_flight},
                        {"wrong secret is rejected", test_wrong_secret_is_rejected},
                        {"discovery by pairing id", test_discovery_by_pairing_id},
                        {"cancelled connector", test_cancelled_connector},
