@@ -383,7 +383,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
 
     engine::CommittedStageResults results;
     restore_committed_tasks(tasks, graph, started.committed, staging_dir, results);
-    report_resume(started, tasks.size(), journal_session.journal_root(),
+    report_resume(started, graph.size(), journal_session.journal_root(),
                   effective_options.quiet);
 
     const engine::StageTaskEnvironment environment{
