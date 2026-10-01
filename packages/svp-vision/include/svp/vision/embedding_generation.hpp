@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+namespace svp::media { struct MediaIngestPlan; }
+
 namespace svp::vision {
 
 struct EmbeddingGenerationOptions {
@@ -22,6 +24,13 @@ struct EmbeddingGenerationOptions {
   std::string execution_provider = "cpu";
   // ThreadPlan text_embedding role.
   svp::models::OrtThreadCounts threads;
+  // Shot keyframe image embeddings (RC2 §16.2 "Every shot keyframe") decode
+  // each shot's first frame from the source; without a media plan or ffmpeg
+  // they are skipped and the reason is recorded in provenance.
+  const svp::media::MediaIngestPlan* media_plan = nullptr;
+  std::filesystem::path ffmpeg_path;
+  // ThreadPlan visual_entity_embedding role (same vision model).
+  svp::models::OrtThreadCounts vision_threads;
   std::uint32_t embedding_dim = 768;
   std::function<void(std::size_t current, std::size_t total)> on_progress;
 };
