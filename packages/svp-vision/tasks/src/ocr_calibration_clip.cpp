@@ -15,7 +15,7 @@ namespace {
 
 // Text layout: a grid of cells, each holding at most one line, so lines
 // never touch and the detector sees one box per line. 4 columns x 32 rows
-// of 480 x 33 px fill the frame and hold the heaviest frame's 128 lines.
+// of 480 x 33 px fill the frame and hold up to 128 lines.
 constexpr int kColumns = 4;
 constexpr int kRows = 32;
 constexpr int kCellWidth = kOcrCalibrationFrameWidth / kColumns;

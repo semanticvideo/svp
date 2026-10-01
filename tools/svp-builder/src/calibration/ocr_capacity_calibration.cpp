@@ -97,6 +97,8 @@ OcrCalibration calibrate_ocr_capacity(svp::exec::Executor& executor, std::size_t
   }
   const svp::exec::TaskSpec batch = ocr_calibration_spec(inputs, timestamps_us);
   const std::uint64_t frames_per_batch = timestamps_us.size();
+  const svp::exec::TaskSpec warm_up = svp::vision::tasks::make_ocr_frame_batch_task_spec(
+      inputs, clip_plan(timestamps_us), svp::vision::OcrSampleBatch{.first_ordinal = 0, .count = 1});
 
   // Step 0 is the warm-up (one task); step k has k chains.
   std::vector<svp::exec::TaskNode> nodes;
@@ -108,7 +110,7 @@ OcrCalibration calibrate_ocr_capacity(svp::exec::Executor& executor, std::size_t
     std::vector<std::string> this_step;
     for (std::size_t chain = 0; chain < chains; ++chain) {
       for (std::size_t index = 0; index < per_chain; ++index) {
-        svp::exec::TaskSpec spec = batch;
+        svp::exec::TaskSpec spec = step == 0 ? warm_up : batch;
         spec.task_id = task_id(step, chain, index);
         spec.depends_on = index == 0 ? previous_step
                                      : std::vector<std::string>{task_id(step, chain, index - 1)};

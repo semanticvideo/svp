@@ -23,12 +23,12 @@ namespace svp::vision::tasks {
 
 // Bumped whenever the clip's content or encoding changes; calibration
 // records name it so a changed slice invalidates old measurements.
-inline constexpr std::uint32_t kOcrCalibrationRecipeVersion = 1;
+inline constexpr std::uint32_t kOcrCalibrationRecipeVersion = 2;
 
 inline constexpr int kOcrCalibrationFrameWidth = 1920;
 inline constexpr int kOcrCalibrationFrameHeight = 1080;
 inline constexpr std::int64_t kOcrCalibrationFrameIntervalUs = 1'000'000;
-inline constexpr int kOcrCalibrationFrameLines[] = {4, 4, 8, 16, 32, 64, 96, 128};
+inline constexpr int kOcrCalibrationFrameLines[] = {4, 16, 48, 112};
 
 // The clip's frame timestamps, known without writing it.
 [[nodiscard]] std::vector<std::int64_t> ocr_calibration_timestamps_us();

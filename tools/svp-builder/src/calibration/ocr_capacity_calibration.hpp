@@ -6,10 +6,11 @@
 //
 // The sweep runs the fixed calibration slice (ocr_calibration_clip.hpp) on
 // one executor at 1, 2, 3, ... concurrent slots. Each step runs `slots`
-// independent chains of kOcrCalibrationBatchesPerSlot batches (so exactly
-// `slots` tasks are in flight), after a barrier on the previous step, and is
-// timed from its first lease to its last commit. A warm-up batch runs first
-// so file caches and the first PP-OCR session do not count against one step.
+// independent chains of kOcrCalibrationBatchesPerSlot whole-slice batches
+// (so exactly `slots` tasks are in flight), after a barrier on the previous
+// step, and is timed from its first lease to its last commit. A one-frame
+// warm-up batch runs first so file caches and the first PP-OCR session do
+// not count against one step.
 // The sweep stops at the first step whose throughput (frames per second)
 // gains less than kOcrCalibrationMinSlotGain over the best step so far, or at
 // `max_slots` (the most slots the Mac's memory admits, never more than its
@@ -36,9 +37,10 @@ namespace svp::builder::calibration {
 // slot on an M4 mini), and an extra slot makes every batch take longer,
 // which lengthens the build's tail.
 inline constexpr double kOcrCalibrationMinSlotGain = 0.10;
-// Batches each slot runs per step: two, so every slot's second batch runs
-// while its neighbours are busy (steady state, not a ramp).
-inline constexpr std::size_t kOcrCalibrationBatchesPerSlot = 2;
+// Batches each slot runs per step. One whole-slice batch per slot already
+// keeps every slot busy for the whole step (the batches are identical, so
+// they start and end together); more would only lengthen calibration.
+inline constexpr std::size_t kOcrCalibrationBatchesPerSlot = 1;
 
 struct OcrCalibrationStep {
   std::size_t slots = 0;
