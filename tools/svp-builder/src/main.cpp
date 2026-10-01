@@ -24,6 +24,7 @@ int main(int argc, char** argv) {
   CLI11_PARSE(app, argc, argv);
 
   try {
+    apply_cli_runtime_tools(context);
     return run_selected_command(context);
   } catch (const std::exception& error) {
     std::cerr << "svp-builder: " << error.what() << "\n";

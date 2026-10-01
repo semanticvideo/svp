@@ -2,6 +2,7 @@
 
 #include "svp/builder/build_progress.hpp"
 #include "svp/models/thread_plan.hpp"
+#include "svp/builder/runtime_tools.hpp"
 #include "svp/vision/inference_performance.hpp"
 #include "svp/vision/visual_tracking_quality.hpp"
 
@@ -63,6 +64,9 @@ struct BuildPipelineOptions {
   // Empty: the build resolves its plan from the host once at start.
   std::optional<svp::models::ThreadPlan> thread_plan;
   std::shared_ptr<BuildProgressSink> progress_sink;
+  // Where ffmpeg/ffprobe/sherpa-onnx came from; recorded in the builder
+  // foundation JSON (`builder_command.runtime_tools`) when set.
+  std::optional<RuntimeToolSelection> runtime_tools;
   bool quiet = false;
   bool verbose = false;
 };

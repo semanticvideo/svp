@@ -13,7 +13,7 @@ SherpaLibState& lib_state() {
   return state;
 }
 
-void add_sherpa_lib_from_dir(std::vector<std::string>& candidates,
+void add_sherpa_lib_from_dir(std::vector<SherpaLibCandidate>& candidates,
                               const std::filesystem::path& lib_dir,
                               const std::string& filename) {
   if (!std::filesystem::exists(lib_dir)) return;
@@ -26,13 +26,13 @@ void add_sherpa_lib_from_dir(std::vector<std::string>& candidates,
       const std::filesystem::path sherpa_lib =
           entry.path() / pkg_dir / "sherpa_onnx" / "lib" / filename;
       if (std::filesystem::exists(sherpa_lib)) {
-        candidates.push_back(sherpa_lib.string());
+        candidates.push_back({sherpa_lib.string()});
       }
     }
   }
 }
 
-void add_sherpa_lib_from_env(std::vector<std::string>& candidates,
+void add_sherpa_lib_from_env(std::vector<SherpaLibCandidate>& candidates,
                               const char* env_var,
                               const std::string& filename) {
   const char* env_val = std::getenv(env_var);
@@ -43,37 +43,44 @@ void add_sherpa_lib_from_env(std::vector<std::string>& candidates,
   // Also check <env>/lib/sherpa_onnx/ (some installs place libs directly)
   const std::filesystem::path direct_lib = env_path / "lib" / "sherpa_onnx" / "lib" / filename;
   if (std::filesystem::exists(direct_lib)) {
-    candidates.push_back(direct_lib.string());
+    candidates.push_back({direct_lib.string()});
   }
   // Conda sometimes places libs in <env>/lib/ directly
   const std::filesystem::path conda_lib = env_path / "lib" / filename;
   if (std::filesystem::exists(conda_lib)) {
-    candidates.push_back(conda_lib.string());
+    candidates.push_back({conda_lib.string()});
   }
 }
 
-std::vector<std::string> build_candidate_paths() {
-  std::vector<std::string> candidates;
+std::vector<SherpaLibCandidate> build_candidate_paths() {
+  std::vector<SherpaLibCandidate> candidates;
 
   // 1. Explicit path set via set_sherpa_lib_path()
   if (!lib_state().explicit_path.empty()) {
-    candidates.push_back(lib_state().explicit_path);
+    candidates.push_back({lib_state().explicit_path, SherpaLibSource::explicit_path});
   }
 
   // 2. SHERPA_ONNX_LIB_PATH env var
   const char* env_path = std::getenv("SHERPA_ONNX_LIB_PATH");
   if (env_path && env_path[0]) {
-    candidates.push_back(env_path);
+    candidates.push_back({env_path, SherpaLibSource::environment});
   }
 
-  // 3. macOS user site-packages: ~/Library/Python/3.{9..14}/lib/python/site-packages/
+  // 3. The pinned library of an installed SVP runtime bundle, set by the
+  //    executable via set_sherpa_bundled_lib_path(). It precedes every
+  //    unpinned location below.
+  if (!lib_state().bundled_path.empty()) {
+    candidates.push_back({lib_state().bundled_path, SherpaLibSource::bundled});
+  }
+
+  // 4. macOS user site-packages: ~/Library/Python/3.{9..14}/lib/python/site-packages/
   const char* home = std::getenv("HOME");
   if (home && home[0]) {
     std::string home_str(home);
     for (int minor = 9; minor <= 14; ++minor) {
-      candidates.push_back(home_str +
+      candidates.push_back({home_str +
           "/Library/Python/3." + std::to_string(minor) +
-          "/lib/python/site-packages/sherpa_onnx/lib/libsherpa-onnx-c-api.dylib");
+          "/lib/python/site-packages/sherpa_onnx/lib/libsherpa-onnx-c-api.dylib"});
     }
     // Linux pip --user: ~/.local/lib/python3.*/site-packages/ and dist-packages/
     add_sherpa_lib_from_dir(candidates,
@@ -81,29 +88,29 @@ std::vector<std::string> build_candidate_paths() {
         "libsherpa-onnx-c-api.so");
   }
 
-  // 4. Virtual environments (venv, Conda)
+  // 5. Virtual environments (venv, Conda)
   add_sherpa_lib_from_env(candidates, "VIRTUAL_ENV", "libsherpa-onnx-c-api.dylib");
   add_sherpa_lib_from_env(candidates, "CONDA_PREFIX", "libsherpa-onnx-c-api.dylib");
   // On Linux venvs the shared lib is .so
   add_sherpa_lib_from_env(candidates, "VIRTUAL_ENV", "libsherpa-onnx-c-api.so");
   add_sherpa_lib_from_env(candidates, "CONDA_PREFIX", "libsherpa-onnx-c-api.so");
 
-  // 5. Homebrew site-packages (Apple Silicon and Intel)
+  // 6. Homebrew site-packages (Apple Silicon and Intel)
   add_sherpa_lib_from_dir(candidates, "/opt/homebrew/lib", "libsherpa-onnx-c-api.dylib");
   add_sherpa_lib_from_dir(candidates, "/usr/local/lib", "libsherpa-onnx-c-api.dylib");
 
-  // 6. Direct Homebrew and system library paths (macOS)
-  candidates.push_back("/opt/homebrew/lib/libsherpa-onnx-c-api.dylib");
-  candidates.push_back("/usr/local/lib/libsherpa-onnx-c-api.dylib");
+  // 7. Direct Homebrew and system library paths (macOS)
+  candidates.push_back({"/opt/homebrew/lib/libsherpa-onnx-c-api.dylib"});
+  candidates.push_back({"/usr/local/lib/libsherpa-onnx-c-api.dylib"});
 
-  // 7. Linux system paths (site-packages and dist-packages scanned above via HOME)
+  // 8. Linux system paths (site-packages and dist-packages scanned above via HOME)
   //    Also check common system-level Python directories
   add_sherpa_lib_from_dir(candidates, "/usr/lib", "libsherpa-onnx-c-api.so");
   add_sherpa_lib_from_dir(candidates, "/usr/local/lib", "libsherpa-onnx-c-api.so");
-  candidates.push_back("/usr/local/lib/libsherpa-onnx-c-api.so");
-  candidates.push_back("/usr/lib/libsherpa-onnx-c-api.so");
-  candidates.push_back("/usr/lib/x86_64-linux-gnu/libsherpa-onnx-c-api.so");
-  candidates.push_back("/usr/lib/aarch64-linux-gnu/libsherpa-onnx-c-api.so");
+  candidates.push_back({"/usr/local/lib/libsherpa-onnx-c-api.so"});
+  candidates.push_back({"/usr/lib/libsherpa-onnx-c-api.so"});
+  candidates.push_back({"/usr/lib/x86_64-linux-gnu/libsherpa-onnx-c-api.so"});
+  candidates.push_back({"/usr/lib/aarch64-linux-gnu/libsherpa-onnx-c-api.so"});
 
   return candidates;
 }
@@ -113,13 +120,17 @@ SherpaDiarizationApi& get_api() {
   if (api.loaded) return api;
   api.loaded = true;
 
-  std::vector<std::string> candidates = build_candidate_paths();
-  lib_state().attempted_paths = candidates;
+  const std::vector<SherpaLibCandidate> candidates = build_candidate_paths();
+  lib_state().attempted_paths.clear();
+  for (const auto& candidate : candidates) {
+    lib_state().attempted_paths.push_back(candidate.path);
+  }
 
-  for (const auto& path : candidates) {
-    api.lib_handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
+  for (const auto& candidate : candidates) {
+    api.lib_handle = dlopen(candidate.path.c_str(), RTLD_LAZY | RTLD_LOCAL);
     if (api.lib_handle) {
-      lib_state().loaded_path = path;
+      lib_state().loaded_path = candidate.path;
+      lib_state().loaded_source = candidate.source;
       break;
     }
   }
@@ -166,6 +177,30 @@ SherpaDiarizationApi& get_api() {
 
 void set_sherpa_lib_path(const std::string& path) {
   sherpa_diarization_internal::lib_state().explicit_path = path;
+}
+
+void set_sherpa_bundled_lib_path(const std::string& path) {
+  sherpa_diarization_internal::lib_state().bundled_path = path;
+}
+
+SherpaLibSource sherpa_lib_source_used() {
+  return sherpa_diarization_internal::lib_state().loaded_source;
+}
+
+std::string_view sherpa_lib_source_name(SherpaLibSource source) {
+  switch (source) {
+    case SherpaLibSource::none:
+      return "none";
+    case SherpaLibSource::explicit_path:
+      return "explicit_flag";
+    case SherpaLibSource::environment:
+      return "environment";
+    case SherpaLibSource::bundled:
+      return "bundled";
+    case SherpaLibSource::legacy_search:
+      return "legacy_search";
+  }
+  return "none";
 }
 
 std::string sherpa_lib_path_used() {

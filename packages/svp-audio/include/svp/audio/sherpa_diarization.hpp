@@ -8,6 +8,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace svp::audio {
@@ -86,6 +87,20 @@ struct ReconciliationResult {
 [[nodiscard]] bool is_sherpa_diarization_available();
 
 void set_sherpa_lib_path(const std::string& path);
+
+// Where the loaded sherpa-onnx C API library came from, in search order:
+// the explicit path, SHERPA_ONNX_LIB_PATH, the installed runtime bundle, then
+// the legacy pip/venv/Homebrew/system locations. `none` until a library loads.
+enum class SherpaLibSource { none, explicit_path, environment, bundled, legacy_search };
+
+// The pinned library of an installed SVP runtime bundle. Searched after the
+// explicit path and SHERPA_ONNX_LIB_PATH and before every legacy location.
+// Must be set before the library is first loaded.
+void set_sherpa_bundled_lib_path(const std::string& path);
+
+[[nodiscard]] SherpaLibSource sherpa_lib_source_used();
+
+[[nodiscard]] std::string_view sherpa_lib_source_name(SherpaLibSource source);
 
 [[nodiscard]] std::string sherpa_lib_path_used();
 

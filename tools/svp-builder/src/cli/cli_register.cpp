@@ -27,6 +27,11 @@ void register_cli(CLI::App& app, CliContext& context) {
   auto& build_opts = context.build_opts;
   auto& opts = context.interlace_opts;
   auto& transport_opts = context.transport_opts;
+  using svp::builder::RuntimeTool;
+  const auto tool_option = [&context](CLI::App& command, const std::string& flag,
+                                      std::string& target, RuntimeTool tool) {
+    add_runtime_tool_option(context.runtime_tool_bindings, command, flag, target, tool);
+  };
 
   // --- probe subcommand ---
   auto* probe = app.add_subcommand(
@@ -34,7 +39,7 @@ void register_cli(CLI::App& app, CliContext& context) {
   probe->add_option("source", probe_opts.source_path, "Source media path")->required();
   probe->add_option("--probe-json", probe_opts.probe_json_path,
                     "Precomputed media probe JSON; skips running ffprobe");
-  probe->add_option("--ffprobe", probe_opts.ffprobe_path, "ffprobe executable path");
+  tool_option(*probe, "--ffprobe", probe_opts.ffprobe_path, RuntimeTool::ffprobe);
   probe->add_flag("--json", probe_opts.json_output, "Emit JSON");
   context.probe_subcommand = probe;
 
@@ -44,8 +49,8 @@ void register_cli(CLI::App& app, CliContext& context) {
   build->add_option("source", build_opts.source_path, "Source media path")->required();
   build->add_option("--probe-json", build_opts.probe_json_path,
                     "Precomputed media probe JSON; skips running ffprobe");
-  build->add_option("--ffprobe", build_opts.ffprobe_path, "ffprobe executable path");
-  build->add_option("--ffmpeg", build_opts.ffmpeg_path, "ffmpeg executable path");
+  tool_option(*build, "--ffprobe", build_opts.ffprobe_path, RuntimeTool::ffprobe);
+  tool_option(*build, "--ffmpeg", build_opts.ffmpeg_path, RuntimeTool::ffmpeg);
   build->add_option("--out", build_opts.output_path,
                     "Output artifact path")
       ->required();
@@ -64,8 +69,8 @@ void register_cli(CLI::App& app, CliContext& context) {
   add_pipeline_performance_options(*build, build_opts.performance);
   add_visual_tracking_quality_option(
       *build, build_opts.visual_tracking_quality);
-  build->add_option("--sherpa-lib", build_opts.sherpa_lib_path,
-                    "Explicit path to libsherpa-onnx-c-api.dylib for diarization");
+  tool_option(*build, "--sherpa-lib", build_opts.sherpa_lib_path,
+              RuntimeTool::sherpa_onnx);
   build->add_flag("--allow-fallback-diarization", build_opts.allow_fallback_diarization,
                   "Proceed without diarization if sherpa-onnx is not available. "
                   "Speaker data will be fabricated fallback, not real. NOT RECOMMENDED.");
@@ -93,8 +98,8 @@ void register_cli(CLI::App& app, CliContext& context) {
                       "Path to 16kHz mono PCM WAV")->required();
   diarize->add_option("--model-dir", context.diarize_opts.model_dir,
                       "Sherpa diarization model directory")->required();
-  diarize->add_option("--sherpa-lib", context.diarize_opts.sherpa_lib_path,
-                      "Explicit path to libsherpa-onnx-c-api.dylib");
+  tool_option(*diarize, "--sherpa-lib", context.diarize_opts.sherpa_lib_path,
+              RuntimeTool::sherpa_onnx);
   diarize->add_option("--segments-jsonl", context.diarize_opts.segments_jsonl_path,
                       "Write diarization segments as JSONL for diagnostics");
   context.diarize_subcommand = diarize;
@@ -110,9 +115,8 @@ void register_cli(CLI::App& app, CliContext& context) {
   diarize_replay->add_option("--model-dir",
                              context.diarize_replay_opts.model_dir,
                              "Sherpa diarization model directory");
-  diarize_replay->add_option("--sherpa-lib",
-                             context.diarize_replay_opts.sherpa_lib_path,
-                             "Explicit path to libsherpa-onnx-c-api.dylib");
+  tool_option(*diarize_replay, "--sherpa-lib", context.diarize_replay_opts.sherpa_lib_path,
+              RuntimeTool::sherpa_onnx);
   diarize_replay->add_option("--out-words-jsonl",
                              context.diarize_replay_opts.out_words_jsonl_path,
                              "Write replayed words JSONL with updated speaker_id values");
@@ -137,10 +141,10 @@ void register_cli(CLI::App& app, CliContext& context) {
   ic_create->add_option("--out", opts.ic_out, "Output .svpi path")->required();
   ic_create->add_option("--staging-dir", opts.ic_staging, "Staging directory");
   ic_create->add_option("--model-cache", opts.ic_model_cache, "Model cache directory");
-  ic_create->add_option("--ffprobe", opts.ic_ffprobe, "ffprobe executable path");
-  ic_create->add_option("--ffmpeg", opts.ic_ffmpeg, "ffmpeg executable path");
+  tool_option(*ic_create, "--ffprobe", opts.ic_ffprobe, RuntimeTool::ffprobe);
+  tool_option(*ic_create, "--ffmpeg", opts.ic_ffmpeg, RuntimeTool::ffmpeg);
   ic_create->add_option("--probe-json", opts.ic_probe_json, "Precomputed probe JSON");
-  ic_create->add_option("--sherpa-lib", opts.ic_sherpa_lib, "Path to sherpa-onnx shared library");
+  tool_option(*ic_create, "--sherpa-lib", opts.ic_sherpa_lib, RuntimeTool::sherpa_onnx);
   add_pipeline_performance_options(*ic_create, opts.ic_performance);
   add_visual_tracking_quality_option(
       *ic_create, opts.ic_visual_tracking_quality);
@@ -169,7 +173,7 @@ void register_cli(CLI::App& app, CliContext& context) {
       "validate", "Validate a .svpi sidecar (structure and optional binding)");
   iv_validate->add_option("svpi", opts.iv_svpi, "SVPI file path")->required();
   iv_validate->add_option("--media", opts.iv_media, "Candidate media file for binding verification");
-  iv_validate->add_option("--ffprobe", opts.iv_ffprobe, "ffprobe executable path");
+  tool_option(*iv_validate, "--ffprobe", opts.iv_ffprobe, RuntimeTool::ffprobe);
   iv_validate->add_option("--validation-codes", opts.iv_codes, "Validation codes registry path");
   iv_validate->add_flag("--json", opts.iv_json, "Emit JSON output");
   iv_validate->add_option("--progress", opts.iv_progress_mode,
@@ -193,7 +197,7 @@ void register_cli(CLI::App& app, CliContext& context) {
       "extract", "Extract source media and .svpi from a .svp package");
   ie_extract->add_option("svp", opts.ie_svp, "SVP package path")->required();
   ie_extract->add_option("--out-dir", opts.ie_out_dir, "Output directory")->required();
-  ie_extract->add_option("--ffprobe", opts.ie_ffprobe, "ffprobe executable path");
+  tool_option(*ie_extract, "--ffprobe", opts.ie_ffprobe, RuntimeTool::ffprobe);
   ie_extract->add_option("--validation-codes", opts.ie_codes, "Validation codes registry path");
   ie_extract->add_option("--progress", opts.ie_progress_mode,
       "Progress output mode: auto, plain, json, none")
@@ -210,7 +214,7 @@ void register_cli(CLI::App& app, CliContext& context) {
   ir_recombine->add_option("svpi", opts.ir_svpi, "SVPI sidecar file")->required();
   ir_recombine->add_option("--out", opts.ir_out, "Output .svp path")->required();
   ir_recombine->add_option("--staging-dir", opts.ir_staging, "Staging directory");
-  ir_recombine->add_option("--ffprobe", opts.ir_ffprobe, "ffprobe executable path");
+  tool_option(*ir_recombine, "--ffprobe", opts.ir_ffprobe, RuntimeTool::ffprobe);
   ir_recombine->add_option("--validation-codes", opts.ir_codes, "Validation codes registry path");
   ir_recombine->add_option("--progress", opts.ir_progress_mode,
       "Progress output mode: auto, plain, json, none")
@@ -226,10 +230,11 @@ void register_cli(CLI::App& app, CliContext& context) {
   cb_create_batch->add_option("source-dir", opts.cb_source_dir, "Directory containing source videos")->required();
   cb_create_batch->add_option("--out-dir", opts.cb_out_dir, "Output directory (default: same as source)");
   cb_create_batch->add_option("--model-cache", opts.cb_model_cache, "Model cache directory");
-  cb_create_batch->add_option("--ffprobe", opts.cb_ffprobe, "ffprobe executable path");
-  cb_create_batch->add_option("--ffmpeg", opts.cb_ffmpeg, "ffmpeg executable path");
+  tool_option(*cb_create_batch, "--ffprobe", opts.cb_ffprobe, RuntimeTool::ffprobe);
+  tool_option(*cb_create_batch, "--ffmpeg", opts.cb_ffmpeg, RuntimeTool::ffmpeg);
   cb_create_batch->add_option("--staging-dir", opts.cb_staging, "Staging directory");
-  cb_create_batch->add_option("--sherpa-lib", opts.cb_sherpa_lib, "Path to sherpa-onnx shared library");
+  tool_option(*cb_create_batch, "--sherpa-lib", opts.cb_sherpa_lib,
+              RuntimeTool::sherpa_onnx);
   add_pipeline_performance_options(*cb_create_batch, opts.cb_performance);
   add_visual_tracking_quality_option(
       *cb_create_batch, opts.cb_visual_tracking_quality);
@@ -271,7 +276,7 @@ void register_cli(CLI::App& app, CliContext& context) {
   sc_scan->add_option("source-dir", opts.sc_source_dir, "Directory to scan")->required();
   sc_scan->add_flag("--recursive", opts.sc_recursive, "Search subdirectories recursively");
   sc_scan->add_flag("--json", opts.sc_json, "Emit JSON output");
-  sc_scan->add_option("--ffprobe", opts.sc_ffprobe, "ffprobe executable path");
+  tool_option(*sc_scan, "--ffprobe", opts.sc_ffprobe, RuntimeTool::ffprobe);
   sc_scan->add_option("--validation-codes", opts.sc_codes, "Validation codes registry path");
   context.sc_scan = sc_scan;
   opts.sc_scan_sub = sc_scan;
@@ -282,7 +287,7 @@ void register_cli(CLI::App& app, CliContext& context) {
   vb_validate_batch->add_option("source-dir", opts.vb_source_dir, "Directory to validate")->required();
   vb_validate_batch->add_flag("--recursive", opts.vb_recursive, "Search subdirectories recursively");
   vb_validate_batch->add_flag("--json", opts.vb_json, "Emit JSON output");
-  vb_validate_batch->add_option("--ffprobe", opts.vb_ffprobe, "ffprobe executable path");
+  tool_option(*vb_validate_batch, "--ffprobe", opts.vb_ffprobe, RuntimeTool::ffprobe);
   vb_validate_batch->add_option("--validation-codes", opts.vb_codes, "Validation codes registry path");
   vb_validate_batch->add_option("--progress", opts.vb_progress_mode,
       "Progress output mode: auto, plain, json, none")
@@ -297,7 +302,7 @@ void register_cli(CLI::App& app, CliContext& context) {
       "complete-identity", "Complete pending full-file BLAKE3 identity for an SVPI");
   ci_complete->add_option("svpi", opts.ci_svpi, "SVPI file path")->required();
   ci_complete->add_option("--media", opts.ci_media, "Source media file")->required();
-  ci_complete->add_option("--ffprobe", opts.ci_ffprobe, "ffprobe executable path");
+  tool_option(*ci_complete, "--ffprobe", opts.ci_ffprobe, RuntimeTool::ffprobe);
   ci_complete->add_option("--validation-codes", opts.ci_codes, "Validation codes registry path");
   ci_complete->add_option("--progress", opts.ci_progress_mode,
       "Progress output mode: auto, plain, json, none")
@@ -313,7 +318,7 @@ void register_cli(CLI::App& app, CliContext& context) {
   cib_complete_batch->add_option("source-dir", opts.cib_source_dir, "Directory containing SVPI files")->required();
   cib_complete_batch->add_flag("--recursive", opts.cib_recursive, "Search subdirectories recursively");
   cib_complete_batch->add_flag("--json", opts.cib_json, "Emit JSON output");
-  cib_complete_batch->add_option("--ffprobe", opts.cib_ffprobe, "ffprobe executable path");
+  tool_option(*cib_complete_batch, "--ffprobe", opts.cib_ffprobe, RuntimeTool::ffprobe);
   cib_complete_batch->add_option("--validation-codes", opts.cib_codes, "Validation codes registry path");
   cib_complete_batch->add_option("--progress", opts.cib_progress_mode,
       "Progress output mode: auto, plain, json, none")
@@ -338,9 +343,8 @@ void register_cli(CLI::App& app, CliContext& context) {
   transport_embed->add_option(
       "--out", transport_opts.embed_out,
       "Output ISO BMFF media container")->required();
-  transport_embed->add_option(
-      "--ffprobe", transport_opts.embed_ffprobe,
-      "ffprobe executable path");
+  tool_option(*transport_embed, "--ffprobe", transport_opts.embed_ffprobe,
+              RuntimeTool::ffprobe);
   transport_embed->add_option(
       "--validation-codes", transport_opts.embed_codes,
       "Validation codes registry path");

@@ -6,6 +6,11 @@ set(executable_suffix "@CMAKE_EXECUTABLE_SUFFIX@")
 set(is_macos "@APPLE@")
 set(expected_registry_files "@SVP_INSTALL_REGISTRY_RELATIVE_FILES@")
 set(expected_schema_files "@SVP_INSTALL_SCHEMA_RELATIVE_FILES@")
+# Set only when the build was configured with SVP_RUNTIME_BUNDLE_DIR.
+set(runtime_bundle_directory "@SVP_RUNTIME_BUNDLE_DIR@")
+set(runtime_install_directory "@SVP_RUNTIME_INSTALL_DIR@")
+set(expected_runtime_files "@SVP_INSTALL_RUNTIME_RELATIVE_FILES@")
+set(runtime_manifest_tool_file "@SVP_RUNTIME_MANIFEST_TOOL_FILE@")
 
 string(RANDOM LENGTH 16 ALPHABET 0123456789abcdef temporary_token)
 set(temporary_root "/tmp/svp-cli-install-uninstall-${temporary_token}")
@@ -203,6 +208,30 @@ assert_inventory(
   "schema"
 )
 
+if(NOT runtime_install_directory STREQUAL "")
+  set(installed_runtime "${install_prefix}/${runtime_install_directory}")
+  foreach(relative_path IN LISTS expected_runtime_files)
+    execute_process(
+      COMMAND "@CMAKE_COMMAND@" -E compare_files
+              "${runtime_bundle_directory}/${relative_path}"
+              "${installed_runtime}/${relative_path}"
+      RESULT_VARIABLE compare_result
+    )
+    if(NOT compare_result EQUAL 0)
+      fail_verification(
+        "Installed runtime bundle file is missing or differs: ${relative_path}"
+      )
+    endif()
+  endforeach()
+  assert_exists("${installed_runtime}/manifest.json" "runtime manifest")
+  file(READ "${runtime_manifest_tool_file}" runtime_manifest_tool)
+  run_checked("installed runtime manifest verification"
+    COMMAND "${runtime_manifest_tool}" verify
+            --root "${install_prefix}"
+            --manifest "${installed_runtime}/manifest.json"
+  )
+endif()
+
 set(builder "${install_prefix}/${binary_directory_name}/svp-builder${executable_suffix}")
 set(validator "${install_prefix}/${binary_directory_name}/svp-validator${executable_suffix}")
 set(inspector "${install_prefix}/${binary_directory_name}/svp-inspector${executable_suffix}")
@@ -269,6 +298,11 @@ list(LENGTH manifest_entries manifest_entry_count)
 list(LENGTH expected_registry_files registry_count)
 list(LENGTH expected_schema_files schema_count)
 math(EXPR expected_manifest_count "4 + ${registry_count} + ${schema_count}")
+if(NOT runtime_install_directory STREQUAL "")
+  # The bundle files plus the manifest.json written at install time.
+  list(LENGTH expected_runtime_files runtime_count)
+  math(EXPR expected_manifest_count "${expected_manifest_count} + ${runtime_count} + 1")
+endif()
 if(NOT manifest_entry_count EQUAL expected_manifest_count)
   fail_verification(
     "Install manifest entry count mismatch: expected ${expected_manifest_count}, "
@@ -316,6 +350,7 @@ assert_absent(
 assert_absent(
   "${install_prefix}/${data_directory_name}/svp" "empty SVP data directory"
 )
+assert_absent("${install_prefix}/@CMAKE_INSTALL_LIBEXECDIR@/svp" "SVP runtime bundle directory")
 assert_exists("${install_prefix}" "generic installation prefix")
 assert_exists("${install_prefix}/${binary_directory_name}" "generic bin directory")
 assert_exists("${install_prefix}/${data_directory_name}" "generic share directory")

@@ -2,7 +2,7 @@
 
 These scripts build the third-party executables and libraries that `svp-builder` runs, so that an SVP worker Mac needs nothing except macOS. Today SVP calls Homebrew's `ffmpeg`/`ffprobe` and loads sherpa-onnx from pip or Homebrew locations. Homebrew's ffmpeg links 19 Homebrew dylibs and is a GPL build, and the sherpa-onnx version is not pinned. The bundle replaces both with pinned, hashed, relocatable builds.
 
-This directory only builds the bundle. `svp-builder` does not use it by default yet. Pass the files explicitly with `--ffmpeg`, `--ffprobe`, and `--sherpa-lib`.
+This directory only builds the bundle. To install it next to `svp-builder`, configure with `-DSVP_RUNTIME_BUNDLE_DIR=<out-dir>` and run `cmake --install` (see "Install the runtime bundle" in the top-level README). The installed builder then uses the bundle by default; `--ffmpeg`, `--ffprobe`, and `--sherpa-lib` still override it. The install also writes `manifest.json`, the runtime identity (`svp.runtime.manifest/1`: `svp-builder` plus every file `components.json` declares, each with BLAKE3, and `runtime_id` = BLAKE3 of the canonical manifest), because it covers the installed `svp-builder`, which does not exist when the bundle is built.
 
 ## What is built
 

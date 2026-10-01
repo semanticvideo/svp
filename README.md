@@ -186,6 +186,9 @@ Normal builds and CLI operation expect:
 FFmpeg and ffprobe are resolved from `PATH` by default. Homebrew installations
 under `/opt/homebrew/bin` are common Apple Silicon macOS examples, not required
 locations. Use the CLI executable-path options when the tools are elsewhere.
+An installation that includes the SVP runtime bundle uses its pinned FFmpeg,
+ffprobe, and sherpa-onnx instead; see
+[Install the runtime bundle](#install-the-runtime-bundle).
 
 Repository fixtures, personal sample media, and OCR comparison tools are
 development-only inputs. They are not required for normal validation,
@@ -321,6 +324,66 @@ models or other user data. This is a CMake installation path, not package-manage
 integration. The preceding build section is the completed clean-clone and vcpkg
 bootstrap workflow from issue #121.
 
+### Install the runtime bundle
+
+The runtime bundle holds pinned, relocatable builds of FFmpeg and ffprobe
+(LGPL, static) and the sherpa-onnx C API library with its ONNX Runtime. It is
+optional. Build it with the scripts in
+[`distribution/runtime-bundle`](distribution/runtime-bundle/README.md), then
+pass its output directory when configuring and install as above:
+
+```bash
+cmake --preset macos-arm64-release -DCMAKE_INSTALL_PREFIX="$HOME/.local" \
+  -DSVP_RUNTIME_BUNDLE_DIR="$PWD/dist/runtime"
+cmake --build --preset macos-arm64-release --parallel
+cmake --install build/macos-arm64-release
+```
+
+This adds:
+
+```text
+~/.local/libexec/svp/runtime/bin/ffmpeg
+~/.local/libexec/svp/runtime/bin/ffprobe
+~/.local/libexec/svp/runtime/lib/libsherpa-onnx-c-api.dylib
+~/.local/libexec/svp/runtime/lib/libonnxruntime.1.dylib
+~/.local/libexec/svp/runtime/licenses/*
+~/.local/libexec/svp/runtime/components.json
+~/.local/libexec/svp/runtime/manifest.json
+```
+
+The installed `svp-builder` finds the bundle at `../libexec/svp/runtime`
+relative to its real location, so a symlink to it elsewhere still works. For
+each tool it uses the first of:
+
+1. the command-line option (`--ffmpeg`, `--ffprobe`, `--sherpa-lib`);
+2. an environment override (`SVP_FFMPEG`, `SVP_FFPROBE`,
+   `SHERPA_ONNX_LIB_PATH`);
+3. the installed runtime bundle;
+4. `ffmpeg`/`ffprobe` on `PATH`, and the previous sherpa-onnx search (pip,
+   virtual environments, Homebrew, and system library paths).
+
+Without `SVP_RUNTIME_BUNDLE_DIR` nothing under `libexec` is installed and the
+builder behaves exactly as before. The builder records which source each tool
+came from, with the bundle's BLAKE3 digest for bundled tools and the
+`runtime_id`, under `runtime_tools` in the builder foundation JSON
+(`builder_command.runtime_tools`) and in `--run-report`. None of this is
+written into packages.
+
+`manifest.json` identifies the installed runtime: `svp-builder`, `ffmpeg`,
+`ffprobe`, the sherpa-onnx library, and ONNX Runtime, each with its BLAKE3
+digest and size, and a `runtime_id` that is the BLAKE3 of the manifest's
+canonical JSON without that field. The install writes it with
+`svp-runtime-manifest` (a build-tree tool, not installed), which also checks
+every bundled file against `components.json`. To check an installation later:
+
+```bash
+build/macos-arm64-release/packages/svp-exec/svp-runtime-manifest verify \
+  --root "$HOME/.local" --manifest "$HOME/.local/libexec/svp/runtime/manifest.json"
+```
+
+The uninstall target removes the bundle and its empty `libexec/svp`
+directories too.
+
 ## Install the reference models
 
 After installing the CLI tools and adding their `bin` directory to `PATH`, use
@@ -394,8 +457,9 @@ svp-builder build \
   --visual-tracking-quality off
 ```
 
-If sherpa-onnx is installed in a nonstandard location, pass the C API library
-explicitly:
+With the runtime bundle installed, the builder loads its pinned sherpa-onnx
+library automatically. Otherwise, if sherpa-onnx is installed in a nonstandard
+location, pass the C API library explicitly:
 
 ```bash
 svp-builder build \
