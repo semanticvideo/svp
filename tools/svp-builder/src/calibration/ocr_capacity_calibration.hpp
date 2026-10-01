@@ -76,8 +76,9 @@ struct OcrCalibration {
 
 // Runs the sweep on `executor`, which must accept ocr.frame_batch and
 // advertise at least `max_slots` slots. `inputs.source` is the calibration
-// clip, already resolvable by the executor. Throws std::runtime_error when a
-// batch fails (the Mac cannot run OCR at all).
+// clip, already resolvable by the executor. Throws std::runtime_error when an
+// attempt fails or is lost (a retried step would time the retry, not the
+// Mac), so an interrupted sweep is never kept.
 [[nodiscard]] OcrCalibration calibrate_ocr_capacity(
     svp::exec::Executor& executor, std::size_t max_slots,
     const svp::vision::tasks::OcrFrameBatchTaskInputs& inputs,

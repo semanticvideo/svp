@@ -136,6 +136,7 @@ OcrCalibration calibrate_ocr_capacity(svp::exec::Executor& executor, std::size_t
   std::size_t best_slots = 1;
   double best_seconds_per_frame = 0.0;
   svp::exec::CancellationToken stop;
+  std::string interrupted;
   const svp::exec::SteadyClock clock;
   const svp::exec::AttemptObserver observer = [&](const svp::exec::AttemptEvent& event) {
     const auto found = step_of.find(event.task_id);
@@ -143,6 +144,17 @@ OcrCalibration calibrate_ocr_capacity(svp::exec::Executor& executor, std::size_t
       return;
     }
     StepTiming& timing = steps[found->second];
+    if (event.kind == svp::exec::AttemptEventKind::failed ||
+        event.kind == svp::exec::AttemptEventKind::expired ||
+        event.kind == svp::exec::AttemptEventKind::deadline_exceeded) {
+      // A step whose attempt was lost or retried would time the retry, not
+      // the Mac: the measurement is void.
+      interrupted = event.task_id + " attempt " + std::to_string(event.attempt) + ": " +
+                    std::string(svp::exec::attempt_event_kind_name(event.kind)) +
+                    (event.detail.empty() ? std::string() : " (" + event.detail + ")");
+      stop.request();
+      return;
+    }
     if (event.kind == svp::exec::AttemptEventKind::leased && timing.first_lease.count() < 0) {
       timing.first_lease = clock.now();
     }
@@ -190,6 +202,9 @@ OcrCalibration calibrate_ocr_capacity(svp::exec::Executor& executor, std::size_t
           .run(graph, executors, sink, combined, forwarding);
   if (cancellation.requested()) {
     throw std::runtime_error("calibration cancelled");
+  }
+  if (!interrupted.empty()) {
+    throw std::runtime_error("calibration was interrupted, nothing is kept: " + interrupted);
   }
   if (outcome.status == svp::exec::BuildStatus::failed) {
     throw std::runtime_error("calibration batch failed: " +
