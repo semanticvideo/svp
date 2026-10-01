@@ -90,7 +90,8 @@ BuildOutcome SchedulerRun::execute() {
       // Work remains (not all complete) yet nothing could be leased, and no
       // executor is merely declining work for a moment.
       fail_build(BuildFailureKind::no_usable_executor, {},
-                 "tasks remain but every executor is quarantined");
+                 "tasks remain but no executor that accepts them is usable (every one is "
+                 "quarantined or none accepts their task type)");
       break;
     }
     for (InboxEvent& event : inbox_.wait(next_wait())) {
@@ -350,12 +351,13 @@ void SchedulerRun::attempt_failed(std::size_t task_index, std::size_t executor,
       outcome_.failure) {
     return;  // Committed already, or another attempt is still running.
   }
-  const std::string& task_id = graph_.node(task_index).spec.task_id;
-  if (task.failed_attempts >= policy_.retry.max_attempts) {
+  const TaskSpec& spec = graph_.node(task_index).spec;
+  const std::string& task_id = spec.task_id;
+  const std::uint64_t max_attempts = max_attempts_for(policy_, spec.task_type);
+  if (task.failed_attempts >= max_attempts) {
     fail_build(BuildFailureKind::retries_exhausted, task_id,
                "task `" + task_id + "` failed " + std::to_string(task.failed_attempts) +
-                   " attempts (max_attempts " +
-                   std::to_string(policy_.retry.max_attempts) +
+                   " attempts (max_attempts " + std::to_string(max_attempts) +
                    "); last failure: " + task.last_failure);
     return;
   }
