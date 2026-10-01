@@ -19,6 +19,7 @@ add_library(svp-builder-lib
   src/build_interrupt.cpp
   src/model_cache_preflight.cpp
   src/package_final_stages.cpp
+  src/processor_provenance.cpp
   src/vision_stage_progress.cpp
   src/engine/build_assembly.cpp
   src/engine/build_inputs_digest.cpp
@@ -191,6 +192,19 @@ if(BUILD_TESTING)
       nlohmann_json::nlohmann_json
   )
 
+  add_executable(svp-builder-processor-provenance-tests
+    tests/processor_provenance_tests.cpp
+  )
+  target_include_directories(svp-builder-processor-provenance-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_compile_features(svp-builder-processor-provenance-tests PRIVATE cxx_std_20)
+  target_link_libraries(svp-builder-processor-provenance-tests
+    PRIVATE
+      svp::builder
+      nlohmann_json::nlohmann_json
+  )
+
   add_executable(svp-builder-model-cache-preflight-tests
     tests/model_cache_preflight_tests.cpp
   )
@@ -360,6 +374,8 @@ if(BUILD_TESTING)
            COMMAND svp-builder-frame-plan-tests)
   add_test(NAME svp-builder-task-engine-tests
            COMMAND svp-builder-task-engine-tests)
+  add_test(NAME svp-builder-processor-provenance-tests
+           COMMAND svp-builder-processor-provenance-tests)
   add_test(NAME svp-builder-pipeline-tests COMMAND svp-builder-pipeline-tests
            WORKING_DIRECTORY ${SVP_BUILDER_RUNTIME_RESOURCE_TEST_CWD})
   add_test(NAME svp-builder-model-cache-preflight-tests

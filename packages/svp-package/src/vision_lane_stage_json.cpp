@@ -45,6 +45,7 @@ nlohmann::json to_json(const VisionTrackingStageResult& result) {
   return {
       {"masks_index_written", result.masks_index_written},
       {"masks_blocks_written", result.masks_blocks_written},
+      {"processor", result.processor},
   };
 }
 
@@ -94,6 +95,7 @@ VisionTrackingStageResult vision_tracking_stage_result_from_json(
   VisionTrackingStageResult result;
   result.masks_index_written = value.at("masks_index_written").get<bool>();
   result.masks_blocks_written = value.at("masks_blocks_written").get<bool>();
+  result.processor = value.at("processor");
   return result;
 }
 

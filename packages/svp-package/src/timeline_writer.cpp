@@ -55,30 +55,6 @@ std::string string_value(const nlohmann::json& record, const char* key) {
   return iterator->get<std::string>();
 }
 
-void append_processor_records(
-    const std::filesystem::path& processors_path,
-    const std::vector<nlohmann::json>& new_processors) {
-  std::map<std::string, nlohmann::json> processors_by_id;
-  for (const nlohmann::json& processor : read_jsonl(processors_path)) {
-    const std::string id = string_value(processor, "id");
-    if (!id.empty()) {
-      processors_by_id[id] = processor;
-    }
-  }
-  for (const nlohmann::json& processor : new_processors) {
-    const std::string id = string_value(processor, "id");
-    if (!id.empty()) {
-      processors_by_id[id] = processor;
-    }
-  }
-  std::vector<nlohmann::json> all_processors;
-  all_processors.reserve(processors_by_id.size());
-  for (const auto& [id, processor] : processors_by_id) {
-    all_processors.push_back(processor);
-  }
-  write_jsonl(processors_path, all_processors);
-}
-
 } // namespace
 
 TimelineWriteSummary write_timeline_artifacts(
@@ -328,8 +304,8 @@ TimelineWriteSummary write_timeline_artifacts(
   summary.frames_written = true;
   summary.frame_count = frame_records.size();
 
-  // 5. Append processor provenance with honest limitations
-  nlohmann::json proc = {
+  // 5. Processor provenance with honest limitations, for the caller to stage
+  summary.processor = {
       {"id", "processor_timeline_generator_0001"},
       {"name", "svp timeline generator"},
       {"version", "svp-timeline-generator-v1"},
@@ -344,8 +320,6 @@ TimelineWriteSummary write_timeline_artifacts(
           {"limitations", "honest frame sampling and color-based grouping rather than cinematic shot detection"}
       }}
   };
-
-  append_processor_records(staging_dir / "provenance" / "processors.jsonl", {proc});
 
   return summary;
 }

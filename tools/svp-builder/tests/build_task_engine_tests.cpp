@@ -9,6 +9,7 @@
 #include "engine/stage_task_plan.hpp"
 #include "engine/stage_task_products.hpp"
 #include "engine/staging_scope.hpp"
+#include "processor_provenance.hpp"
 
 #include "svp/exec/task_graph.hpp"
 
@@ -82,8 +83,8 @@ void test_package_plan_overlaps_lanes() {
   require(tasks.back().kind == StageTaskKind::package_write, "package write runs last");
   // Audio lane, depth beside OCR: three tasks can run at once.
   require(stage_task_graph_width(tasks) == 3, "overlapping lanes give width 3");
-  require(depends_on(tasks, StageTaskKind::tracking, StageTaskKind::audio_extract),
-          "tracking waits for the processors.jsonl rewrite of audio extraction");
+  require(!depends_on(tasks, StageTaskKind::tracking, StageTaskKind::audio_extract),
+          "tracking does not wait for audio extraction: no lane writes processors.jsonl");
   require(!depends_on(tasks, StageTaskKind::canonical_frames,
                       StageTaskKind::audio_transcribe),
           "vision lane does not wait for audio when lanes overlap");
@@ -111,12 +112,45 @@ void test_single_heavy_lane_runs_audio_first() {
   require(stage_task_graph_width(tasks) == 2, "one heavy lane keeps depth beside OCR");
 }
 
-void test_microphone_mode_orders_processor_writers() {
-  StageTaskPlanInputs inputs = package_inputs();
-  inputs.microphone_stream_mode = true;
-  const auto tasks = plan_stage_tasks(inputs);
-  require(depends_on(tasks, StageTaskKind::tracking, StageTaskKind::audio_transcribe),
-          "microphone transcription appends processors.jsonl before tracking merges it");
+// processors.jsonl is composed by entities alone; every lane task that emits
+// processor records owns its own fragment, which entities reads and removes.
+void test_only_entities_composes_processors_jsonl() {
+  for (const bool microphone : {false, true}) {
+    StageTaskPlanInputs inputs = package_inputs();
+    inputs.microphone_stream_mode = microphone;
+    const auto tasks = plan_stage_tasks(inputs);
+    const auto scope_of = [&](StageTaskKind kind) -> const StagingScope& {
+      return tasks[position(tasks, kind)].scope;
+    };
+    for (const PlannedStageTask& task : tasks) {
+      const bool lane_task =
+          position(tasks, task.kind) < position(tasks, StageTaskKind::entities);
+      require(!lane_task || !scope_covers(task.scope, "provenance/processors.jsonl"),
+              std::string(stage_task_id(task.kind)) +
+                  " is a lane task but writes provenance/processors.jsonl");
+    }
+    require(!depends_on(tasks, StageTaskKind::tracking, StageTaskKind::audio_transcribe),
+            "tracking does not wait for transcription");
+
+    const StagingScope& entities = scope_of(StageTaskKind::entities);
+    require(scope_covers(entities, "provenance/processors.jsonl"),
+            "entities composes processors.jsonl");
+    const std::vector<std::pair<StageTaskKind, std::string_view>> writers{
+        {StageTaskKind::color, svp::builder::processor_fragment::kColor},
+        {StageTaskKind::audio_extract, svp::builder::processor_fragment::kAudioExtract}};
+    for (const auto& [kind, stage] : writers) {
+      const std::string fragment = svp::builder::stage_processor_fragment_ref(stage);
+      require(scope_covers(scope_of(kind), fragment),
+              std::string(stage_task_id(kind)) + " owns its processor fragment");
+      require(scope_covers(entities, fragment), "entities removes the " +
+                                                    std::string(stage) + " fragment");
+    }
+    const std::string microphone_fragment = svp::builder::stage_processor_fragment_ref(
+        svp::builder::processor_fragment::kAudioTranscribe);
+    require(scope_covers(scope_of(StageTaskKind::audio_transcribe), microphone_fragment) ==
+                microphone,
+            "transcription owns a processor fragment only on the microphone path");
+  }
 }
 
 void test_svpi_and_stop_after_plans() {
@@ -322,7 +356,7 @@ int main() {
   test_package_plan_overlaps_lanes();
   test_serial_plan_is_one_chain();
   test_single_heavy_lane_runs_audio_first();
-  test_microphone_mode_orders_processor_writers();
+  test_only_entities_composes_processors_jsonl();
   test_svpi_and_stop_after_plans();
   test_graph_cache_keys_follow_build_inputs();
   test_staging_capture_and_restore();

@@ -22,6 +22,9 @@ struct EntityWriteSummary {
   std::size_t processors_written = 0;
   std::size_t duplicate_processors_merged = 0;
   std::size_t skipped_missing_evidence = 0;
+  // write_visual_entity_artifacts: the visual entity tracker's processor
+  // record (RC2 §18.1), for the caller to stage. Null otherwise.
+  nlohmann::json processor_record;
 };
 
 /**
@@ -53,7 +56,8 @@ struct EntityWriteSummary {
  * - spatial/masks.index.jsonl + spatial/masks.blocks.svpmz
  *
  * Evidence source: EntityTrackResult from the visual entity tracker (§20.6).
- * Also writes processor provenance for the visual entity tracker.
+ * Returns the tracker's processor record in the summary; it does not touch
+ * provenance/processors.jsonl.
  */
 [[nodiscard]] EntityWriteSummary write_visual_entity_artifacts(
     const std::filesystem::path& staging_dir,

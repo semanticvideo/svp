@@ -1,4 +1,5 @@
 #include "build_pipeline_internal.hpp"
+#include "processor_provenance.hpp"
 
 #include "svp/vision/canonical_frame_input.hpp"
 #include "svp/vision/inference_performance.hpp"
@@ -112,12 +113,8 @@ void run_foundation_ocr_stage(BuildPipelineContext& context) {
     emit_stage_completed(context, ProgressStageId::ocr_evidence_crops);
   }
 
-  // Append OCR processor provenance records
-  if (!ocr_result.processors.empty()) {
-    nlohmann::json procs = nlohmann::json::array();
-    for (const auto& p : ocr_result.processors) procs.push_back(p);
-    append_jsonl_file(context.staging_dir / "provenance" / "processors.jsonl", procs);
-  }
+  write_stage_processor_fragment(context.staging_dir, processor_fragment::kFoundationOcr,
+                                 ocr_result.processors);
 
   nlohmann::json ocr_json =
       svp::vision::ocr_generation_result_to_json(ocr_result);
@@ -130,8 +127,10 @@ void run_foundation_ocr_stage(BuildPipelineContext& context) {
        (context.staging_dir / "text" / "numeric_values.jsonl").string()},
       {"text_absence_json",
        (context.staging_dir / "text" / "text_absence.json").string()},
-      {"processors_jsonl",
-       (context.staging_dir / "provenance" / "processors.jsonl").string()},
+      {"processor_records_jsonl",
+       stage_processor_fragment_path(context.staging_dir,
+                                     processor_fragment::kFoundationOcr)
+           .string()},
   };
   context.output["foundation_ocr_staging"] = ocr_json;
 }

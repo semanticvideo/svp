@@ -6,10 +6,9 @@
 //
 // Package build, lanes overlapping (the default):
 //
-//   inventory ─ color ─┬─ audio.extract ─ transcript ───────────────────┐
-//                      │        └──────────────┐ (processors.jsonl)     │
-//                      └─ frames ─┬─ depth ────┼─ tracking ─┐           │
-//                                 └─ ocr ─ embedding.text ┘ └─ entities ┴─
+//   inventory ─ color ─┬─ audio.extract ─ transcript ───────────────┬─ entities
+//                      └─ frames ─┬─ depth ──────────┬─ tracking ───┘
+//                                 └─ ocr ─ embedding.text ┘
 //      ─ relationships ─ index ─ validation ─ package.write
 //      [─ binding ─ svpi.write]                         (interlace create)
 //
@@ -20,11 +19,11 @@
 // beside OCR unless the build is serial, as before.
 //
 // Staging scopes (staging_scope.hpp) of tasks that may run at the same time
-// never overlap; plan_stage_tasks checks this for every pair. Audio
-// extraction rewrites provenance/processors.jsonl, so tracking, which merges
-// into that file, is ordered after it (formerly guaranteed only by timing);
-// the microphone path appends to it after ASR, so with several microphones
-// tracking also waits for transcription.
+// never overlap; plan_stage_tasks checks this for every pair. No lane task
+// writes provenance/processors.jsonl: each writes its processor records to
+// its own fragment or task state, and entities, which follows every lane,
+// composes the file (processor_provenance.hpp). So the lanes need no
+// ordering between them for provenance.
 
 #include "engine/staging_scope.hpp"
 
