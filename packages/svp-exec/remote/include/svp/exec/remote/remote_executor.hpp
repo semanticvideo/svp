@@ -2,12 +2,14 @@
 
 #include "svp/exec/executor.hpp"
 #include "svp/exec/frame_limits.hpp"
+#include "svp/exec/frame_stream.hpp"
 #include "svp/exec/loopback_executor.hpp"
 #include "svp/exec/remote/remote_connector.hpp"
 #include "svp/exec/remote/route_policy.hpp"
 
 #include <chrono>
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -32,6 +34,14 @@ namespace svp::exec::remote {
 inline constexpr std::chrono::milliseconds kDefaultReconnectWindow{15'000};
 inline constexpr std::chrono::milliseconds kDefaultReconnectPause{500};
 
+// Runs on a session's own thread once its connection is authenticated and
+// before any ASSIGN is sent: the worker handshake (HELLO / HELLO_ACK, runtime
+// and model transfer, plan §4.3) belongs here. It reads the worker's replies
+// from `reader` and writes requests to `writer`; frames it leaves unread stay
+// in `reader` for the lease pump. Throwing ends the session: its queued
+// leases fail with executor_lost and the exception text as the reason.
+using RemoteSessionPreamble = std::function<void(FrameReader& reader, FrameWriter& writer)>;
+
 struct RemoteExecutorOptions {
   // Stable and unique within a scheduler run. Required.
   std::string executor_id;
@@ -46,6 +56,9 @@ struct RemoteExecutorOptions {
   std::chrono::milliseconds reconnect_window = kDefaultReconnectWindow;
   std::chrono::milliseconds reconnect_pause = kDefaultReconnectPause;
   FrameLimits frame_limits{};
+  // Empty: leases are sent as soon as the connection opens (a bare worker
+  // loop, such as svp-exec-test-worker --listen).
+  RemoteSessionPreamble session_preamble;
 };
 
 // Runs tasks on a paired worker over the remote transport, speaking the same
@@ -53,9 +66,10 @@ struct RemoteExecutorOptions {
 // same rules through WorkerSessionLeases / pump_worker_frames:
 //
 //   * The first assign() opens a session: discovery by pairing id, route
-//     selection, and the TLS handshake run on the session's own thread, so
-//     the scheduler thread never waits on the network; ASSIGN frames issued
-//     meanwhile are queued and sent once the connection is up.
+//     selection, the TLS handshake, and the session preamble run on the
+//     session's own thread, so the scheduler thread never waits on the
+//     network; ASSIGN frames issued meanwhile are queued and sent once the
+//     preamble has finished.
 //   * Results are verified (schema, output_digest, every payload's length
 //     and BLAKE3) before they reach the scheduler. Bytes that fail any check,
 //     or a result for a lease this executor did not issue, end the session:

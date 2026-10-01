@@ -32,7 +32,10 @@ struct Session {
   std::vector<PendingAssign> pending;
   std::thread thread;
   WorkerSessionLeases leases;
+  // The connection is open (stream and writer are set).
   bool connected = false;
+  // The preamble finished: ASSIGN frames go straight to the writer.
+  bool ready = false;
   // Torn down on purpose (lease expiry); takes no new leases while it ends.
   bool retiring = false;
   bool finished = false;
@@ -75,10 +78,8 @@ struct RemoteExecutor::State {
     return all;
   }
 
-  // Returns true when the session is connected and its queued ASSIGNs moved
-  // to `pending`.
-  bool adopt_connection(Session& session, RemoteConnection connection,
-                        std::vector<PendingAssign>& pending) {
+  // Returns true when the session took the connection.
+  bool adopt_connection(Session& session, RemoteConnection connection) {
     const std::lock_guard lock(mutex);
     if (session.retiring || stopping) {
       connection.stream->cancel();
@@ -89,8 +90,14 @@ struct RemoteExecutor::State {
     session.connected = true;
     ++connections_opened;
     last_route = std::move(connection.route);
-    pending.swap(session.pending);
     return true;
+  }
+
+  // Marks the session ready and moves its queued ASSIGNs to `pending`.
+  void mark_ready(Session& session, std::vector<PendingAssign>& pending) {
+    const std::lock_guard lock(mutex);
+    session.ready = true;
+    pending.swap(session.pending);
   }
 
   // Connects, rediscovering the worker until reconnect_window runs out.
@@ -119,18 +126,30 @@ struct RemoteExecutor::State {
     WorkerSessionEnd end{.failure = AttemptFailureKind::executor_lost,
                          .reason = "worker session closed while connecting"};
     std::optional<RemoteConnection> connection = connect_within_window(session, end.reason);
-    std::vector<PendingAssign> pending;
-    if (connection && adopt_connection(session, std::move(*connection), pending)) {
-      try {
-        for (const PendingAssign& assign : pending) {
-          session.writer->write(assign.frame);
-        }
-      } catch (const ExecError&) {
-        // The connection is gone; the reader below sees it end.
-      }
+    if (connection && adopt_connection(session, std::move(*connection))) {
       StreamFrameReader reader(*session.stream, options.frame_limits);
-      end = pump_worker_frames(reader, mutex, session.leases, *events,
-                               "worker connection ended");
+      bool ready = true;
+      if (options.session_preamble) {
+        try {
+          options.session_preamble(reader, *session.writer);
+        } catch (const std::exception& error) {
+          ready = false;
+          end.reason = std::string("worker session setup failed: ") + error.what();
+        }
+      }
+      if (ready) {
+        std::vector<PendingAssign> pending;
+        mark_ready(session, pending);
+        try {
+          for (const PendingAssign& assign : pending) {
+            session.writer->write(assign.frame);
+          }
+        } catch (const ExecError&) {
+          // The connection is gone; the reader below sees it end.
+        }
+        end = pump_worker_frames(reader, mutex, session.leases, *events,
+                                 "worker connection ended");
+      }
       session.stream->cancel();
     }
 
@@ -242,7 +261,7 @@ void RemoteExecutor::assign(const TaskSpec& spec, const Lease& lease) {
     const std::lock_guard lock(state.mutex);
     session = state.live_session();
     session->leases.add(lease.lease_id, spec.task_id, lease.attempt);
-    if (!session->connected) {
+    if (!session->ready) {
       session->pending.push_back(PendingAssign{.lease_id = lease.lease_id, .frame = std::move(frame)});
       return;
     }
@@ -264,7 +283,7 @@ void RemoteExecutor::cancel(std::string_view lease_id) {
       return;
     }
     session->leases.mark_cancelled(lease_id);
-    if (!session->connected) {
+    if (!session->ready) {
       std::erase_if(session->pending,
                     [&](const PendingAssign& pending) { return pending.lease_id == lease_id; });
       return;
