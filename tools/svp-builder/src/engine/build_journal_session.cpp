@@ -95,6 +95,16 @@ std::string BuildJournalSession::prepare() {
   throw std::logic_error("unknown recovery journal mode");
 }
 
+std::vector<std::string> BuildJournalSession::recorded_task_ids() const {
+  std::vector<std::string> ids;
+  if (opened_) {
+    for (auto& [task_id, task_type] : opened_->recorded_tasks()) {
+      ids.push_back(std::move(task_id));
+    }
+  }
+  return ids;
+}
+
 StartedJournal BuildJournalSession::start(const svp::exec::TaskGraph& graph,
                                           const svp::exec::SourceFingerprintRecord& source) {
   const std::array<svp::exec::SourceFingerprintRecord, 1> sources{source};

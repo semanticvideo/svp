@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/builder/build_progress.hpp"
+#include "svp/builder/distributed_execution.hpp"
 #include "svp/models/thread_plan.hpp"
 #include "svp/builder/runtime_tools.hpp"
 #include "svp/vision/inference_performance.hpp"
@@ -105,6 +106,10 @@ struct BuildPipelineOptions {
   // internal package.
   std::filesystem::path journal_output_path;
   std::optional<SvpiPublicationOptions> svpi;
+  // --distributed: the paired workers OCR frame batches may also run on
+  // (distributed_execution.hpp). Null for a local build, which then loads no
+  // pairing data and opens no socket.
+  std::shared_ptr<DistributedExecution> distributed;
 };
 
 enum class BuildPipelineFailure {

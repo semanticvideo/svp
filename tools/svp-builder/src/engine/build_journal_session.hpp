@@ -57,6 +57,10 @@ class BuildJournalSession {
   [[nodiscard]] StartedJournal start(const svp::exec::TaskGraph& graph,
                                      const svp::exec::SourceFingerprintRecord& source);
 
+  // After prepare() in resume mode: the IDs of every task the journal
+  // recorded. Empty for a new journal.
+  [[nodiscard]] std::vector<std::string> recorded_task_ids() const;
+
   [[nodiscard]] const std::filesystem::path& journal_root() const noexcept {
     return journal_root_;
   }

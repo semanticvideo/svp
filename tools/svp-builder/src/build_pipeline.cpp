@@ -11,6 +11,9 @@
 #include "engine/build_inputs_digest.hpp"
 #include "engine/build_journal_session.hpp"
 #include "engine/committed_stage_results.hpp"
+#include "engine/ocr_batch_observer.hpp"
+#include "engine/ocr_execution_policy.hpp"
+#include "engine/ocr_frame_batch_plan.hpp"
 #include "engine/stage_output_access.hpp"
 #include "engine/stage_task_environment.hpp"
 #include "engine/stage_task_plan.hpp"
@@ -30,16 +33,22 @@
 #include "svp/exec/journal_result_commit_sink.hpp"
 #include "svp/exec/scheduler.hpp"
 #include "svp/exec/source_fingerprint.hpp"
+#include "svp/exec/task_type_restricted_executor.hpp"
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/models/cache.hpp"
 #include "svp/models/runtime.hpp"
 #include "svp/vision/noise_suppression.hpp"
+#include "svp/vision/tasks/ocr_frame_batch_parameters.hpp"
+#include "svp/vision/tasks/ocr_frame_batch_task.hpp"
 
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <algorithm>
 #include <map>
 #include <memory>
+#include <set>
+#include <span>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -103,9 +112,11 @@ std::string join_task_ids(const std::vector<svp::exec::CommittedResult>& committ
   return ids;
 }
 
-// Restores what an interrupted build already committed: each task's staging
-// capture, in graph order, and its states for the tasks still to run.
+// Restores what an interrupted build already committed: each stage task's
+// staging capture, in graph order, and its states for the tasks still to run;
+// each frame-batch task's output for the OCR reducer.
 void restore_committed_tasks(const std::vector<engine::PlannedStageTask>& tasks,
+                             const svp::exec::TaskGraph& graph,
                              const std::vector<svp::exec::CommittedResult>& committed,
                              const std::filesystem::path& staging_dir,
                              engine::CommittedStageResults& results) {
@@ -114,12 +125,82 @@ void restore_committed_tasks(const std::vector<engine::PlannedStageTask>& tasks,
     by_id.emplace(std::string(engine::stage_task_id(task.kind)), &task);
   }
   for (const svp::exec::CommittedResult& result : committed) {
+    const auto stage = by_id.find(result.result.task_id);
+    if (stage == by_id.end()) {
+      const svp::exec::TaskSpec& spec = graph.node(graph.find(result.result.task_id).value()).spec;
+      engine::record_committed_result(results, spec, result);
+      continue;
+    }
     const engine::StageTaskProducts products =
         engine::decode_stage_products(result.result.outputs, result.payloads);
-    engine::restore_staging_scope(staging_dir, by_id.at(result.result.task_id)->scope,
-                                  products.staging);
+    engine::restore_staging_scope(staging_dir, stage->second->scope, products.staging);
     results.record(result.result.task_id, products);
   }
+}
+
+// The OCR stage's frame batches, when it splits (ocr_frame_batch_plan.hpp).
+// A --distributed build prepares its workers here, once the OCR work is
+// known and before any task runs, and sizes batches from this Mac's measured
+// per-sample cost. A resumed build keeps the partition its journal recorded.
+struct PlannedOcrExecution {
+  std::optional<engine::OcrFrameBatchPlan> batches;
+  std::size_t coordinator_slots = engine::kLocalOnlyOcrBatchSlots;
+  std::vector<svp::exec::Executor*> workers;
+};
+
+PlannedOcrExecution plan_ocr_execution(
+    const BuildPipelineOptions& options, const BuildStageExecutionPlan& stage_plan,
+    const svp::media::MediaIngestPlan& plan, const nlohmann::json& plan_json,
+    const svp::models::ThreadPlan& thread_plan, bool model_runtime_available,
+    const svp::exec::SourceFingerprintRecord& source,
+    const std::vector<engine::PlannedStageTask>& tasks, const std::string& build_session_id,
+    const engine::BuildJournalSession& journal_session) {
+  PlannedOcrExecution execution;
+  std::optional<engine::OcrWorkPlan> work = engine::plan_ocr_work({
+      .options = options,
+      .stage_plan = stage_plan,
+      .media_plan = plan,
+      .media_plan_json = plan_json,
+      .thread_plan = thread_plan,
+      .model_runtime_available = model_runtime_available,
+      .source_blake3 = source.blake3,
+      .source_bytes = source.size_bytes,
+  });
+  if (!work) {
+    return execution;
+  }
+  svp::vision::OcrBatchPolicy batch_policy;
+  if (options.distributed) {
+    const DistributedFleet fleet = options.distributed->prepare(DistributedOcrWork{
+        .build_session_id = build_session_id,
+        .source = work->source,
+        .source_path = work->source_path,
+        .model_refs = work->model_refs,
+        .pp_ocr = work->pp_ocr,
+        .model_cache_root = options.model_cache_dir,
+        .ffmpeg_path = options.ffmpeg_path,
+        .ffmpeg_build = work->ffmpeg_build,
+        .thread_plan = thread_plan,
+    });
+    execution.workers = fleet.workers;
+    execution.coordinator_slots = std::max<std::size_t>(1, fleet.coordinator_ocr_slots);
+    if (fleet.seconds_per_sample) {
+      batch_policy.estimated_seconds_per_sample = *fleet.seconds_per_sample;
+    }
+  }
+  const std::vector<std::string> depends_on = engine::ocr_stage_dependencies(tasks);
+  if (options.journal_mode == RecoveryJournalMode::resume) {
+    if (std::optional<std::vector<svp::vision::OcrSampleBatch>> recorded =
+            engine::ocr_batches_from_task_ids(journal_session.recorded_task_ids(),
+                                              work->samples.samples.size())) {
+      execution.batches = engine::make_ocr_frame_batch_plan_from_batches(
+          std::move(*work), std::move(*recorded), batch_policy, build_session_id, depends_on);
+      return execution;
+    }
+  }
+  execution.batches = engine::make_ocr_frame_batch_plan(std::move(*work), batch_policy,
+                                                         build_session_id, depends_on);
+  return execution;
 }
 
 void report_resume(const engine::StartedJournal& started, std::size_t task_count,
@@ -266,8 +347,13 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         effective_options.journal_output_path.empty() ? effective_options.output_path
                                                       : effective_options.journal_output_path);
     const std::string build_session_id = journal_session.prepare();
+    PlannedOcrExecution ocr_execution = plan_ocr_execution(
+        effective_options, stage_plan, plan, plan_json, thread_plan, model_runtime_available,
+        source, tasks, build_session_id, journal_session);
+    const engine::OcrFrameBatchPlan* ocr_batches =
+        ocr_execution.batches ? &*ocr_execution.batches : nullptr;
     const svp::exec::TaskGraph graph =
-        engine::make_stage_task_graph(tasks, build_session_id, build_inputs);
+        engine::make_build_task_graph(tasks, build_session_id, build_inputs, ocr_batches);
     std::optional<engine::StartedJournal> started_journal;
     try {
       started_journal.emplace(journal_session.start(graph, source));
@@ -296,7 +382,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     }
 
     engine::CommittedStageResults results;
-    restore_committed_tasks(tasks, started.committed, staging_dir, results);
+    restore_committed_tasks(tasks, graph, started.committed, staging_dir, results);
     report_resume(started, tasks.size(), journal_session.journal_root(),
                   effective_options.quiet);
 
@@ -310,14 +396,33 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         .model_runtime_available = model_runtime_available,
         .planned_catalog = planned_catalog,
         .progress_sink = *sink,
-        .results = results};
+        .results = results,
+        .ocr_batches = ocr_batches,
+        .pp_ocr_sessions = std::make_shared<svp::vision::tasks::PpOcrSessionPool>()};
     svp::exec::TaskTypeRegistry registry;
     engine::StageOutputAccess outputs;
     engine::StageExitRecord stage_exits;
     engine::register_stage_task_types(registry, tasks, environment, outputs, stage_exits);
+    if (ocr_batches != nullptr) {
+      outputs.register_input(ocr_batches->work.source, ocr_batches->work.source_path);
+      svp::vision::tasks::register_ocr_frame_batch_task(
+          registry,
+          svp::vision::tasks::OcrFrameBatchWorkerEnvironment{
+              .model_cache_root = effective_options.model_cache_dir,
+              .ffmpeg_path = effective_options.ffmpeg_path,
+              .write_output =
+                  [&outputs](std::span<const std::byte> bytes, std::string media_type,
+                             std::string role) {
+                    return outputs.put(bytes, std::move(media_type), std::move(role));
+                  },
+              .model_cache_for = {}},
+          environment.pp_ocr_sessions);
+    }
 
-    // One slot per task that can run at once: the graph's edges encode the
-    // concurrency policy, so they alone bound concurrency.
+    // One slot per stage task that can run at once: the graph's edges encode
+    // the concurrency policy, so they alone bound concurrency. Frame batches
+    // have executors of their own: this Mac's OCR slots and, when
+    // distributed, the workers'.
     svp::exec::InProcessExecutor executor(
         registry, outputs,
         svp::exec::InProcessExecutorOptions{
@@ -325,13 +430,48 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
             .threads = engine::stage_task_graph_width(tasks),
             .worker_session_id = "ws_" + build_session_id,
             .runtime_id = {}});
+    const std::set<std::string, std::less<>> frame_batch_types{
+        std::string(svp::vision::tasks::kOcrFrameBatchTaskType)};
+    svp::exec::TaskTypeExcludingExecutor stages_only(executor, frame_batch_types);
+    std::optional<svp::exec::InProcessExecutor> ocr_executor;
+    std::optional<svp::exec::TaskTypeRestrictedExecutor> ocr_only;
+    std::vector<svp::exec::Executor*> executors{&stages_only};
+    if (ocr_batches != nullptr) {
+      ocr_executor.emplace(registry, outputs,
+                           svp::exec::InProcessExecutorOptions{
+                               .executor_id = "in-process-ocr",
+                               .threads = ocr_execution.coordinator_slots,
+                               .worker_session_id = "ws_" + build_session_id + "_ocr",
+                               .runtime_id = {}});
+      ocr_only.emplace(*ocr_executor, frame_batch_types);
+      executors.push_back(&*ocr_only);
+      executors.insert(executors.end(), ocr_execution.workers.begin(),
+                       ocr_execution.workers.end());
+    }
     svp::exec::JournalResultCommitSink journal_sink(started.journal);
     engine::StageResultCommitSink commit_sink(journal_sink, results);
     const svp::exec::SteadyClock clock;
-    std::vector<svp::exec::Executor*> executors{&executor};
+    svp::exec::SchedulerPolicy scheduler_policy = engine::whole_stage_scheduler_policy();
+    scheduler_policy.task_types.emplace(std::string(svp::vision::tasks::kOcrFrameBatchTaskType),
+                                        engine::ocr_frame_batch_task_policy());
+    std::optional<engine::OcrBatchObserver> ocr_observer;
+    svp::exec::AttemptObserver observer;
+    if (ocr_batches != nullptr) {
+      std::set<std::string> resumed_ids;
+      for (const svp::exec::CommittedResult& committed : started.committed) {
+        resumed_ids.insert(committed.result.task_id);
+      }
+      ocr_observer.emplace(*ocr_batches, *sink, clock, effective_options.quiet, resumed_ids);
+      observer = [&ocr_observer](const svp::exec::AttemptEvent& event) {
+        ocr_observer->observe(event);
+      };
+    }
     const svp::exec::BuildOutcome outcome =
-        svp::exec::Scheduler(engine::whole_stage_scheduler_policy(), clock)
-            .run(graph, executors, commit_sink, cancellation, {}, started.committed);
+        svp::exec::Scheduler(scheduler_policy, clock)
+            .run(graph, executors, commit_sink, cancellation, observer, started.committed);
+    if (ocr_observer && effective_options.distributed && !effective_options.quiet) {
+      std::cerr << ocr_observer->summary();
+    }
 
     if (outcome.status == svp::exec::BuildStatus::cancelled) {
       started.journal.set_build_session_status(build_session_id,
@@ -463,6 +603,11 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     finished.error_message = journal_note;
     staging_guard.cleanup_on_success();
     return with_plan(std::move(finished));
+  } catch (const DistributedPreparationError& error) {
+    std::cerr << "svp-builder: " << error.what() << "\n";
+    return with_plan({.exit_code = kBuildFailedExitCode,
+                      .failure = BuildPipelineFailure::processing,
+                      .error_message = error.what()});
   } catch (const engine::RecoveryJournalBlocked& error) {
     std::cerr << "svp-builder: " << error.what() << "\n";
     return with_plan({.exit_code = kBuildFailedExitCode,

@@ -27,6 +27,9 @@ add_library(svp-builder-lib
   src/engine/canonical_frames_codec.cpp
   src/engine/committed_stage_results.cpp
   src/engine/frame_catalog_delta.cpp
+  src/engine/ocr_batch_observer.cpp
+  src/engine/ocr_execution_policy.cpp
+  src/engine/ocr_frame_batch_plan.cpp
   src/engine/stage_output_access.cpp
   src/engine/stage_task_plan.cpp
   src/engine/stage_task_products.cpp
@@ -38,6 +41,7 @@ add_library(svp-builder-lib
   src/engine/stage_tasks_vision.cpp
   src/engine/staging_capture_check.cpp
   src/engine/staging_scope.cpp
+  src/engine/vision_lane_settings.cpp
   src/engine/whole_stage_scheduler_policy.cpp
   src/process_resources.cpp
   src/progress_renderer.cpp
@@ -81,13 +85,14 @@ target_compile_features(svp-builder-lib PUBLIC cxx_std_20)
 
 target_link_libraries(svp-builder-lib
   PUBLIC
+    svp::exec
     svp::vision
     svp::progress
   PRIVATE
     nlohmann_json::nlohmann_json
     svp::audio
     svp::core
-    svp::exec
+    svp::vision_tasks
     svp::media
     svp::models
     svp::package

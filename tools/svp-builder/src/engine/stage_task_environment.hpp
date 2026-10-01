@@ -14,17 +14,21 @@
 #include "svp/media/media_ingest_plan.hpp"
 #include "svp/models/thread_plan.hpp"
 #include "svp/vision/frame_catalog.hpp"
+#include "svp/vision/tasks/pp_ocr_session_pool.hpp"
 
 #include <nlohmann/json.hpp>
 
 #include <cstddef>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace svp::builder::engine {
+
+struct OcrFrameBatchPlan;
 
 // A stage that ends the build with a specific exit status rather than an
 // error (the audio lane when diarization is required but unavailable).
@@ -52,6 +56,12 @@ struct StageTaskEnvironment {
   const svp::vision::FrameCatalog& planned_catalog;
   BuildProgressSink& progress_sink;
   const CommittedStageResults& results;
+  // Set when the OCR stage runs as frame-batch tasks: the `ocr` task reduces
+  // their committed outputs instead of running the whole stage.
+  const OcrFrameBatchPlan* ocr_batches = nullptr;
+  // PP-OCR sessions shared by this process's frame-batch tasks and the OCR
+  // reducer's evidence-crop re-read.
+  std::shared_ptr<svp::vision::tasks::PpOcrSessionPool> pp_ocr_sessions;
 };
 
 // Named state blobs a task returns (stage_task_products.hpp).

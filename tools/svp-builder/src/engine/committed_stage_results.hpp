@@ -40,6 +40,12 @@ class CommittedStageResults {
                                           std::string_view name) const;
   [[nodiscard]] StagingCaptureDigests capture(std::string_view task_id) const;
 
+  // Results of tasks that are not whole stages (ocr.frame_batch): their one
+  // output's bytes, as the reducer that consumes them reads them.
+  void record_task_output(const std::string& task_id, std::vector<std::byte> bytes);
+  // Throws std::runtime_error when the task's output was never recorded.
+  [[nodiscard]] std::vector<std::byte> task_output(std::string_view task_id) const;
+
  private:
   struct Entry {
     std::map<std::string, std::vector<std::byte>, std::less<>> states;
@@ -49,7 +55,13 @@ class CommittedStageResults {
 
   mutable std::mutex mutex_;
   std::map<std::string, Entry, std::less<>> entries_;
+  std::map<std::string, std::vector<std::byte>, std::less<>> task_outputs_;
 };
+
+// Records one committed result where its consumers read it: a whole-stage
+// task's states and staging capture, or a frame-batch task's output bytes.
+void record_committed_result(CommittedStageResults& results, const svp::exec::TaskSpec& spec,
+                             const svp::exec::CommittedResult& committed);
 
 // Commits to the journal first (RC2 §20.4: a result is committed only once it
 // is durable), then makes the result visible to dependents.
