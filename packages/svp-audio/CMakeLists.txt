@@ -73,6 +73,7 @@ add_library(svp-audio
   src/whisper_cpp_backend.cpp
   src/whisper_cpp_model.cpp
   src/whisper_pcm_reader.cpp
+  src/whisper_vad_speech.cpp
   src/word_boundary_conversion.cpp
 )
 
@@ -102,6 +103,7 @@ target_link_libraries(svp-audio
 if(BUILD_TESTING)
   add_executable(svp-audio-tests
     tests/asr_boundary_tests.cpp
+    tests/asr_chunk_purity_tests.cpp
     tests/asr_slice_workspace_tests.cpp
     tests/audio_stage_tests.cpp
     tests/diarization_boundary_tests.cpp

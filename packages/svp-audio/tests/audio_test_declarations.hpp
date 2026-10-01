@@ -111,3 +111,4 @@ void test_strong_segment_lock_preserves_supported_group_decision();
 void test_punctuated_segment_repair_preserves_supported_group_decision();
 void test_real_sherpa_diarization_speaker_count_fixtures_when_enabled();
 void test_real_asr_diarization_word_attribution_fixtures_when_enabled();
+void test_real_asr_chunk_results_are_independent_of_prior_chunks_when_enabled();
