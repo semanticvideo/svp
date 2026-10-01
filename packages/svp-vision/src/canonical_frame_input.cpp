@@ -132,6 +132,21 @@ std::vector<Srgb8Pixel> decode_frame_at(const std::filesystem::path& ffmpeg_path
 
 }  // namespace
 
+bool ffmpeg_executable_available(const std::filesystem::path& ffmpeg_path) {
+  return ffmpeg_is_available(ffmpeg_path);
+}
+
+std::vector<Srgb8Pixel> decode_rgb_frame_at(
+    const std::filesystem::path& ffmpeg_path,
+    const std::filesystem::path& source_path,
+    std::int64_t seek_us,
+    int width,
+    int height,
+    std::string& out_error) {
+  return decode_frame_at(ffmpeg_path, source_path, seek_us, width, height,
+                         out_error);
+}
+
 std::vector<std::int64_t> deterministic_seek_timestamps_us(
     std::int64_t duration_us,
     int count) {

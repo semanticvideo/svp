@@ -87,6 +87,23 @@ struct DecodedCanonicalFrames {
     const std::string& purpose = kCanonicalFramePurpose,
     FrameProgressCallback on_progress = {});
 
+// True when `ffmpeg_path` names an existing file, or (a bare name) a program
+// found on PATH. Every decode below checks this first.
+[[nodiscard]] bool ffmpeg_executable_available(
+    const std::filesystem::path& ffmpeg_path);
+
+// Decodes the one RGB frame ffmpeg yields after seeking `source_path` to
+// `seek_us`, scaled to width x height: the per-frame primitive every decode
+// below uses. Empty, with `out_error` set, when ffmpeg yields no full frame
+// (a decode miss).
+[[nodiscard]] std::vector<Srgb8Pixel> decode_rgb_frame_at(
+    const std::filesystem::path& ffmpeg_path,
+    const std::filesystem::path& source_path,
+    std::int64_t seek_us,
+    int width,
+    int height,
+    std::string& out_error);
+
 // Extract the media duration in microseconds from the MediaIngestPlan.
 // Returns 0 if the duration cannot be determined.
 [[nodiscard]] std::int64_t compute_media_duration_us(

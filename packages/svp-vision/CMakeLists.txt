@@ -15,14 +15,22 @@ add_library(svp-vision
   src/foundation_color_staging.cpp
   src/foundation_ocr_staging.cpp
   src/observation_pipeline_plan.cpp
+  src/ocr_batch_policy.cpp
+  src/ocr_frame_batch.cpp
+  src/ocr_frame_batch_reduction.cpp
+  src/ocr_frame_detections_codec.cpp
   src/ocr_generation/common.cpp
   src/ocr_generation/crop_hardening.cpp
   src/ocr_generation/numeric_parser.cpp
+  src/ocr_generation/pp_ocr_options.cpp
   src/ocr_generation/reconciliation.cpp
   src/ocr_generation/record_emission.cpp
   src/ocr_generation/result_json.cpp
+  src/ocr_generation/sample_collection.cpp
+  src/ocr_generation/stage_completion.cpp
   src/ocr_generation/staging_io.cpp
   src/ocr_generation.cpp
+  src/ocr_sample_plan.cpp
   src/ocr_temporal_sampling.cpp
   src/pp_ocr/detection.cpp
   src/pp_ocr/model_bundles.cpp
@@ -445,6 +453,26 @@ if(BUILD_TESTING)
   add_test(NAME svp-vision-ocr-temporal-sampling-tests
            COMMAND svp-vision-ocr-temporal-sampling-tests)
 
+  add_executable(svp-vision-ocr-frame-batch-tests
+    tests/ocr_frame_batch_tests.cpp
+  )
+
+  target_compile_features(svp-vision-ocr-frame-batch-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_compile_definitions(svp-vision-ocr-frame-batch-tests PRIVATE
+    SVP_VISION_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+  )
+
+  target_link_libraries(svp-vision-ocr-frame-batch-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-ocr-frame-batch-tests
+           COMMAND svp-vision-ocr-frame-batch-tests)
+
   add_executable(svp-vision-ocr-numeric-parser-tests
     tests/ocr_numeric_parser_tests.cpp
   )
@@ -509,3 +537,6 @@ if(BUILD_TESTING)
   add_test(NAME svp-vision-pp-ocr-recognition-tests
            COMMAND svp-vision-pp-ocr-recognition-tests)
 endif()
+
+# ocr.frame_batch registration for the task engine (links svp::exec).
+add_subdirectory(tasks)
