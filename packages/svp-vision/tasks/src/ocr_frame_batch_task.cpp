@@ -1,0 +1,167 @@
+#include "svp/vision/tasks/ocr_frame_batch_task.hpp"
+
+#include "pp_ocr_session_pool.hpp"
+#include "svp/exec/blake3_digest.hpp"
+#include "svp/exec/output_digest.hpp"
+#include "svp/vision/ocr_frame_batch.hpp"
+#include "svp/vision/ocr_frame_detections.hpp"
+#include "svp/vision/tasks/ocr_frame_batch_parameters.hpp"
+
+#include <algorithm>
+#include <cstddef>
+#include <memory>
+#include <optional>
+#include <string_view>
+#include <utility>
+
+namespace svp::vision::tasks {
+namespace {
+
+using svp::exec::TaskError;
+using svp::exec::TaskModelRef;
+using svp::exec::TaskResult;
+using svp::exec::TaskSpec;
+using svp::exec::TaskStatus;
+
+// TaskTypeRegistry::execute validates the result before run_task_attempt
+// stamps the real attempt number and worker session over these.
+constexpr std::uint64_t kUnstampedAttempt = 1;
+constexpr std::string_view kUnstampedWorkerSession = "ws_unstamped";
+
+TaskResult unstamped_result(const TaskSpec& spec) {
+  TaskResult result;
+  result.task_id = spec.task_id;
+  result.attempt = kUnstampedAttempt;
+  result.execution.worker_session_id = std::string(kUnstampedWorkerSession);
+  return result;
+}
+
+TaskResult failed(const TaskSpec& spec, std::string code, std::string message,
+                  bool retryable) {
+  TaskResult result = unstamped_result(spec);
+  result.status = TaskStatus::failed;
+  result.output_digest = svp::exec::compute_output_digest({});
+  result.error = TaskError{.code = std::move(code),
+                           .message = "ocr.frame_batch: " + std::move(message),
+                           .retryable = retryable};
+  return result;
+}
+
+const TaskModelRef* find_ref(const TaskSpec& spec, std::string_view model_id) {
+  const auto found = std::find_if(
+      spec.model_refs.begin(), spec.model_refs.end(),
+      [&](const TaskModelRef& ref) { return ref.model_id == model_id; });
+  return found == spec.model_refs.end() ? nullptr : &*found;
+}
+
+// nullopt when the loaded bundles are the ones the coordinator named.
+std::optional<std::string> model_identity_mismatch(const PpOcrModelInfo& loaded,
+                                                   const TaskModelRef& det,
+                                                   const TaskModelRef& rec) {
+  if (loaded.det_model_id != det.model_id ||
+      loaded.det_bundle_blake3 != svp::exec::blake3_hex(det.bundle_blake3)) {
+    return "detector bundle " + loaded.det_model_id + "@" + loaded.det_bundle_blake3 +
+           " is not " + det.model_bundle_id;
+  }
+  if (loaded.rec_model_id != rec.model_id ||
+      loaded.rec_bundle_blake3 != svp::exec::blake3_hex(rec.bundle_blake3)) {
+    return "recognizer bundle " + loaded.rec_model_id + "@" + loaded.rec_bundle_blake3 +
+           " is not " + rec.model_bundle_id;
+  }
+  return std::nullopt;
+}
+
+std::vector<std::byte> to_bytes(const std::string& text) {
+  std::vector<std::byte> bytes(text.size());
+  std::transform(text.begin(), text.end(), bytes.begin(),
+                 [](char character) { return static_cast<std::byte>(character); });
+  return bytes;
+}
+
+TaskResult execute(const TaskSpec& spec, const svp::exec::ResolvedInputs& inputs,
+                   const svp::exec::CancellationToken& cancellation,
+                   const OcrFrameBatchWorkerEnvironment& environment,
+                   PpOcrSessionPool& sessions) {
+  svp::exec::throw_if_cancelled(cancellation, "ocr.frame_batch start");
+  const OcrFrameBatchParameters parameters =
+      ocr_frame_batch_parameters_from_json(spec.parameters);
+
+  if (spec.inputs.size() != 1 ||
+      !spec.inputs.contains(std::string(kOcrFrameBatchSourceInput))) {
+    return failed(spec, "invalid_inputs",
+                  "inputs must be exactly `" + std::string(kOcrFrameBatchSourceInput) + "`",
+                  false);
+  }
+  const TaskModelRef* det = find_ref(spec, parameters.pp_ocr.detector_model_id);
+  const TaskModelRef* rec = find_ref(spec, parameters.pp_ocr.recognizer_model_id);
+  if (det == nullptr || rec == nullptr || spec.model_refs.size() != 2) {
+    return failed(spec, "invalid_model_refs",
+                  "model_refs must name exactly the detector and recognizer", false);
+  }
+
+  const std::unique_ptr<PpOcrSessionPool::Lease> lease =
+      sessions.acquire(parameters.pp_ocr);
+  const PpOcrSession& session = lease->session();
+  if (!session.available) {
+    return failed(spec, "ocr_unavailable", session.blocker, true);
+  }
+  if (const auto mismatch = model_identity_mismatch(session.model_info, *det, *rec)) {
+    return failed(spec, "model_mismatch", *mismatch, true);
+  }
+
+  const OcrFrameBatchRequest request{
+      .source_path = inputs.at(std::string(kOcrFrameBatchSourceInput)).path,
+      .ffmpeg_path = environment.ffmpeg_path,
+      .frame_width = parameters.frame_width,
+      .frame_height = parameters.frame_height,
+      .samples = parameters.samples,
+  };
+  OcrFrameBatchHooks hooks;
+  hooks.before_sample = [&cancellation] {
+    svp::exec::throw_if_cancelled(cancellation, "ocr.frame_batch between frames");
+  };
+  const OcrFrameBatchOutcome outcome = run_ocr_frame_batch(
+      session, sessions.with_model_cache(parameters.pp_ocr), request, hooks);
+  if (!outcome.decoding_attempted) {
+    return failed(spec, "decode_unavailable", outcome.skipped_reason, true);
+  }
+  svp::exec::throw_if_cancelled(cancellation, "ocr.frame_batch before output");
+
+  std::size_t decoded = 0;
+  std::size_t detections = 0;
+  for (const OcrSampleDetections& sample : outcome.samples) {
+    if (sample.status != OcrSampleStatus::decode_missed) ++decoded;
+    detections += sample.detections.size();
+  }
+
+  TaskResult result = unstamped_result(spec);
+  result.status = TaskStatus::succeeded;
+  result.outputs = {environment.write_output(
+      to_bytes(encode_ocr_sample_detections_jsonl(outcome.samples)),
+      std::string(kOcrFrameDetectionsMediaType), std::string(kOcrFrameDetectionsRole))};
+  result.output_digest = svp::exec::compute_output_digest(result.outputs);
+  result.diagnostics = {
+      {"decoded_samples", decoded},
+      {"detections", detections},
+      {"samples", outcome.samples.size()},
+  };
+  return result;
+}
+
+}  // namespace
+
+void register_ocr_frame_batch_task(svp::exec::TaskTypeRegistry& registry,
+                                   OcrFrameBatchWorkerEnvironment environment) {
+  auto sessions = std::make_shared<PpOcrSessionPool>(environment.model_cache_root);
+  registry.register_type(svp::exec::TaskTypeDefinition{
+      .name = std::string(kOcrFrameBatchTaskType),
+      .version = kOcrFrameBatchTaskTypeVersion,
+      .validate_parameters = validate_ocr_frame_batch_parameters,
+      .execute = [environment = std::move(environment), sessions](
+                     const TaskSpec& spec, const svp::exec::ResolvedInputs& inputs,
+                     const svp::exec::CancellationToken& cancellation) {
+        return execute(spec, inputs, cancellation, environment, *sessions);
+      }});
+}
+
+}  // namespace svp::vision::tasks

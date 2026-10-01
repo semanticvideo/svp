@@ -517,3 +517,6 @@ if(BUILD_TESTING)
   add_test(NAME svp-vision-pp-ocr-recognition-tests
            COMMAND svp-vision-pp-ocr-recognition-tests)
 endif()
+
+# ocr.frame_batch registration for the task engine (links svp::exec).
+add_subdirectory(tasks)
