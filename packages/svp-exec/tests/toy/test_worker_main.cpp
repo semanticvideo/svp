@@ -11,6 +11,15 @@
 //       "listening service=<name> port=<n>" once discoverable and serves
 //       until SIGINT or SIGTERM.
 //
+//   svp-exec-test-worker worker --serve-fd <fd> --cas-root <dir>
+//                        --session-dir <dir> --worker-session-id <id>
+//                        --runtime-id b3:<hex>
+//       The session-program contract of a worker runtime
+//       (svp/exec/worker/session_process.hpp): one session on <fd>, toy
+//       outputs in the CAS at <dir>, results stamped with the session id and
+//       runtime id. The worker driver ships this executable as a stand-in
+//       runtime's bin/svp-builder.
+//
 // By default toy outputs live in memory; with `--cas-root <dir>` inputs are
 // resolved from, and outputs stored in, the content-addressed cache at <dir>
 // through CasTaskArtifactAccess, as a real worker does.
@@ -33,6 +42,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unistd.h>
 
@@ -80,11 +90,34 @@ bool set_up(WorkerRuntime& runtime, const std::map<std::string, std::string>& fl
   return true;
 }
 
-WorkerLoopExit serve(ByteStream& stream, WorkerRuntime& runtime, const std::string& session_id) {
+WorkerLoopExit serve(ByteStream& stream, WorkerRuntime& runtime, const std::string& session_id,
+                     Blake3Digest runtime_id = {}) {
   StreamFrameReader reader(stream);
   test::TransitFaultFrameWriter writer(stream);
   return run_worker_loop(reader, writer, runtime.registry, *runtime.artifacts,
-                         WorkerLoopOptions{.worker_session_id = session_id});
+                         WorkerLoopOptions{.worker_session_id = session_id,
+                                           .runtime_id = runtime_id});
+}
+
+int serve_session_fd(const std::map<std::string, std::string>& flags, WorkerRuntime& runtime) {
+  for (const char* required :
+       {"--serve-fd", "--cas-root", "--worker-session-id", "--runtime-id"}) {
+    if (!flags.contains(required)) {
+      std::cerr << "svp-exec-test-worker: worker mode needs " << required << "\n";
+      return 2;
+    }
+  }
+  const std::optional<Blake3Digest> runtime_id =
+      parse_blake3_prefixed(flags.at("--runtime-id"));
+  if (!runtime_id) {
+    std::cerr << "svp-exec-test-worker: --runtime-id must be b3:<hex>\n";
+    return 2;
+  }
+  const int fd = std::stoi(flags.at("--serve-fd"));
+  FdByteStream stream(fd, fd);
+  const WorkerLoopExit exit =
+      serve(stream, runtime, flags.at("--worker-session-id"), *runtime_id);
+  return exit == WorkerLoopExit::protocol_error ? 1 : 0;
 }
 
 int serve_stdio(WorkerRuntime& runtime) {
@@ -139,8 +172,14 @@ int main(int argc, char** argv) {
   std::signal(SIGPIPE, SIG_IGN);
 
   bool listen = false;
+  bool session_mode = false;
   std::map<std::string, std::string> flags;
-  for (int index = 1; index < argc; ++index) {
+  int first = 1;
+  if (argc > 1 && std::string(argv[1]) == "worker") {
+    session_mode = true;
+    first = 2;
+  }
+  for (int index = first; index < argc; ++index) {
     const std::string argument = argv[index];
     if (argument == "--listen") {
       listen = true;
@@ -157,6 +196,9 @@ int main(int argc, char** argv) {
     return 2;
   }
   try {
+    if (session_mode) {
+      return serve_session_fd(flags, runtime);
+    }
     if (!listen) {
       return serve_stdio(runtime);
     }

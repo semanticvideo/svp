@@ -196,3 +196,30 @@ transcript/speaker_segments.jsonl
 text/evidence_crops/*.jpg
 media_binding.json
 ```
+
+### Worker Macs (macOS)
+
+Pair another Apple Silicon Mac running the same macOS version as a worker for
+distributed builds. Pairing uses the system `ssh` once (keys or a password
+typed into ssh itself; SVP never handles passwords):
+
+```
+svp-builder workers pair <user>@<host> [--system-service] [--models all|none|<ids>] [--dry-run]
+svp-builder workers list [--json]
+svp-builder workers status [<pairing-id>|<user>@<host>] [--json]
+svp-builder workers sync <pairing-id>|<user>@<host> [--models all|none|<ids>]
+svp-builder workers unpair <pairing-id>|<user>@<host> [--forget]
+```
+
+`pair` checks arm64, the macOS product version, and free disk; copies this
+Mac's runtime (svp-builder plus its runtime bundle when one is installed,
+otherwise svp-builder alone) and has the worker verify every file's BLAKE3;
+writes a 256-bit pairing secret on both Macs (0600); and installs a launchd
+job that only accepts connections. The default is a LaunchAgent for the
+worker's user (`~/Library/Application Support/SVP/Worker`); with
+`--system-service` it is a LaunchDaemon that runs as that user without anyone
+logged in (`/Library/Application Support/SVP/Worker`, installed with `sudo`).
+Workers are found by pairing id over Bonjour, never by address. `unpair`
+removes the job, runtimes, models, cache, and the secret on both Macs.
+`--dry-run` writes the plist and scripts locally, lints them, and changes
+nothing on the worker.

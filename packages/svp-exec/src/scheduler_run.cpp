@@ -86,8 +86,9 @@ BuildOutcome SchedulerRun::execute() {
       break;
     }
     dispatch();
-    if (leases_.empty()) {
-      // Work remains (not all complete) yet nothing could be leased.
+    if (leases_.empty() && !any_executor_backing_off()) {
+      // Work remains (not all complete) yet nothing could be leased, and no
+      // executor is merely declining work for a moment.
       fail_build(BuildFailureKind::no_usable_executor, {},
                  "tasks remain but every executor is quarantined");
       break;
@@ -108,7 +109,25 @@ std::chrono::milliseconds SchedulerRun::next_wait() const {
     const std::chrono::milliseconds next = std::min(lease.expires_at, lease.deadline_at);
     wait = std::min(wait, std::max(std::chrono::milliseconds(0), next - now));
   }
+  for (const ExecutorRecord& record : executors_) {
+    if (!record.quarantined && record.declined_until > now) {
+      wait = std::min(wait, record.declined_until - now);
+    }
+  }
   return wait;
+}
+
+bool SchedulerRun::backing_off(std::size_t executor) const {
+  return executors_[executor].declined_until > clock_.now();
+}
+
+bool SchedulerRun::any_executor_backing_off() const {
+  for (std::size_t executor = 0; executor < executors_.size(); ++executor) {
+    if (!executors_[executor].quarantined && backing_off(executor)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void SchedulerRun::apply(InboxEvent event) {
@@ -119,6 +138,8 @@ void SchedulerRun::apply(InboxEvent event) {
     on_heartbeat(*heartbeat);
   } else if (auto* finished = std::get_if<FinishedEvent>(&event)) {
     on_finished(std::move(*finished));
+  } else if (auto* rejected = std::get_if<RejectedEvent>(&event)) {
+    on_rejected(*rejected);
   } else {
     on_failed(std::get<FailedEvent>(event));
   }
@@ -144,6 +165,9 @@ void SchedulerRun::on_finished(FinishedEvent event) {
     return;  // Abandoned (expired, cancelled, or quarantined); never committed.
   }
   const LeaseRecord lease = release(found);
+  // A finished attempt frees capacity: an executor backing off after a
+  // rejection may take work again.
+  executors_[lease.executor].declined_until = std::chrono::milliseconds{0};
   const TaskSpec& spec = graph_.node(lease.task).spec;
   if (const auto defect = find_result_defect(spec, lease.lease.attempt, event.output)) {
     ++outcome_.stats.invalid_results;
@@ -255,6 +279,25 @@ void SchedulerRun::on_failed(const FailedEvent& event) {
     count_executor_loss(lease);
   }
   attempt_failed(lease.task, lease.executor, reason);
+}
+
+// The executor declined the lease (admission). Nothing counts: not the task's
+// attempts, not the executor's losses, and the task is not marked to avoid
+// it. The task is ready again at once for any executor; this one backs off.
+void SchedulerRun::on_rejected(const RejectedEvent& event) {
+  const auto found = leases_.find(event.lease_id);
+  if (found == leases_.end()) {
+    return;
+  }
+  const LeaseRecord lease = release(found);
+  ++outcome_.stats.leases_rejected;
+  emit(AttemptEventKind::rejected, lease, event.code + ": " + event.message);
+  executors_[lease.executor].declined_until = clock_.now() + policy_.rejection_backoff;
+  TaskRecord& task = tasks_[lease.task];
+  if (task.phase != TaskPhase::committed && task.active_leases.empty()) {
+    task.phase = TaskPhase::ready;
+    ready_queue_.insert(lease.task);
+  }
 }
 
 void SchedulerRun::expire_leases() {

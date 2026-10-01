@@ -13,6 +13,15 @@ namespace svp::exec {
 // pressing Ctrl-C and costs about 20 idle wake-ups a second.
 inline constexpr std::chrono::milliseconds kDefaultMaxIdleWait{50};
 
+// How long an executor that rejected a lease (admission: insufficient memory,
+// memory pressure, no capacity) is offered no new leases, unless it reports
+// capacity sooner by finishing an attempt. 2 s: memory on a worker frees as
+// its running tasks end, which takes seconds (plan §2.2: OCR frames take
+// 0.4-10 s), so re-offering at the scheduler's 50 ms wake-up cadence would
+// only produce a stream of rejections; and it is short enough that a worker
+// whose pressure eased is used again within a fraction of one task's time.
+inline constexpr std::chrono::milliseconds kDefaultRejectionBackoff{2'000};
+
 struct SchedulerPolicy {
   LeasePolicy lease;
   RetryPolicy retry;
@@ -22,10 +31,11 @@ struct SchedulerPolicy {
   // measured (plan milestone M4).
   bool speculative_duplicates = false;
   std::chrono::milliseconds max_idle_wait = kDefaultMaxIdleWait;
+  std::chrono::milliseconds rejection_backoff = kDefaultRejectionBackoff;
 };
 
 // Validates the nested policies; throws ExecError(invalid_value) when
-// max_idle_wait is not positive.
+// max_idle_wait or rejection_backoff is not positive.
 void validate_scheduler_policy(const SchedulerPolicy& policy);
 
 }  // namespace svp::exec

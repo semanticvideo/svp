@@ -299,3 +299,12 @@ if(BUILD_TESTING)
   add_test(NAME svp-exec-runtime-manifest-tests
            COMMAND svp-exec-runtime-manifest-tests)
 endif()
+
+# ---------------------------------------------------------------------------
+# Worker pairing and agent (plan §3.2, §3.3, §4.1, §4.3). Apple-only, like
+# the remote transport; after the toy task library because its tests and
+# driver use it.
+# ---------------------------------------------------------------------------
+if(APPLE)
+  add_subdirectory(worker)
+endif()

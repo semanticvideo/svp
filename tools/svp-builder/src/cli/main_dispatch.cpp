@@ -1,6 +1,13 @@
 #include "cli_context.hpp"
 
 int run_selected_command(const CliContext& context) {
+#if defined(__APPLE__)
+  if (const std::optional<int> status = svp::builder::workers::run_workers_cli(
+          context.workers_opts, context.worker_opts)) {
+    return *status;
+  }
+#endif
+
   if (*context.transport_opts.embed_sub ||
       *context.transport_opts.extract_sub ||
       *context.transport_opts.strip_sub) {

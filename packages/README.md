@@ -42,8 +42,15 @@ the build storage layer: the global content-addressed cache (`CasStore`, RC2
 §20.3 roots, `blobs/b3/<2 hex>/<62 hex>`, verified writes, LRU eviction with
 pins, RC2 §20.5.2 non-fatal errors) and the RC2 §20.4 recovery journal
 (`RecoveryJournal`: `<output>-journal/` with `build.sqlite` in WAL mode,
-verified artifact commits, resume, and §20.5.1 cleanup). Nothing links it yet;
-builder integration, scheduling, and transport come later.
+verified artifact commits, resume, and §20.5.1 cleanup).
+
+On Apple platforms `svp-exec/remote` adds the TLS-PSK transport with Bonjour
+discovery and the `RemoteExecutor`, and `svp-exec/worker` adds worker pairing
+and the worker agent: the HELLO / runtime / blob protocol, memory admission,
+the pairing store, launchd job and install-script generation, the runtime and
+model-bundle stores on a worker, and the agent session that runs a verified
+runtime's session process (`svp-builder workers ...`, `svp-builder worker
+serve`).
 
 ## svp-package
 

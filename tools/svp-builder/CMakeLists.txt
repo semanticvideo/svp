@@ -96,6 +96,24 @@ add_executable(svp-builder
 
 target_compile_features(svp-builder PRIVATE cxx_std_20)
 
+# Worker pairing and the worker agent (plan §3.3, §6): `workers pair|list|
+# status|sync|unpair` and the launchd entry points `worker serve` /
+# `worker --serve-fd`. Apple-only, like the remote transport they use.
+if(APPLE)
+  target_sources(svp-builder PRIVATE
+    src/workers/builder_worker_tasks.cpp
+    src/workers/coordinator_context.cpp
+    src/workers/ssh_session.cpp
+    src/workers/worker_commands.cpp
+    src/workers/worker_reach.cpp
+    src/workers/workers_cli.cpp
+    src/workers/workers_pair.cpp
+    src/workers/workers_query.cpp
+    src/workers/workers_unpair.cpp
+  )
+  target_link_libraries(svp-builder PRIVATE svp::exec_worker svp::exec svp::models)
+endif()
+
 target_include_directories(svp-builder PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -312,6 +330,15 @@ if(BUILD_TESTING)
   add_test(NAME svp-builder-version-without-model-cache COMMAND svp-builder --version)
   add_test(NAME svp-builder-probe-help-without-model-cache
            COMMAND svp-builder probe --help)
+  if(APPLE)
+    # The worker commands parse without a model cache, a pairing, or a
+    # network; `worker verify-runtime` fails cleanly on a missing runtime.
+    add_test(NAME svp-builder-workers-help COMMAND svp-builder workers pair --help)
+    add_test(NAME svp-builder-worker-verify-missing-runtime
+             COMMAND svp-builder worker verify-runtime --runtime-dir
+                     ${CMAKE_CURRENT_BINARY_DIR}/no-such-runtime)
+    set_tests_properties(svp-builder-worker-verify-missing-runtime PROPERTIES WILL_FAIL TRUE)
+  endif()
   set_tests_properties(
     svp-builder-help-without-model-cache
     svp-builder-version-without-model-cache

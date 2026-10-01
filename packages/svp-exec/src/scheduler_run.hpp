@@ -58,6 +58,10 @@ struct ExecutorRecord {
   // recovery.
   std::uint64_t loss_horizon = 0;
   bool quarantined = false;
+  // While clock now() is before this, the executor rejected a lease and is
+  // offered no new work (SchedulerPolicy::rejection_backoff). Cleared when
+  // one of its attempts finishes.
+  std::chrono::milliseconds declined_until{0};
 };
 
 // State and decisions of one Scheduler::run(). Single-threaded: executor
@@ -83,6 +87,9 @@ class SchedulerRun {
   void on_heartbeat(const HeartbeatEvent& event);
   void on_finished(FinishedEvent event);
   void on_failed(const FailedEvent& event);
+  void on_rejected(const RejectedEvent& event);
+  [[nodiscard]] bool backing_off(std::size_t executor) const;
+  [[nodiscard]] bool any_executor_backing_off() const;
   void on_verified_success(const LeaseRecord& lease, AttemptOutput output);
   // Ends leases past their expiry (lost worker) or hard deadline (stuck
   // attempt).

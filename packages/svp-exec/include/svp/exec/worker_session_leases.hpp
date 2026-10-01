@@ -37,6 +37,11 @@ class WorkerSessionLeases {
   // ExecError(frame_malformed) when no lease of this session matches.
   std::optional<std::string> claim_result(const TaskResult& result);
 
+  // Removes the lease a REJECT names and returns true when it was live
+  // (false when it was cancelled). Throws ExecError(frame_malformed) when no
+  // lease of this session has that id.
+  bool claim_rejected(std::string_view lease_id);
+
   // Removes every lease and returns the ones not cancelled, in lease_id
   // order: the leases a lost session leaves orphaned.
   std::vector<std::string> take_live();
@@ -63,6 +68,10 @@ struct WorkerSessionEnd {
 //     the schema, output_digest, and every payload's length and BLAKE3, and
 //     is claimed against `leases`; a verified result for a live lease is
 //     reported with events.attempt_finished.
+//   * REJECT (the worker's admission declined the lease, plan §3.5) is
+//     reported with events.attempt_rejected and the worker's reason; it is
+//     not a failure and the session goes on. A REJECT for a lease this
+//     session did not issue is invalid like any other stray frame.
 //   * ERROR from the worker ends the session as executor_lost.
 //   * Bytes that fail any check, a result for a lease this session did not
 //     issue, or any other frame end the session as invalid_result.

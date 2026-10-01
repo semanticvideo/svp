@@ -7,6 +7,9 @@ namespace svp::exec::detail {
 void SchedulerRun::dispatch() {
   for (std::size_t executor = 0; executor < executors_.size(); ++executor) {
     ExecutorRecord& record = executors_[executor];
+    if (backing_off(executor)) {
+      continue;
+    }
     while (!record.quarantined && record.active < record.executor->slots()) {
       const std::optional<std::size_t> task = pick_task(executor);
       if (!task) {
@@ -50,6 +53,9 @@ bool SchedulerRun::has_other_usable_executor(std::size_t task, std::size_t execu
 void SchedulerRun::dispatch_speculative() {
   for (std::size_t executor = 0; executor < executors_.size(); ++executor) {
     ExecutorRecord& record = executors_[executor];
+    if (backing_off(executor)) {
+      continue;
+    }
     while (!record.quarantined && record.active < record.executor->slots()) {
       const LeaseRecord* oldest = nullptr;
       for (const auto& [lease_id, lease] : leases_) {
