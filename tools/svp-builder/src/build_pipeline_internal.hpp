@@ -52,11 +52,6 @@ struct PackageSkeletonStageResult {
   std::filesystem::path json_output_path;
 };
 
-struct PackageVisionStageResult {
-  nlohmann::json placeholder_summary_json = nlohmann::json::object();
-  std::vector<nlohmann::json> processor_records;
-};
-
 void write_json_file(const std::filesystem::path& output_path,
                      const nlohmann::json& value);
 void write_jsonl_file(const std::filesystem::path& output_path,
@@ -68,15 +63,9 @@ svp::media::MediaProbe load_or_run_probe(const std::string& source_path,
                                          const std::string& ffprobe_path);
 bool executable_exists(const std::filesystem::path& executable_path);
 
-std::optional<int> run_audio_stage(BuildPipelineContext& context);
 void run_vision_plan_stage(BuildPipelineContext& context);
 void run_foundation_color_stage(BuildPipelineContext& context);
 void run_foundation_ocr_stage(BuildPipelineContext& context);
-PackageVisionStageResult run_package_vision_stage(BuildPipelineContext& context);
-PackageSkeletonStageResult run_package_final_stage(
-    BuildPipelineContext& context,
-    const PackageVisionStageResult& vision_result);
-PackageSkeletonStageResult run_package_skeleton_stage(BuildPipelineContext& context);
 void print_build_progress(const BuildPipelineContext& context,
                           const PackageSkeletonStageResult& package_result);
 

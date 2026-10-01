@@ -16,8 +16,28 @@ add_library(svp-builder-lib
   src/foundation_color_stage.cpp
   src/foundation_ocr_stage.cpp
   src/microphone_asr_stage.cpp
+  src/build_interrupt.cpp
   src/model_cache_preflight.cpp
-  src/package_skeleton_stage.cpp
+  src/package_final_stages.cpp
+  src/vision_stage_progress.cpp
+  src/engine/build_assembly.cpp
+  src/engine/build_inputs_digest.cpp
+  src/engine/build_journal_session.cpp
+  src/engine/canonical_frames_codec.cpp
+  src/engine/committed_stage_results.cpp
+  src/engine/frame_catalog_delta.cpp
+  src/engine/stage_output_access.cpp
+  src/engine/stage_task_plan.cpp
+  src/engine/stage_task_products.cpp
+  src/engine/stage_task_registry.cpp
+  src/engine/stage_tasks_audio.cpp
+  src/engine/stage_tasks_foundation.cpp
+  src/engine/stage_tasks_package.cpp
+  src/engine/stage_tasks_svpi.cpp
+  src/engine/stage_tasks_vision.cpp
+  src/engine/staging_capture_check.cpp
+  src/engine/staging_scope.cpp
+  src/engine/whole_stage_scheduler_policy.cpp
   src/process_resources.cpp
   src/progress_renderer.cpp
   src/progress_timeline.cpp
@@ -25,6 +45,7 @@ add_library(svp-builder-lib
   src/runtime_tools_json.cpp
   src/vision_plan_stage.cpp
   src/interlace/interlace_create.cpp
+  src/interlace/svpi_publication.cpp
   src/interlace/interlace_validate.cpp
   src/interlace/interlace_inspect.cpp
   src/interlace/interlace_extract.cpp

@@ -4,6 +4,7 @@
 
 #include "default_staging.hpp"
 #include "staging_cleanup.hpp"
+#include "svpi_publication.hpp"
 
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
@@ -27,253 +28,6 @@
 
 namespace svp::builder {
 
-namespace {
-
-std::string make_utc_timestamp() {
-  const auto now = std::chrono::system_clock::now();
-  const auto time_t_now = std::chrono::system_clock::to_time_t(now);
-  std::ostringstream ss;
-  ss << std::put_time(std::gmtime(&time_t_now), "%Y-%m-%dT%H:%M:%SZ");
-  return ss.str();
-}
-
-void write_jsonl(const std::filesystem::path& path,
-                 const std::vector<nlohmann::json>& records) {
-  svp::package::ensure_parent_directory(path);
-  std::ofstream out(path);
-  for (const auto& record : records) {
-    out << record.dump() << "\n";
-  }
-}
-
-bool dir_has_files(const std::filesystem::path& dir) {
-  if (!std::filesystem::exists(dir)) return false;
-  for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-    if (entry.is_regular_file()) return true;
-  }
-  return false;
-}
-
-nlohmann::json detect_section_states(const std::filesystem::path& staging_dir) {
-  auto state_for = [&](const std::string& subdir) -> std::string {
-    return dir_has_files(staging_dir / subdir) ? "generated" : "not_generated";
-  };
-  nlohmann::json sections = nlohmann::json::object();
-  sections["transcript"] = {{"state", state_for("transcript")}};
-  sections["timeline"] = {{"state", state_for("timeline")}};
-  sections["text"] = {{"state", state_for("text")}};
-  sections["colors"] = {{"state", state_for("colors")}};
-  sections["entities"] = {{"state", state_for("entities")}};
-  sections["spatial"] = {{"state", state_for("spatial")}};
-  sections["relationships"] = {{"state", state_for("relationships")}};
-  sections["embeddings"] = {{"state", state_for("embeddings")}};
-  return sections;
-}
-
-nlohmann::json make_svpi_manifest_with_sections(
-    const std::string& source_filename,
-    const svp::package::MediaBindingDocument& binding_doc,
-    const nlohmann::json& sections) {
-  std::string package_id =
-      "svpi_" + std::filesystem::path(source_filename).stem().string() + "_pkg";
-  return {
-    {"format", "svpi"},
-    {"svpi_version", std::string{svp::package::kSvpiVersion}},
-    {"svp_version", "1.0-rc.2"},
-    {"package_id", package_id},
-    {"created_utc", make_utc_timestamp()},
-    {"media_binding_ref", "media_binding.json"},
-    {"primary_media_binding_id", binding_doc.primary_binding_id},
-    {"timebase", {
-      {"unit", "microseconds"},
-      {"origin", "primary_presentation_start"},
-      {"source_timebase_mode", "exact_rational"},
-      {"rounding", "round_half_to_even"}
-    }},
-    {"sections", sections}
-  };
-}
-
-nlohmann::json make_core_only_sections(const std::string& state) {
-  nlohmann::json sections = nlohmann::json::object();
-  for (const auto& key : {"transcript", "timeline", "text", "colors",
-                          "entities", "spatial", "relationships", "embeddings"}) {
-    sections[key] = {{"state", state}};
-  }
-  return sections;
-}
-
-void append_jsonl_if_exists(const std::filesystem::path& path,
-                            const std::vector<nlohmann::json>& records) {
-  svp::package::ensure_parent_directory(path);
-  std::ofstream out(path, std::ios::app);
-  for (const auto& record : records) {
-    out << record.dump() << "\n";
-  }
-}
-
-InterlaceCreateResult write_svpi_from_staging(
-    const InterlaceCreateOptions& options,
-    const svp::package::MediaBindingDocument& binding_doc,
-    const std::string& blake3_state,
-    const std::filesystem::path& staging_dir,
-    const nlohmann::json& sections,
-    const std::string& provenance_notes,
-    BuildProgressSink& sink) {
-  InterlaceCreateResult result;
-  result.svpi_path = options.output_path;
-  result.blake3_state = blake3_state;
-
-  sink.emit(make_stage_started(ProgressStageId::svpi_write));
-
-  const std::filesystem::path source_path(options.source_path);
-
-  append_jsonl_if_exists(staging_dir / "provenance" / "processors.jsonl", {
-    nlohmann::json{
-      {"processor_id", "proc_interlace_create_000001"},
-      {"processor_name", "svp-builder-interlace"},
-      {"processor_version", "1.0.0"},
-      {"stage", "interlace-create"},
-      {"ran_utc", make_utc_timestamp()},
-      {"inputs", nlohmann::json::array({source_path.filename().string()})},
-      {"outputs", nlohmann::json::array({std::filesystem::path(options.output_path).filename().string()})},
-      {"notes", provenance_notes}
-    }
-  });
-
-  append_jsonl_if_exists(staging_dir / "provenance" / "interlace_events.jsonl", {
-    nlohmann::json{
-      {"event_id", "evt_interlace_create_000001"},
-      {"event_type", "svpi_created_from_media"},
-      {"event_utc", make_utc_timestamp()},
-      {"authority", "builder_derived"},
-      {"source_media", source_path.filename().string()},
-      {"binding_id", binding_doc.primary_binding_id},
-      {"binding_contract", std::string{svp::package::kSvpiBindingContract}},
-      {"blake3_state", blake3_state}
-    }
-  });
-
-  auto manifest = make_svpi_manifest_with_sections(
-      source_path.filename().string(), binding_doc, sections);
-
-  auto manifest_copy = manifest;
-  if (!svp::package::write_index_foundation(staging_dir, manifest_copy)) {
-    result.error_message = "failed to write index foundation";
-    return result;
-  }
-
-  result.success = svp::package::write_svpi_package(
-      options.output_path, staging_dir, manifest, binding_doc);
-
-  if (!result.success) {
-    result.error_message = "failed to write SVPI package";
-    sink.emit(make_stage_failed(ProgressStageId::svpi_write, result.error_message));
-    return result;
-  }
-
-  sink.emit(make_artifact_written(ProgressStageId::svpi_write, options.output_path));
-  sink.emit(make_stage_completed(ProgressStageId::svpi_write));
-
-  sink.emit(make_stage_started(ProgressStageId::validate));
-  svp::validation::SvpiValidatorOptions validator_opts;
-  auto report = svp::validation::validate_svpi_package(options.output_path, validator_opts);
-  result.binding_state = svp::validation::to_string(report.status);
-
-  if (svp::validation::exit_code(report) == 0) {
-    sink.emit(make_stage_completed(ProgressStageId::validate));
-  } else {
-    sink.emit(make_stage_failed(ProgressStageId::validate, "SVPI validation reported issues"));
-  }
-
-  return result;
-}
-
-InterlaceCreateResult write_core_only_svpi(
-    const InterlaceCreateOptions& options,
-    const svp::package::MediaBindingDocument& binding_doc,
-    const std::string& blake3_state,
-    const std::string& section_state,
-    const std::string& notes,
-    const std::filesystem::path& staging_dir,
-    BuildProgressSink& sink) {
-  InterlaceCreateResult result;
-  result.svpi_path = options.output_path;
-  result.blake3_state = blake3_state;
-
-  sink.emit(make_stage_started(ProgressStageId::svpi_write));
-
-  const std::filesystem::path source_path(options.source_path);
-
-  std::filesystem::remove_all(staging_dir);
-  std::filesystem::create_directories(staging_dir);
-  std::filesystem::create_directories(staging_dir / "provenance");
-  std::filesystem::create_directories(staging_dir / "index");
-
-  write_jsonl(staging_dir / "provenance" / "processors.jsonl", {
-    nlohmann::json{
-      {"processor_id", "proc_interlace_create_000001"},
-      {"processor_name", "svp-builder-interlace"},
-      {"processor_version", "1.0.0"},
-      {"stage", "interlace-create"},
-      {"ran_utc", make_utc_timestamp()},
-      {"inputs", nlohmann::json::array({source_path.filename().string()})},
-      {"outputs", nlohmann::json::array({std::filesystem::path(options.output_path).filename().string()})},
-      {"notes", notes}
-    }
-  });
-
-  write_jsonl(staging_dir / "provenance" / "interlace_events.jsonl", {
-    nlohmann::json{
-      {"event_id", "evt_interlace_create_000001"},
-      {"event_type", "svpi_created_from_media"},
-      {"event_utc", make_utc_timestamp()},
-      {"authority", "builder_derived"},
-      {"source_media", source_path.filename().string()},
-      {"binding_id", binding_doc.primary_binding_id},
-      {"binding_contract", std::string{svp::package::kSvpiBindingContract}},
-      {"blake3_state", blake3_state}
-    }
-  });
-
-  auto sections = make_core_only_sections(section_state);
-  auto manifest = make_svpi_manifest_with_sections(
-      source_path.filename().string(), binding_doc, sections);
-
-  auto manifest_copy = manifest;
-  if (!svp::package::write_index_foundation(staging_dir, manifest_copy)) {
-    result.error_message = "failed to write index foundation";
-    return result;
-  }
-
-  result.success = svp::package::write_svpi_package(
-      options.output_path, staging_dir, manifest, binding_doc);
-
-  if (!result.success) {
-    result.error_message = "failed to write SVPI package";
-    sink.emit(make_stage_failed(ProgressStageId::svpi_write, result.error_message));
-    return result;
-  }
-
-  sink.emit(make_artifact_written(ProgressStageId::svpi_write, options.output_path));
-  sink.emit(make_stage_completed(ProgressStageId::svpi_write));
-
-  sink.emit(make_stage_started(ProgressStageId::validate));
-  svp::validation::SvpiValidatorOptions validator_opts;
-  auto report = svp::validation::validate_svpi_package(options.output_path, validator_opts);
-  result.binding_state = svp::validation::to_string(report.status);
-
-  if (svp::validation::exit_code(report) == 0) {
-    sink.emit(make_stage_completed(ProgressStageId::validate));
-  } else {
-    sink.emit(make_stage_failed(ProgressStageId::validate, "SVPI validation reported issues"));
-  }
-
-  return result;
-}
-
-}  // namespace
-
 InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
   InterlaceCreateResult result;
   result.svpi_path = options.output_path;
@@ -288,6 +42,8 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
     result.error_message = "source media file does not exist: " + options.source_path;
     return result;
   }
+  const SvpiWriteRequest request{.source_path = options.source_path,
+                                 .output_path = options.output_path};
 
   auto create_binding = [&]() {
     sink->emit(make_stage_started(ProgressStageId::media_binding));
@@ -313,7 +69,7 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
     result.blake3_state = svp::package::to_string(
         binding_doc.bindings[0].identity.blake3_state);
     result = write_core_only_svpi(
-        options, binding_doc, result.blake3_state,
+        request, binding_doc, result.blake3_state,
         "not_generated",
         "SVPI sidecar created in core-only diagnostic mode (semantic pipeline skipped)",
         staging_dir, *sink);
@@ -341,16 +97,42 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
   pipeline_opts.serial_pipeline = options.serial_pipeline;
   pipeline_opts.reset_staging_before_stages = true;
   pipeline_opts.progress_sink = sink;
+  // Binding and the SVPI write are tasks of the same journaled build, and the
+  // journal belongs to the .svpi the user asked for.
+  pipeline_opts.journal_mode = options.journal_mode;
+  pipeline_opts.journal_output_path = options.output_path;
+  pipeline_opts.svpi = SvpiPublicationOptions{
+      .svpi_path = options.output_path,
+      .compute_full_blake3 = options.compute_full_blake3,
+      .compute_chunk_proof = options.compute_chunk_proof};
 
   BuildPipeline pipeline;
   auto pipeline_result = pipeline.run(pipeline_opts);
   result.thread_plan = pipeline_result.thread_plan;
+  result.pipeline_failure = pipeline_result.failure;
+  result.pipeline_exit_code = pipeline_result.exit_code;
 
-  if (pipeline_result.failure == BuildPipelineFailure::model_cache_preflight) {
+  if (pipeline_result.svpi) {
+    result.success = pipeline_result.svpi->success;
+    result.error_message = pipeline_result.svpi->error_message;
+    result.blake3_state = pipeline_result.svpi->blake3_state;
+    result.binding_state = pipeline_result.svpi->binding_state;
+    if (result.success) staging_guard.cleanup_on_success();
+    return result;
+  }
+
+  // The build stopped before publishing. Model preflight, recovery-journal,
+  // and cancellation failures publish nothing.
+  if (pipeline_result.failure == BuildPipelineFailure::model_cache_preflight ||
+      pipeline_result.failure == BuildPipelineFailure::recovery_journal ||
+      pipeline_result.failure == BuildPipelineFailure::cancelled) {
     result.error_message = pipeline_result.error_message;
     return result;
   }
 
+  // A stage failed: publish what staging holds, as before (core-only when the
+  // semantic pipeline produced nothing). The recovery journal is kept so the
+  // build can be resumed once the failure is fixed.
   auto binding_doc = create_binding();
   result.blake3_state = svp::package::to_string(
       binding_doc.bindings[0].identity.blake3_state);
@@ -362,37 +144,23 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
     std::filesystem::remove(temp_svp_path.string() + ".json");
   }
 
-  auto sections = detect_section_states(staging_dir);
-  bool has_semantic_content = false;
-  for (const auto& key : {"transcript", "timeline", "text", "colors",
-                          "entities", "spatial", "relationships", "embeddings"}) {
-    if (sections[key]["state"] == "generated") {
-      has_semantic_content = true;
-      break;
-    }
-  }
-
-  if (pipeline_result.exit_code != 0 && !has_semantic_content) {
+  const nlohmann::json sections = detect_section_states(staging_dir);
+  const bool semantic_content = has_semantic_content(sections);
+  InterlaceCreateResult published;
+  if (!semantic_content) {
     std::filesystem::remove_all(staging_dir);
-    result = write_core_only_svpi(
-        options, binding_doc, result.blake3_state,
-        "blocked",
-        "SVPI sidecar created with core-only content (semantic pipeline failed, sections marked blocked)",
-        staging_dir, *sink);
-    if (result.success) staging_guard.cleanup_on_success();
-    return result;
+    published = write_core_only_svpi(request, binding_doc, result.blake3_state,
+                                     "blocked", kSvpiBlockedNotes, staging_dir, *sink);
+  } else {
+    published = write_svpi_from_staging(request, binding_doc, result.blake3_state,
+                                        staging_dir, sections,
+                                        svpi_provenance_notes(semantic_content), *sink);
   }
-
-  std::string provenance_notes =
-      has_semantic_content
-          ? "SVPI sidecar created from source media with semantic pipeline output, without embedding primary media bytes"
-          : "SVPI sidecar created with core-only content (semantic pipeline produced no section output, sections marked not_generated)";
-
-  result = write_svpi_from_staging(
-      options, binding_doc, result.blake3_state,
-      staging_dir, sections, provenance_notes, *sink);
-  if (result.success) staging_guard.cleanup_on_success();
-  return result;
+  published.thread_plan = result.thread_plan;
+  published.pipeline_failure = result.pipeline_failure;
+  published.pipeline_exit_code = result.pipeline_exit_code;
+  if (published.success) staging_guard.cleanup_on_success();
+  return published;
 }
 
 }  // namespace svp::builder

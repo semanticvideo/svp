@@ -6,11 +6,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
-#include <cstdlib>
 #include <system_error>
-#include <thread>
-#include <csignal>
-#include <pthread.h>
 
 namespace svp::builder {
 
@@ -62,29 +58,6 @@ inline void cleanup_registered_auto_staging() noexcept {
 }
 
 }  // namespace staging_cleanup_internal
-
-inline void install_staging_interrupt_cleanup() {
-  static const bool installed = [] {
-    std::atexit(staging_cleanup_internal::cleanup_registered_auto_staging);
-
-    sigset_t signal_set;
-    sigemptyset(&signal_set);
-    sigaddset(&signal_set, SIGINT);
-    if (pthread_sigmask(SIG_BLOCK, &signal_set, nullptr) != 0) {
-      return true;
-    }
-
-    std::thread([signal_set] {
-      int signal_number = 0;
-      if (sigwait(&signal_set, &signal_number) == 0) {
-        staging_cleanup_internal::cleanup_registered_auto_staging();
-        std::_Exit(128 + signal_number);
-      }
-    }).detach();
-    return true;
-  }();
-  (void)installed;
-}
 
 class StagingCleanupGuard {
  public:

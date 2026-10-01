@@ -11,6 +11,19 @@ void add_pipeline_performance_options(
       ->check(CLI::IsMember({"serial", "background", "conservative", "fast"}));
 }
 
+// RC2 §21 recovery journal flags. Without either, an existing journal for the
+// output stops the build with instructions instead of being reused or deleted.
+void add_recovery_journal_flags(CLI::App& command, bool& resume, bool& fresh) {
+  auto* resume_flag = command.add_flag(
+      "--resume", resume,
+      "Continue an interrupted build from its recovery journal (<out>-journal/) "
+      "after verifying the source and every completed artifact");
+  auto* fresh_flag = command.add_flag(
+      "--fresh", fresh,
+      "Discard any recovery journal for this output and start the build over");
+  resume_flag->excludes(fresh_flag);
+}
+
 void add_visual_tracking_quality_option(
     CLI::App& command,
     std::string& quality) {
@@ -79,6 +92,7 @@ void register_cli(CLI::App& app, CliContext& context) {
                   "Use when you know the clip contains only one speaker.");
   build->add_flag("--serial", build_opts.serial_pipeline,
                   "Run per-video semantic pipeline stages serially instead of overlapping ASR/OCR work");
+  add_recovery_journal_flags(*build, build_opts.resume, build_opts.fresh);
   build->add_option("--progress", build_opts.progress_mode,
                     "Progress output mode: auto, plain, json, none")
       ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
@@ -157,6 +171,7 @@ void register_cli(CLI::App& app, CliContext& context) {
       "Force single-speaker diarization");
   ic_create->add_flag("--serial", opts.ic_serial_pipeline,
       "Run per-video semantic pipeline stages serially instead of overlapping ASR/OCR work");
+  add_recovery_journal_flags(*ic_create, opts.ic_resume, opts.ic_fresh);
   ic_create->add_option("--progress", opts.ic_progress_mode,
       "Progress output mode: auto, plain, json, none")
       ->check(CLI::IsMember({"auto", "plain", "json", "none"}));

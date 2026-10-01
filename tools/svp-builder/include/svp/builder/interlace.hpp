@@ -31,6 +31,8 @@ struct InterlaceCreateOptions {
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
   bool serial_pipeline = false;
+  // The recovery journal lives next to output_path (`<out>.svpi-journal/`).
+  RecoveryJournalMode journal_mode = RecoveryJournalMode::require_new;
   std::shared_ptr<BuildProgressSink> progress_sink;
 };
 
@@ -42,6 +44,10 @@ struct InterlaceCreateResult {
   std::string binding_state;
   // The runtime thread plan the package build ran with.
   std::optional<svp::models::ThreadPlanResolution> thread_plan;
+  // Why the package build did not complete, when it did not.
+  BuildPipelineFailure pipeline_failure = BuildPipelineFailure::none;
+  // Process exit status the failure calls for (0 when none does).
+  int pipeline_exit_code = 0;
 };
 
 [[nodiscard]] InterlaceCreateResult interlace_create(

@@ -43,6 +43,35 @@ struct BuildOutputPaths {
   std::filesystem::path json_output_path;
 };
 
+// What a build does with an existing RC2 §20.4 recovery journal for its
+// output (`<output>-journal/`).
+enum class RecoveryJournalMode {
+  // Start a new journal. An existing journal is neither reused nor deleted:
+  // the build fails and asks for --resume or --fresh, so an interrupted
+  // build's work is never discarded silently.
+  require_new,
+  // Continue from the existing journal (`--resume`) after verifying the
+  // source fingerprint and every completed artifact.
+  resume,
+  // Delete any existing journal and start over (`--fresh`).
+  fresh,
+};
+
+// interlace create: after the package, bind the source media and write the
+// SVPI sidecar as tasks of the same build.
+struct SvpiPublicationOptions {
+  std::filesystem::path svpi_path;
+  bool compute_full_blake3 = true;
+  bool compute_chunk_proof = true;
+};
+
+struct SvpiPublicationResult {
+  bool success = false;
+  std::string error_message;
+  std::string blake3_state;
+  std::string binding_state;
+};
+
 struct BuildPipelineOptions {
   std::string source_path;
   std::string probe_json_path;
@@ -69,6 +98,12 @@ struct BuildPipelineOptions {
   std::optional<RuntimeToolSelection> runtime_tools;
   bool quiet = false;
   bool verbose = false;
+  RecoveryJournalMode journal_mode = RecoveryJournalMode::require_new;
+  // Output path the recovery journal belongs to; empty means output_path.
+  // interlace create journals next to the .svpi it publishes, not next to its
+  // internal package.
+  std::filesystem::path journal_output_path;
+  std::optional<SvpiPublicationOptions> svpi;
 };
 
 enum class BuildPipelineFailure {
@@ -78,6 +113,12 @@ enum class BuildPipelineFailure {
   // The requested package artifact could not be written (for example the
   // output directory is missing or not writable).
   package_write,
+  // A recovery journal blocked the build: one exists without --resume or
+  // --fresh, none exists for --resume, it is locked by another build, or it
+  // was recorded for a different source or different options.
+  recovery_journal,
+  // Ctrl-C or SIGTERM; the recovery journal is kept for --resume.
+  cancelled,
 };
 
 // Exit status for a build that could not produce what was requested: a
@@ -92,6 +133,8 @@ struct BuildPipelineResult {
   // The plan every stage ran with; empty if the build failed before
   // resolving it.
   std::optional<svp::models::ThreadPlanResolution> thread_plan;
+  // Set when options.svpi was given and the build reached the SVPI write.
+  std::optional<SvpiPublicationResult> svpi;
 };
 
 std::vector<std::string_view> supported_build_stage_names();
