@@ -105,6 +105,12 @@ StartedJournal BuildJournalSession::start(const svp::exec::TaskGraph& graph,
         .svp_version = svp::core::spec_version_label(),
         .builder_version = svp::core::tool_version_label("svp-builder"),
         .status = svp::exec::BuildSessionStatus::active};
+    // Outputs get their missing parent directories created (output path
+    // policy); the journal beside the output follows the same rule.
+    std::error_code parent_error;
+    if (!journal_root_.parent_path().empty()) {
+      fs::create_directories(journal_root_.parent_path(), parent_error);
+    }
     StartedJournal started{
         .journal = svp::exec::RecoveryJournal::create(journal_output_path_, session, sources),
         .committed = {},

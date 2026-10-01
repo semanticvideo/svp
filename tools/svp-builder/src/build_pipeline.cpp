@@ -23,6 +23,7 @@
 #include "svp/audio/sherpa_diarization.hpp"
 #include "svp/audio/whisper_model.hpp"
 #include "svp/core/memory_diagnostics.hpp"
+#include "svp/exec/blake3_digest.hpp"
 #include "svp/exec/clock.hpp"
 #include "svp/exec/in_process_executor.hpp"
 #include "svp/exec/journal_error.hpp"
@@ -54,6 +55,24 @@ namespace {
 
 // The source every build reads, as the journal's source_fingerprint names it.
 constexpr const char* kPrimarySourceId = "source_000";
+
+// The journal's source fingerprint. A build may run from a probe JSON whose
+// source file is absent (stages that read the source then degrade as they
+// always have); such a source is fingerprinted as zero bytes, so a resume
+// still refuses a journal once the file appears or changes.
+svp::exec::SourceFingerprintRecord fingerprint_build_source(
+    const std::filesystem::path& source_path) {
+  std::error_code error;
+  if (std::filesystem::is_regular_file(source_path, error)) {
+    return svp::exec::fingerprint_source(kPrimarySourceId, source_path);
+  }
+  return svp::exec::SourceFingerprintRecord{
+      .source_id = kPrimarySourceId,
+      .path = source_path.string(),
+      .size_bytes = 0,
+      .mtime_ns = std::nullopt,
+      .blake3 = svp::exec::blake3_digest(std::string_view{})};
+}
 
 bool should_write_builder_foundation_json(
     const BuildPipelineOptions& options,
@@ -237,8 +256,8 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
             audio_uses_microphone_path(effective_options, plan, model_runtime_available),
         .svpi_publication = stage_plan.run_package_skeleton && effective_options.svpi.has_value(),
     });
-    const svp::exec::SourceFingerprintRecord source = svp::exec::fingerprint_source(
-        kPrimarySourceId, std::filesystem::path(options.source_path));
+    const svp::exec::SourceFingerprintRecord source =
+        fingerprint_build_source(std::filesystem::path(options.source_path));
     const std::string build_inputs = engine::build_inputs_blake3(
         engine::describe_build_inputs(effective_options, source, plan_json, thread_plan));
 
@@ -259,9 +278,11 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
       }
       // The journal lives beside the output; if it cannot be created there,
       // neither can the output.
-      const std::string message = "cannot write next to " +
-                                  journal_session.journal_root().parent_path().string() +
-                                  ": " + error.what();
+      const std::string message =
+          "failed to write SVP package: " +
+          resolve_package_skeleton_output_paths(effective_options.output_path)
+              .package_path.string() +
+          " (cannot create its recovery journal: " + error.what() + ")";
       std::cerr << "svp-builder: " << message << "\n";
       return with_plan({.exit_code = kBuildFailedExitCode,
                         .failure = BuildPipelineFailure::package_write,

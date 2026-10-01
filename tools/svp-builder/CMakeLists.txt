@@ -176,6 +176,21 @@ if(BUILD_TESTING)
       svp::vision
   )
 
+  add_executable(svp-builder-task-engine-tests
+    tests/build_task_engine_tests.cpp
+  )
+  target_include_directories(svp-builder-task-engine-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_compile_features(svp-builder-task-engine-tests PRIVATE cxx_std_20)
+  target_link_libraries(svp-builder-task-engine-tests
+    PRIVATE
+      svp::builder
+      svp::exec
+      svp::vision
+      nlohmann_json::nlohmann_json
+  )
+
   add_executable(svp-builder-model-cache-preflight-tests
     tests/model_cache_preflight_tests.cpp
   )
@@ -343,6 +358,8 @@ if(BUILD_TESTING)
                    ${CMAKE_SOURCE_DIR}/spec/registries/reference-model-set.json)
   add_test(NAME svp-builder-frame-plan-tests
            COMMAND svp-builder-frame-plan-tests)
+  add_test(NAME svp-builder-task-engine-tests
+           COMMAND svp-builder-task-engine-tests)
   add_test(NAME svp-builder-pipeline-tests COMMAND svp-builder-pipeline-tests
            WORKING_DIRECTORY ${SVP_BUILDER_RUNTIME_RESOURCE_TEST_CWD})
   add_test(NAME svp-builder-model-cache-preflight-tests
