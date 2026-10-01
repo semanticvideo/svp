@@ -1,4 +1,4 @@
-#include "build_pipeline_internal.hpp"
+#include "audio_stage.hpp"
 #include "microphone_asr_stage.hpp"
 
 #include "svp/audio/asr_chunk_planner.hpp"
@@ -24,14 +24,49 @@
 
 namespace svp::builder {
 
-std::optional<int> run_audio_stage(BuildPipelineContext& context) {
-  const svp::audio::AudioStagePlan audio_plan =
-      svp::audio::build_audio_stage_plan(context.options.source_path,
-                                         context.plan.probe,
-                                         executable_exists(context.options.ffmpeg_path),
-                                         context.options.ffmpeg_path,
-                                         context.model_runtime_available,
-                                         context.options.ffprobe_path);
+namespace {
+
+// The audio plan is a pure function of the source, its probe, and the tools,
+// so the extract and transcribe stages each derive the same plan.
+svp::audio::AudioStagePlan plan_audio_stage(const BuildPipelineOptions& options,
+                                            const svp::media::MediaIngestPlan& plan,
+                                            bool model_runtime_available) {
+  return svp::audio::build_audio_stage_plan(options.source_path, plan.probe,
+                                            executable_exists(options.ffmpeg_path),
+                                            options.ffmpeg_path, model_runtime_available,
+                                            options.ffprobe_path);
+}
+
+svp::audio::AudioStagePlan plan_audio_stage(const BuildPipelineContext& context) {
+  return plan_audio_stage(context.options, context.plan, context.model_runtime_available);
+}
+
+}  // namespace
+
+bool audio_uses_microphone_path(const BuildPipelineOptions& options,
+                                const svp::media::MediaIngestPlan& plan,
+                                bool model_runtime_available) {
+  return plan_audio_stage(options, plan, model_runtime_available)
+             .extraction_plan.microphone_analysis_streams.size() > 1;
+}
+
+nlohmann::json audio_extract_stage_state_to_json(const AudioExtractStageState& state) {
+  return {{"audio_json", state.audio_json},
+          {"analysis_audio_written", state.analysis_audio_written},
+          {"microphone_streams_staged", state.microphone_streams_staged}};
+}
+
+AudioExtractStageState audio_extract_stage_state_from_json(const nlohmann::json& value) {
+  AudioExtractStageState state;
+  state.audio_json = value.at("audio_json");
+  state.analysis_audio_written = value.at("analysis_audio_written").get<bool>();
+  state.microphone_streams_staged =
+      value.at("microphone_streams_staged").get<std::vector<bool>>();
+  return state;
+}
+
+AudioExtractStageState run_audio_extract_stage(BuildPipelineContext& context) {
+  const svp::audio::AudioStagePlan audio_plan = plan_audio_stage(context);
   nlohmann::json audio_json = svp::audio::audio_stage_plan_to_json(audio_plan);
   emit_stage_started(context, ProgressStageId::audio_extract);
   const svp::audio::AudioExtractionRun extraction_run =
@@ -80,6 +115,20 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
   audio_json["vad_execution_boundary"] =
       svp::audio::vad_execution_boundary_to_json(executed_boundary);
 
+  AudioExtractStageState state;
+  state.audio_json = std::move(audio_json);
+  state.analysis_audio_written = extraction_run.analysis_audio_written;
+  for (const auto& microphone : extraction_run.microphone_analysis_streams) {
+    state.microphone_streams_staged.push_back(microphone.success);
+  }
+  return state;
+}
+
+std::optional<int> run_audio_transcribe_stage(BuildPipelineContext& context,
+                                              const AudioExtractStageState& extracted) {
+  const svp::audio::AudioStagePlan audio_plan = plan_audio_stage(context);
+  nlohmann::json audio_json = extracted.audio_json;
+
   std::int64_t media_duration_us = 0;
   if (context.plan.probe.container_timing.has_value() &&
       context.plan.probe.container_timing->duration_pts.has_value()) {
@@ -124,7 +173,8 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
   if (microphone_stream_mode) {
     bool microphone_diarization_started = false;
     MicrophoneAsrStageResult microphone_result = run_microphone_asr_stage(
-        audio_plan.extraction_plan, extraction_run, media_duration_us,
+        audio_plan.extraction_plan, extracted.microphone_streams_staged,
+        media_duration_us,
         asr_runtime_available, asr_model_available, asr_model_verified,
         context.staging_dir, model_cache_root, context.thread_plan,
         [&context](std::size_t current, std::size_t total) {
@@ -168,7 +218,7 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
         svp::audio::build_asr_chunk_plan(media_duration_us);
     const svp::audio::AsrExecutionBoundary asr_boundary =
         svp::audio::build_asr_execution_boundary(
-            asr_chunk_plan, extraction_run.analysis_audio_written,
+            asr_chunk_plan, extracted.analysis_audio_written,
             asr_runtime_available, asr_model_available,
             asr_model_verified);
     executed_asr_boundary = svp::audio::execute_asr_boundary(
@@ -222,7 +272,7 @@ std::optional<int> run_audio_stage(BuildPipelineContext& context) {
 
   svp::audio::DiarizationExecutionBoundary diar_boundary =
       svp::audio::build_diarization_boundary(
-          extraction_run.analysis_audio_written,
+          extracted.analysis_audio_written,
           context.model_runtime_available,
           diar_model_available,
           diar_model_verified,

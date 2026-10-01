@@ -103,7 +103,7 @@ std::vector<svp::audio::TimeSpan> diarized_speech_spans(
 
 MicrophoneAsrStageResult run_microphone_asr_stage(
     const svp::audio::AudioExtractionPlan& extraction_plan,
-    const svp::audio::AudioExtractionRun& extraction_run,
+    const std::vector<bool>& microphone_streams_staged,
     std::int64_t media_duration_us,
     bool model_runtime_available,
     bool asr_model_available,
@@ -137,8 +137,8 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
     const auto& microphone_plan =
         extraction_plan.microphone_analysis_streams[stream_ordinal];
     const bool microphone_available =
-        stream_ordinal < extraction_run.microphone_analysis_streams.size() &&
-        extraction_run.microphone_analysis_streams[stream_ordinal].success;
+        stream_ordinal < microphone_streams_staged.size() &&
+        microphone_streams_staged[stream_ordinal];
     const std::int64_t microphone_duration_us =
         microphone_plan.timeline_duration_us.value_or(media_duration_us);
     const svp::audio::AsrChunkPlanResult chunk_plan =
