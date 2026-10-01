@@ -21,6 +21,7 @@ add_library(svp-builder-lib
   src/package_final_stages.cpp
   src/processor_provenance.cpp
   src/vision_stage_progress.cpp
+  src/calibration/ocr_capacity_calibration.cpp
   src/engine/build_assembly.cpp
   src/engine/build_inputs_digest.cpp
   src/engine/build_journal_session.cpp
@@ -129,16 +130,22 @@ target_compile_features(svp-builder PRIVATE cxx_std_20)
 if(APPLE)
   target_sources(svp-builder PRIVATE
     src/workers/builder_worker_tasks.cpp
+    src/workers/calibration_store.cpp
     src/workers/coordinator_context.cpp
+    src/workers/distributed_fleet.cpp
+    src/workers/ocr_calibration_runs.cpp
     src/workers/ssh_session.cpp
     src/workers/worker_commands.cpp
+    src/workers/worker_model_view.cpp
     src/workers/worker_reach.cpp
+    src/workers/worker_supplies.cpp
     src/workers/workers_cli.cpp
     src/workers/workers_pair.cpp
     src/workers/workers_query.cpp
     src/workers/workers_unpair.cpp
   )
-  target_link_libraries(svp-builder PRIVATE svp::exec_worker svp::exec svp::models)
+  target_link_libraries(svp-builder PRIVATE svp::exec_worker svp::exec_remote svp::exec
+                                             svp::models svp::vision_tasks)
 endif()
 
 target_include_directories(svp-builder PRIVATE

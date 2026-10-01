@@ -93,6 +93,12 @@ void register_cli(CLI::App& app, CliContext& context) {
   build->add_flag("--serial", build_opts.serial_pipeline,
                   "Run per-video semantic pipeline stages serially instead of overlapping ASR/OCR work");
   add_recovery_journal_flags(*build, build_opts.resume, build_opts.fresh);
+  build->add_flag("--distributed", build_opts.distributed,
+                  "Also run OCR on this Mac's paired workers (svp-builder workers pair); "
+                  "unreachable workers are skipped with a warning");
+  build->add_option("--require-workers", build_opts.require_workers,
+                    "With --distributed: fail before any work unless at least this many "
+                    "paired workers are ready (implies --distributed)");
   build->add_option("--progress", build_opts.progress_mode,
                     "Progress output mode: auto, plain, json, none")
       ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
