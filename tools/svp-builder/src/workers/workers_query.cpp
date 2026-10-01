@@ -5,6 +5,7 @@
 #include "svp/exec/worker/coordinator_session.hpp"
 #include "svp/exec/worker/pairing_store.hpp"
 #include "svp/exec/worker/worker_connection.hpp"
+#include "ocr_calibration_runs.hpp"
 #include "worker_reach.hpp"
 #include "workers_cli.hpp"
 
@@ -197,7 +198,10 @@ int run_workers_sync(const WorkersCliOptions& options) {
             << " model bundle(s) already present; sent " << stats.blobs_sent << " blob(s), "
             << format_bytes(stats.bytes_sent) << " (runtime " << format_bytes(runtime_bytes_sent)
             << ")\n";
-  return 0;
+  return calibrate_for_workers_command(record, context.hello(), context.runtime,
+                                       context.model_cache)
+             ? 0
+             : 1;
 }
 
 }  // namespace svp::builder::workers

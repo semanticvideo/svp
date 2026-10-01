@@ -2,6 +2,7 @@
 
 #include "svp/exec/worker/coordinator_session.hpp"
 #include "svp/exec/worker/model_bundles.hpp"
+#include "svp/builder/build_thread_plan.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 #include "svp/models/cache.hpp"
 
@@ -37,11 +38,13 @@ svp::exec::worker::CoordinatorHello CoordinatorContext::hello() const {
 CoordinatorContext load_coordinator_context() {
   CoordinatorContext context;
   context.runtime = svp::exec::worker::locate_coordinator_runtime(current_executable());
-  // Until a build hands its own plan to the session (later task types), the
-  // handshake carries the plan a local build on this Mac would resolve with
-  // one OCR recognition worker; HELLO only checks that it is host-independent.
-  context.thread_plan = svp::models::resolve_local_thread_plan(
-      svp::models::detect_host_cpu_topology(), /*ocr_recognition_workers=*/1);
+  // The plan a default build on this Mac resolves; a --distributed build
+  // sends its own. HELLO checks that it is host-independent, and the
+  // `workers` commands calibrate OCR with it.
+  context.thread_plan =
+      resolve_build_thread_plan(BuildPipelineOptions{}, svp::models::detect_host_cpu_topology(),
+                                svp::models::process_environment_lookup(), false)
+          .plan;
   context.model_cache = svp::models::model_cache_root();
   try {
     context.model_set = svp::exec::worker::model_set_summary(context.model_cache);

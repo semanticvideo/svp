@@ -21,6 +21,7 @@
 #include "svp/exec/worker/worker_connection.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 #include "svp/exec/worker/worker_scripts.hpp"
+#include "ocr_calibration_runs.hpp"
 #include "worker_reach.hpp"
 #include "workers_cli.hpp"
 
@@ -305,7 +306,7 @@ int run_workers_pair(const WorkersCliOptions& options) {
   plan.plist_path = launchd_plist_path(plan.mode, plan.probe.home);
   plan.plist = render_launchd_plist(make_worker_service_spec(
       plan.mode, plan.layout, plan.layout.runtime(runtime.runtime_id), plan.probe.user,
-      plan.probe.home));
+      plan.probe.home, plan.probe.login_path));
   plan.worker_record = encode_worker_pairing(
       WorkerPairingRecord{.key = plan.key, .created_at = utc_timestamp_now()});
   plan.staging = std::filesystem::path(plan.probe.home) / "Library" / "Caches" / "org.svp" /
@@ -383,7 +384,10 @@ int run_workers_pair(const WorkersCliOptions& options) {
               << format_bytes(stats.bytes_sent) << "), "
               << models.size() - stats.model_bundles_pushed.size() << " already present\n";
   }
-  return 0;
+  return calibrate_for_workers_command(record, context.hello(), context.runtime,
+                                       context.model_cache)
+             ? 0
+             : 1;
 }
 
 }  // namespace svp::builder::workers

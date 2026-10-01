@@ -4,7 +4,10 @@
 # only place vision code meets svp-exec, so a runtime that registers vision
 # task types links svp::vision_tasks and nothing else in svp-vision changes.
 
+find_package(OpenCV REQUIRED COMPONENTS core imgproc)
+
 add_library(svp-vision-tasks
+  src/ocr_calibration_clip.cpp
   src/ocr_frame_batch_parameters.cpp
   src/ocr_frame_batch_spec.cpp
   src/ocr_frame_batch_task.cpp
@@ -27,6 +30,9 @@ target_link_libraries(svp-vision-tasks
   PUBLIC
     svp::exec
     svp::vision
+  PRIVATE
+    opencv_core
+    opencv_imgproc
 )
 
 if(BUILD_TESTING)
