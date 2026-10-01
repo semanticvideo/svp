@@ -189,6 +189,24 @@ if(BUILD_TESTING)
       svp::vision
   )
 
+  add_executable(svp-builder-ocr-frame-batch-plan-tests
+    tests/ocr_frame_batch_plan_tests.cpp
+  )
+  target_include_directories(svp-builder-ocr-frame-batch-plan-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_compile_features(svp-builder-ocr-frame-batch-plan-tests PRIVATE cxx_std_20)
+  target_link_libraries(svp-builder-ocr-frame-batch-plan-tests
+    PRIVATE
+      svp::builder
+      svp::exec
+      svp::vision
+      svp::vision_tasks
+      nlohmann_json::nlohmann_json
+  )
+  add_test(NAME svp-builder-ocr-frame-batch-plan-tests
+           COMMAND svp-builder-ocr-frame-batch-plan-tests)
+
   add_executable(svp-builder-task-engine-tests
     tests/build_task_engine_tests.cpp
   )
