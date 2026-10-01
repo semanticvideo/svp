@@ -4,36 +4,26 @@
 #include "svp/exec/exec_error.hpp"
 #include "svp/exec/fd_frame_io.hpp"
 #include "svp/exec/lease_frames.hpp"
-#include "svp/exec/task_frames.hpp"
+#include "svp/exec/worker_session_leases.hpp"
 
 #include <csignal>
 #include <condition_variable>
-#include <map>
 #include <mutex>
-#include <optional>
 #include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
 #include <utility>
+#include <vector>
 
 namespace svp::exec {
 namespace {
-
-using AttemptKey = std::pair<std::string, std::uint64_t>;
-
-struct OutstandingLease {
-  AttemptKey key;
-  // Cancelled leases stay known so a result already in flight is recognised
-  // and ignored rather than treated as a result nobody asked for.
-  bool cancelled = false;
-};
 
 // One worker process and the thread that reads from it.
 struct Session {
   detail::ChildProcess process;
   std::unique_ptr<FdFrameWriter> writer;
   std::thread reader;
-  std::map<std::string, OutstandingLease, std::less<>> leases;
+  WorkerSessionLeases leases;
   // Set (under the executor mutex) before the reader reaps the process; once
   // set, the pid may be reused and must never be signalled.
   bool reaping = false;
@@ -90,78 +80,10 @@ struct LoopbackExecutor::State {
     return all;
   }
 
-  // Returns the lease to report a result for, or nullopt when the result
-  // belongs to a cancelled lease. Throws when nobody asked for it.
-  std::optional<std::string> claim_result(Session& session, const TaskResult& result) {
-    const std::lock_guard lock(mutex);
-    for (auto iterator = session.leases.begin(); iterator != session.leases.end();
-         ++iterator) {
-      if (iterator->second.key == AttemptKey{result.task_id, result.attempt}) {
-        std::optional<std::string> lease_id;
-        if (!iterator->second.cancelled) {
-          lease_id = iterator->first;
-        }
-        session.leases.erase(iterator);
-        return lease_id;
-      }
-    }
-    throw ExecError(ExecErrorCode::frame_malformed,
-                    "RESULT for task `" + result.task_id + "` attempt " +
-                        std::to_string(result.attempt) +
-                        " matches no lease issued to this worker");
-  }
-
-  bool has_live_lease(Session& session, const std::string& lease_id) {
-    const std::lock_guard lock(mutex);
-    const auto found = session.leases.find(lease_id);
-    return found != session.leases.end() && !found->second.cancelled;
-  }
-
-  void handle_frame(Session& session, Frame frame) {
-    switch (frame.type) {
-      case MessageType::heartbeat: {
-        const std::string lease_id = lease_id_from_heartbeat_frame(frame);
-        if (has_live_lease(session, lease_id)) {
-          events->lease_heartbeat(lease_id);
-        }
-        return;
-      }
-      case MessageType::result: {
-        TaskResult result = task_result_from_result_frame(frame);
-        if (const auto lease_id = claim_result(session, result)) {
-          events->attempt_finished(
-              *lease_id, AttemptOutput{.result = std::move(result),
-                                       .payloads = std::move(frame.payloads)});
-        }
-        return;
-      }
-      default:
-        throw ExecError(ExecErrorCode::frame_malformed,
-                        "worker sent an unexpected " +
-                            std::string(message_type_name(frame.type)) + " frame");
-    }
-  }
-
   void read_session(Session& session) {
     FdFrameReader reader(session.process.fd, options.frame_limits);
-    AttemptFailureKind failure = AttemptFailureKind::executor_lost;
-    std::string reason = "worker process ended";
-    try {
-      while (auto frame = reader.read()) {
-        if (frame->type == MessageType::error) {
-          reason = "worker reported a protocol error: " + frame->body.dump();
-          break;
-        }
-        handle_frame(session, std::move(*frame));
-      }
-    } catch (const ExecError& error) {
-      // A stream that ends inside a frame is a process that died mid-write,
-      // not a worker that lied; everything else is bytes we cannot accept.
-      if (error.code() != ExecErrorCode::frame_truncated) {
-        failure = AttemptFailureKind::invalid_result;
-      }
-      reason = std::string("worker stream rejected: ") + error.what();
-    }
+    const WorkerSessionEnd end =
+        pump_worker_frames(reader, mutex, session.leases, *events, "worker process ended");
     {
       const std::lock_guard lock(mutex);
       session.reaping = true;
@@ -174,17 +96,12 @@ struct LoopbackExecutor::State {
       const std::lock_guard lock(mutex);
       session.finished = true;
       report = !stopping;
-      for (const auto& [lease_id, lease] : session.leases) {
-        if (!lease.cancelled) {
-          orphaned.push_back(lease_id);
-        }
-      }
-      session.leases.clear();
+      orphaned = session.leases.take_live();
       session_finished.notify_all();
     }
     if (report) {
       for (const std::string& lease_id : orphaned) {
-        events->attempt_failed(lease_id, failure, reason);
+        events->attempt_failed(lease_id, end.failure, end.reason);
       }
     }
   }
@@ -252,8 +169,7 @@ void LoopbackExecutor::assign(const TaskSpec& spec, const Lease& lease) {
   try {
     const std::lock_guard lock(state.mutex);
     session = state.live_session();
-    session->leases.emplace(lease.lease_id,
-                            OutstandingLease{.key = {spec.task_id, lease.attempt}});
+    session->leases.add(lease.lease_id, spec.task_id, lease.attempt);
   } catch (const ExecError& error) {
     state.events->attempt_failed(lease.lease_id, AttemptFailureKind::executor_lost,
                                  error.what());
@@ -275,7 +191,7 @@ void LoopbackExecutor::cancel(std::string_view lease_id) {
     if (!session || session->finished) {
       return;
     }
-    session->leases.find(lease_id)->second.cancelled = true;
+    session->leases.mark_cancelled(lease_id);
   }
   try {
     session->writer->write(make_cancel_frame(lease_id));
@@ -291,7 +207,7 @@ void LoopbackExecutor::lease_expired(std::string_view lease_id) {
   if (!session || session->finished) {
     return;
   }
-  session->leases.find(lease_id)->second.cancelled = true;
+  session->leases.mark_cancelled(lease_id);
   // The reader sees end of stream, reaps the process, and fails the rest.
   session->retiring = true;
   kill_session_process(*session);

@@ -32,9 +32,9 @@ struct RunningLease {
 // Everything the reader thread, task threads, and heartbeat thread share.
 class WorkerSession {
  public:
-  WorkerSession(int out_fd, const TaskTypeRegistry& registry,
+  WorkerSession(FrameWriter& writer, const TaskTypeRegistry& registry,
                 TaskArtifactAccess& artifacts, const WorkerLoopOptions& options)
-      : writer_(out_fd, options.frame_limits),
+      : writer_(writer),
         registry_(registry),
         artifacts_(artifacts),
         options_(options),
@@ -163,7 +163,7 @@ class WorkerSession {
     }
   }
 
-  FdFrameWriter writer_;
+  FrameWriter& writer_;
   const TaskTypeRegistry& registry_;
   TaskArtifactAccess& artifacts_;
   const WorkerLoopOptions& options_;
@@ -202,15 +202,15 @@ std::string_view worker_loop_exit_name(WorkerLoopExit exit) noexcept {
   return "unknown";
 }
 
-WorkerLoopExit run_worker_loop(int in_fd, int out_fd, const TaskTypeRegistry& registry,
+WorkerLoopExit run_worker_loop(FrameReader& input, FrameWriter& output,
+                               const TaskTypeRegistry& registry,
                                TaskArtifactAccess& artifacts,
                                const WorkerLoopOptions& options) {
-  WorkerSession session(out_fd, registry, artifacts, options);
-  FdFrameReader reader(in_fd, options.frame_limits);
+  WorkerSession session(output, registry, artifacts, options);
   while (true) {
     std::optional<Frame> frame;
     try {
-      frame = reader.read();
+      frame = input.read();
     } catch (const ExecError& error) {
       send_protocol_error(session, error.what());
       return WorkerLoopExit::protocol_error;
@@ -245,6 +245,14 @@ WorkerLoopExit run_worker_loop(int in_fd, int out_fd, const TaskTypeRegistry& re
       return WorkerLoopExit::protocol_error;
     }
   }
+}
+
+WorkerLoopExit run_worker_loop(int in_fd, int out_fd, const TaskTypeRegistry& registry,
+                               TaskArtifactAccess& artifacts,
+                               const WorkerLoopOptions& options) {
+  FdFrameReader reader(in_fd, options.frame_limits);
+  FdFrameWriter writer(out_fd, options.frame_limits);
+  return run_worker_loop(reader, writer, registry, artifacts, options);
 }
 
 }  // namespace svp::exec
