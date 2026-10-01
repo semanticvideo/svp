@@ -453,6 +453,26 @@ if(BUILD_TESTING)
   add_test(NAME svp-vision-ocr-temporal-sampling-tests
            COMMAND svp-vision-ocr-temporal-sampling-tests)
 
+  add_executable(svp-vision-ocr-frame-batch-tests
+    tests/ocr_frame_batch_tests.cpp
+  )
+
+  target_compile_features(svp-vision-ocr-frame-batch-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_compile_definitions(svp-vision-ocr-frame-batch-tests PRIVATE
+    SVP_VISION_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+  )
+
+  target_link_libraries(svp-vision-ocr-frame-batch-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-ocr-frame-batch-tests
+           COMMAND svp-vision-ocr-frame-batch-tests)
+
   add_executable(svp-vision-ocr-numeric-parser-tests
     tests/ocr_numeric_parser_tests.cpp
   )
