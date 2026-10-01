@@ -50,6 +50,18 @@ std::optional<std::string> WorkerSessionLeases::claim_result(const TaskResult& r
                       " matches no lease issued to this worker");
 }
 
+bool WorkerSessionLeases::claim_rejected(std::string_view lease_id) {
+  const auto found = leases_.find(lease_id);
+  if (found == leases_.end()) {
+    throw ExecError(ExecErrorCode::frame_malformed,
+                    "REJECT for lease `" + std::string(lease_id) +
+                        "` matches no lease issued to this worker");
+  }
+  const bool live = !found->second.cancelled;
+  leases_.erase(found);
+  return live;
+}
+
 std::vector<std::string> WorkerSessionLeases::take_live() {
   std::vector<std::string> live;
   for (const auto& [lease_id, lease] : leases_) {
@@ -89,6 +101,20 @@ void handle_worker_frame(Frame frame, std::mutex& mutex, WorkerSessionLeases& le
         events.attempt_finished(*lease_id,
                                 AttemptOutput{.result = std::move(result),
                                               .payloads = std::move(frame.payloads)});
+      }
+      return;
+    }
+    case MessageType::reject: {
+      const LeaseRejection rejection = lease_rejection_from_frame(frame);
+      bool live = false;
+      {
+        const std::lock_guard lock(mutex);
+        live = leases.claim_rejected(rejection.lease_id);
+      }
+      if (live) {
+        events.attempt_failed(rejection.lease_id, AttemptFailureKind::executor_lost,
+                              "worker rejected the lease (" + rejection.code +
+                                  "): " + rejection.message);
       }
       return;
     }

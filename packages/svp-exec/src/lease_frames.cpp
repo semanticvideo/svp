@@ -4,6 +4,7 @@
 #include "record_identifiers.hpp"
 #include "svp/exec/exec_error.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <utility>
 
@@ -137,6 +138,40 @@ std::string lease_id_from_cancel_frame(const Frame& frame) {
 
 Frame make_shutdown_frame() {
   return Frame{.type = MessageType::shutdown, .body = nlohmann::json::object(), .payloads = {}};
+}
+
+namespace {
+
+std::string checked_rejection_code(std::string code) {
+  const bool valid = !code.empty() && std::all_of(code.begin(), code.end(), [](char c) {
+    return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+  });
+  if (!valid) {
+    throw ExecError(ExecErrorCode::invalid_value,
+                    "REJECT code must be a non-empty [a-z0-9_] identifier: `" + code + "`");
+  }
+  return code;
+}
+
+}  // namespace
+
+Frame make_reject_frame(const LeaseRejection& rejection) {
+  return Frame{.type = MessageType::reject,
+               .body = nlohmann::json{{"code", checked_rejection_code(rejection.code)},
+                                      {kLeaseIdMember, checked_lease_id(rejection.lease_id)},
+                                      {"message", rejection.message}},
+               .payloads = {}};
+}
+
+LeaseRejection lease_rejection_from_frame(const Frame& frame) {
+  require_control_frame(frame, MessageType::reject);
+  constexpr std::string_view kBody = "REJECT.body";
+  detail::require_object(frame.body, kBody);
+  detail::reject_unknown_fields(frame.body, {"code", kLeaseIdMember, "message"}, kBody);
+  return LeaseRejection{
+      .lease_id = checked_lease_id(detail::required_string(frame.body, kLeaseIdMember, kBody)),
+      .code = checked_rejection_code(detail::required_string(frame.body, "code", kBody)),
+      .message = detail::required_string(frame.body, "message", kBody)};
 }
 
 }  // namespace svp::exec

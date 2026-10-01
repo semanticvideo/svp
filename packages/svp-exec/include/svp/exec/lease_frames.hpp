@@ -19,6 +19,7 @@ namespace svp::exec {
 // HEARTBEAT body {"lease_id"}                            no payloads
 // CANCEL    body {"lease_id"}                            no payloads
 // SHUTDOWN  body {}                                      no payloads
+// REJECT    body {"code","lease_id","message"}            no payloads
 //
 // lease_id is a record identifier ([A-Za-z0-9._-]); attempt, expires_in_ms,
 // and heartbeat_interval_ms are integers >= 1. Parsers reject unknown fields
@@ -39,5 +40,21 @@ struct LeasedAssignment {
 [[nodiscard]] std::string lease_id_from_cancel_frame(const Frame& frame);
 
 [[nodiscard]] Frame make_shutdown_frame();
+
+// A worker's refusal to run one lease it was assigned (plan §4.3 ACCEPT /
+// REJECT: "admission decision (insufficient_memory, model_missing,
+// os_mismatch, ...)"). `code` is a lower-case [a-z0-9_] identifier naming the
+// reason; `message` is for people. The lease never ran, so the coordinator
+// reports the attempt as lost and retries it under its RetryPolicy.
+struct LeaseRejection {
+  std::string lease_id;
+  std::string code;
+  std::string message;
+
+  bool operator==(const LeaseRejection&) const = default;
+};
+
+[[nodiscard]] Frame make_reject_frame(const LeaseRejection& rejection);
+[[nodiscard]] LeaseRejection lease_rejection_from_frame(const Frame& frame);
 
 }  // namespace svp::exec
