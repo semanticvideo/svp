@@ -39,7 +39,7 @@ std::optional<ToyFault> parse_fault(std::string_view name) {
 
 std::optional<std::string> validate_parameters(const nlohmann::json& parameters) {
   for (const auto& [name, value] : parameters.items()) {
-    if (name == "seed" || name == "sleep_ms") {
+    if (name == "seed" || name == "sleep_ms" || name == "output_bytes") {
       if (!value.is_number_unsigned()) {
         return name + " must be an unsigned integer";
       }
@@ -134,8 +134,12 @@ TaskResult execute(const TaskSpec& spec, const ResolvedInputs& inputs,
     fault = *parse_fault(parameters.at("fault").get<std::string>());
   }
 
-  std::string text = toy_expected_output(
-      spec.task_id, parameters.at("seed").get<std::uint64_t>(), input_contents);
+  const std::uint64_t seed = parameters.at("seed").get<std::uint64_t>();
+  std::string text = toy_expected_output(spec.task_id, seed, input_contents);
+  std::optional<std::vector<std::byte>> large;
+  if (const auto size = parameters.find("output_bytes"); size != parameters.end()) {
+    large = toy_expected_output_bytes(spec.task_id, seed, size->get<std::uint64_t>());
+  }
   TaskResult result = base_result(spec);
   switch (fault) {
     case ToyFault::crash:
@@ -149,6 +153,7 @@ TaskResult execute(const TaskSpec& spec, const ResolvedInputs& inputs,
       return failed_result(spec, false);
     case ToyFault::nondeterministic:
       text += " nonce=" + std::to_string(std::random_device{}());
+      large.reset();
       break;
     case ToyFault::corrupt_in_transit:
       result.diagnostics[std::string(kToyCorruptInTransit)] = true;
@@ -164,7 +169,9 @@ TaskResult execute(const TaskSpec& spec, const ResolvedInputs& inputs,
       break;
   }
   throw_if_cancelled(cancellation, "toy task before output");
-  result.outputs = {write_output(to_bytes(text), "text/plain", "toy_output")};
+  result.outputs = {large ? write_output(std::move(*large), "application/octet-stream",
+                                         "toy_output")
+                          : write_output(to_bytes(text), "text/plain", "toy_output")};
   result.output_digest = compute_output_digest(result.outputs);
   return result;
 }
@@ -227,6 +234,30 @@ std::string toy_expected_output(std::string_view task_id, std::uint64_t seed,
   return text;
 }
 
+std::vector<std::byte> toy_expected_output_bytes(std::string_view task_id, std::uint64_t seed,
+                                                 std::uint64_t output_bytes) {
+  const Blake3Digest digest =
+      blake3_digest(std::string(task_id) + "#" + std::to_string(seed) + "#bytes");
+  std::uint64_t state = 0;
+  for (std::size_t index = 0; index < sizeof(state); ++index) {
+    state = (state << 8U) | static_cast<std::uint64_t>(digest[index]);
+  }
+  std::vector<std::byte> bytes(output_bytes);
+  std::size_t offset = 0;
+  while (offset < bytes.size()) {
+    // splitmix64 (Steele, Lea, Flood 2014).
+    state += 0x9E3779B97F4A7C15ULL;
+    std::uint64_t value = state;
+    value = (value ^ (value >> 30U)) * 0xBF58476D1CE4E5B9ULL;
+    value = (value ^ (value >> 27U)) * 0x94D049BB133111EBULL;
+    value ^= value >> 31U;
+    for (std::size_t shift = 0; shift < 64 && offset < bytes.size(); shift += 8) {
+      bytes[offset++] = static_cast<std::byte>(value >> shift);
+    }
+  }
+  return bytes;
+}
+
 TaskNode make_toy_node(const ToyTask& task) {
   nlohmann::json parameters{{"seed", task.seed}};
   if (task.fault != ToyFault::none) {
@@ -237,6 +268,9 @@ TaskNode make_toy_node(const ToyTask& task) {
   }
   if (task.sleep_ms != 0) {
     parameters["sleep_ms"] = task.sleep_ms;
+  }
+  if (task.output_bytes != 0) {
+    parameters["output_bytes"] = task.output_bytes;
   }
 
   TaskSpec spec;

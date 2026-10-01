@@ -174,12 +174,19 @@ target_sources(svp-exec
 
 target_link_libraries(svp-exec PUBLIC Threads::Threads)
 
+# Remote transport (plan §3.3, §3.4): Network framework TLS-PSK, Bonjour, and
+# the remote executor. Apple-only; nothing above depends on it.
+if(APPLE)
+  add_subdirectory(remote)
+endif()
+
 if(BUILD_TESTING)
   # Toy task type and in-memory store shared by the scheduler tests and the
   # loopback test worker.
   add_library(svp-exec-toy-tasks STATIC
     tests/toy/in_memory_artifact_store.cpp
     tests/toy/toy_tasks.cpp
+    tests/toy/transit_fault_writer.cpp
   )
   target_compile_features(svp-exec-toy-tasks PUBLIC cxx_std_20)
   target_include_directories(svp-exec-toy-tasks PUBLIC
@@ -189,6 +196,13 @@ if(BUILD_TESTING)
 
   add_executable(svp-exec-test-worker tests/toy/test_worker_main.cpp)
   target_link_libraries(svp-exec-test-worker PRIVATE svp-exec-toy-tasks)
+  if(APPLE)
+    # --listen mode serves the worker loop over the remote transport.
+    target_include_directories(svp-exec-test-worker PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/remote/tests
+    )
+    target_link_libraries(svp-exec-test-worker PRIVATE svp::exec_remote)
+  endif()
 
   set(SVP_EXEC_SCHEDULER_TESTS
     task_graph

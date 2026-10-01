@@ -12,6 +12,9 @@
 //   once_marker  optional path: the fault fires only if this file does not
 //                exist yet, and creates it (so a retry succeeds)
 //   sleep_ms     optional uint: real sleep before producing output
+//   output_bytes optional uint: output is exactly this many deterministic
+//                bytes (toy_expected_output_bytes) instead of the text line;
+//                used to move large payloads in transport tests
 //
 // Faults simulate a misbehaving worker, not task logic, so they fire only
 // when the registry was built with ToyFaults::honoured (the test worker);
@@ -85,6 +88,7 @@ struct ToyTask {
   std::uint64_t sleep_ms = 0;
   std::uint64_t est_seconds = 1;
   std::map<std::string, ArtifactRef> inputs;
+  std::uint64_t output_bytes = 0;
 };
 
 [[nodiscard]] TaskNode make_toy_node(const ToyTask& task);
@@ -94,5 +98,11 @@ struct ToyTask {
 [[nodiscard]] std::string toy_expected_output(
     std::string_view task_id, std::uint64_t seed,
     const std::map<std::string, std::string>& input_contents = {});
+
+// The bytes a correct execution produces when `output_bytes` is set: a
+// splitmix64 stream seeded from the BLAKE3 of task_id and seed.
+[[nodiscard]] std::vector<std::byte> toy_expected_output_bytes(std::string_view task_id,
+                                                               std::uint64_t seed,
+                                                               std::uint64_t output_bytes);
 
 }  // namespace svp::exec::test
