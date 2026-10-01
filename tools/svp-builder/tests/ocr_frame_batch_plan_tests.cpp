@@ -105,6 +105,35 @@ void test_batches_are_spliced_before_the_reducer() {
           "without batches the graph is the whole-stage graph");
 }
 
+// Nothing depends on how densely OCR samples: a plan four times denser than
+// one sample per second of a ten-minute video, at a measured cost that puts
+// one sample in each batch, still splices into one valid graph, and its
+// partition still round-trips through the journal's task IDs.
+void test_dense_sampling_scales() {
+  const auto tasks = package_tasks();
+  const std::vector<std::string> deps = ocr_stage_dependencies(tasks);
+  constexpr std::size_t kDenseSamples = 4 * 600;
+  for (const double measured_seconds_per_sample : {7.5, 0.4}) {
+    const svp::vision::OcrBatchPolicy policy{
+        .target_task_seconds = svp::vision::OcrBatchPolicy{}.target_task_seconds,
+        .estimated_seconds_per_sample = measured_seconds_per_sample};
+    const OcrFrameBatchPlan batches =
+        make_ocr_frame_batch_plan(work_plan(kDenseSamples), policy, "bs_test", deps);
+    const std::uint64_t per_batch = svp::vision::ocr_batch_sample_count(policy);
+    require(batches.batches.size() == (kDenseSamples + per_batch - 1) / per_batch,
+            "batch count follows the measured cost, not the sample count");
+    const svp::exec::TaskGraph graph =
+        make_build_task_graph(tasks, "bs_test", "b3:inputs", &batches);
+    require(graph.size() == tasks.size() + batches.batches.size(), "dense plan graph builds");
+    std::vector<std::string> ids;
+    for (const svp::exec::TaskNode& node : batches.nodes) {
+      ids.push_back(node.spec.task_id);
+    }
+    const auto partition = ocr_batches_from_task_ids(ids, kDenseSamples);
+    require(partition && *partition == batches.batches, "dense partition round-trips");
+  }
+}
+
 void test_resume_recovers_the_recorded_partition() {
   const auto tasks = package_tasks();
   const std::vector<std::string> deps = ocr_stage_dependencies(tasks);
@@ -225,6 +254,7 @@ void test_calibration_bounds_and_records() {
 int main() {
   test_batches_are_spliced_before_the_reducer();
   test_resume_recovers_the_recorded_partition();
+  test_dense_sampling_scales();
   test_committed_batch_outputs_reach_the_reducer();
   test_in_process_access_serves_source_and_outputs();
   test_calibration_bounds_and_records();
