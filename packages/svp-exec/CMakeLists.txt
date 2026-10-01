@@ -149,6 +149,7 @@ target_sources(svp-exec
     src/clock.cpp
     src/executor.cpp
     src/fd_frame_io.cpp
+    src/frame_stream.cpp
     src/in_memory_result_commit_sink.cpp
     src/in_process_executor.cpp
     src/lease_frames.cpp
@@ -168,6 +169,7 @@ target_sources(svp-exec
     src/task_attempt_runner.cpp
     src/task_graph.cpp
     src/worker_loop.cpp
+    src/worker_session_leases.cpp
 )
 
 target_link_libraries(svp-exec PUBLIC Threads::Threads)

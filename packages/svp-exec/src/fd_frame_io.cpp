@@ -7,7 +7,6 @@
 #include <string>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <vector>
 
 namespace svp::exec {
 namespace {
@@ -31,14 +30,30 @@ ssize_t write_some(int fd, const std::byte* data, std::size_t size) {
 
 }  // namespace
 
-FdFrameWriter::FdFrameWriter(int fd, FrameLimits limits) : fd_(fd), limits_(limits) {}
+FdByteStream::FdByteStream(int read_fd, int write_fd)
+    : read_fd_(read_fd), write_fd_(write_fd) {}
 
-void FdFrameWriter::write(const Frame& frame) {
-  const std::vector<std::byte> bytes = encode_frame(frame, limits_);
-  const std::lock_guard lock(mutex_);
+std::size_t FdByteStream::read_some(std::span<std::byte> buffer) {
+  while (true) {
+    const ssize_t count = ::read(read_fd_, buffer.data(), buffer.size());
+    if (count >= 0) {
+      return static_cast<std::size_t>(count);
+    }
+    if (errno == EINTR) {
+      continue;
+    }
+    if (errno == ECONNRESET) {
+      return 0;
+    }
+    throw_io("frame read failed");
+  }
+}
+
+void FdByteStream::write_all(std::span<const std::byte> bytes) {
   std::size_t written = 0;
   while (written < bytes.size()) {
-    const ssize_t count = write_some(fd_, bytes.data() + written, bytes.size() - written);
+    const ssize_t count =
+        write_some(write_fd_, bytes.data() + written, bytes.size() - written);
     if (count < 0) {
       if (errno == EINTR) {
         continue;
@@ -49,31 +64,14 @@ void FdFrameWriter::write(const Frame& frame) {
   }
 }
 
-FdFrameReader::FdFrameReader(int fd, FrameLimits limits)
-    : fd_(fd), decoder_(limits), chunk_(kFdReadChunkBytes) {}
+FdFrameWriter::FdFrameWriter(int fd, FrameLimits limits)
+    : stream_(-1, fd), writer_(stream_, limits) {}
 
-std::optional<Frame> FdFrameReader::read() {
-  while (true) {
-    if (auto frame = decoder_.next()) {
-      return frame;
-    }
-    const ssize_t count = ::read(fd_, chunk_.data(), chunk_.size());
-    if (count < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      if (errno == ECONNRESET) {
-        decoder_.finish();
-        return std::nullopt;
-      }
-      throw_io("frame read failed");
-    }
-    if (count == 0) {
-      decoder_.finish();
-      return std::nullopt;
-    }
-    decoder_.feed(std::span<const std::byte>(chunk_.data(), static_cast<std::size_t>(count)));
-  }
-}
+void FdFrameWriter::write(const Frame& frame) { writer_.write(frame); }
+
+FdFrameReader::FdFrameReader(int fd, FrameLimits limits)
+    : stream_(fd, -1), reader_(stream_, limits) {}
+
+std::optional<Frame> FdFrameReader::read() { return reader_.read(); }
 
 }  // namespace svp::exec
