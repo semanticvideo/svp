@@ -26,6 +26,10 @@
 #include "svp/package/spatial_embedding_placeholders.hpp"
 #include "svp/vision/canonical_frame_input.hpp"
 #include "svp/vision/inference_performance.hpp"
+#include "svp/vision/ocr_frame_detections.hpp"
+#include "svp/vision/ocr_generation.hpp"
+#include "svp/vision/ocr_sample_plan.hpp"
+#include "svp/vision/pp_ocr.hpp"
 
 #include <filesystem>
 #include <nlohmann/json.hpp>
@@ -115,6 +119,32 @@ decode_vision_lane_canonical_frames(const VisionLaneSettings& settings,
 [[nodiscard]] VisionOcrStageResult run_vision_ocr_stage(
     const VisionLaneSettings& settings,
     const svp::vision::DecodedCanonicalFrames& frames,
+    svp::vision::FrameCatalog* frame_catalog,
+    const SpatialProgressCallback& on_progress);
+
+// The OCR stage's options for these settings, exactly as run_vision_ocr_stage
+// uses them. A build that runs OCR as frame-batch tasks plans the sample
+// schedule (svp::vision::plan_ocr_samples) and PP-OCR options
+// (svp::vision::make_ocr_pp_ocr_options) from these, so its batches decode
+// and recognize exactly what the stage would. `on_progress` is captured by
+// reference and must outlive the options' use.
+[[nodiscard]] svp::vision::OcrGenerationOptions make_vision_ocr_options(
+    const VisionLaneSettings& settings,
+    svp::vision::FrameCatalog* frame_catalog,
+    const SpatialProgressCallback& on_progress);
+
+// The OCR stage's reduce step for frame-batch results (plan §2.4 item 3): the
+// result run_vision_ocr_stage would return when the stage ran the same sample
+// plan in this process. `pp_ocr_session` (from `pp_ocr_options`) serves the
+// evidence-crop re-read. Throws svp::vision::OcrFrameBatchReductionError when
+// the batches do not cover the plan; other stage errors become the stage's
+// blocker, as they do in run_vision_ocr_stage.
+[[nodiscard]] VisionOcrStageResult run_vision_ocr_reduce_stage(
+    const VisionLaneSettings& settings,
+    const svp::vision::OcrSamplePlan& plan,
+    std::vector<std::vector<svp::vision::OcrSampleDetections>> batch_results,
+    const svp::vision::PpOcrSession& pp_ocr_session,
+    const svp::vision::PpOcrOptions& pp_ocr_options,
     svp::vision::FrameCatalog* frame_catalog,
     const SpatialProgressCallback& on_progress);
 
