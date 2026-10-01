@@ -79,6 +79,7 @@ int main() {
   test_word_assignment_single_speaker_gap_beyond_tolerance_uses_sole_speaker();
   test_word_assignment_no_segments_all_unknown();
   test_transcript_confidence_provenance_is_decoder_token_softmax_mean();
+  test_real_asr_chunk_results_are_independent_of_prior_chunks_when_enabled();
   test_real_asr_diarization_word_attribution_fixtures_when_enabled();
   test_real_sherpa_diarization_speaker_count_fixtures_when_enabled();
   test_set_sherpa_lib_path_with_invalid_path_leaves_unavailable();

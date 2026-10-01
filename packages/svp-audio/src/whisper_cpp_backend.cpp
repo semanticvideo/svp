@@ -4,6 +4,7 @@
 #include "svp/audio/phoneme_lexicon.hpp"
 #include "svp/audio/whisper_pcm_reader.hpp"
 #include "svp/audio/word_boundary_conversion.hpp"
+#include "whisper_vad_speech.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -28,12 +29,7 @@ namespace svp::audio {
 #if defined(SVP_AUDIO_WHISPER_CPP_AVAILABLE)
 namespace {
 
-constexpr std::int64_t kWhisperCentisecondsPerSecond = 100;
 constexpr std::int64_t kWhisperCentisecondsToMicroseconds = 10'000;
-constexpr std::int64_t kWhisperVadProcessedGapMilliseconds = 100;
-// A VAD mapping segment whose original span exceeds its processed span by
-// more than this is a synthetic gap covering removed silence, not speech.
-constexpr std::int64_t kVadSyntheticGapSlackCentiseconds = 5;
 
 // whisper_model_type exposes whisper.cpp's private e_model ordinal through its
 // public C API. Keep these values named so the DTW preset mapping is explicit.
@@ -44,93 +40,6 @@ enum class WhisperModelType : int {
   kSmall = 3,
   kMedium = 4,
   kLarge = 5,
-};
-
-struct WhisperVadContextDeleter {
-  void operator()(whisper_vad_context* context) const noexcept {
-    whisper_vad_free(context);
-  }
-};
-
-using WhisperVadContext =
-    std::unique_ptr<whisper_vad_context, WhisperVadContextDeleter>;
-
-struct WhisperVadSegmentsDeleter {
-  void operator()(whisper_vad_segments* segments) const noexcept {
-    whisper_vad_free_segments(segments);
-  }
-};
-
-using WhisperVadSegments =
-    std::unique_ptr<whisper_vad_segments, WhisperVadSegmentsDeleter>;
-
-struct VadTimeMappingPoint {
-  std::int64_t processed_centiseconds = 0;
-  std::int64_t original_centiseconds = 0;
-};
-
-struct VadTimeMapper {
-  std::vector<VadTimeMappingPoint> points;
-  std::vector<std::pair<std::int64_t, std::int64_t>> processed_speech_ranges;
-
-  [[nodiscard]] bool same_speech_region(
-      std::int64_t first_centiseconds,
-      std::int64_t second_centiseconds) const {
-    if (processed_speech_ranges.empty()) return false;
-    const std::int64_t start = std::min(first_centiseconds, second_centiseconds);
-    const std::int64_t end = std::max(first_centiseconds, second_centiseconds);
-    return std::any_of(
-        processed_speech_ranges.begin(), processed_speech_ranges.end(),
-        [start, end](const auto& range) {
-          return start >= range.first && end <= range.second;
-        });
-  }
-
-  [[nodiscard]] std::optional<std::int64_t> speech_region_start(
-      std::int64_t processed_centiseconds) const {
-    for (const auto& range : processed_speech_ranges) {
-      if (processed_centiseconds >= range.first &&
-          processed_centiseconds <= range.second) {
-        return range.first;
-      }
-    }
-    return std::nullopt;
-  }
-
-  // Maps a processed-buffer timestamp back to original time. Inside a
-  // synthetic gap the mapping interpolates proportionally into the removed
-  // silence, which scatters word times across pauses that no longer exist
-  // in the output; instead onsets resolve to the following speech region's
-  // start and offsets to the preceding region's end.
-  [[nodiscard]] std::int64_t map_centiseconds(
-      std::int64_t processed_centiseconds, bool is_onset) const {
-    if (points.empty()) return processed_centiseconds;
-    if (processed_centiseconds <= points.front().processed_centiseconds) {
-      return points.front().original_centiseconds;
-    }
-
-    for (std::size_t index = 1; index < points.size(); ++index) {
-      const VadTimeMappingPoint& previous = points[index - 1];
-      const VadTimeMappingPoint& current = points[index];
-      if (processed_centiseconds > current.processed_centiseconds) continue;
-      const std::int64_t processed_span =
-          current.processed_centiseconds - previous.processed_centiseconds;
-      if (processed_span <= 0) return current.original_centiseconds;
-      const std::int64_t original_span =
-          current.original_centiseconds - previous.original_centiseconds;
-      // original time advancing far beyond processed time marks a synthetic
-      // gap (removed silence); a small slack absorbs centisecond rounding.
-      if (original_span > processed_span + kVadSyntheticGapSlackCentiseconds) {
-        return is_onset ? current.original_centiseconds
-                        : previous.original_centiseconds;
-      }
-      return previous.original_centiseconds +
-             ((processed_centiseconds - previous.processed_centiseconds) *
-              original_span) /
-                 processed_span;
-    }
-    return points.back().original_centiseconds;
-  }
 };
 
 std::atomic<bool> g_whisper_cpp_verbose{false};
@@ -153,6 +62,21 @@ struct WhisperContextDeleter {
 
 using WhisperContext = std::unique_ptr<whisper_context, WhisperContextDeleter>;
 
+struct WhisperStateDeleter {
+  void operator()(whisper_state* state) const noexcept {
+    whisper_free_state(state);
+  }
+};
+
+// Decoding state for exactly one chunk. whisper.cpp keeps mutable decode
+// state here (KV caches regrown when temperature fallback adds decoders,
+// backend compute buffers, the first decoder's sampling RNG, the previous
+// result), so a state shared across chunks makes each chunk's output depend
+// on the chunks decoded before it. A fresh state per chunk makes every chunk
+// a pure function of its own samples; the cached context holds only the
+// immutable model weights.
+using WhisperState = std::unique_ptr<whisper_state, WhisperStateDeleter>;
+
 struct CachedWhisperModel {
   std::mutex mutex;
   std::filesystem::path path;
@@ -166,8 +90,10 @@ CachedWhisperModel& cached_model() {
 
 WhisperContext load_context(const std::filesystem::path& model_path,
                             whisper_context_params params) {
-  WhisperContext loaded(
-      whisper_init_from_file_with_params(model_path.string().c_str(), params));
+  // The context is shared across chunks, so it carries no decoding state of
+  // its own; each chunk allocates a fresh whisper_state instead.
+  WhisperContext loaded(whisper_init_from_file_with_params_no_state(
+      model_path.string().c_str(), params));
   if (!loaded) {
     throw std::runtime_error("Unable to load GGML Whisper model: " +
                              model_path.string());
@@ -222,127 +148,6 @@ whisper_context* load_model(CachedWhisperModel& cache,
   cache.path = model_path;
   cache.context = std::move(loaded);
   return cache.context.get();
-}
-
-std::int64_t samples_to_centiseconds(int samples) {
-  return static_cast<std::int64_t>(std::lround(
-      static_cast<double>(samples) * kWhisperCentisecondsPerSecond /
-      WHISPER_SAMPLE_RATE));
-}
-
-int centiseconds_to_samples(std::int64_t centiseconds) {
-  return static_cast<int>(std::lround(
-      static_cast<double>(centiseconds) * WHISPER_SAMPLE_RATE /
-      kWhisperCentisecondsPerSecond));
-}
-
-void append_vad_mapping_point(VadTimeMapper& mapper,
-                              std::int64_t processed_centiseconds,
-                              std::int64_t original_centiseconds) {
-  if (!mapper.points.empty() &&
-      mapper.points.back().processed_centiseconds == processed_centiseconds) {
-    mapper.points.back().original_centiseconds = original_centiseconds;
-    return;
-  }
-  mapper.points.push_back({processed_centiseconds, original_centiseconds});
-}
-
-VadTimeMapper build_vad_time_mapper(
-    const std::filesystem::path& vad_model_path,
-    const std::vector<float>& samples,
-    whisper_vad_params vad_params,
-    int vad_threads) {
-  VadTimeMapper mapper;
-  if (samples.empty()) return mapper;
-
-  whisper_vad_context_params context_params =
-      whisper_vad_default_context_params();
-  context_params.n_threads = vad_threads;
-  const std::string vad_model_path_string = vad_model_path.string();
-  WhisperVadContext vad_context(
-      whisper_vad_init_from_file_with_params(
-          vad_model_path_string.c_str(), context_params));
-  if (!vad_context) {
-    throw std::runtime_error("Unable to initialize whisper.cpp VAD model: " +
-                             vad_model_path.string());
-  }
-
-  WhisperVadSegments segments(whisper_vad_segments_from_samples(
-      vad_context.get(), vad_params, samples.data(),
-      static_cast<int>(samples.size())));
-  if (!segments) {
-    throw std::runtime_error("Unable to detect speech with whisper.cpp VAD");
-  }
-
-  const int segment_count = whisper_vad_segments_n_segments(segments.get());
-  const int overlap_samples = static_cast<int>(
-      vad_params.samples_overlap * WHISPER_SAMPLE_RATE);
-  const int silence_samples = static_cast<int>(
-      kWhisperVadProcessedGapMilliseconds * WHISPER_SAMPLE_RATE / 1000);
-  int processed_offset_samples = 0;
-  const bool debug = std::getenv("SVP_VAD_DEBUG") != nullptr;
-
-  for (int index = 0; index < segment_count; ++index) {
-    const std::int64_t original_start_centiseconds = static_cast<std::int64_t>(
-        std::llround(whisper_vad_segments_get_segment_t0(segments.get(), index)));
-    const std::int64_t original_end_centiseconds = static_cast<std::int64_t>(
-        std::llround(whisper_vad_segments_get_segment_t1(segments.get(), index)));
-    int segment_start_samples =
-        centiseconds_to_samples(original_start_centiseconds);
-    int segment_end_samples = centiseconds_to_samples(original_end_centiseconds);
-    segment_start_samples = std::clamp(segment_start_samples, 0,
-                                       static_cast<int>(samples.size()) - 1);
-    segment_end_samples = std::clamp(segment_end_samples, 0,
-                                     static_cast<int>(samples.size()) - 1);
-    const int original_segment_length =
-        segment_end_samples - segment_start_samples;
-    // whisper.cpp packs a non-final segment's overlap extension into the
-    // processed buffer too, so the copied length decides the skip — a
-    // degenerate segment still contributes its overlap and silence gap.
-    int copied_segment_end_samples = segment_end_samples;
-    if (index < segment_count - 1) {
-      copied_segment_end_samples = std::min(
-          copied_segment_end_samples + overlap_samples,
-          static_cast<int>(samples.size()) - 1);
-    }
-    const int segment_length =
-        copied_segment_end_samples - segment_start_samples;
-    if (segment_length <= 0) continue;
-    if (debug) {
-      std::fprintf(stderr,
-                   "vad seg %d: orig %.2f-%.2f processed_from %.2f\n", index,
-                   original_start_centiseconds / 100.0,
-                   original_end_centiseconds / 100.0,
-                   samples_to_centiseconds(processed_offset_samples) / 100.0);
-    }
-
-    const std::int64_t processed_segment_start =
-        samples_to_centiseconds(processed_offset_samples);
-    const std::int64_t processed_segment_end = samples_to_centiseconds(
-        processed_offset_samples + original_segment_length);
-    mapper.processed_speech_ranges.emplace_back(
-        processed_segment_start, processed_segment_end);
-    append_vad_mapping_point(
-        mapper, processed_segment_start, original_start_centiseconds);
-    append_vad_mapping_point(
-        mapper, processed_segment_end, original_end_centiseconds);
-
-    processed_offset_samples += segment_length;
-
-    if (index < segment_count - 1) {
-      append_vad_mapping_point(
-          mapper, samples_to_centiseconds(processed_offset_samples),
-          original_end_centiseconds);
-      append_vad_mapping_point(
-          mapper,
-          samples_to_centiseconds(processed_offset_samples + silence_samples),
-          static_cast<std::int64_t>(std::llround(
-              whisper_vad_segments_get_segment_t0(segments.get(), index + 1))));
-      processed_offset_samples += silence_samples;
-    }
-  }
-
-  return mapper;
 }
 
 std::int64_t clamped_token_time_us(
@@ -406,6 +211,7 @@ std::string trim_leading_space(const char* raw) {
 
 std::vector<AsrWord> collect_segment_words(
     whisper_context* context,
+    whisper_state* state,
     int segment_index,
     const VadTimeMapper& vad_time_mapper,
     std::int64_t chunk_start_us,
@@ -430,14 +236,15 @@ std::vector<AsrWord> collect_segment_words(
     probability_count = 0;
   };
 
-  const int token_count = whisper_full_n_tokens(context, segment_index);
+  const int token_count =
+      whisper_full_n_tokens_from_state(state, segment_index);
   for (int token_index = 0; token_index < token_count; ++token_index) {
     const whisper_token token_id =
-        whisper_full_get_token_id(context, segment_index, token_index);
+        whisper_full_get_token_id_from_state(state, segment_index, token_index);
     if (token_id >= whisper_token_eot(context)) continue;
 
-    const char* raw_text =
-        whisper_full_get_token_text(context, segment_index, token_index);
+    const char* raw_text = whisper_full_get_token_text_from_state(
+        context, state, segment_index, token_index);
     if (raw_text == nullptr || *raw_text == '\0') continue;
     const bool begins_word = std::isspace(
                                  static_cast<unsigned char>(*raw_text)) != 0;
@@ -445,7 +252,8 @@ std::vector<AsrWord> collect_segment_words(
     if (token_text.empty()) continue;
 
     const whisper_token_data token_data =
-        whisper_full_get_token_data(context, segment_index, token_index);
+        whisper_full_get_token_data_from_state(state, segment_index,
+                                               token_index);
     const std::int64_t current_token_start_us = token_start_us(
         token_data, vad_time_mapper, chunk_start_us, chunk_end_us);
     if (begins_word && !current.text.empty()) {
@@ -458,7 +266,7 @@ std::vector<AsrWord> collect_segment_words(
     current.text += token_text;
     current.end_us = std::max(current.end_us, current_token_end_us);
     probability_sum +=
-        whisper_full_get_token_p(context, segment_index, token_index);
+        whisper_full_get_token_p_from_state(state, segment_index, token_index);
     ++probability_count;
   }
   flush();
@@ -735,31 +543,42 @@ WhisperInferenceResult run_whisper_cpp_inference(
   params.print_realtime = false;
   params.print_timestamps = false;
   params.print_special = false;
-  params.vad = true;
-  const std::string vad_model_path_string = vad_model_path.string();
-  params.vad_model_path = vad_model_path_string.c_str();
-  params.vad_params = whisper_vad_default_params();
-  const VadTimeMapper vad_time_mapper = build_vad_time_mapper(
-      vad_model_path, samples, params.vad_params, threads.whisper.vad);
+  // Speech-only decoding with whisper.cpp's default Silero VAD parameters.
+  // whisper_full_with_state() has no VAD step, so detect_vad_speech() packs
+  // the speech buffer exactly as whisper_full()'s built-in VAD would.
+  params.vad = false;
+  const whisper_vad_params vad_params = whisper_vad_default_params();
+  const VadSpeechInput speech = detect_vad_speech(
+      vad_model_path, samples, vad_params, threads.whisper.vad);
+  const VadTimeMapper& vad_time_mapper = speech.time_mapper;
 
-  if (whisper_full(context, params, samples.data(),
-                   static_cast<int>(samples.size())) != 0) {
+  const WhisperState state(whisper_init_state(context));
+  if (!state) {
+    throw std::runtime_error("Unable to allocate whisper.cpp decoding state");
+  }
+  // No speech: whisper_full() returns an empty result without decoding.
+  if (!speech.speech_samples.empty() &&
+      whisper_full_with_state(
+          context, state.get(), params, speech.speech_samples.data(),
+          static_cast<int>(speech.speech_samples.size())) != 0) {
     throw std::runtime_error("whisper.cpp inference failed");
   }
 
-  const int segment_count = whisper_full_n_segments(context);
+  const int segment_count = whisper_full_n_segments_from_state(state.get());
   for (int segment_index = 0; segment_index < segment_count; ++segment_index) {
     WhisperSegment segment;
-    const char* text = whisper_full_get_segment_text(context, segment_index);
+    const char* text =
+        whisper_full_get_segment_text_from_state(state.get(), segment_index);
     if (text != nullptr) segment.text = text;
     segment.start_us = clamped_token_time_us(
-        whisper_full_get_segment_t0(context, segment_index), vad_time_mapper,
-        chunk_start_us, chunk_end_us, true);
+        whisper_full_get_segment_t0_from_state(state.get(), segment_index),
+        vad_time_mapper, chunk_start_us, chunk_end_us, true);
     segment.end_us = clamped_token_time_us(
-        whisper_full_get_segment_t1(context, segment_index), vad_time_mapper,
-        chunk_start_us, chunk_end_us, false);
-    segment.words = collect_segment_words(
-        context, segment_index, vad_time_mapper, chunk_start_us, chunk_end_us);
+        whisper_full_get_segment_t1_from_state(state.get(), segment_index),
+        vad_time_mapper, chunk_start_us, chunk_end_us, false);
+    segment.words = collect_segment_words(context, state.get(), segment_index,
+                                          vad_time_mapper, chunk_start_us,
+                                          chunk_end_us);
     result.all_words.insert(result.all_words.end(), segment.words.begin(),
                             segment.words.end());
     result.segments.push_back(std::move(segment));
