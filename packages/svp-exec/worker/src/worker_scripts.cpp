@@ -177,17 +177,23 @@ std::string render_prepare_root_script(const std::filesystem::path& root) {
   return out.str();
 }
 
-std::string render_agent_start_script(const std::filesystem::path& plist,
-                                      const std::filesystem::path& root, std::string_view label) {
+std::string render_prepare_launch_agents_script(const std::filesystem::path& plist,
+                                               const std::filesystem::path& root) {
+  std::ostringstream out;
+  out << "set -eu\n"
+      << "agents=" << q(plist.parent_path()) << "\n"
+      << "if [ ! -d \"$agents\" ]; then\n"
+      << "  mkdir -m 755 \"$agents\"\n"
+      << "  : > " << q(root / std::string(kCreatedLaunchAgentsMarker)) << "\n"
+      << "fi\n";
+  return out.str();
+}
+
+std::string render_agent_start_script(const std::filesystem::path& plist, std::string_view label) {
   std::ostringstream out;
   out << "set -eu\n"
       << "uid=$(id -u)\n"
       << "plist=" << q(plist) << "\n"
-      << "agents=\"$(dirname \"$plist\")\"\n"
-      << "if [ ! -d \"$agents\" ]; then\n"
-      << "  mkdir -p \"$agents\"\n"
-      << "  : > " << q(root / std::string(kCreatedLaunchAgentsMarker)) << "\n"
-      << "fi\n"
       << "launchctl bootout \"gui/$uid/" << label << "\" >/dev/null 2>&1 || true\n"
       << bootstrap_with_retry("\"gui/$uid\"", "$plist")
       << "launchctl print \"gui/$uid/" << label << "\" >/dev/null\n";

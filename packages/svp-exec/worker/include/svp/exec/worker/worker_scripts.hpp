@@ -63,10 +63,16 @@ struct WorkerProbe {
 // Creates the layout directories under `root` (0700).
 [[nodiscard]] std::string render_prepare_root_script(const std::filesystem::path& root);
 
+// Creates the per-user LaunchAgents directory when it is missing (0755, as
+// macOS creates it) and then leaves kCreatedLaunchAgentsMarker in `root` so
+// removal can take the directory away again. Runs before the plist is
+// written.
+[[nodiscard]] std::string render_prepare_launch_agents_script(const std::filesystem::path& plist,
+                                                              const std::filesystem::path& root);
+
 // Loads (or reloads) the per-user LaunchAgent whose plist is already in
 // place, then waits until launchd reports it running.
 [[nodiscard]] std::string render_agent_start_script(const std::filesystem::path& plist,
-                                                    const std::filesystem::path& root,
                                                     std::string_view label = kWorkerJobLabel);
 
 struct DaemonInstall {

@@ -144,9 +144,11 @@ int dry_run(const Plan& plan, const CoordinatorRuntime& runtime,
                             render_write_file_script(plan.layout.pairings() /
                                                          (plan.key.pairing_id + ".json"),
                                                      0600)));
-    scripts.push_back(write("4-write-plist.sh", render_write_file_script(plan.plist_path, 0644)));
-    scripts.push_back(write("5-start-agent.sh",
-                            render_agent_start_script(plan.plist_path, plan.layout.root)));
+    scripts.push_back(write("4-prepare-launch-agents.sh",
+                            render_prepare_launch_agents_script(plan.plist_path, plan.layout.root)));
+    scripts.push_back(write("5-write-plist.sh", render_write_file_script(plan.plist_path, 0644)));
+    scripts.push_back(write("6-start-agent.sh",
+                            render_agent_start_script(plan.plist_path)));
   } else {
     const WorkerLayout staging{.root = plan.staging};
     scripts.push_back(write("1-prepare-staging.sh", render_prepare_root_script(plan.staging)));
@@ -192,11 +194,11 @@ int dry_run(const Plan& plan, const CoordinatorRuntime& runtime,
   std::cout << "$ " << verify << "\n" << std::flush;
   failures += std::system(verify.c_str()) == 0 ? 0 : 1;
   std::cout << "dry run: nothing was changed on the worker; files in " << out.string() << "\n"
-            << "  the real pairing runs scripts 1-4 over ssh"
+            << "  the real pairing runs the numbered scripts over ssh in order"
             << (plan.mode == WorkerServiceMode::system_daemon
-                    ? " and then `ssh -t " + plan.probe.user + "@... sudo /bin/sh " +
-                          (plan.staging / "install-daemon.sh").string() + "`"
-                    : " and then script 5")
+                    ? ", the last one staged as " + (plan.staging / "install-daemon.sh").string() +
+                          " and run with `ssh -t <worker> sudo /bin/sh <it>`"
+                    : "")
             << "\n";
   return failures == 0 ? 0 : 1;
 }
@@ -213,9 +215,10 @@ void install_user_agent(SshSession& ssh, const Plan& plan, const CoordinatorRunt
   (void)ssh.run_script(
       render_write_file_script(plan.layout.pairings() / (plan.key.pairing_id + ".json"), 0600),
       plan.worker_record);
+  (void)ssh.run_script(render_prepare_launch_agents_script(plan.plist_path, plan.layout.root));
   (void)ssh.run_script(render_write_file_script(plan.plist_path, 0644), plan.plist);
   std::cout << "loading LaunchAgent " << plan.plist_path.string() << "\n";
-  (void)ssh.run_script(render_agent_start_script(plan.plist_path, plan.layout.root));
+  (void)ssh.run_script(render_agent_start_script(plan.plist_path));
 }
 
 void install_system_daemon(SshSession& ssh, const Plan& plan, const CoordinatorRuntime& runtime,

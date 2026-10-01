@@ -99,7 +99,9 @@ void test_scripts_parse() {
   expect_sh_parses(scratch.path, render_receive_runtime_script(layout.runtimes(), kRuntime));
   expect_sh_parses(scratch.path, render_write_file_script(layout.pairings() / "x.json", 0600));
   expect_sh_parses(scratch.path, render_prepare_root_script(layout.root));
-  expect_sh_parses(scratch.path, render_agent_start_script(scratch.path / "a.plist", layout.root));
+  expect_sh_parses(scratch.path, render_agent_start_script(scratch.path / "a.plist"));
+  expect_sh_parses(scratch.path,
+                   render_prepare_launch_agents_script(scratch.path / "a.plist", layout.root));
   expect_sh_parses(scratch.path,
                    render_daemon_install_script(DaemonInstall{
                        .user = "w",
@@ -160,6 +162,10 @@ void test_write_file_and_removal_scripts_on_a_scratch_root() {
   expect(::stat((layout.pairings() / "svpw-aaa.json").c_str(), &info) == 0 &&
              (info.st_mode & 0777) == 0600,
          "pairing file is 0600");
+  expect(run(render_prepare_launch_agents_script(plist, layout.root)).first == 0,
+         "prepare LaunchAgents directory");
+  expect(fs::exists(layout.root / std::string(kCreatedLaunchAgentsMarker)),
+         "pairing records that it created the LaunchAgents directory");
   expect(run(render_write_file_script(plist, 0644), "<plist/>").first == 0, "write plist");
   write_file(layout.cas() / "blob", "x");
 
@@ -179,6 +185,7 @@ void test_write_file_and_removal_scripts_on_a_scratch_root() {
          "last removal removes everything: " + last.second);
   expect(!fs::exists(layout.root), "root is gone");
   expect(!fs::exists(plist), "plist is gone");
+  expect(!fs::exists(plist.parent_path()), "the LaunchAgents directory pairing created is gone");
 }
 
 void test_receive_runtime_script_installs_a_verified_runtime() {
