@@ -43,6 +43,8 @@ std::string_view attempt_event_kind_name(AttemptEventKind kind) noexcept {
       return "determinism_incident";
     case AttemptEventKind::failed:
       return "failed";
+    case AttemptEventKind::rejected:
+      return "rejected";
     case AttemptEventKind::expired:
       return "expired";
     case AttemptEventKind::deadline_exceeded:

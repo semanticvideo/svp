@@ -68,9 +68,10 @@ struct WorkerSessionEnd {
 //     the schema, output_digest, and every payload's length and BLAKE3, and
 //     is claimed against `leases`; a verified result for a live lease is
 //     reported with events.attempt_finished.
-//   * REJECT (the worker's admission refused the lease, plan §3.5) fails
-//     that attempt as executor_lost with the worker's reason; the session
-//     goes on.
+//   * REJECT (the worker's admission declined the lease, plan §3.5) is
+//     reported with events.attempt_rejected and the worker's reason; it is
+//     not a failure and the session goes on. A REJECT for a lease this
+//     session did not issue is invalid like any other stray frame.
 //   * ERROR from the worker ends the session as executor_lost.
 //   * Bytes that fail any check, a result for a lease this session did not
 //     issue, or any other frame end the session as invalid_result.

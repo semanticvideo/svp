@@ -1,6 +1,6 @@
 // The worker handshake and transfer codecs (plan §4.1, §4.3): every message
 // survives the wire, HELLO's compatibility rules refuse what they must, and
-// REJECT reaches the scheduler as a lost attempt.
+// REJECT reaches the scheduler as a rejection, never as a failed attempt.
 
 #include "svp/exec/frame_decoder.hpp"
 #include "svp/exec/lease_frames.hpp"
@@ -218,7 +218,12 @@ class RecordingEvents final : public ExecutorEvents {
                       std::string message) override {
     failures.emplace_back(std::string(lease_id), kind, std::move(message));
   }
+  void attempt_rejected(std::string_view lease_id, std::string code,
+                        std::string message) override {
+    rejections.emplace_back(std::string(lease_id), std::move(code), std::move(message));
+  }
   std::vector<std::tuple<std::string, AttemptFailureKind, std::string>> failures;
+  std::vector<std::tuple<std::string, std::string, std::string>> rejections;
 };
 
 class VectorReader final : public FrameReader {
@@ -236,7 +241,7 @@ class VectorReader final : public FrameReader {
   std::size_t next_ = 0;
 };
 
-void test_reject_fails_only_that_attempt() {
+void test_reject_is_a_rejection_not_a_failure() {
   const LeaseRejection rejection{.lease_id = "lease-1",
                                  .code = std::string(kRejectInsufficientMemory),
                                  .message = "too big"};
@@ -254,12 +259,12 @@ void test_reject_fails_only_that_attempt() {
   RecordingEvents events;
   VectorReader reader({make_reject_frame(rejection)});
   const WorkerSessionEnd end = pump_worker_frames(reader, mutex, leases, events, "ended");
-  expect(events.failures.size() == 1, "one attempt failed");
-  expect(std::get<0>(events.failures.front()) == "lease-1" &&
-             std::get<1>(events.failures.front()) == AttemptFailureKind::executor_lost,
-         "the rejected lease is lost, not invalid");
-  expect(std::get<2>(events.failures.front()).find("insufficient_memory") != std::string::npos,
-         "reason names the rejection code");
+  expect(events.failures.empty(), "a rejection is not a failed attempt");
+  expect(events.rejections.size() == 1, "one rejection reported");
+  expect(std::get<0>(events.rejections.front()) == "lease-1" &&
+             std::get<1>(events.rejections.front()) == kRejectInsufficientMemory &&
+             std::get<2>(events.rejections.front()) == "too big",
+         "the rejected lease with the worker's code and message");
   expect(end.failure == AttemptFailureKind::executor_lost, "session ends normally afterwards");
   expect(leases.contains("lease-2") && !leases.contains("lease-1"), "other lease untouched");
 
@@ -282,6 +287,6 @@ int main() {
                        {"other refusals", test_other_refusals},
                        {"transfer messages round trip", test_transfer_messages_round_trip},
                        {"transfer messages are strict", test_transfer_messages_are_strict},
-                       {"REJECT fails only that attempt", test_reject_fails_only_that_attempt},
+                       {"REJECT is reported as a rejection, not a failure", test_reject_is_a_rejection_not_a_failure},
                    });
 }

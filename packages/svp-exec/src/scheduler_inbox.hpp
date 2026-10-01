@@ -27,7 +27,13 @@ struct FailedEvent {
   std::string message;
 };
 
-using InboxEvent = std::variant<HeartbeatEvent, FinishedEvent, FailedEvent>;
+struct RejectedEvent {
+  std::string lease_id;
+  std::string code;
+  std::string message;
+};
+
+using InboxEvent = std::variant<HeartbeatEvent, FinishedEvent, FailedEvent, RejectedEvent>;
 
 // Thread-safe queue from executor threads to the scheduler thread. Every
 // scheduler decision is made on one thread from these events, so scheduler
@@ -38,6 +44,8 @@ class SchedulerInbox final : public ExecutorEvents {
   void attempt_finished(std::string_view lease_id, AttemptOutput output) override;
   void attempt_failed(std::string_view lease_id, AttemptFailureKind kind,
                       std::string message) override;
+  void attempt_rejected(std::string_view lease_id, std::string code,
+                        std::string message) override;
 
   // Waits up to `timeout` (real time) for at least one event, then returns
   // every queued event in arrival order.

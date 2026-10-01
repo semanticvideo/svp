@@ -19,6 +19,12 @@ void SchedulerInbox::attempt_failed(std::string_view lease_id, AttemptFailureKin
       .lease_id = std::string(lease_id), .kind = kind, .message = std::move(message)});
 }
 
+void SchedulerInbox::attempt_rejected(std::string_view lease_id, std::string code,
+                                      std::string message) {
+  push(RejectedEvent{
+      .lease_id = std::string(lease_id), .code = std::move(code), .message = std::move(message)});
+}
+
 void SchedulerInbox::push(InboxEvent event) {
   const std::lock_guard lock(mutex_);
   events_.push_back(std::move(event));

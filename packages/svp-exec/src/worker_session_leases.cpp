@@ -112,9 +112,7 @@ void handle_worker_frame(Frame frame, std::mutex& mutex, WorkerSessionLeases& le
         live = leases.claim_rejected(rejection.lease_id);
       }
       if (live) {
-        events.attempt_failed(rejection.lease_id, AttemptFailureKind::executor_lost,
-                              "worker rejected the lease (" + rejection.code +
-                                  "): " + rejection.message);
+        events.attempt_rejected(rejection.lease_id, rejection.code, rejection.message);
       }
       return;
     }

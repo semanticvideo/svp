@@ -68,6 +68,8 @@ struct SchedulerStats {
   // Attempts cancelled at their hard deadline (LeasePolicy).
   std::uint64_t deadlines_exceeded = 0;
   std::uint64_t invalid_results = 0;
+  // Leases an executor declined (REJECT); not failures, not retries.
+  std::uint64_t leases_rejected = 0;
   // Later verified results whose digest equals the committed one.
   std::uint64_t duplicates_discarded = 0;
   std::vector<std::string> quarantined_executors;

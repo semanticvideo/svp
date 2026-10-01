@@ -16,6 +16,9 @@ enum class AttemptEventKind {
   determinism_incident,
   // The attempt failed (task failure, invalid result, executor lost).
   failed,
+  // The executor declined the lease before running it (admission); the task
+  // was offered elsewhere and nothing was counted against it.
+  rejected,
   expired,
   // The attempt ran past its hard deadline (LeasePolicy) while its lease was
   // still renewed; it was cancelled and counted as lost.

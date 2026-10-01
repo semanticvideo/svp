@@ -47,8 +47,9 @@ enum class AttemptFailureKind {
 // Callbacks from an executor to the scheduler. Implementations are
 // thread-safe and never block for long; executors call them from their own
 // threads. Every lease handed to Executor::assign ends in exactly one
-// attempt_finished or attempt_failed unless the scheduler has already
-// abandoned it (cancel, expiry, stop), in which case reporting is optional.
+// attempt_finished, attempt_failed, or attempt_rejected unless the scheduler
+// has already abandoned it (cancel, expiry, stop), in which case reporting is
+// optional.
 class ExecutorEvents {
  public:
   virtual ~ExecutorEvents() = default;
@@ -56,6 +57,14 @@ class ExecutorEvents {
   virtual void attempt_finished(std::string_view lease_id, AttemptOutput output) = 0;
   virtual void attempt_failed(std::string_view lease_id, AttemptFailureKind kind,
                               std::string message) = 0;
+  // A healthy executor declined the lease before running it (plan §3.5
+  // admission: insufficient memory, memory pressure, no free capacity). It
+  // is not a failure: the attempt does not count against the task's retries
+  // or the executor's loss quarantine; the task is offered elsewhere and the
+  // executor is offered no new work for a short backoff (scheduler.hpp).
+  // `code` is the worker's lower-case reason (lease_frames.hpp REJECT).
+  virtual void attempt_rejected(std::string_view lease_id, std::string code,
+                                std::string message) = 0;
 };
 
 // Whether lost attempts (executor_lost, lease expiry, hard deadline) count

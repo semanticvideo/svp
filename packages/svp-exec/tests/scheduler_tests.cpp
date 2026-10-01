@@ -4,8 +4,10 @@
 #include "svp/exec/scheduler.hpp"
 #include "svp/exec/task_attempt_runner.hpp"
 
+#include <algorithm>
 #include <future>
 #include <memory>
+#include <optional>
 #include <set>
 
 namespace {
@@ -641,6 +643,132 @@ SchedulerPolicy deadline_policy() {
 
 // A task that is alive (heartbeating) but never finishes is cancelled at its
 // hard deadline, counted as lost, and retried; the retry commits.
+// Admission rejections (REJECT) are a healthy worker declining work, not
+// failures: the strictest retry and quarantine settings (one attempt, one
+// loss event) would end the run at the first rejection if either counted.
+SchedulerPolicy strict_rejection_policy(std::chrono::milliseconds backoff) {
+  SchedulerPolicy policy = test_policy();
+  policy.retry.max_attempts = 1;
+  policy.retry.quarantine_after_loss_events = 1;
+  policy.rejection_backoff = backoff;
+  return policy;
+}
+
+void reject(const Lease& lease, ExecutorEvents& events) {
+  events.attempt_rejected(lease.lease_id, "insufficient_memory", "test worker is full");
+}
+
+// The only executor rejects its first several offers, then accepts: it is
+// offered work again after each backoff, never quarantined, and the task
+// never runs out of attempts.
+void test_repeated_rejections_neither_quarantine_nor_exhaust_retries() {
+  constexpr std::size_t kRejections = 5;
+  const TaskGraph graph = single_task_graph();
+  ToyRuntime runtime;
+  std::size_t offers = 0;
+  ScriptedExecutor picky("picky", [&](const TaskSpec& spec, const Lease& lease,
+                                      ExecutorEvents& events) {
+    if (offers++ < kRejections) {
+      reject(lease, events);
+    } else {
+      events.attempt_finished(lease.lease_id, correct_output(runtime, spec, lease));
+    }
+  });
+  InMemoryResultCommitSink sink;
+  EventLog log;
+  const BuildOutcome outcome = run_sync(graph, {&picky}, sink,
+                                        strict_rejection_policy(std::chrono::milliseconds{5}),
+                                        log.observer());
+  expect_succeeded(outcome, "rejections then acceptance");
+  expect(picky.assignments().size() == kRejections + 1, "offered again after every backoff");
+  expect(outcome.stats.leases_rejected == kRejections, "rejections counted as rejections");
+  expect(log.count(AttemptEventKind::rejected) == kRejections, "rejected events reported");
+  expect(log.count(AttemptEventKind::failed) == 0, "no failed attempts");
+  expect(outcome.stats.retries == 0, "no retries consumed");
+  expect(outcome.stats.quarantined_executors.empty(), "never quarantined");
+  expect_payload_is_correct(sink.results().front(), 42);
+}
+
+// A rejected task is offered to another executor at once, without waiting
+// for the rejecting executor's backoff.
+void test_rejected_task_completes_on_another_executor() {
+  const TaskGraph graph = make_toy_graph(two_lane_toy_tasks(3));
+  ToyRuntime runtime;
+  ScriptedExecutor picky("picky", [](const TaskSpec&, const Lease& lease,
+                                     ExecutorEvents& events) { reject(lease, events); });
+  InProcessExecutor local(runtime.registry, runtime.store, {.threads = 1});
+  InMemoryResultCommitSink sink;
+  // A backoff far longer than the test may take: every task must finish on
+  // the in-process executor without waiting it out.
+  const auto started = std::chrono::steady_clock::now();
+  const BuildOutcome outcome =
+      run_sync(graph, {&picky, &local}, sink, strict_rejection_policy(std::chrono::hours{1}));
+  expect(std::chrono::steady_clock::now() - started < kTestWaitLimit,
+         "rejected work did not wait for the backoff");
+  expect_succeeded(outcome, "work moves to the in-process executor");
+  expect(picky.assignments().size() == 1, "the rejecting executor is not re-offered during backoff");
+  expect(outcome.stats.leases_rejected == 1, "one rejection");
+  expect(outcome.stats.quarantined_executors.empty(), "nobody quarantined");
+  expect(sink.size() == graph.size(), "all tasks committed");
+  for (const CommittedResult& committed : sink.results()) {
+    expect(committed.executor_id == "in-process", "committed by the in-process executor");
+  }
+}
+
+// An executor that finishes an attempt has freed capacity: its backoff ends
+// at once and it receives work again, long before the backoff would expire.
+void test_finished_attempt_ends_rejection_backoff() {
+  const TaskGraph graph = make_toy_graph({
+      ToyTask{.task_id = "t.first", .seed = 1, .order_key = {.lane = "a", .ordinals = {0}}},
+      ToyTask{.task_id = "t.second", .seed = 2, .order_key = {.lane = "a", .ordinals = {1}}}});
+  ToyRuntime runtime;
+  std::mutex mutex;
+  std::size_t offers = 0;
+  std::optional<std::pair<TaskSpec, Lease>> held;
+  ScriptedExecutor busy(
+      "busy",
+      [&](const TaskSpec& spec, const Lease& lease, ExecutorEvents& events) {
+        const std::lock_guard lock(mutex);
+        switch (offers++) {
+          case 0:
+            held = std::make_pair(spec, lease);  // runs; finished by the test below
+            break;
+          case 1:
+            reject(lease, events);  // full while the first one runs
+            break;
+          default:
+            events.attempt_finished(lease.lease_id, correct_output(runtime, spec, lease));
+        }
+      },
+      LossQuarantine::after_repeated_losses, /*slots=*/2);
+  InMemoryResultCommitSink sink;
+  EventLog log;
+  const SchedulerPolicy policy = strict_rejection_policy(std::chrono::hours{1});
+  auto outcome = std::async(std::launch::async, [&] {
+    return run_sync(graph, {&busy}, sink, policy, log.observer());
+  });
+  log.wait_until([](const std::vector<AttemptEvent>& events) {
+    return std::any_of(events.begin(), events.end(), [](const AttemptEvent& event) {
+      return event.kind == AttemptEventKind::rejected;
+    });
+  });
+  std::pair<TaskSpec, Lease> first;
+  {
+    const std::lock_guard lock(mutex);
+    first = *held;
+  }
+  busy.events().attempt_finished(first.second.lease_id,
+                                 correct_output(runtime, first.first, first.second));
+  expect(outcome.wait_for(kTestWaitLimit) == std::future_status::ready,
+         "the run finished well before the backoff");
+  const BuildOutcome result = outcome.get();
+  expect_succeeded(result, "both tasks committed on the one executor");
+  expect(busy.assignments().size() == 3, "offered again once it reported capacity");
+  expect(result.stats.leases_rejected == 1 && result.stats.retries == 0,
+         "one rejection, no retries");
+  expect(result.stats.quarantined_executors.empty(), "never quarantined");
+}
+
 void test_deadline_cancels_a_live_stuck_attempt() {
   const TemporaryDirectory directory("svp-exec-scheduler-deadline");
   ToyTask stuck{.task_id = "task.toy.stuck",
@@ -701,6 +829,12 @@ int main() {
                         test_invalid_result_quarantines_a_never_executor},
                        {"in-process executor is never quarantined for losses",
                         test_in_process_executor_is_never_quarantined_for_losses},
+                       {"repeated rejections neither quarantine nor exhaust retries",
+                        test_repeated_rejections_neither_quarantine_nor_exhaust_retries},
+                       {"rejected task completes on another executor",
+                        test_rejected_task_completes_on_another_executor},
+                       {"finished attempt ends rejection backoff",
+                        test_finished_attempt_ends_rejection_backoff},
                        {"deadline cancels a live stuck attempt",
                         test_deadline_cancels_a_live_stuck_attempt},
                    });

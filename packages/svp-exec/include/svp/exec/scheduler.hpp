@@ -47,6 +47,15 @@ namespace svp::exec {
 //     the latest event shows the executor recovered and resets its count.
 //     An executor that declares LossQuarantine::never (the in-process
 //     executor) is quarantined only for invalid results.
+//   * A rejected lease (ExecutorEvents::attempt_rejected: a healthy executor's
+//     admission declined it) is not a failed attempt: it counts toward
+//     neither the task's max_attempts nor the executor's loss events. The
+//     task goes straight back to the ready queue for any executor, and the
+//     rejecting executor is offered no new lease for policy.rejection_backoff
+//     or until one of its attempts finishes (capacity freed), whichever is
+//     first. While every executor that could take work is backing off, the
+//     build waits rather than failing for lack of a usable executor; a fleet
+//     that only ever rejects waits until cancelled.
 //   * The first verified result for a task is committed to the sink, exactly
 //     once. A later verified result with the same output_digest is discarded
 //     and counted; a different digest is a determinism incident and fails the

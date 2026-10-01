@@ -44,8 +44,10 @@ struct LeasedAssignment {
 // A worker's refusal to run one lease it was assigned (plan §4.3 ACCEPT /
 // REJECT: "admission decision (insufficient_memory, model_missing,
 // os_mismatch, ...)"). `code` is a lower-case [a-z0-9_] identifier naming the
-// reason; `message` is for people. The lease never ran, so the coordinator
-// reports the attempt as lost and retries it under its RetryPolicy.
+// reason; `message` is for people. The lease never ran and the worker is
+// healthy, so the coordinator reports it with ExecutorEvents::attempt_rejected:
+// not a failed attempt, not a loss (scheduler.hpp). Protocol errors are ERROR
+// frames and end the session instead.
 struct LeaseRejection {
   std::string lease_id;
   std::string code;
