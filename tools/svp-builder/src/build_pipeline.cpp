@@ -15,7 +15,11 @@
 #include "engine/distributed_vision_work.hpp"
 #include "engine/ocr_batch_observer.hpp"
 #include "engine/ocr_execution_policy.hpp"
+#include "engine/build_task_graph.hpp"
 #include "engine/ocr_frame_batch_plan.hpp"
+#include "engine/tracking_execution_policy.hpp"
+#include "engine/tracking_window_plan.hpp"
+#include "engine/tracking_window_progress.hpp"
 #include "engine/stage_output_access.hpp"
 #include "engine/stage_task_environment.hpp"
 #include "engine/stage_task_plan.hpp"
@@ -42,9 +46,13 @@
 #include "svp/vision/noise_suppression.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_parameters.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_task.hpp"
+#include "svp/vision/tasks/track_window_parameters.hpp"
+#include "svp/vision/tasks/track_window_spec.hpp"
+#include "svp/vision/tasks/track_window_task.hpp"
 
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <algorithm>
 #include <map>
@@ -140,30 +148,73 @@ void restore_committed_tasks(const std::vector<engine::PlannedStageTask>& tasks,
   }
 }
 
-// The OCR stage's frame batches, when it splits (ocr_frame_batch_plan.hpp).
-// A --distributed build prepares its workers here, once the OCR work is
-// known and before any task runs, and sizes batches from this Mac's measured
-// per-sample cost. A resumed build keeps the partition its journal recorded.
-struct PlannedOcrExecution {
+// The OCR stage's batches: the partition a resumed build's journal recorded,
+// else one cut by `batch_policy`.
+engine::OcrFrameBatchPlan plan_ocr_batches(engine::OcrWorkPlan work,
+                                           const svp::vision::OcrBatchPolicy& batch_policy,
+                                           const BuildPipelineOptions& options,
+                                           const std::vector<engine::PlannedStageTask>& tasks,
+                                           const std::string& build_session_id,
+                                           const engine::BuildJournalSession& journal_session) {
+  const std::vector<std::string> depends_on = engine::ocr_stage_dependencies(tasks);
+  if (options.journal_mode == RecoveryJournalMode::resume) {
+    if (std::optional<std::vector<svp::vision::OcrSampleBatch>> recorded =
+            engine::ocr_batches_from_task_ids(journal_session.recorded_task_ids(),
+                                              work.samples.samples.size())) {
+      return engine::make_ocr_frame_batch_plan_from_batches(
+          std::move(work), std::move(*recorded), batch_policy, build_session_id, depends_on);
+    }
+  }
+  return engine::make_ocr_frame_batch_plan(std::move(work), batch_policy, build_session_id,
+                                           depends_on);
+}
+
+// The stages that run as subtasks: the OCR stage's frame batches
+// (ocr_frame_batch_plan.hpp) and, in a --distributed build or when resuming
+// a journal that recorded them, the tracking stage's windows
+// (tracking_window_plan.hpp). A --distributed build with OCR work prepares
+// its workers here, before any task runs, and sizes OCR batches and window
+// leases from this Mac's measured costs. A resumed build keeps the OCR
+// partition its journal recorded (tracking windows are the plan's own).
+struct PlannedSplitExecution {
   std::optional<engine::OcrFrameBatchPlan> batches;
   std::size_t coordinator_slots = engine::kLocalOnlyOcrBatchSlots;
   std::vector<svp::exec::Executor*> workers;
+  // Frees the workers' OCR sessions once every batch has committed.
+  std::function<void()> release_ocr_workers;
   // --distributed only: the vision stage work this build dispatches (M4) and
   // the models its workers were given.
   std::map<std::string, DispatchedTypeCapacity, std::less<>> dispatched_capacity;
   std::shared_ptr<DispatchedWorkerExecutors> dispatched_workers;
   std::vector<svp::exec::TaskModelRef> dispatched_model_refs;
+  std::optional<engine::TrackingWindowPlan> windows;
+  std::size_t coordinator_tracking_slots = engine::kCoordinatorTrackWindowSlotsWithoutMeasurement;
+  std::vector<svp::exec::Executor*> tracking_workers;
 };
 
-PlannedOcrExecution plan_ocr_execution(
+DistributedTrackingWork distributed_tracking_work(const engine::TrackingWorkPlan& tracking) {
+  std::size_t largest_window = 0;
+  for (const svp::vision::VisualEntitySamplingWindow& window : tracking.plan.windows) {
+    largest_window = std::max(largest_window, window.timestamps_us.size());
+  }
+  return DistributedTrackingWork{
+      .model_refs = tracking.model_refs,
+      .options = tracking.options,
+      .window_peak_rss_mb = svp::vision::tasks::track_window_estimated_peak_rss_mb(
+          largest_window, tracking.frame_width, tracking.frame_height,
+          tracking.options.detector.maximum_detections)};
+}
+
+PlannedSplitExecution plan_split_execution(
     const BuildPipelineOptions& options, const BuildStageExecutionPlan& stage_plan,
     const svp::media::MediaIngestPlan& plan, const nlohmann::json& plan_json,
     const svp::models::ThreadPlan& thread_plan, bool model_runtime_available,
     const svp::exec::SourceFingerprintRecord& source,
     const std::vector<engine::PlannedStageTask>& tasks, const std::string& build_session_id,
     const engine::BuildJournalSession& journal_session,
+    const svp::vision::FrameCatalog& planned_catalog,
     const svp::exec::CancellationToken& cancellation) {
-  PlannedOcrExecution execution;
+  PlannedSplitExecution execution;
   std::optional<engine::OcrWorkPlan> work = engine::plan_ocr_work({
       .options = options,
       .stage_plan = stage_plan,
@@ -174,11 +225,26 @@ PlannedOcrExecution plan_ocr_execution(
       .source_blake3 = source.blake3,
       .source_bytes = source.size_bytes,
   });
-  if (!work) {
-    return execution;
+  std::optional<engine::TrackingWorkPlan> tracking;
+  if (engine::split_tracking_stage(options.journal_mode, options.distributed != nullptr,
+                                   journal_session.recorded_task_ids())) {
+    tracking = engine::plan_tracking_work({
+        .options = options,
+        .stage_plan = stage_plan,
+        .media_plan = plan,
+        .media_plan_json = plan_json,
+        .thread_plan = thread_plan,
+        .model_runtime_available = model_runtime_available,
+        .source_blake3 = source.blake3,
+        .source_bytes = source.size_bytes,
+    });
   }
-  svp::vision::OcrBatchPolicy batch_policy;
-  if (options.distributed) {
+  svp::vision::tasks::TrackWindowCostPolicy window_cost;
+  // Workers are prepared with the OCR work (which carries what every task
+  // shares). A build whose OCR does not split runs its tracking windows on
+  // this Mac alone.
+  if (work && options.distributed) {
+    svp::vision::OcrBatchPolicy batch_policy;
     const DistributedVisionWork vision =
         engine::plan_distributed_vision_work(options.model_cache_dir, thread_plan);
     const DistributedFleet fleet = options.distributed->prepare(DistributedOcrWork{
@@ -193,8 +259,11 @@ PlannedOcrExecution plan_ocr_execution(
         .thread_plan = thread_plan,
         .cancellation = &cancellation,
         .vision = vision,
+        .tracking = tracking ? std::optional(distributed_tracking_work(*tracking))
+                             : std::nullopt,
     });
     execution.workers = fleet.workers;
+    execution.release_ocr_workers = fleet.release_ocr_workers;
     execution.coordinator_slots = std::max<std::size_t>(1, fleet.coordinator_ocr_slots);
     if (fleet.seconds_per_sample) {
       batch_policy.estimated_seconds_per_sample = *fleet.seconds_per_sample;
@@ -208,19 +277,23 @@ PlannedOcrExecution plan_ocr_execution(
         execution.dispatched_model_refs.push_back((*onnx)->model_ref);
       }
     }
-  }
-  const std::vector<std::string> depends_on = engine::ocr_stage_dependencies(tasks);
-  if (options.journal_mode == RecoveryJournalMode::resume) {
-    if (std::optional<std::vector<svp::vision::OcrSampleBatch>> recorded =
-            engine::ocr_batches_from_task_ids(journal_session.recorded_task_ids(),
-                                              work->samples.samples.size())) {
-      execution.batches = engine::make_ocr_frame_batch_plan_from_batches(
-          std::move(*work), std::move(*recorded), batch_policy, build_session_id, depends_on);
-      return execution;
+    execution.tracking_workers = fleet.tracking_workers;
+    execution.coordinator_tracking_slots =
+        std::max<std::size_t>(1, fleet.coordinator_tracking_slots);
+    if (fleet.seconds_per_tracking_frame) {
+      window_cost.estimated_seconds_per_frame = *fleet.seconds_per_tracking_frame;
     }
+    execution.batches = plan_ocr_batches(std::move(*work), batch_policy, options, tasks,
+                                         build_session_id, journal_session);
+  } else if (work) {
+    execution.batches = plan_ocr_batches(std::move(*work), {}, options, tasks, build_session_id,
+                                         journal_session);
   }
-  execution.batches = engine::make_ocr_frame_batch_plan(std::move(*work), batch_policy,
-                                                         build_session_id, depends_on);
+  if (tracking) {
+    execution.windows = engine::make_tracking_window_plan(
+        std::move(*tracking), window_cost, build_session_id,
+        engine::tracking_stage_dependencies(tasks), planned_catalog);
+  }
   return execution;
 }
 
@@ -368,13 +441,17 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         effective_options.journal_output_path.empty() ? effective_options.output_path
                                                       : effective_options.journal_output_path);
     const std::string build_session_id = journal_session.prepare();
-    PlannedOcrExecution ocr_execution = plan_ocr_execution(
+    PlannedSplitExecution ocr_execution = plan_split_execution(
         effective_options, stage_plan, plan, plan_json, thread_plan, model_runtime_available,
-        source, tasks, build_session_id, journal_session, cancellation);
+        source, tasks, build_session_id, journal_session, planned_catalog, cancellation);
     const engine::OcrFrameBatchPlan* ocr_batches =
         ocr_execution.batches ? &*ocr_execution.batches : nullptr;
-    const svp::exec::TaskGraph graph =
-        engine::make_build_task_graph(tasks, build_session_id, build_inputs, ocr_batches);
+    const engine::TrackingWindowPlan* tracking_windows =
+        ocr_execution.windows ? &*ocr_execution.windows : nullptr;
+    const svp::exec::TaskGraph graph = engine::make_split_build_task_graph(
+        tasks, build_session_id, build_inputs,
+        engine::SplitStageTasks{.ocr_batches = ocr_batches,
+                                .tracking_windows = tracking_windows});
     std::optional<engine::StartedJournal> started_journal;
     try {
       started_journal.emplace(journal_session.start(graph, source));
@@ -406,6 +483,16 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     restore_committed_tasks(tasks, graph, started.committed, staging_dir, results);
     report_resume(started, graph.size(), journal_session.journal_root(),
                   effective_options.quiet);
+    std::set<std::string> resumed_ids;
+    for (const svp::exec::CommittedResult& committed : started.committed) {
+      resumed_ids.insert(committed.result.task_id);
+    }
+    const svp::exec::SteadyClock clock;
+    std::optional<engine::TrackingWindowProgress> tracking_progress;
+    if (tracking_windows != nullptr) {
+      tracking_progress.emplace(*tracking_windows, *sink, clock, effective_options.quiet,
+                                resumed_ids);
+    }
 
     svp::exec::TaskTypeRegistry registry;
     engine::StageOutputAccess outputs;
@@ -445,7 +532,10 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         .results = results,
         .ocr_batches = ocr_batches,
         .pp_ocr_sessions = pp_ocr_sessions,
-        .vision_dispatch = vision_dispatch ? &vision_dispatch->dispatch : nullptr};
+        .vision_dispatch = vision_dispatch ? &vision_dispatch->dispatch : nullptr,
+        .tracking_windows = tracking_windows,
+        .track_window_runtimes = std::make_shared<svp::vision::tasks::TrackWindowRuntimePool>(),
+        .tracking_progress = tracking_progress ? &*tracking_progress : nullptr};
     engine::register_stage_task_types(registry, tasks, environment, outputs, stage_exits);
     if (ocr_batches != nullptr) {
       outputs.register_input(ocr_batches->work.source, ocr_batches->work.source_path);
@@ -463,11 +553,27 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
               .record_start_failures = true},
           environment.pp_ocr_sessions);
     }
+    if (tracking_windows != nullptr) {
+      outputs.register_input(tracking_windows->work.source, tracking_windows->work.source_path);
+      svp::vision::tasks::register_track_window_task(
+          registry,
+          svp::vision::tasks::TrackWindowWorkerEnvironment{
+              .model_cache_root = effective_options.model_cache_dir,
+              .ffmpeg_path = effective_options.ffmpeg_path,
+              .write_output =
+                  [&outputs](std::span<const std::byte> bytes, std::string media_type,
+                             std::string role) {
+                    return outputs.put(bytes, std::move(media_type), std::move(role));
+                  },
+              .model_cache_for = {},
+              .record_start_failures = true},
+          environment.track_window_runtimes);
+    }
 
     // One slot per stage task that can run at once: the graph's edges encode
     // the concurrency policy, so they alone bound concurrency. Frame batches
-    // have executors of their own: this Mac's OCR slots and, when
-    // distributed, the workers'.
+    // and tracking windows have executors of their own: this Mac's slots for
+    // each and, when distributed, the workers'.
     svp::exec::InProcessExecutor executor(
         registry, outputs,
         svp::exec::InProcessExecutorOptions{
@@ -477,7 +583,12 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
             .runtime_id = {}});
     const std::set<std::string, std::less<>> frame_batch_types{
         std::string(svp::vision::tasks::kOcrFrameBatchTaskType)};
-    svp::exec::TaskTypeExcludingExecutor stages_only(executor, frame_batch_types);
+    const std::set<std::string, std::less<>> window_types{
+        std::string(svp::vision::tasks::kTrackWindowTaskType)};
+    const std::set<std::string, std::less<>> subtask_types{
+        std::string(svp::vision::tasks::kOcrFrameBatchTaskType),
+        std::string(svp::vision::tasks::kTrackWindowTaskType)};
+    svp::exec::TaskTypeExcludingExecutor stages_only(executor, subtask_types);
     std::optional<svp::exec::InProcessExecutor> ocr_executor;
     std::optional<svp::exec::TaskTypeRestrictedExecutor> ocr_only;
     std::vector<svp::exec::Executor*> executors{&stages_only};
@@ -493,22 +604,41 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
       executors.insert(executors.end(), ocr_execution.workers.begin(),
                        ocr_execution.workers.end());
     }
+    std::optional<svp::exec::InProcessExecutor> window_executor;
+    std::optional<svp::exec::TaskTypeRestrictedExecutor> windows_only;
+    if (tracking_windows != nullptr) {
+      window_executor.emplace(registry, outputs,
+                              svp::exec::InProcessExecutorOptions{
+                                  .executor_id = "in-process-tracking",
+                                  .threads = ocr_execution.coordinator_tracking_slots,
+                                  .worker_session_id = "ws_" + build_session_id + "_tracking",
+                                  .runtime_id = {}});
+      windows_only.emplace(*window_executor, window_types);
+      executors.push_back(&*windows_only);
+      executors.insert(executors.end(), ocr_execution.tracking_workers.begin(),
+                       ocr_execution.tracking_workers.end());
+    }
     svp::exec::JournalResultCommitSink journal_sink(started.journal);
     engine::StageResultCommitSink commit_sink(journal_sink, results);
-    const svp::exec::SteadyClock clock;
     svp::exec::SchedulerPolicy scheduler_policy = engine::whole_stage_scheduler_policy();
     scheduler_policy.task_types.emplace(std::string(svp::vision::tasks::kOcrFrameBatchTaskType),
                                         engine::ocr_frame_batch_task_policy());
+    scheduler_policy.task_types.emplace(
+        std::string(svp::vision::tasks::kTrackWindowTaskType),
+        engine::track_window_task_policy(ocr_execution.tracking_workers.size()));
     std::optional<engine::OcrBatchObserver> ocr_observer;
-    svp::exec::AttemptObserver observer;
     if (ocr_batches != nullptr) {
-      std::set<std::string> resumed_ids;
-      for (const svp::exec::CommittedResult& committed : started.committed) {
-        resumed_ids.insert(committed.result.task_id);
-      }
-      ocr_observer.emplace(*ocr_batches, *sink, clock, effective_options.quiet, resumed_ids);
-      observer = [&ocr_observer](const svp::exec::AttemptEvent& event) {
-        ocr_observer->observe(event);
+      // Once every batch has committed, the workers' OCR sessions only hold
+      // memory (their PP-OCR models) while later stages, such as tracking
+      // windows, run there.
+      ocr_observer.emplace(*ocr_batches, *sink, clock, effective_options.quiet, resumed_ids,
+                           ocr_execution.release_ocr_workers);
+    }
+    svp::exec::AttemptObserver observer;
+    if (ocr_observer || tracking_progress) {
+      observer = [&ocr_observer, &tracking_progress](const svp::exec::AttemptEvent& event) {
+        if (ocr_observer) ocr_observer->observe(event);
+        if (tracking_progress) tracking_progress->observe(event);
       };
     }
     const svp::exec::BuildOutcome outcome =
@@ -516,6 +646,9 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
             .run(graph, executors, commit_sink, cancellation, observer, started.committed);
     if (ocr_observer && effective_options.distributed && !effective_options.quiet) {
       std::cerr << ocr_observer->summary();
+    }
+    if (tracking_progress && !effective_options.quiet) {
+      std::cerr << tracking_progress->summary();
     }
 
     if (outcome.status == svp::exec::BuildStatus::cancelled) {

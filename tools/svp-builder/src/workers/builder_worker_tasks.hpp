@@ -25,9 +25,10 @@ struct WorkerTaskEnvironment {
 // each task type is a C++ function in svp-builder, and local and remote
 // execution call the same function from the same runtime): ocr.frame_batch
 // and the dispatched vision stage work (ocr.crop_batch, embed.text_batch,
-// embed.keyframe_batch, depth.frame_batch), with their source from the
-// session's content-addressed cache, their models from the worker's verified
-// bundles, and their scratch files in the session directory. Any other ASSIGN is answered with the
+// embed.keyframe_batch, depth.frame_batch), and track.window, with their
+// source from the session's content-addressed cache, their models from the
+// worker's verified bundles, and their scratch files in the session
+// directory. Any other ASSIGN is answered with the
 // registry's unknown_task_type failure, never with arbitrary code.
 void register_builder_worker_task_types(svp::exec::TaskTypeRegistry& registry,
                                         svp::exec::CasTaskArtifactAccess& artifacts,

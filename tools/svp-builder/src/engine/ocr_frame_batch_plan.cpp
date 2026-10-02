@@ -1,5 +1,6 @@
 #include "engine/ocr_frame_batch_plan.hpp"
 
+#include "engine/build_task_graph.hpp"
 #include "engine/vision_lane_settings.hpp"
 
 #include "svp/vision/canonical_frame_input.hpp"
@@ -20,15 +21,6 @@ namespace {
 // The source is passed to ffmpeg as-is; its container is ffmpeg's business,
 // so the reference names no particular one.
 constexpr const char* kSourceMediaType = "application/octet-stream";
-
-std::vector<std::string> batch_task_ids(const OcrFrameBatchPlan& batches) {
-  std::vector<std::string> ids;
-  ids.reserve(batches.nodes.size());
-  for (const svp::exec::TaskNode& node : batches.nodes) {
-    ids.push_back(node.spec.task_id);
-  }
-  return ids;
-}
 
 }  // namespace
 
@@ -129,28 +121,8 @@ svp::exec::TaskGraph make_build_task_graph(const std::vector<PlannedStageTask>& 
                                            const std::string& build_session_id,
                                            const std::string& build_inputs_blake3,
                                            const OcrFrameBatchPlan* batches) {
-  const svp::exec::TaskGraph stages =
-      make_stage_task_graph(tasks, build_session_id, build_inputs_blake3);
-  if (batches == nullptr) {
-    return stages;
-  }
-  const std::string ocr_task(stage_task_id(StageTaskKind::ocr));
-  const std::vector<std::string> batch_ids = batch_task_ids(*batches);
-  std::vector<svp::exec::TaskNode> nodes;
-  nodes.reserve(stages.size() + batches->nodes.size());
-  for (std::size_t index = 0; index < stages.size(); ++index) {
-    svp::exec::TaskNode node = stages.node(index);
-    if (node.spec.task_id == ocr_task) {
-      // Batches run where the stage would have started; the reducer waits
-      // for all of them.
-      nodes.insert(nodes.end(), batches->nodes.begin(), batches->nodes.end());
-      node.spec.depends_on.insert(node.spec.depends_on.end(), batch_ids.begin(),
-                                  batch_ids.end());
-      std::sort(node.spec.depends_on.begin(), node.spec.depends_on.end());
-    }
-    nodes.push_back(std::move(node));
-  }
-  return svp::exec::TaskGraph(std::move(nodes));
+  return make_split_build_task_graph(tasks, build_session_id, build_inputs_blake3,
+                                     SplitStageTasks{.ocr_batches = batches});
 }
 
 std::optional<std::vector<svp::vision::OcrSampleBatch>> ocr_batches_from_task_ids(

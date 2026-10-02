@@ -62,6 +62,8 @@ bool WorkerSessionLeases::claim_rejected(std::string_view lease_id) {
   return live;
 }
 
+bool WorkerSessionLeases::empty() const { return leases_.empty(); }
+
 std::vector<std::string> WorkerSessionLeases::take_live() {
   std::vector<std::string> live;
   for (const auto& [lease_id, lease] : leases_) {

@@ -13,7 +13,7 @@
 //     └─ run_vision_ocr_stage              (text/)
 //          └─ run_vision_text_embedding_stage   (embeddings/)
 //   run_vision_tracking_stage               (spatial/masks.*, spatial/regions.*,
-//                                            entities/)
+//                                            entities/; vision_tracking_stage.cpp)
 //   combine_vision_lane_results             (summary + processor records)
 //
 // No stage writes provenance/processors.jsonl: each returns its processor
@@ -34,8 +34,11 @@
 #include "svp/vision/ocr_sample_plan.hpp"
 #include "svp/vision/pp_ocr.hpp"
 #include "svp/vision/text_embedding_work.hpp"
+#include "svp/vision/visual_entity_pipeline.hpp"
+#include "svp/vision/visual_entity_window.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -172,6 +175,40 @@ decode_vision_lane_canonical_frames(const VisionLaneSettings& settings,
 // tracking quality when tracking would run.
 [[nodiscard]] VisionTrackingStageResult run_vision_tracking_stage(
     const VisionLaneSettings& settings,
+    svp::vision::FrameCatalog* frame_catalog,
+    const SpatialProgressCallback& on_progress);
+
+// True when run_vision_tracking_stage reads its options and may run the
+// tracker: a model runtime, a media plan, and an ffmpeg path. (The quality
+// may still be `off`.)
+[[nodiscard]] bool vision_tracking_would_run(const VisionLaneSettings& settings);
+
+// The tracking stage's options for these settings, exactly as
+// run_vision_tracking_stage uses them, before it adds the artifact sink and
+// progress of one run. Throws std::invalid_argument for an unknown quality.
+// A build that runs tracking windows as tasks plans the windows
+// (svp::vision::plan_visual_entity_pipeline) and their task parameters from
+// these, so each window runs exactly what the stage would.
+[[nodiscard]] svp::vision::VisualEntityPipelineOptions make_vision_tracking_options(
+    const VisionLaneSettings& settings);
+
+// Window `index`'s outcome, decoded when the fold asks for it.
+using VisualEntityWindowSource =
+    std::function<svp::vision::VisualEntityWindowOutcome(std::size_t index)>;
+
+// The tracking stage's reduce step (plan §2.4 item 9): folds window outcomes
+// computed elsewhere, one per window of `plan` in window order, with the
+// runtimes they ran with, and writes what run_vision_tracking_stage writes
+// when it ran the same windows in this process. `source` is asked for each
+// window once, in window order, only after the window before it has been
+// folded, so like the stage this holds one decoded window at a time.
+// `frame_catalog` receives the windows' decoded frames. Throws
+// std::logic_error unless tracking would run and is enabled.
+[[nodiscard]] VisionTrackingStageResult run_vision_tracking_reduce_stage(
+    const VisionLaneSettings& settings,
+    const svp::vision::VisualEntityPipelinePlan& plan,
+    const VisualEntityWindowSource& source,
+    const svp::vision::VisualEntityWindowRuntimeStatus& runtimes,
     svp::vision::FrameCatalog* frame_catalog,
     const SpatialProgressCallback& on_progress);
 

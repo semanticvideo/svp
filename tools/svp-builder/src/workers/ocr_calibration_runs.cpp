@@ -122,7 +122,13 @@ OcrCalibrationSetup default_ocr_calibration_setup(const std::filesystem::path& m
 }
 
 CalibrationClipFile::CalibrationClipFile(std::filesystem::path ffmpeg)
-    : ffmpeg_(std::move(ffmpeg)) {}
+    : CalibrationClipFile(std::move(ffmpeg),
+                          [](const std::filesystem::path& tool, const std::filesystem::path& dir) {
+                            return svp::vision::tasks::write_ocr_calibration_clip(tool, dir).path;
+                          }) {}
+
+CalibrationClipFile::CalibrationClipFile(std::filesystem::path ffmpeg, Writer writer)
+    : ffmpeg_(std::move(ffmpeg)), writer_(std::move(writer)) {}
 
 CalibrationClipFile::~CalibrationClipFile() {
   if (!directory_.empty()) {
@@ -140,9 +146,7 @@ svp::exec::worker::BlobSource CalibrationClipFile::blob() {
       throw WorkerError(WorkerErrorCode::io, "cannot create a calibration directory");
     }
     directory_ = pattern;
-    const svp::vision::tasks::OcrCalibrationClip clip =
-        svp::vision::tasks::write_ocr_calibration_clip(ffmpeg_, directory_);
-    blob_ = svp::exec::worker::describe_blob_file(clip.path);
+    blob_ = svp::exec::worker::describe_blob_file(writer_(ffmpeg_, directory_));
   }
   return *blob_;
 }

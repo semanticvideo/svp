@@ -239,18 +239,25 @@ Distributed builds:
 svp-builder build <source> --out <out.svp> --distributed [--require-workers <n>]
 ```
 
-`--distributed` runs the OCR stage's frame batches on this Mac and on every
+`--distributed` runs the OCR stage's frame batches and the visual tracking
+stage's windows (one task per tracking window) on this Mac and on every
 ready paired worker, and, inside their own stages, the per-item work of
 evidence crops, text embeddings, shot-keyframe embeddings, and depth; every
-other stage stays on this Mac, and stages run in the same order as in a local
-build. Before any task runs, each worker is reached by pairing id, refused if
-its macOS or the build's thread plan does not match, and sent what it lacks:
-the runtime, the model bundles, and the source media (BLAKE3-verified). Each
-Mac runs as many tasks of each kind at once as its calibration found
-worthwhile, and tasks are sized from this Mac's measured seconds per item.
-Workers only compute: IDs, files, and blocks are written on this Mac in the
-local build's order, and any item a worker could not compute is computed
-again on this Mac, so a package records only failures a local build would. Workers decode with the
+other stage, and the tracking stage's fold of its windows (identity across
+windows, every ID, the masks and entity files), stays on this Mac, and
+stages run in the same order as in a local build. Before any task runs, each
+worker is reached by pairing id, refused if its macOS or the build's thread
+plan does not match, and sent what it lacks: the runtime, the model bundles
+(the tracking detector, depth, and visual embedding bundles too when
+tracking runs), and the source media (BLAKE3-verified). Each Mac runs as many
+tasks of each kind at once as its calibration found worthwhile (tracking is
+measured on a short synthetic window with the build's tracking options, once
+per tracking quality), and tasks are sized from this Mac's measured seconds
+per item. Workers only compute: IDs, files, and blocks are written on this
+Mac in the local build's order, and any item or tracking window a worker
+could not compute cleanly is computed again on this Mac, so a package
+records only failures a local build would. A build without `--distributed`
+runs tracking as one stage, exactly as before. Workers decode with the
 coordinator's ffmpeg build only (a different `ffmpeg -version` is refused).
 A worker that cannot be reached is reported and skipped (`--require-workers`
 fails the build instead when fewer are ready); a worker lost mid-build has

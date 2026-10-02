@@ -309,6 +309,31 @@ void RemoteExecutor::lease_expired(std::string_view lease_id) {
   state.end_session_now(*session);
 }
 
+bool RemoteExecutor::close_idle_session() {
+  State& state = *state_;
+  std::shared_ptr<Session> session;
+  {
+    const std::lock_guard lock(state.mutex);
+    session = state.current;
+    if (!session || session->finished || session->retiring || state.stopping ||
+        !session->leases.empty() || !session->pending.empty()) {
+      return false;
+    }
+    // New leases go to a new session from here on.
+    session->retiring = true;
+    if (!session->ready) {
+      state.end_session_now(*session);
+      return true;
+    }
+  }
+  try {
+    session->writer->write(make_shutdown_frame());
+  } catch (const ExecError&) {
+    // Already gone; the reader is finishing.
+  }
+  return true;
+}
+
 void RemoteExecutor::stop() {
   State& state = *state_;
   std::unique_lock lock(state.mutex);

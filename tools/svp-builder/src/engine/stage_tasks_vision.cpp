@@ -1,6 +1,8 @@
 #include "engine/canonical_frames_codec.hpp"
 #include "engine/frame_catalog_delta.hpp"
 #include "engine/ocr_frame_batch_plan.hpp"
+#include "engine/tracking_window_plan.hpp"
+#include "engine/tracking_window_progress.hpp"
 #include "engine/stage_tasks.hpp"
 #include "engine/vision_lane_settings.hpp"
 #include "engine/vision_task_states.hpp"
@@ -8,8 +10,13 @@
 
 #include "svp/package/vision_lane_stages.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_spec.hpp"
+#include "svp/vision/tasks/track_window_spec.hpp"
+#include "svp/vision/visual_entity_window_codec.hpp"
 
 #include <algorithm>
+#include <optional>
+#include <cstdint>
+#include <span>
 #include <stdexcept>
 
 namespace svp::builder::engine {
@@ -79,6 +86,58 @@ void add_catalog_delta(StageStates& states, StageTaskContext& task) {
       json_state_bytes(frame_catalog_delta(task.context().frame_catalog));
 }
 
+// The tracking stage's fold over committed window outcomes, in window order.
+// Progress events are TrackingWindowProgress's: it started the stage when the
+// first window was leased and completes it here, after the artifacts.
+svp::package::VisionTrackingStageResult reduce_tracking_windows(
+    const StageTaskEnvironment& environment, const TrackingWindowPlan& windows,
+    StageTaskContext& task) {
+  if (!environment.track_window_runtimes || environment.tracking_progress == nullptr) {
+    throw std::logic_error("tracking windows planned without a runtime pool and progress");
+  }
+  environment.tracking_progress->fold_started();
+  const auto payload_of = [&](const svp::exec::TaskNode& node) {
+    return environment.results.task_output(node.spec.task_id);
+  };
+  const auto as_bytes = [](const std::vector<std::byte>& bytes) {
+    return std::span(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
+  };
+  // Headers only: whether every window started, and the runtimes they ran
+  // with. Regions and masks are decoded one window at a time by the fold.
+  bool started = true;
+  std::optional<svp::vision::VisualEntityWindowRuntimeStatus> runtimes;
+  for (const svp::exec::TaskNode& node : windows.nodes) {
+    const svp::vision::VisualEntityWindowHeader header =
+        svp::vision::peek_visual_entity_window_header(as_bytes(payload_of(node)));
+    started = started && header.status != svp::vision::VisualEntityWindowStatus::not_started;
+    if (!runtimes) runtimes = header.runtime_status;
+  }
+  // Every window has committed, so no runtime in the pool is needed again.
+  environment.track_window_runtimes->clear_idle();
+  svp::package::VisionTrackingStageResult reduced;
+  if (!started || !runtimes) {
+    // Tracking could not start on this Mac for some window
+    // (track_window_task.hpp, record_start_failures): run the stage exactly
+    // as a build without window tasks does, so the package and its
+    // limitations are the ones that build writes.
+    reduced = svp::package::run_vision_tracking_stage(
+        vision_settings(environment), &task.context().frame_catalog, {});
+  } else {
+    // Every window ran with complete runtimes from the bundles the specs
+    // name, so their runtime status is one and the same.
+    reduced = svp::package::run_vision_tracking_reduce_stage(
+        vision_settings(environment), windows.work.plan,
+        [&](std::size_t index) {
+          const svp::exec::TaskNode& node = windows.nodes.at(index);
+          return svp::vision::tasks::read_track_window_output(node.spec,
+                                                              as_bytes(payload_of(node)));
+        },
+        *runtimes, &task.context().frame_catalog, {});
+  }
+  environment.tracking_progress->fold_finished();
+  return reduced;
+}
+
 }  // namespace
 
 StageStates run_canonical_frames_task(const StageTaskEnvironment& environment) {
@@ -139,6 +198,14 @@ StageStates run_text_embeddings_task(const StageTaskEnvironment& environment) {
 
 StageStates run_tracking_task(const StageTaskEnvironment& environment) {
   StageTaskContext task(environment);
+  if (environment.tracking_windows != nullptr) {
+    const svp::package::VisionTrackingStageResult tracking =
+        reduce_tracking_windows(environment, *environment.tracking_windows, task);
+    StageStates states;
+    states[vision_state::kTracking] = json_state_bytes(svp::package::to_json(tracking));
+    add_catalog_delta(states, task);
+    return states;
+  }
   VisionStageProgress progress(task.context());
   const svp::package::VisionTrackingStageResult tracking =
       svp::package::run_vision_tracking_stage(vision_settings(environment),

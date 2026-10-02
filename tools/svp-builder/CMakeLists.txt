@@ -24,10 +24,12 @@ add_library(svp-builder-lib
   src/calibration/capacity_sweep.cpp
   src/calibration/dispatched_capacity_workloads.cpp
   src/calibration/ocr_capacity_calibration.cpp
+  src/calibration/track_window_capacity_calibration.cpp
   src/engine/build_assembly.cpp
   src/engine/build_inputs_digest.cpp
   src/engine/build_vision_dispatch.cpp
   src/engine/build_journal_session.cpp
+  src/engine/build_task_graph.cpp
   src/engine/canonical_frames_codec.cpp
   src/engine/committed_stage_results.cpp
   src/engine/dispatch_scratch.cpp
@@ -48,6 +50,9 @@ add_library(svp-builder-lib
   src/engine/staging_capture_check.cpp
   src/engine/staging_scope.cpp
   src/engine/subtask_run.cpp
+  src/engine/tracking_execution_policy.cpp
+  src/engine/tracking_window_plan.cpp
+  src/engine/tracking_window_progress.cpp
   src/engine/vision_lane_settings.cpp
   src/engine/vision_work_dispatch.cpp
   src/engine/whole_stage_scheduler_policy.cpp
@@ -142,6 +147,7 @@ if(APPLE)
     src/workers/dispatched_calibration_runs.cpp
     src/workers/distributed_fleet.cpp
     src/workers/ocr_calibration_runs.cpp
+    src/workers/track_window_calibration_runs.cpp
     src/workers/ssh_session.cpp
     src/workers/worker_commands.cpp
     src/workers/worker_model_view.cpp
@@ -233,6 +239,31 @@ if(BUILD_TESTING)
   )
   add_test(NAME svp-builder-dispatched-work-tests
            COMMAND svp-builder-dispatched-work-tests)
+
+  add_executable(svp-builder-tracking-window-plan-tests
+    tests/tracking_window_plan_tests.cpp
+  )
+  target_include_directories(svp-builder-tracking-window-plan-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_compile_features(svp-builder-tracking-window-plan-tests PRIVATE cxx_std_20)
+  target_link_libraries(svp-builder-tracking-window-plan-tests
+    PRIVATE
+      svp::builder
+      svp::exec
+      svp::vision
+      svp::vision_tasks
+      nlohmann_json::nlohmann_json
+  )
+  if(APPLE)
+    # Calibration records live with the worker commands (Apple-only).
+    target_sources(svp-builder-tracking-window-plan-tests PRIVATE
+      src/workers/calibration_store.cpp
+    )
+    target_link_libraries(svp-builder-tracking-window-plan-tests PRIVATE svp::exec_worker)
+  endif()
+  add_test(NAME svp-builder-tracking-window-plan-tests
+           COMMAND svp-builder-tracking-window-plan-tests)
 
   add_executable(svp-builder-task-engine-tests
     tests/build_task_engine_tests.cpp

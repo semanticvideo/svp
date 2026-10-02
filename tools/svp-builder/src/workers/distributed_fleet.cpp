@@ -2,6 +2,7 @@
 
 #include "coordinator_context.hpp"
 #include "dispatched_calibration_runs.hpp"
+#include "track_window_calibration_runs.hpp"
 #include "worker_reach.hpp"
 
 #include "calibration/ocr_capacity_calibration.hpp"
@@ -12,6 +13,7 @@
 #include "svp/exec/worker/worker_connection.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_parameters.hpp"
+#include "svp/vision/tasks/track_window_parameters.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -35,7 +37,18 @@ struct WorkerOutcome {
   // Measured slots per dispatched vision task type (types it could not
   // measure are missing: it runs none of them).
   std::map<std::string, std::size_t, std::less<>> dispatched_slots;
+  std::size_t tracking_slots = 0;
+  // Which kinds of task this worker takes: one it could not calibrate for
+  // does not cost it the others.
+  bool ocr_ready = false;
+  bool tracking_ready = false;
   std::string detail;
+};
+
+// The tracking calibration setup and clip when the build splits tracking.
+struct TrackingCalibration {
+  TrackWindowCalibrationSetup setup;
+  std::unique_ptr<CalibrationClipFile> clip;
 };
 
 // The dispatched vision work's calibration setup: the OCR work's PP-OCR, the
@@ -120,7 +133,8 @@ std::unique_ptr<WorkerConnection> connect_within_window(
 WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSupplies& supplies,
                              const OcrCalibrationSetup& setup,
                              const calibration::DispatchedCalibrationSetup& dispatched,
-                             CalibrationClipFile& clip, const CalibrationStore& store,
+                             const TrackingCalibration* tracking, CalibrationClipFile& clip,
+                             const CalibrationStore& store,
                              const svp::exec::CancellationToken& cancellation) {
   WorkerOutcome outcome{.record = std::move(record)};
   const auto start = std::chrono::steady_clock::now();
@@ -141,17 +155,22 @@ WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSuppli
       stats = session.stats;
       client.shutdown();
     }
-    const CalibrationOutcome calibration =
-        ensure_worker_calibration(outcome.record.key, supplies, ack, setup, clip, store,
-                                  cancellation);
-    outcome.ready = true;
-    outcome.slots = calibration.ocr.slots;
     std::ostringstream detail;
     detail << "via " << route << ", sent " << format_bytes(stats.bytes_sent) << " ("
            << (stats.runtime_pushed ? "runtime, " : "") << stats.model_bundles_pushed.size()
-           << " model bundle(s), " << stats.blobs_sent << " blob(s)), "
-           << (calibration.measured ? "calibrated now: " : "calibration: ")
-           << describe_calibration(calibration.ocr);
+           << " model bundle(s), " << stats.blobs_sent << " blob(s))";
+    std::string problems;
+    try {
+      const CalibrationOutcome calibration = ensure_worker_calibration(
+          outcome.record.key, supplies, ack, setup, clip, store, cancellation);
+      outcome.slots = calibration.ocr.slots;
+      outcome.ocr_ready = true;
+      detail << ", " << (calibration.measured ? "calibrated now: " : "calibration: ")
+             << describe_calibration(calibration.ocr);
+    } catch (const std::exception& error) {
+      problems = std::string("OCR calibration: ") + error.what();
+      detail << ", takes no OCR (calibration failed: " << error.what() << ")";
+    }
     // A type this worker cannot measure is left to the other executors.
     for (const std::string& type : calibration::dispatched_task_types(dispatched.vision)) {
       try {
@@ -164,6 +183,27 @@ WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSuppli
       } catch (const std::exception& error) {
         detail << "; " << type << " not used: " << error.what();
       }
+    }
+    if (tracking != nullptr) {
+      try {
+        const CapacityOutcome capacity = ensure_worker_track_window_calibration(
+            outcome.record.key, supplies, ack, tracking->setup, *tracking->clip, cancellation);
+        outcome.tracking_slots = capacity.capacity.slots;
+        outcome.tracking_ready = true;
+        detail << "; " << (capacity.measured ? "tracking calibrated now: " : "tracking: ")
+               << describe_track_window_calibration(capacity.capacity);
+      } catch (const std::exception& error) {
+        problems += std::string(problems.empty() ? "" : "; ") + "tracking calibration: " +
+                    error.what();
+        detail << "; " << svp::vision::tasks::kTrackWindowTaskType
+               << " not used: " << error.what();
+      }
+    }
+    outcome.ready =
+        outcome.ocr_ready || outcome.tracking_ready || !outcome.dispatched_slots.empty();
+    if (!outcome.ready) {
+      outcome.problem = problems;
+      return outcome;
     }
     detail << ", ready in " << seconds_since(start);
     outcome.detail = detail.str();
@@ -210,6 +250,14 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
     for (const svp::exec::TaskModelRef& ref : work.model_refs) {
       model_ids.push_back(ref.model_id);
     }
+    // The tracking windows' detector, depth, and embedding bundles (M4).
+    if (work.tracking) {
+      for (const svp::exec::TaskModelRef& ref : work.tracking->model_refs) {
+        if (std::find(model_ids.begin(), model_ids.end(), ref.model_id) == model_ids.end()) {
+          model_ids.push_back(ref.model_id);
+        }
+      }
+    }
     // The dispatched vision work's models (M4).
     for (const std::optional<DistributedOnnxWork>* onnx :
          {&work.vision.text_embeddings, &work.vision.keyframe_embeddings, &work.vision.depth}) {
@@ -240,6 +288,16 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
                                   .ffmpeg_build = work.ffmpeg_build};
   const calibration::DispatchedCalibrationSetup dispatched = dispatched_setup(work);
   CalibrationClipFile clip(work.ffmpeg_path);
+  std::optional<TrackingCalibration> tracking;
+  if (work.tracking) {
+    tracking.emplace();
+    tracking->setup = TrackWindowCalibrationSetup{.options = work.tracking->options,
+                                                  .model_refs = work.tracking->model_refs,
+                                                  .model_cache_root = work.model_cache_root,
+                                                  .ffmpeg_path = work.ffmpeg_path,
+                                                  .ffmpeg_build = work.ffmpeg_build};
+    tracking->clip = track_window_calibration_clip_file(tracking->setup);
+  }
   const CalibrationStore store;
   const std::string runtime_id = svp::exec::blake3_prefixed(supplies->runtime.runtime_id);
 
@@ -258,8 +316,8 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
   std::vector<std::future<WorkerOutcome>> pending;
   for (CoordinatorPairingRecord& record : records) {
     pending.push_back(std::async(std::launch::async, [&, record = std::move(record)]() mutable {
-      return prepare_worker(std::move(record), *supplies, setup, dispatched, clip, store,
-                            cancellation);
+      return prepare_worker(std::move(record), *supplies, setup, dispatched,
+                            tracking ? &*tracking : nullptr, clip, store, cancellation);
     }));
   }
   const auto coordinator_start = std::chrono::steady_clock::now();
@@ -314,6 +372,34 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
     }
   }
 
+  if (tracking) {
+    const auto tracking_start = std::chrono::steady_clock::now();
+    try {
+      const CapacityOutcome local = ensure_coordinator_track_window_calibration(
+          tracking->setup, runtime_id, *tracking->clip, cancellation);
+      // This Mac's in-process windows have no admission check of their own:
+      // run no more at once than the memory free now admits for the build's
+      // largest window (workers check each lease against their memory).
+      const svp::exec::worker::HostFacts host = svp::exec::worker::detect_host_facts();
+      const std::size_t admitted_now = calibration::capacity_max_slots(
+          svp::exec::worker::sample_memory().available_bytes,
+          svp::exec::worker::AdmissionPolicy{}.reserve_bytes(host.physical_memory_bytes),
+          host.logical_cpus, work.tracking->window_peak_rss_mb);
+      fleet.coordinator_tracking_slots = std::min(local.capacity.slots, admitted_now);
+      fleet.seconds_per_tracking_frame = local.capacity.seconds_per_item;
+      log("this Mac: " + std::string(local.measured ? "tracking calibrated now: " : "tracking: ") +
+          describe_track_window_calibration(local.capacity) +
+          (local.measured ? ", in " + seconds_since(tracking_start) : std::string()));
+    } catch (const std::exception& error) {
+      // The build's own window tasks will report why tracking cannot run
+      // here. One slot is how a build without measurements runs
+      // (kCoordinatorTrackWindowSlotsWithoutMeasurement).
+      fleet.coordinator_tracking_slots = 1;
+      log(std::string("warning: could not calibrate this Mac's tracking capacity: ") +
+          error.what());
+    }
+  }
+
   std::vector<WorkerOutcome> outcomes;
   for (std::future<WorkerOutcome>& future : pending) {
     outcomes.push_back(future.get());
@@ -344,6 +430,28 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
     log("warning: no worker is ready; OCR runs on this Mac only");
   }
 
+  // Each ready worker gets one executor per graph task type it takes (OCR
+  // frame batches, tracking windows): its own session, restricted to that
+  // type and sized by that type's measured capacity.
+  std::vector<svp::exec::remote::RemoteExecutor*> ocr_remotes;
+  const auto add_executor = [this, &supplies](const WorkerOutcome& outcome,
+                                              const std::string& suffix, std::size_t slots,
+                                              std::string_view task_type,
+                                              std::vector<svp::exec::Executor*>& into) {
+    auto executor = std::make_unique<svp::exec::remote::RemoteExecutor>(
+        svp::exec::remote::RemoteExecutorOptions{
+            .executor_id = "worker." + outcome.record.key.pairing_id + suffix,
+            .connector = {.pairing = outcome.record.key},
+            .slots = slots,
+            .session_preamble = make_supplying_preamble(supplies)});
+    auto restricted = std::make_unique<svp::exec::TaskTypeRestrictedExecutor>(
+        *executor, std::set<std::string, std::less<>>{std::string(task_type)});
+    into.push_back(restricted.get());
+    svp::exec::remote::RemoteExecutor* remote = executor.get();
+    remotes_.push_back(std::move(executor));
+    restricted_.push_back(std::move(restricted));
+    return remote;
+  };
   std::vector<FleetDispatchedExecutors::Worker> dispatched_workers;
   for (const WorkerOutcome& outcome : outcomes) {
     if (!outcome.ready) {
@@ -353,18 +461,23 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
       dispatched_workers.push_back(
           {.key = outcome.record.key, .slots = outcome.dispatched_slots});
     }
-    auto executor = std::make_unique<svp::exec::remote::RemoteExecutor>(
-        svp::exec::remote::RemoteExecutorOptions{
-            .executor_id = "worker." + outcome.record.key.pairing_id,
-            .connector = {.pairing = outcome.record.key},
-            .slots = outcome.slots,
-            .session_preamble = make_supplying_preamble(supplies)});
-    auto restricted = std::make_unique<svp::exec::TaskTypeRestrictedExecutor>(
-        *executor, std::set<std::string, std::less<>>{
-                       std::string(svp::vision::tasks::kOcrFrameBatchTaskType)});
-    fleet.workers.push_back(restricted.get());
-    remotes_.push_back(std::move(executor));
-    restricted_.push_back(std::move(restricted));
+    if (outcome.ocr_ready) {
+      ocr_remotes.push_back(add_executor(outcome, "", outcome.slots,
+                                         svp::vision::tasks::kOcrFrameBatchTaskType,
+                                         fleet.workers));
+    }
+    if (tracking && outcome.tracking_ready) {
+      add_executor(outcome, ".tracking", outcome.tracking_slots,
+                   svp::vision::tasks::kTrackWindowTaskType, fleet.tracking_workers);
+    }
+  }
+  if (!ocr_remotes.empty()) {
+    // The executors live as long as this fleet, which outlives the build.
+    fleet.release_ocr_workers = [ocr_remotes] {
+      for (svp::exec::remote::RemoteExecutor* remote : ocr_remotes) {
+        (void)remote->close_idle_session();
+      }
+    };
   }
   if (!dispatched_workers.empty()) {
     fleet.dispatched_workers =

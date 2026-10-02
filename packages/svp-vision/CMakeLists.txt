@@ -48,12 +48,16 @@ add_library(svp-vision
   src/visual_entity_depth_schedule.cpp
   src/visual_entity_cut_detection.cpp
   src/visual_entity_frame_decoder.cpp
+  src/visual_entity_grabcut.cpp
   src/visual_entity_detector.cpp
   src/visual_entity_identity_reconciliation.cpp
   src/visual_entity_motion_policy.cpp
   src/visual_entity_sampling.cpp
   src/visual_entity_tracker.cpp
+  src/visual_entity_window.cpp
   src/visual_entity_window_assembler.cpp
+  src/visual_entity_window_codec.cpp
+  src/visual_entity_window_fold.cpp
   src/vision_embedding_input.cpp
   src/mask_writer.cpp
   src/mask_stream_writer.cpp
@@ -228,6 +232,46 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-vision-visual-entity-motion-policy-tests
            COMMAND svp-vision-visual-entity-motion-policy-tests)
+
+  add_executable(svp-vision-visual-entity-grabcut-tests
+    tests/visual_entity_grabcut_tests.cpp
+  )
+
+  target_compile_features(svp-vision-visual-entity-grabcut-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-visual-entity-grabcut-tests
+    PRIVATE
+      svp::vision
+      opencv_core
+      opencv_imgproc
+  )
+
+  add_test(NAME svp-vision-visual-entity-grabcut-tests
+           COMMAND svp-vision-visual-entity-grabcut-tests)
+
+  add_executable(svp-vision-visual-entity-window-tests
+    tests/visual_entity_window_tests.cpp
+  )
+
+  target_compile_features(svp-vision-visual-entity-window-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-visual-entity-window-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-visual-entity-window-tests
+           COMMAND svp-vision-visual-entity-window-tests)
+  # Window independence on a real video; skips unless the source, models,
+  # and ffmpeg are named by SVP_TRACK_WINDOW_TEST_* / SVP_MODEL_CACHE_ROOT.
+  add_test(NAME svp-vision-visual-entity-window-independence-tests
+           COMMAND svp-vision-visual-entity-window-tests --real-video)
+  set_tests_properties(svp-vision-visual-entity-window-independence-tests PROPERTIES
+    SKIP_REGULAR_EXPRESSION "^Skipping:")
 
   add_executable(svp-vision-visual-entity-depth-schedule-tests
     tests/visual_entity_depth_schedule_tests.cpp

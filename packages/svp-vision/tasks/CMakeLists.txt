@@ -1,7 +1,8 @@
 # Task-engine registration for svp-vision work (plan §4.2): the ocr.frame_batch
-# task type and the dispatched stage work types (ocr.crop_batch,
-# embed.text_batch, embed.keyframe_batch, depth.frame_batch), each with its
-# parameter schema, TaskSpec builder, and output reader.
+# task type, the dispatched stage work types (ocr.crop_batch,
+# embed.text_batch, embed.keyframe_batch, depth.frame_batch), and the
+# track.window task type, each with its parameter schema, TaskSpec builder,
+# and output reader.
 # svp-vision itself stays free of scheduler concerns; this thin layer is the
 # only place vision code meets svp-exec, so a runtime that registers vision
 # task types links svp::vision_tasks and nothing else in svp-vision changes.
@@ -38,6 +39,11 @@ add_library(svp-vision-tasks
   src/depth_frame_batch_parameters.cpp
   src/depth_frame_batch_spec.cpp
   src/depth_frame_batch_execution.cpp
+  src/track_window_calibration_clip.cpp
+  src/track_window_parameters.cpp
+  src/track_window_runtime_pool.cpp
+  src/track_window_spec.cpp
+  src/track_window_task.cpp
 )
 
 add_library(svp::vision_tasks ALIAS svp-vision-tasks)
@@ -80,6 +86,15 @@ if(BUILD_TESTING)
   )
   add_test(NAME svp-vision-dispatched-task-spec-tests
            COMMAND svp-vision-dispatched-task-spec-tests)
+  add_executable(svp-vision-track-window-task-tests
+    tests/track_window_task_tests.cpp
+  )
+  target_link_libraries(svp-vision-track-window-task-tests
+    PRIVATE
+      svp::vision_tasks
+  )
+  add_test(NAME svp-vision-track-window-task-tests
+           COMMAND svp-vision-track-window-task-tests)
 
   # A worker process serving ocr.frame_batch on stdin/stdout for the loopback
   # executor, with inputs and outputs in a content-addressed cache.
