@@ -21,6 +21,11 @@ std::string task_id(std::size_t step, std::size_t chain, std::size_t batch) {
          std::to_string(chain) + ".batch_" + std::to_string(batch);
 }
 
+std::string warm_up_task_id(std::size_t step, std::size_t chain) {
+  return "task.calibration.ocr.slots_" + std::to_string(step) + ".warm_up_" +
+         std::to_string(chain);
+}
+
 svp::vision::OcrSamplePlan clip_plan(const std::vector<std::int64_t>& timestamps_us) {
   svp::vision::OcrTemporalSamplingResult sampling;
   sampling.timestamps_us = timestamps_us;
@@ -88,6 +93,54 @@ svp::exec::TaskSpec ocr_calibration_spec(const svp::vision::tasks::OcrFrameBatch
       svp::vision::OcrSampleBatch{.first_ordinal = 0, .count = plan.samples.size()});
 }
 
+OcrCalibrationGraph ocr_calibration_graph(
+    const svp::vision::tasks::OcrFrameBatchTaskInputs& inputs,
+    const std::vector<std::int64_t>& timestamps_us, std::size_t max_slots) {
+  const svp::exec::TaskSpec batch = ocr_calibration_spec(inputs, timestamps_us);
+  const svp::exec::TaskSpec warm_up = svp::vision::tasks::make_ocr_frame_batch_task_spec(
+      inputs, clip_plan(timestamps_us), svp::vision::OcrSampleBatch{.first_ordinal = 0, .count = 1});
+
+  // Step k first runs k concurrent one-frame warm-up tasks (untimed), so each
+  // of its k slots holds a loaded PP-OCR session before timing starts; then k
+  // timed chains. Without the warm-up, loading the k-th session would count
+  // against step k and bias the sweep toward fewer slots.
+  OcrCalibrationGraph graph;
+  std::vector<std::string> previous_step;
+  for (std::size_t step = 1; step <= max_slots; ++step) {
+    std::vector<std::string> warmed;
+    for (std::size_t chain = 0; chain < step; ++chain) {
+      svp::exec::TaskSpec spec = warm_up;
+      spec.task_id = warm_up_task_id(step, chain);
+      spec.depends_on = previous_step;
+      std::sort(spec.depends_on.begin(), spec.depends_on.end());
+      warmed.push_back(spec.task_id);
+      graph.nodes.push_back(svp::exec::TaskNode{
+          .spec = std::move(spec),
+          .order_key = {.lane = std::string(kCalibrationLane),
+                        .ordinals = {step, 0, chain}}});
+    }
+    std::sort(warmed.begin(), warmed.end());
+    std::vector<std::string> this_step;
+    for (std::size_t chain = 0; chain < step; ++chain) {
+      for (std::size_t index = 0; index < kOcrCalibrationBatchesPerSlot; ++index) {
+        svp::exec::TaskSpec spec = batch;
+        spec.task_id = task_id(step, chain, index);
+        spec.depends_on = index == 0 ? warmed
+                                     : std::vector<std::string>{task_id(step, chain, index - 1)};
+        graph.timed_step[spec.task_id] = step;
+        graph.nodes.push_back(svp::exec::TaskNode{
+            .spec = std::move(spec),
+            .order_key = {.lane = std::string(kCalibrationLane),
+                          .ordinals = {step, 1, chain, index}}});
+      }
+      this_step.push_back(task_id(step, chain, kOcrCalibrationBatchesPerSlot - 1));
+    }
+    std::sort(this_step.begin(), this_step.end());
+    previous_step = std::move(this_step);
+  }
+  return graph;
+}
+
 OcrCalibration calibrate_ocr_capacity(svp::exec::Executor& executor, std::size_t max_slots,
                                       const svp::vision::tasks::OcrFrameBatchTaskInputs& inputs,
                                       const std::vector<std::int64_t>& timestamps_us,
@@ -95,37 +148,11 @@ OcrCalibration calibrate_ocr_capacity(svp::exec::Executor& executor, std::size_t
   if (max_slots == 0 || executor.slots() < max_slots) {
     throw std::invalid_argument("calibration executor has fewer slots than the sweep needs");
   }
-  const svp::exec::TaskSpec batch = ocr_calibration_spec(inputs, timestamps_us);
   const std::uint64_t frames_per_batch = timestamps_us.size();
-  const svp::exec::TaskSpec warm_up = svp::vision::tasks::make_ocr_frame_batch_task_spec(
-      inputs, clip_plan(timestamps_us), svp::vision::OcrSampleBatch{.first_ordinal = 0, .count = 1});
 
-  // Step 0 is the warm-up (one task); step k has k chains.
-  std::vector<svp::exec::TaskNode> nodes;
-  std::map<std::string, std::size_t> step_of;
-  std::vector<std::string> previous_step;
-  for (std::size_t step = 0; step <= max_slots; ++step) {
-    const std::size_t chains = std::max<std::size_t>(1, step);
-    const std::size_t per_chain = step == 0 ? 1 : kOcrCalibrationBatchesPerSlot;
-    std::vector<std::string> this_step;
-    for (std::size_t chain = 0; chain < chains; ++chain) {
-      for (std::size_t index = 0; index < per_chain; ++index) {
-        svp::exec::TaskSpec spec = step == 0 ? warm_up : batch;
-        spec.task_id = task_id(step, chain, index);
-        spec.depends_on = index == 0 ? previous_step
-                                     : std::vector<std::string>{task_id(step, chain, index - 1)};
-        std::sort(spec.depends_on.begin(), spec.depends_on.end());
-        step_of[spec.task_id] = step;
-        nodes.push_back(svp::exec::TaskNode{
-            .spec = std::move(spec),
-            .order_key = {.lane = std::string(kCalibrationLane),
-                          .ordinals = {step, chain, index}}});
-      }
-      this_step.push_back(task_id(step, chain, per_chain - 1));
-    }
-    previous_step = std::move(this_step);
-  }
-  const svp::exec::TaskGraph graph(std::move(nodes));
+  OcrCalibrationGraph plan = ocr_calibration_graph(inputs, timestamps_us, max_slots);
+  const std::map<std::string, std::size_t>& step_of = plan.timed_step;
+  const svp::exec::TaskGraph graph(std::move(plan.nodes));
 
   std::vector<StepTiming> steps(max_slots + 1);
   for (const auto& [id, step] : step_of) {

@@ -15,6 +15,7 @@
 #include "svp/vision/tasks/ocr_frame_batch_parameters.hpp"
 
 #include <algorithm>
+#include <map>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -249,6 +250,52 @@ void test_calibration_bounds_and_records() {
           "a calibration round-trips through its record");
 }
 
+// For any slot count, step k of the calibration sweep warms exactly k
+// sessions (k one-frame tasks after step k-1) before any of its k timed
+// tasks start, so model loading never counts against a step.
+void test_calibration_warms_every_slot_before_timing() {
+  const OcrWorkPlan work = work_plan(1);
+  const svp::vision::tasks::OcrFrameBatchTaskInputs inputs{
+      .build_session_id = "bs_calibration",
+      .depends_on = {},
+      .source = work.source,
+      .model_refs = work.model_refs,
+      .pp_ocr = work.pp_ocr,
+      .ffmpeg_build = work.ffmpeg_build,
+      .batch_policy = {}};
+  const std::vector<std::int64_t> timestamps = {0, 100000, 200000, 300000};
+  for (const std::size_t max_slots : {std::size_t{1}, std::size_t{3}, std::size_t{7}}) {
+    const auto graph =
+        svp::builder::calibration::ocr_calibration_graph(inputs, timestamps, max_slots);
+    std::map<std::string, const svp::exec::TaskSpec*> by_id;
+    for (const svp::exec::TaskNode& node : graph.nodes) {
+      by_id[node.spec.task_id] = &node.spec;
+    }
+    require(by_id.size() == graph.nodes.size(), "calibration task IDs are unique");
+    std::map<std::size_t, std::size_t> timed_per_step;
+    for (const auto& [id, step] : graph.timed_step) {
+      ++timed_per_step[step];
+      const svp::exec::TaskSpec& timed = *by_id.at(id);
+      // Walk back through the chain to the step's head: it depends only on
+      // warm-ups, exactly `step` of them.
+      const svp::exec::TaskSpec* head = &timed;
+      while (!head->depends_on.empty() && graph.timed_step.count(head->depends_on.front()) != 0) {
+        head = by_id.at(head->depends_on.front());
+      }
+      require(head->depends_on.size() == step,
+              "step " + std::to_string(step) + " waits for " + std::to_string(step) + " warm-ups");
+      for (const std::string& warm : head->depends_on) {
+        require(graph.timed_step.count(warm) == 0, "a step's head depends only on warm-ups");
+      }
+    }
+    require(timed_per_step.size() == max_slots, "one timed step per slot count");
+    for (const auto& [step, count] : timed_per_step) {
+      require(count == step * svp::builder::calibration::kOcrCalibrationBatchesPerSlot,
+              "step k runs k chains");
+    }
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -258,6 +305,7 @@ int main() {
   test_committed_batch_outputs_reach_the_reducer();
   test_in_process_access_serves_source_and_outputs();
   test_calibration_bounds_and_records();
+  test_calibration_warms_every_slot_before_timing();
   if (g_failures != 0) {
     std::cerr << g_failures << " OCR frame batch plan check(s) failed\n";
     return 1;
