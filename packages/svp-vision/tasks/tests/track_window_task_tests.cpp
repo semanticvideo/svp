@@ -248,12 +248,21 @@ void test_start_failures() {
 // With the models (SVP_MODEL_CACHE_ROOT) and a decoder that runs but cannot
 // decode: on the coordinator the window's decode failure is recorded as a
 // local build records it; on a worker the same window is a retryable failure
+
+// True when `root` is a model cache that holds models. CI points
+// SVP_MODEL_CACHE_ROOT at a directory with no model assets.
+bool has_models(const char* root) {
+  std::error_code error;
+  return root != nullptr && *root != '\0' && std::filesystem::is_directory(root, error) &&
+         !std::filesystem::is_empty(root, error);
+}
+
 // (window_failed_here), so it runs on another Mac instead of putting this
 // Mac's trouble into the package. Skips without the models.
 void test_window_trouble_on_a_worker_is_retried() {
   const char* models = std::getenv("SVP_MODEL_CACHE_ROOT");
-  if (models == nullptr) {
-    std::cout << "skipping window trouble test: SVP_MODEL_CACHE_ROOT is not set\n";
+  if (!has_models(models)) {
+    std::cout << "skipping window trouble test: SVP_MODEL_CACHE_ROOT holds no models\n";
     return;
   }
   const std::filesystem::path directory =

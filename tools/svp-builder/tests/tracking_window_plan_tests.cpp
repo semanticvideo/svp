@@ -355,6 +355,15 @@ void test_calibration_records_by_kind() {
 }
 #endif
 
+// True when `root` is a model cache that holds models. CI points
+// SVP_MODEL_CACHE_ROOT at a directory with no model assets.
+bool has_models(const char* root) {
+  std::error_code error;
+  return root != nullptr && *root != '\0' && std::filesystem::is_directory(root, error) &&
+         !std::filesystem::is_empty(root, error);
+}
+
+
 // A Mac that cannot load the window runtimes does not split the stage. With
 // the models (SVP_MODEL_CACHE_ROOT) a build's options load; options whose
 // detector cannot load (or an empty cache) do not. Skips without the models.
@@ -362,8 +371,8 @@ void test_runtime_probe() {
   require(!tracking_runtimes_load("/nonexistent/models", {}),
           "nothing loads from a cache that does not exist");
   const char* models = std::getenv("SVP_MODEL_CACHE_ROOT");
-  if (models == nullptr) {
-    std::cout << "skipping runtime probe with models: SVP_MODEL_CACHE_ROOT is not set\n";
+  if (!has_models(models)) {
+    std::cout << "skipping runtime probe with models: SVP_MODEL_CACHE_ROOT holds no models\n";
     return;
   }
   svp::vision::VisualEntityPipelineOptions options;
@@ -405,8 +414,8 @@ void test_resume_follows_the_journal() {
 void test_calibration_windows_are_clean_on_a_worker() {
   const char* models = std::getenv("SVP_MODEL_CACHE_ROOT");
   const char* ffmpeg = std::getenv("SVP_TRACK_WINDOW_TEST_FFMPEG");
-  if (models == nullptr || ffmpeg == nullptr) {
-    std::cout << "skipping calibration windows on a worker: set SVP_MODEL_CACHE_ROOT and "
+  if (!has_models(models) || ffmpeg == nullptr) {
+    std::cout << "skipping calibration windows on a worker: set SVP_MODEL_CACHE_ROOT (with models) and "
                  "SVP_TRACK_WINDOW_TEST_FFMPEG\n";
     return;
   }

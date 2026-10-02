@@ -787,8 +787,13 @@ void test_depth(Fixture& fixture) {
 int run(const fs::path& worker) {
   const auto model_cache = env("SVP_MODEL_CACHE_ROOT");
   const fs::path ffmpeg = env("SVP_FFMPEG").value_or("ffmpeg");
-  if (!model_cache || !vision::ffmpeg_executable_available(ffmpeg)) {
-    std::cout << "Skipping: set SVP_MODEL_CACHE_ROOT and have ffmpeg ($SVP_FFMPEG or PATH)\n";
+  // CI points SVP_MODEL_CACHE_ROOT at a directory with no model assets.
+  std::error_code cache_error;
+  const bool has_models = model_cache && fs::is_directory(*model_cache, cache_error) &&
+                          !fs::is_empty(*model_cache, cache_error);
+  if (!has_models || !vision::ffmpeg_executable_available(ffmpeg)) {
+    std::cout << "Skipping: set SVP_MODEL_CACHE_ROOT (with models) and have ffmpeg "
+                 "($SVP_FFMPEG or PATH)\n";
     return 0;
   }
   for (const char* model : {svp::models::kNomicEmbedTextV15ModelId,
