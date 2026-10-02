@@ -57,6 +57,9 @@ struct OcrGenerationOptions {
   FrameProgressCallback on_progress;
   EvidenceCropProgressCallback on_evidence_crop_progress;
   EvidenceCropProgressCallback on_evidence_roi_progress;
+  // Optional: runs the evidence-crop per-observation work elsewhere
+  // (dispatched_work.hpp). Empty in every build that is not --distributed.
+  EvidenceCropDispatcher evidence_crop_dispatcher;
 };
 
 struct OcrGenerationResult {

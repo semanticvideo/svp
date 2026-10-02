@@ -23,14 +23,19 @@
 #include "svp/exec/executor.hpp"
 #include "svp/exec/task_spec.hpp"
 #include "svp/models/thread_plan.hpp"
+#include "svp/vision/dispatched_work.hpp"
 #include "svp/vision/pp_ocr.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace svp::builder {
@@ -38,6 +43,26 @@ namespace svp::builder {
 class DistributedPreparationError : public std::runtime_error {
  public:
   using std::runtime_error::runtime_error;
+};
+
+// One ONNX-model task type a build may dispatch (M4): the bundle and the
+// settings its stage runs the model with.
+struct DistributedOnnxWork {
+  svp::exec::TaskModelRef model_ref;
+  svp::vision::DispatchedModel model;
+};
+
+// The vision stage work a build may dispatch besides OCR frame batches (M4,
+// svp/vision/dispatched_work.hpp). Evidence crops (ocr.crop_batch) re-read
+// with the OCR work's PP-OCR, so they need no model of their own. A type
+// whose model this Mac cannot name is not dispatched; its stage does the
+// work itself.
+struct DistributedVisionWork {
+  bool evidence_crops = false;
+  std::optional<DistributedOnnxWork> text_embeddings;      // embed.text_batch
+  std::optional<DistributedOnnxWork> keyframe_embeddings;  // embed.keyframe_batch
+  std::optional<DistributedOnnxWork> depth;                // depth.frame_batch
+  std::uint32_t embedding_dim = 0;
 };
 
 // What workers need to run this build's ocr.frame_batch tasks.
@@ -57,6 +82,26 @@ struct DistributedOcrWork {
   svp::models::ThreadPlan thread_plan;
   // The build's Ctrl-C / SIGTERM token; null when the caller has none.
   const svp::exec::CancellationToken* cancellation = nullptr;
+  // The vision stage work the build may also dispatch.
+  DistributedVisionWork vision;
+};
+
+// How one dispatched task type runs on this Mac, from its measured capacity
+// (plan §3.5): concurrent tasks, and seconds one item takes on one of them
+// (batch sizing).
+struct DispatchedTypeCapacity {
+  std::size_t coordinator_slots = 0;
+  double seconds_per_item = 0.0;
+};
+
+// The paired workers' executors for one dispatched task type. Each call
+// returns fresh executors (one per ready worker that measured a capacity for
+// the type, sized from it), to be started and stopped by one scheduler run.
+class DispatchedWorkerExecutors {
+ public:
+  virtual ~DispatchedWorkerExecutors() = default;
+  [[nodiscard]] virtual std::vector<std::unique_ptr<svp::exec::Executor>> make(
+      std::string_view task_type) = 0;
 };
 
 struct DistributedFleet {
@@ -68,6 +113,11 @@ struct DistributedFleet {
   // Measured seconds one ocr.frame_batch sample takes on one of this Mac's
   // slots (batch sizing). Empty when not measured.
   std::optional<double> seconds_per_sample;
+  // The dispatched vision task types this Mac measured a capacity for, by
+  // type name; a type missing here is not dispatched.
+  std::map<std::string, DispatchedTypeCapacity, std::less<>> dispatched_capacity;
+  // The workers' executors for those types; null when no worker is ready.
+  std::shared_ptr<DispatchedWorkerExecutors> dispatched_workers;
 };
 
 class DistributedExecution {

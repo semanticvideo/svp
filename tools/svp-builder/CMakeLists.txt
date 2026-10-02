@@ -21,12 +21,17 @@ add_library(svp-builder-lib
   src/package_final_stages.cpp
   src/processor_provenance.cpp
   src/vision_stage_progress.cpp
+  src/calibration/capacity_sweep.cpp
+  src/calibration/dispatched_capacity_workloads.cpp
   src/calibration/ocr_capacity_calibration.cpp
   src/engine/build_assembly.cpp
   src/engine/build_inputs_digest.cpp
+  src/engine/build_vision_dispatch.cpp
   src/engine/build_journal_session.cpp
   src/engine/canonical_frames_codec.cpp
   src/engine/committed_stage_results.cpp
+  src/engine/dispatch_scratch.cpp
+  src/engine/distributed_vision_work.cpp
   src/engine/frame_catalog_delta.cpp
   src/engine/ocr_batch_observer.cpp
   src/engine/ocr_execution_policy.cpp
@@ -42,7 +47,9 @@ add_library(svp-builder-lib
   src/engine/stage_tasks_vision.cpp
   src/engine/staging_capture_check.cpp
   src/engine/staging_scope.cpp
+  src/engine/subtask_run.cpp
   src/engine/vision_lane_settings.cpp
+  src/engine/vision_work_dispatch.cpp
   src/engine/whole_stage_scheduler_policy.cpp
   src/process_resources.cpp
   src/progress_renderer.cpp
@@ -132,6 +139,7 @@ if(APPLE)
     src/workers/builder_worker_tasks.cpp
     src/workers/calibration_store.cpp
     src/workers/coordinator_context.cpp
+    src/workers/dispatched_calibration_runs.cpp
     src/workers/distributed_fleet.cpp
     src/workers/ocr_calibration_runs.cpp
     src/workers/ssh_session.cpp
@@ -206,6 +214,25 @@ if(BUILD_TESTING)
   )
   add_test(NAME svp-builder-ocr-frame-batch-plan-tests
            COMMAND svp-builder-ocr-frame-batch-plan-tests)
+
+  add_executable(svp-builder-dispatched-work-tests
+    tests/dispatched_work_tests.cpp
+  )
+  target_include_directories(svp-builder-dispatched-work-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_compile_features(svp-builder-dispatched-work-tests PRIVATE cxx_std_20)
+  target_link_libraries(svp-builder-dispatched-work-tests
+    PRIVATE
+      svp::builder
+      svp::exec
+      svp::package
+      svp::vision
+      svp::vision_tasks
+      nlohmann_json::nlohmann_json
+  )
+  add_test(NAME svp-builder-dispatched-work-tests
+           COMMAND svp-builder-dispatched-work-tests)
 
   add_executable(svp-builder-task-engine-tests
     tests/build_task_engine_tests.cpp

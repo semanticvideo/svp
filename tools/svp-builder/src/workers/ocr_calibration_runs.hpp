@@ -13,6 +13,7 @@
 #include "svp/exec/remote/pairing_key.hpp"
 #include "svp/exec/worker/pairing_store.hpp"
 #include "svp/exec/task_spec.hpp"
+#include "svp/models/thread_plan.hpp"
 #include "svp/vision/pp_ocr.hpp"
 #include "svp/vision/tasks/ocr_calibration_clip.hpp"
 
@@ -33,6 +34,10 @@ struct OcrCalibrationSetup {
   std::filesystem::path ffmpeg_path;
   std::string ffmpeg_build;
 };
+
+// The thread plan a default build resolves on this Mac with `model_cache`.
+[[nodiscard]] svp::models::ThreadPlan default_build_thread_plan(
+    const std::filesystem::path& model_cache);
 
 // The default build's OCR configuration with `model_cache` and the ffmpeg a
 // default build resolves (runtime bundle, $SVP_FFMPEG, PATH). Throws
@@ -84,7 +89,8 @@ struct CalibrationOutcome {
 [[nodiscard]] std::string describe_calibration(const calibration::OcrCalibration& ocr);
 
 // `workers pair` / `workers sync`: measures (or confirms) this Mac's and the
-// worker's OCR capacity for a default build and prints one line for each.
+// worker's OCR capacity, and their capacity for each dispatched vision task
+// type, for a default build, and prints one line for each.
 // Returns false, after saying why, when either could not be measured.
 bool calibrate_for_workers_command(const svp::exec::worker::CoordinatorPairingRecord& record,
                                    const svp::exec::worker::CoordinatorHello& hello,

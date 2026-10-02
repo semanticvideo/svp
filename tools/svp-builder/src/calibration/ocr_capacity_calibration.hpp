@@ -13,10 +13,12 @@
 // slot already holds a loaded PP-OCR session and file caches are warm: model
 // loading never counts against a step.
 // The sweep stops at the first step whose throughput (frames per second)
-// gains less than kOcrCalibrationMinSlotGain over the best step so far, or at
+// gains less than kCapacityMinSlotGain over the best step so far, or at
 // `max_slots` (the most slots the Mac's memory admits, never more than its
 // logical CPUs). The knee, the best step before that, is the slot count;
 // seconds per frame at the knee (wall x slots / frames) sizes batches.
+
+#include "calibration/capacity_sweep.hpp"
 
 #include "svp/exec/cancellation_token.hpp"
 #include "svp/exec/executor.hpp"
@@ -33,17 +35,9 @@
 
 namespace svp::builder::calibration {
 
-// Another slot is worth its memory (about kOcrFrameBatchEstimatedPeakRssMb)
-// and contention only if it adds at least 10% throughput: below that the
-// gain is within run-to-run noise of OCR on real content (plan §2.2 C
-// measured +16% for a second `background` slot and -4% for a second `fast`
-// slot on an M4 mini), and an extra slot makes every batch take longer,
-// which lengthens the build's tail.
-inline constexpr double kOcrCalibrationMinSlotGain = 0.10;
-// Batches each slot runs per step. One whole-slice batch per slot already
-// keeps every slot busy for the whole step (the batches are identical, so
-// they start and end together); more would only lengthen calibration.
-inline constexpr std::size_t kOcrCalibrationBatchesPerSlot = 1;
+// The sweep is calibrate_capacity's (capacity_sweep.hpp, which owns the
+// slot-gain threshold); this header keeps OCR's record shape (frames).
+inline constexpr std::size_t kOcrCalibrationBatchesPerSlot = kCapacityBatchesPerSlot;
 
 struct OcrCalibrationStep {
   std::size_t slots = 0;

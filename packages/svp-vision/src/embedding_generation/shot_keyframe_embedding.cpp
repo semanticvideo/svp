@@ -4,6 +4,7 @@
 #include "svp/models/runtime.hpp"
 #include "svp/models/verification.hpp"
 #include "svp/vision/canonical_frame_input.hpp"
+#include "svp/vision/dispatched_work.hpp"
 #include "svp/vision/vision_embedding_input.hpp"
 
 #include <opencv2/imgproc.hpp>
@@ -95,6 +96,104 @@ class KeyframeInputQueue {
   bool cancelled_ = false;
 };
 
+KeyframeEmbeddingItem embedding_item(const ShotKeyframe& keyframe) {
+  return KeyframeEmbeddingItem{.shot_id = keyframe.shot_id,
+                               .pts_us = keyframe.pts_us,
+                               .width = keyframe.analysis_width,
+                               .height = keyframe.analysis_height};
+}
+
+// Loads and verifies the vision model into `session`, or sets
+// result.blocker; on success fills the result's model identity.
+void load_vision_model(const ShotKeyframeEmbeddingRequest& request,
+                       ShotKeyframeEmbeddings& result,
+                       svp::models::OnnxSession& session) {
+  std::optional<svp::models::ModelBundleManifest> manifest_opt;
+  try {
+    manifest_opt = svp::models::load_model_bundle_manifest(
+        request.model_bundle_dir / "model.svpmodel.json");
+    if (!svp::models::verify_manifest_files(*manifest_opt,
+                                            request.model_bundle_dir)
+             .ok()) {
+      result.blocker = "vision model bundle failed BLAKE3 verification";
+    } else {
+      svp::models::OnnxSessionOptions session_options;
+      session_options.execution_provider = request.execution_provider;
+      session_options.threads = request.threads;
+      session = svp::models::OnnxSession::load(
+          *manifest_opt, request.model_bundle_dir, session_options);
+    }
+  } catch (const std::exception& e) {
+    result.blocker = std::string("vision model could not be loaded: ") + e.what();
+  } catch (...) {
+    result.blocker = "vision model could not be loaded";
+  }
+  if (!result.blocker.empty()) {
+    return;
+  }
+  result.model_id = manifest_opt->model_id;
+  result.model_bundle_id = manifest_opt->model_bundle_id;
+  result.model_blake3 = manifest_opt->bundle_blake3.hex_value();
+}
+
+// The keyframes embedded by request.dispatcher (dispatched_work.hpp): the
+// model is loaded and verified here first, so its blockers are this Mac's;
+// a keyframe the dispatcher could not embed is embedded again here. nullopt
+// when the dispatcher hands the keyframes back to the stage; `loaded` and
+// `session` then hold the model it loaded, for the stage to embed with.
+std::optional<ShotKeyframeEmbeddings> embed_dispatched_keyframes(
+    const std::vector<ShotKeyframe>& keyframes,
+    const ShotKeyframeEmbeddingRequest& request, ShotKeyframeEmbeddings& loaded,
+    svp::models::OnnxSession& session) {
+  ShotKeyframeEmbeddings& result = loaded;
+  result.keyframes_requested = keyframes.size();
+  load_vision_model(request, result, session);
+  if (!result.blocker.empty()) {
+    return result;
+  }
+  std::vector<KeyframeEmbeddingItem> items;
+  items.reserve(keyframes.size());
+  for (const ShotKeyframe& keyframe : keyframes) {
+    items.push_back(embedding_item(keyframe));
+  }
+  std::optional<std::vector<KeyframeEmbeddingOutcome>> outcomes = request.dispatcher(
+      items,
+      DispatchedModel{.model_id = result.model_id,
+                      .execution_provider = request.execution_provider,
+                      .threads = request.threads},
+      request.embedding_dim,
+      [&request](std::size_t done, std::size_t total) {
+        if (request.on_keyframe) request.on_keyframe(done, total);
+      });
+  if (!outcomes) {
+    return std::nullopt;
+  }
+  if (outcomes->size() != items.size()) {
+    throw DispatchedWorkError("keyframe embeddings: " + std::to_string(outcomes->size()) +
+                              " outcomes for " + std::to_string(items.size()) +
+                              " keyframes");
+  }
+  for (std::size_t index = 0; index < items.size(); ++index) {
+    KeyframeEmbeddingOutcome& outcome = (*outcomes)[index];
+    if (outcome.embedded && outcome.vector.size() != request.embedding_dim) {
+      throw DispatchedWorkError("keyframe embeddings: vector for " + items[index].shot_id +
+                                " has " + std::to_string(outcome.vector.size()) +
+                                " values, not " + std::to_string(request.embedding_dim));
+    }
+    if (!outcome.embedded) {
+      outcome = embed_keyframe(session, request.ffmpeg_path, request.media_plan->source_path,
+                               items[index], request.embedding_dim);
+    }
+    if (outcome.embedded) {
+      result.vectors.push_back({items[index].shot_id, std::move(outcome.vector)});
+    }
+  }
+  if (result.vectors.empty()) {
+    result.blocker = "no shot keyframe could be decoded and embedded";
+  }
+  return result;
+}
+
 }  // namespace
 
 std::vector<ShotKeyframe> load_shot_keyframes(
@@ -143,6 +242,21 @@ ShotKeyframeEmbeddings embed_shot_keyframes(
     result.blocker = "no media plan or ffmpeg available to decode keyframes";
     return result;
   }
+  // A dispatcher that hands the keyframes back leaves its loaded model for
+  // the stage, so the model is loaded once either way.
+  svp::models::OnnxSession session;
+  bool model_loaded = false;
+  if (request.dispatcher) {
+    ShotKeyframeEmbeddings loaded;
+    if (std::optional<ShotKeyframeEmbeddings> dispatched =
+            embed_dispatched_keyframes(keyframes, request, loaded, session)) {
+      return std::move(*dispatched);
+    }
+    result.model_id = loaded.model_id;
+    result.model_bundle_id = loaded.model_bundle_id;
+    result.model_blake3 = loaded.model_blake3;
+    model_loaded = true;
+  }
 
   // Decoding (one ffmpeg seek per keyframe) runs on a producer thread so it
   // overlaps model loading and inference; vectors still come out in keyframe
@@ -153,16 +267,9 @@ ShotKeyframeEmbeddings embed_shot_keyframes(
       const auto& keyframe = keyframes[i];
       KeyframeInput item{i, {}};
       try {
-        (void)decode_frames_at_timestamps_streaming(
-            *request.media_plan, request.ffmpeg_path, keyframe.analysis_width,
-            keyframe.analysis_height, {keyframe.pts_us},
-            [&](const ColorRasterFrame& frame, std::size_t) {
-              cv::Mat resized;
-              cv::resize(srgb8_frame_to_cv_mat(frame), resized,
-                         cv::Size(kVisionEmbeddingInputSide,
-                                  kVisionEmbeddingInputSide));
-              item.input = frame_to_clip_normalized_chw(resized);
-            });
+        item.input = keyframe_model_input(request.ffmpeg_path,
+                                          request.media_plan->source_path,
+                                          embedding_item(keyframe));
       } catch (...) {
         item.input.clear();
       }
@@ -171,53 +278,24 @@ ShotKeyframeEmbeddings embed_shot_keyframes(
     queue.close();
   });
 
-  std::optional<svp::models::ModelBundleManifest> manifest_opt;
-  svp::models::OnnxSession session;
-  try {
-    manifest_opt = svp::models::load_model_bundle_manifest(
-        request.model_bundle_dir / "model.svpmodel.json");
-    if (!svp::models::verify_manifest_files(*manifest_opt,
-                                            request.model_bundle_dir)
-             .ok()) {
-      result.blocker = "vision model bundle failed BLAKE3 verification";
-    } else {
-      svp::models::OnnxSessionOptions session_options;
-      session_options.execution_provider = request.execution_provider;
-      session_options.threads = request.threads;
-      session = svp::models::OnnxSession::load(
-          *manifest_opt, request.model_bundle_dir, session_options);
-    }
-  } catch (const std::exception& e) {
-    result.blocker = std::string("vision model could not be loaded: ") + e.what();
-  } catch (...) {
-    result.blocker = "vision model could not be loaded";
+  if (!model_loaded) {
+    load_vision_model(request, result, session);
   }
   if (!result.blocker.empty()) {
     queue.cancel();
     producer.join();
     return result;
   }
-  result.model_id = manifest_opt->model_id;
-  result.model_bundle_id = manifest_opt->model_bundle_id;
-  result.model_blake3 = manifest_opt->bundle_blake3.hex_value();
 
   // The producer must be joined on every exit, including a throwing
   // progress callback, or ~thread terminates the process.
   try {
     std::size_t completed = 0;
     while (auto item = queue.pop()) {
-      if (!item->input.empty()) {
-        try {
-          std::vector<float> vector = session.run_visual_embedding(
-              item->input.data(), item->input.size(), kVisionEmbeddingInputSide,
-              kVisionEmbeddingInputSide);
-          if (vector.size() == request.embedding_dim) {
-            l2_normalize(vector);
-            result.vectors.push_back(
-                {keyframes[item->keyframe_index].shot_id, std::move(vector)});
-          }
-        } catch (...) {
-        }
+      if (std::optional<std::vector<float>> vector =
+              embed_keyframe_input(session, item->input, request.embedding_dim)) {
+        result.vectors.push_back(
+            {keyframes[item->keyframe_index].shot_id, std::move(*vector)});
       }
       ++completed;
       if (request.on_keyframe) request.on_keyframe(completed, keyframes.size());

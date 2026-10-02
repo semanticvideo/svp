@@ -16,7 +16,9 @@
 // exactly the planned frame.
 
 #include <cstdint>
+#include <cstddef>
 #include <filesystem>
+#include <string>
 #include <vector>
 
 namespace svp::vision::tasks {
@@ -32,6 +34,22 @@ inline constexpr int kOcrCalibrationFrameLines[] = {4, 16, 48, 112};
 
 // The clip's frame timestamps, known without writing it.
 [[nodiscard]] std::vector<std::int64_t> ocr_calibration_timestamps_us();
+
+// One rendered line of text: its frame, its characters, and its box in
+// frame pixels (OpenCV's text extent, baseline included).
+struct OcrCalibrationTextLine {
+  std::size_t frame = 0;
+  std::string text;
+  int left = 0;
+  int top = 0;
+  int right = 0;
+  int bottom = 0;
+};
+
+// Every line the clip renders, frame by frame in drawing order, known
+// without writing it. The capacity calibrations of the evidence-crop and
+// text-embedding tasks use them as their items.
+[[nodiscard]] std::vector<OcrCalibrationTextLine> ocr_calibration_text_lines();
 
 struct OcrCalibrationClip {
   std::filesystem::path path;

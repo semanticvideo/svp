@@ -1,14 +1,18 @@
 // svp-vision-ocr-task-test-worker: serves run_worker_loop on stdin/stdout
-// with ocr.frame_batch registered, as the loopback executor's child.
+// with ocr.frame_batch and the dispatched vision task types registered, as
+// the loopback executor's child.
 //
 //   svp-vision-ocr-task-test-worker --cas-root <dir> --model-cache <dir>
-//                                   --ffmpeg <path>
+//                                   --ffmpeg <path> [--scratch <dir>]
 //
+// The dispatched types write their scratch files under --scratch (default:
+// the CAS root).
 // Inputs are resolved from, and outputs stored in, the content-addressed
 // cache at --cas-root through CasTaskArtifactAccess, as a real worker does.
 
 #include "svp/exec/cas_task_artifact_access.hpp"
 #include "svp/exec/worker_loop.hpp"
+#include "svp/vision/tasks/dispatched_vision_tasks.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_task.hpp"
 
 #include <csignal>
@@ -45,18 +49,27 @@ int main(int argc, char** argv) {
     const std::string session_id = "ws_ocr_test_worker_" + std::to_string(::getpid());
     svp::exec::CasTaskArtifactAccess artifacts(std::move(store).value(), session_id);
 
+    const auto write_output = [&artifacts](std::span<const std::byte> bytes,
+                                           std::string media_type, std::string role) {
+      return artifacts.put(bytes, std::move(media_type), std::move(role));
+    };
     svp::exec::TaskTypeRegistry registry;
     svp::vision::tasks::register_ocr_frame_batch_task(
         registry,
         svp::vision::tasks::OcrFrameBatchWorkerEnvironment{
             .model_cache_root = flags.at("--model-cache"),
             .ffmpeg_path = flags.at("--ffmpeg"),
-            .write_output =
-                [&artifacts](std::span<const std::byte> bytes, std::string media_type,
-                             std::string role) {
-                  return artifacts.put(bytes, std::move(media_type), std::move(role));
-                },
+            .write_output = write_output,
         });
+    svp::vision::tasks::register_dispatched_vision_tasks(
+        registry, svp::vision::tasks::DispatchedTaskEnvironment{
+                      .model_cache_root = flags.at("--model-cache"),
+                      .model_cache_for = {},
+                      .ffmpeg_path = flags.at("--ffmpeg"),
+                      .scratch_dir = flags.contains("--scratch") ? flags.at("--scratch")
+                                                                 : flags.at("--cas-root"),
+                      .write_output = write_output,
+                      .record_start_failures = false});
 
     const svp::exec::WorkerLoopExit exit = svp::exec::run_worker_loop(
         STDIN_FILENO, STDOUT_FILENO, registry, artifacts,

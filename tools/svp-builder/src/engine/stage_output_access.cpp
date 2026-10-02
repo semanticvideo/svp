@@ -23,8 +23,17 @@ svp::exec::ArtifactRef StageOutputAccess::put(std::span<const std::byte> bytes,
   svp::exec::ArtifactRef ref =
       svp::exec::make_artifact_ref(bytes, std::move(media_type), std::move(role));
   const std::lock_guard lock(mutex_);
-  outputs_.try_emplace(ref.blake3, bytes.begin(), bytes.end());
+  auto [stored, inserted] = outputs_.try_emplace(ref.blake3);
+  if (inserted) {
+    stored->second.bytes.assign(bytes.begin(), bytes.end());
+  }
+  ++stored->second.unread;
   return ref;
+}
+
+std::size_t StageOutputAccess::stored_outputs() const {
+  const std::lock_guard lock(mutex_);
+  return outputs_.size();
 }
 
 svp::exec::ResolvedInputs StageOutputAccess::resolve_inputs(
@@ -63,7 +72,15 @@ std::vector<svp::exec::FramePayload> StageOutputAccess::read_outputs(
     if (stored == outputs_.end()) {
       throw std::runtime_error("no outputs for task `" + result.task_id + "`");
     }
-    payloads.push_back(stored->second);
+    payloads.push_back(stored->second.bytes);
+  }
+  if (retention_ == StageOutputRetention::release_after_read) {
+    for (const svp::exec::ArtifactRef& ref : result.outputs) {
+      const auto stored = outputs_.find(ref.blake3);
+      if (stored != outputs_.end() && --stored->second.unread == 0) {
+        outputs_.erase(stored);
+      }
+    }
   }
   return payloads;
 }

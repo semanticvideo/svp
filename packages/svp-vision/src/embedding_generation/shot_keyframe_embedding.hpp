@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/models/thread_plan.hpp"
+#include "svp/vision/keyframe_embedding_work.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -53,6 +54,8 @@ struct ShotKeyframeEmbeddingRequest {
   std::uint32_t embedding_dim = 0;
   // Called after each keyframe with (completed, total).
   std::function<void(std::size_t, std::size_t)> on_keyframe;
+  // Optional: embeds the keyframes elsewhere (dispatched_work.hpp).
+  KeyframeEmbeddingDispatcher dispatcher;
 };
 
 // Decodes each keyframe at its analysis raster and embeds it with the vision

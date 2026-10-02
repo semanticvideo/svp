@@ -4,6 +4,7 @@
 #include "svp/models/manifest.hpp"
 #include "svp/models/runtime.hpp"
 #include "svp/models/verification.hpp"
+#include "svp/vision/dispatched_work.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -214,6 +215,63 @@ std::vector<std::uint16_t> infer_depth_frame(
       static_cast<std::uint32_t>(frame.height));
 }
 
+DepthFrameOutcome infer_depth_frame_outcome(const svp::models::OnnxSession& session,
+                                            const ColorRasterFrame& frame) {
+  DepthFrameOutcome outcome;
+
+  // Prepare input tensor: normalized CHW float32
+  std::vector<float> input_data = frame_to_normalized_chw(frame);
+
+  // Run ONNX depth inference
+  std::vector<float> depth_output;
+  try {
+    depth_output = session.run_depth(
+        input_data.data(), input_data.size(),
+        static_cast<std::uint32_t>(frame.width),
+        static_cast<std::uint32_t>(frame.height));
+  } catch (const std::exception& e) {
+    outcome.status = DepthFrameStatus::inference_failed;
+    outcome.error = e.what();
+    return outcome;
+  }
+
+  // The ONNX model outputs at 14*floor(h/14) x 14*floor(w/14), which may
+  // differ from the input frame dimensions.  Resize the depth output back
+  // to the canonical raster dimensions using bilinear interpolation so the
+  // SVPB depth block matches the frame geometry.
+  //
+  // Determine the actual output dimensions from the element count and the
+  // known model output shape formula.
+  const std::uint32_t out_h =
+      14u * static_cast<std::uint32_t>(frame.height / 14);
+  const std::uint32_t out_w =
+      14u * static_cast<std::uint32_t>(frame.width / 14);
+
+  std::vector<float> resized_depth = depth_output;
+  if (out_w > 0 && out_h > 0 &&
+      depth_output.size() == static_cast<std::size_t>(out_w) * static_cast<std::size_t>(out_h) &&
+      (out_w != static_cast<std::uint32_t>(frame.width) ||
+       out_h != static_cast<std::uint32_t>(frame.height))) {
+    resized_depth = bilinear_resize_depth(
+        depth_output, out_w, out_h,
+        static_cast<std::uint32_t>(frame.width),
+        static_cast<std::uint32_t>(frame.height));
+  }
+
+  // Convert float depth to uint16 payload.
+  // Reject mismatched sizes instead of zero-padding.
+  outcome.depth = float_depth_to_uint16(
+      resized_depth,
+      static_cast<std::uint32_t>(frame.width),
+      static_cast<std::uint32_t>(frame.height));
+  if (outcome.depth.empty()) {
+    outcome.status = DepthFrameStatus::unusable_output;
+    outcome.output_elements = depth_output.size();
+    outcome.resized_elements = resized_depth.size();
+  }
+  return outcome;
+}
+
 // Convert float depth output to uint16 relative inverse depth payload.
 //
 // RC2 normalization contract:
@@ -404,70 +462,62 @@ DepthGenerationResult generate_depth_blocks(
     return result;
   }
 
+  // Frames run elsewhere (dispatched_work.hpp), one outcome per frame.
+  std::optional<std::vector<DepthFrameOutcome>> dispatched;
+  if (options.frame_dispatcher) {
+    dispatched = options.frame_dispatcher(
+        options.frame_input.frames,
+        DispatchedModel{.model_id = manifest.model_id,
+                        .execution_provider = options.execution_provider,
+                        .threads = options.threads},
+        [&options](std::size_t done, std::size_t total) {
+          if (options.on_progress) options.on_progress(done, total);
+        });
+    if (dispatched && dispatched->size() != total_frames) {
+      throw DispatchedWorkError("depth: " + std::to_string(dispatched->size()) +
+                                " outcomes for " + std::to_string(total_frames) + " frames");
+    }
+  }
+
   for (std::size_t frame_idx = 0; frame_idx < options.frame_input.frames.size(); ++frame_idx) {
     const ColorRasterFrame& frame = options.frame_input.frames[frame_idx];
 
-    // Prepare input tensor: normalized CHW float32
-    std::vector<float> input_data = frame_to_normalized_chw(frame);
+    DepthFrameOutcome outcome;
+    if (dispatched && (*dispatched)[frame_idx].status == DepthFrameStatus::ok) {
+      outcome = std::move((*dispatched)[frame_idx]);
+      if (outcome.depth.size() != static_cast<std::size_t>(frame.width) *
+                                      static_cast<std::size_t>(frame.height)) {
+        throw DispatchedWorkError("depth: payload for frame " + frame.frame_id + " has " +
+                                  std::to_string(outcome.depth.size()) + " values");
+      }
+    } else {
+      // No dispatcher, or the dispatched frame failed: run it here, so a
+      // failure is this Mac's (dispatched_work.hpp).
+      outcome = infer_depth_frame_outcome(session, frame);
+    }
 
-    // Run ONNX depth inference
-    std::vector<float> depth_output;
-    try {
-      depth_output = session.run_depth(
-          input_data.data(), input_data.size(),
-          static_cast<std::uint32_t>(frame.width),
-          static_cast<std::uint32_t>(frame.height));
-    } catch (const std::exception& e) {
+    if (outcome.status == DepthFrameStatus::inference_failed) {
       result.blocker = std::string("ONNX depth inference failed on frame ") +
-          frame.frame_id + ": " + e.what();
+          frame.frame_id + ": " + outcome.error;
       result.processor_provenance = make_depth_processor_provenance(
           manifest.model_id, manifest.model_bundle_id,
           options.execution_provider, "error", result.blocker);
       return result;
     }
 
-    // The ONNX model outputs at 14*floor(h/14) x 14*floor(w/14), which may
-    // differ from the input frame dimensions.  Resize the depth output back
-    // to the canonical raster dimensions using bilinear interpolation so the
-    // SVPB depth block matches the frame geometry.
-    //
-    // Determine the actual output dimensions from the element count and the
-    // known model output shape formula.
-    const std::uint32_t out_h =
-        14u * static_cast<std::uint32_t>(frame.height / 14);
-    const std::uint32_t out_w =
-        14u * static_cast<std::uint32_t>(frame.width / 14);
-
-    std::vector<float> resized_depth = depth_output;
-    if (out_w > 0 && out_h > 0 &&
-        depth_output.size() == static_cast<std::size_t>(out_w) * static_cast<std::size_t>(out_h) &&
-        (out_w != static_cast<std::uint32_t>(frame.width) ||
-         out_h != static_cast<std::uint32_t>(frame.height))) {
-      resized_depth = bilinear_resize_depth(
-          depth_output, out_w, out_h,
-          static_cast<std::uint32_t>(frame.width),
-          static_cast<std::uint32_t>(frame.height));
-    }
-
-    // Convert float depth to uint16 payload.
-    // Reject mismatched sizes instead of zero-padding.
-    std::vector<std::uint16_t> depth_uint16 = float_depth_to_uint16(
-        resized_depth,
-        static_cast<std::uint32_t>(frame.width),
-        static_cast<std::uint32_t>(frame.height));
-
-    if (depth_uint16.empty()) {
+    if (outcome.status == DepthFrameStatus::unusable_output) {
       result.blocker = std::string("ONNX depth output size mismatch for frame ") +
           frame.frame_id + ": expected " +
           std::to_string(static_cast<std::size_t>(frame.width) * static_cast<std::size_t>(frame.height)) +
-          " elements but got " + std::to_string(depth_output.size()) +
-          " (resized to " + std::to_string(resized_depth.size()) + ")" +
+          " elements but got " + std::to_string(outcome.output_elements) +
+          " (resized to " + std::to_string(outcome.resized_elements) + ")" +
           "; depth generation blocked to prevent fake/partial depth";
       result.processor_provenance = make_depth_processor_provenance(
           manifest.model_id, manifest.model_bundle_id,
           options.execution_provider, "error", result.blocker);
       return result;
     }
+    const std::vector<std::uint16_t>& depth_uint16 = outcome.depth;
 
     // Accumulate raw depth data for downstream consumers (visual entity tracker)
     result.raw_depth_data.insert(
@@ -546,7 +596,8 @@ DepthGenerationResult generate_depth_blocks(
         {"end_us", entry.end_us}
     });
 
-    if (options.on_progress) {
+    // Dispatched progress was reported as the outcomes arrived.
+    if (options.on_progress && !dispatched) {
       options.on_progress(frame_idx + 1, total_frames);
     }
   }

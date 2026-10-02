@@ -5,6 +5,7 @@
 #include "svp/blocks/block_writer.hpp"
 #include "svp/models/runtime.hpp"
 #include "svp/vision/canonical_frame_input.hpp"
+#include "svp/vision/depth_frame_work.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -45,6 +46,9 @@ struct DepthGenerationOptions {
   std::uint32_t raster_height = 0;
   DecodedCanonicalFrames frame_input;
   std::function<void(std::size_t current, std::size_t total)> on_progress;
+  // Optional: runs the per-frame depth work elsewhere (dispatched_work.hpp).
+  // Empty in every build that is not --distributed.
+  DepthFrameDispatcher frame_dispatcher;
 };
 
 struct DepthBlockEntry {
