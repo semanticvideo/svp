@@ -14,8 +14,19 @@ AsrChunkOutcome run_asr_chunk(const std::filesystem::path& input_wav, const AsrC
                               const WhisperRuntimeThreads& threads,
                               const std::filesystem::path& slice_dir) {
   const AsrChunkContextPlan context = plan_asr_chunk_context(chunk);
-  const std::filesystem::path chunk_wav =
-      slice_wav_to_temp(input_wav, context.slice_start_us, context.slice_end_us, slice_dir);
+  const std::optional<std::filesystem::path> slice = slice_wav_range_to_temp(
+      input_wav, context.slice_start_us, context.slice_end_us, slice_dir);
+  if (!slice) {
+    // The chunk plan follows the container's duration, which can run past
+    // the end of the audio (a video longer than its audio track). A chunk
+    // with no audio samples is silence: it decodes to no words, as a chunk
+    // whose VAD finds no speech does, rather than blocking the transcript.
+    AsrChunkOutcome silent;
+    silent.ran = true;
+    silent.alignment_status = WhisperInferenceResult{}.alignment_status;
+    return silent;
+  }
+  const std::filesystem::path& chunk_wav = *slice;
 
   WhisperInferenceResult whisper_result;
   try {

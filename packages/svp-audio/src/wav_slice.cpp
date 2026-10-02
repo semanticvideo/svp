@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <fstream>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -32,6 +33,19 @@ std::filesystem::path slice_wav_to_temp(
     std::int64_t start_us,
     std::int64_t end_us,
     const std::filesystem::path& temp_dir) {
+  std::optional<std::filesystem::path> slice =
+      slice_wav_range_to_temp(input_wav, start_us, end_us, temp_dir);
+  if (!slice) {
+    throw std::runtime_error("chunk slice produces zero or negative samples");
+  }
+  return *slice;
+}
+
+std::optional<std::filesystem::path> slice_wav_range_to_temp(
+    const std::filesystem::path& input_wav,
+    std::int64_t start_us,
+    std::int64_t end_us,
+    const std::filesystem::path& temp_dir) {
   const std::vector<float> samples = read_whisper_pcm16_mono_wav(input_wav);
   const std::int64_t start_sample =
       start_us * kWhisperSampleRate / 1000000LL;
@@ -41,7 +55,7 @@ std::filesystem::path slice_wav_to_temp(
   const std::int64_t clamped_end = std::min<std::int64_t>(
       end_sample, static_cast<std::int64_t>(samples.size()));
   if (clamped_start >= clamped_end) {
-    throw std::runtime_error("chunk slice produces zero or negative samples");
+    return std::nullopt;
   }
 
   const std::size_t sample_count =
