@@ -1,4 +1,5 @@
 #include "cli_context.hpp"
+#include "distributed_cli.hpp"
 
 namespace {
 
@@ -93,13 +94,7 @@ void register_cli(CLI::App& app, CliContext& context) {
   build->add_flag("--serial", build_opts.serial_pipeline,
                   "Run per-video semantic pipeline stages serially instead of overlapping ASR/OCR work");
   add_recovery_journal_flags(*build, build_opts.resume, build_opts.fresh);
-  build->add_flag("--distributed", build_opts.distributed,
-                  "Also run OCR, evidence crops, embeddings, and depth on this Mac's paired "
-                  "workers (svp-builder workers pair); unreachable workers are skipped with a "
-                  "warning");
-  build->add_option("--require-workers", build_opts.require_workers,
-                    "With --distributed: fail before any work unless at least this many "
-                    "paired workers are ready (implies --distributed)");
+  add_distributed_flags(*build, build_opts.distributed, build_opts.require_workers);
   build->add_option("--progress", build_opts.progress_mode,
                     "Progress output mode: auto, plain, json, none")
       ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
@@ -179,6 +174,7 @@ void register_cli(CLI::App& app, CliContext& context) {
   ic_create->add_flag("--serial", opts.ic_serial_pipeline,
       "Run per-video semantic pipeline stages serially instead of overlapping ASR/OCR work");
   add_recovery_journal_flags(*ic_create, opts.ic_resume, opts.ic_fresh);
+  add_distributed_flags(*ic_create, opts.ic_distributed, opts.ic_require_workers);
   ic_create->add_option("--progress", opts.ic_progress_mode,
       "Progress output mode: auto, plain, json, none")
       ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
@@ -284,6 +280,7 @@ void register_cli(CLI::App& app, CliContext& context) {
       "Force single-speaker diarization");
   cb_create_batch->add_flag("--serial", opts.cb_serial_pipeline,
       "Run each media item's semantic pipeline stages serially; --jobs still controls batch item concurrency");
+  add_distributed_flags(*cb_create_batch, opts.cb_distributed, opts.cb_require_workers);
   cb_create_batch->add_option("--progress", opts.cb_progress_mode,
       "Progress output mode: auto, plain, json, none")
       ->check(CLI::IsMember({"auto", "plain", "json", "none"}));

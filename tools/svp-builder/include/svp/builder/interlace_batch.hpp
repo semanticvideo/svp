@@ -3,6 +3,7 @@
 #include "svp/builder/interlace.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -64,6 +65,10 @@ struct BatchCreateOptions {
   bool force_single_speaker = false;
   bool serial_pipeline = false;
   std::shared_ptr<BuildProgressSink> progress_sink;
+  // --distributed: makes the paired workers for one media item's build
+  // (called once per item, since each item is its own build). Empty builds
+  // every item on this Mac alone.
+  std::function<std::shared_ptr<DistributedExecution>()> make_distributed;
 };
 
 enum class BatchFileStatus {

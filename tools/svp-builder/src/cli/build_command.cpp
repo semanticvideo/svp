@@ -5,9 +5,7 @@
 
 #include "svp/builder/build_pipeline.hpp"
 
-#if defined(__APPLE__)
-#include "workers/distributed_fleet.hpp"
-#endif
+#include "distributed_cli.hpp"
 
 #include <chrono>
 #include <memory>
@@ -37,17 +35,11 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
   const auto started_at = std::chrono::steady_clock::now();
   // --distributed: the paired workers this build may use, for every output
   // format (the .svp, SVPI, and embedded SVPI builds run the same pipeline).
-  std::shared_ptr<svp::builder::DistributedExecution> distributed;
-  if (options.distributed || options.require_workers > 0) {
-#if defined(__APPLE__)
-    distributed = std::make_shared<svp::builder::workers::PairedWorkerFleet>(
-        svp::builder::workers::DistributedFleetOptions{
-            .require_workers = options.require_workers, .quiet = options.quiet});
-#else
-    std::cerr << "svp-builder build: --distributed needs macOS (paired workers)\n";
-    return 2;
-#endif
-  }
+  const std::optional<std::shared_ptr<svp::builder::DistributedExecution>> fleet =
+      make_cli_distributed_execution(options.distributed, options.require_workers,
+                                     options.quiet, "build");
+  if (!fleet) return 2;
+  const std::shared_ptr<svp::builder::DistributedExecution>& distributed = *fleet;
   if (options.output_format != "svp") {
     const int exit_code =
         telemetry.finish(run_selected_output_build(options, progress_sink, distributed));

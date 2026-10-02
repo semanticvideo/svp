@@ -120,6 +120,7 @@ add_executable(svp-builder
   src/cli/probe_command.cpp
   src/cli/build_command.cpp
   src/cli/build_selected_output.cpp
+  src/cli/distributed_cli.cpp
   src/cli/diarize_command.cpp
   src/cli/diarize_replay_command.cpp
   src/cli/interlace_commands.cpp
@@ -450,6 +451,16 @@ if(BUILD_TESTING)
                      ${CMAKE_CURRENT_BINARY_DIR}/no-such-runtime)
     set_tests_properties(svp-builder-worker-verify-missing-runtime PROPERTIES WILL_FAIL TRUE)
   endif()
+  # Every command that builds a package offers --distributed and
+  # --require-workers (distributed_cli.hpp).
+  foreach(svp_distributed_command IN ITEMS "build" "interlace;create" "interlace;create-batch")
+    string(REPLACE ";" "-" svp_distributed_test_name "${svp_distributed_command}")
+    add_test(NAME svp-builder-${svp_distributed_test_name}-offers-distributed
+             COMMAND svp-builder ${svp_distributed_command} --help)
+    set_tests_properties(svp-builder-${svp_distributed_test_name}-offers-distributed PROPERTIES
+      PASS_REGULAR_EXPRESSION "--distributed.*--require-workers"
+      ENVIRONMENT "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache")
+  endforeach()
   set_tests_properties(
     svp-builder-help-without-model-cache
     svp-builder-version-without-model-cache

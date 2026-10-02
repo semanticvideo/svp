@@ -1,3 +1,4 @@
+#include "distributed_cli.hpp"
 #include "cli_context.hpp"
 #include "cli_completion.hpp"
 #include "cli_run_telemetry.hpp"
@@ -39,6 +40,11 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
     ic_opts.serial_pipeline = opts.ic_serial_pipeline;
     ic_opts.journal_mode = journal_mode_from_flags(opts.ic_resume, opts.ic_fresh);
     ic_opts.progress_sink = sink;
+    const std::optional<std::shared_ptr<svp::builder::DistributedExecution>> fleet =
+        make_cli_distributed_execution(opts.ic_distributed, opts.ic_require_workers,
+                                       opts.ic_quiet, "interlace create");
+    if (!fleet) return 2;
+    ic_opts.distributed = *fleet;
 
     const auto started_at = std::chrono::steady_clock::now();
     auto result = svp::builder::interlace_create(ic_opts);
@@ -219,6 +225,19 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
     cb_opts.force_single_speaker = opts.cb_force_single;
     cb_opts.serial_pipeline = opts.cb_serial_pipeline;
     cb_opts.progress_sink = resolve_cli_progress_sink(opts.cb_progress_mode, opts.cb_quiet, opts.cb_create_batch_sub);
+    if (!make_cli_distributed_execution(opts.cb_distributed, opts.cb_require_workers,
+                                        opts.cb_quiet, "interlace create-batch")) {
+      return 2;
+    }
+    if (opts.cb_distributed || opts.cb_require_workers > 0) {
+      cb_opts.make_distributed = [distributed = opts.cb_distributed,
+                                  require_workers = opts.cb_require_workers,
+                                  quiet = opts.cb_quiet]() {
+        return make_cli_distributed_execution(distributed, require_workers, quiet,
+                                              "interlace create-batch")
+            .value_or(nullptr);
+      };
+    }
 
     auto result = svp::builder::interlace_create_batch(cb_opts);
 

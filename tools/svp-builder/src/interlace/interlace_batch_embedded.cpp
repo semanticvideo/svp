@@ -96,6 +96,7 @@ bool create_embedded_batch_artifact(
   create.force_single_speaker = options.force_single_speaker;
   create.serial_pipeline = options.serial_pipeline;
   create.progress_sink = progress_sink;
+  if (options.make_distributed) create.distributed = options.make_distributed();
 
   EmbeddedTransportBuildOptions build;
   build.svpi_options = std::move(create);
