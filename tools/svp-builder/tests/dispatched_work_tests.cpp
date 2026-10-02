@@ -350,8 +350,12 @@ void test_planned_vision_work() {
           "models missing from the cache are not dispatched");
   std::filesystem::remove_all(empty);
 
+  // Needs a real model cache; CI points SVP_MODEL_CACHE_ROOT at a directory
+  // with no model assets.
   const char* cache = std::getenv("SVP_MODEL_CACHE_ROOT");
-  if (cache == nullptr || *cache == '\0') {
+  std::error_code error;
+  if (cache == nullptr || *cache == '\0' || !std::filesystem::is_directory(cache, error) ||
+      std::filesystem::is_empty(cache, error)) {
     return;
   }
   const svp::builder::DistributedVisionWork all = engine::plan_distributed_vision_work(cache, plan);
