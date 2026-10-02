@@ -81,6 +81,15 @@ DiarizationWindowOutcome map_diarization_window(
       static_cast<float>(win.accepted_end) / static_cast<float>(kDiarizationSampleRate);
 
   const void* sd = api.create(&config);
+  // Destroys the pipeline on every exit, including an exception from
+  // on_piece (a cancelled task) or from an embedding.
+  struct PipelineOwner {
+    const SherpaDiarizationApi& api;
+    const void* pipeline;
+    ~PipelineOwner() {
+      if (pipeline) api.destroy(pipeline);
+    }
+  } pipeline_owner{api, sd};
   if (!sd) {
     outcome.failure = DiarizationWindowFailure{
         "sherpa-onnx failed to create diarization pipeline "
@@ -93,7 +102,6 @@ DiarizationWindowOutcome map_diarization_window(
   try {
     window_samples = read_pcm_s16le_mono_wav_range(wav_info, win.process_start, win.process_end);
   } catch (const std::exception& e) {
-    api.destroy(sd);
     outcome.failure =
         DiarizationWindowFailure{std::string("failed to read WAV window: ") + e.what()};
     return outcome;
@@ -101,7 +109,6 @@ DiarizationWindowOutcome map_diarization_window(
   DiarizationWindowMap map;
   map.window_index = wi;
   if (window_samples.empty()) {
-    api.destroy(sd);
     outcome.map = std::move(map);
     return outcome;
   }
@@ -116,8 +123,7 @@ DiarizationWindowOutcome map_diarization_window(
 
     const void* diar_result = api.process(sd, window_samples.data() + sample_offset, chunk_samples);
     if (!diar_result) {
-      api.destroy(sd);
-      outcome.failure = DiarizationWindowFailure{
+        outcome.failure = DiarizationWindowFailure{
           "sherpa-onnx diarization process returned null at window " + std::to_string(wi)};
       return outcome;
     }
@@ -174,7 +180,6 @@ DiarizationWindowOutcome map_diarization_window(
       on_piece();
     }
   }
-  api.destroy(sd);
   outcome.map = std::move(map);
   return outcome;
 }

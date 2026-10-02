@@ -496,7 +496,20 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
       if (!loaded) {
         return std::nullopt;
       }
-      setup.sherpa_library = *loaded;
+      // The workers were calibrated, and run windows, against the library
+      // named before it loaded. If this process loaded another one (the
+      // first candidate failed to load), every window would carry an
+      // identity the workers' calibration never saw: map them here instead,
+      // as a build without workers does.
+      if (*loaded != audio.setup.sherpa_library) {
+        if (!quiet) {
+          std::cerr << "svp-builder: warning: " << type
+                    << " is not dispatched: this Mac loaded sherpa-onnx " << *loaded
+                    << ", not the library " << audio.setup.sherpa_library
+                    << " the workers were calibrated for\n";
+        }
+        return std::nullopt;
+      }
       try {
         const auto type_start = std::chrono::steady_clock::now();
         const svp::exec::CancellationToken never_cancelled;
