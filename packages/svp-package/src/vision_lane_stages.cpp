@@ -1,22 +1,17 @@
 #include "svp/package/vision_lane_stages.hpp"
 
 #include "svp/media/media_ingest_plan.hpp"
-#include "svp/package/entity_writer.hpp"
-#include "svp/package/visual_entity_artifact_writer.hpp"
 #include "svp/vision/depth_generation.hpp"
 #include "svp/vision/dispatched_work.hpp"
 #include "svp/vision/embedding_generation.hpp"
 #include "svp/vision/frame_catalog.hpp"
 #include "svp/vision/ocr_frame_batch_reduction.hpp"
 #include "svp/vision/ocr_generation.hpp"
-#include "svp/vision/visual_entity_pipeline.hpp"
-#include "svp/vision/visual_entity_tracker.hpp"
 #include "vision_lane_files.hpp"
 #include "vision_lane_placeholders.hpp"
 
 #include <cstdint>
 #include <memory>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -321,82 +316,6 @@ VisionTextEmbeddingStageResult run_vision_text_embedding_stage(
   result.processor = embeddings.processor_provenance.is_object()
                          ? embeddings.processor_provenance
                          : detail::make_embedding_placeholder_processor();
-  return result;
-}
-
-VisionTrackingStageResult run_vision_tracking_stage(
-    const VisionLaneSettings& settings,
-    svp::vision::FrameCatalog* frame_catalog,
-    const SpatialProgressCallback& on_progress) {
-  VisionTrackingStageResult result;
-  // Visual tracking owns its temporal coverage independently from the
-  // five-frame foundation input shared by depth and embedding generation. It
-  // processes bounded overlapping decode windows for dense temporal coverage
-  // and cross-window identity handoff.
-  if (settings.model_runtime_available && settings.media_plan != nullptr &&
-      !settings.ffmpeg_path.empty()) {
-    std::vector<std::pair<std::string, std::int64_t>> shot_boundaries;
-    for (const auto& shot : detail::read_jsonl_records(
-             settings.staging_dir / "timeline" / "shots.jsonl")) {
-      if (shot.contains("id") && shot.contains("start_us")) {
-        shot_boundaries.emplace_back(shot["id"].get<std::string>(),
-                                     shot["start_us"].get<std::int64_t>());
-      }
-    }
-
-    svp::vision::VisualEntityPipelineOptions entity_options;
-    entity_options.execution_provider = "cpu";
-    entity_options.detector.threads = settings.thread_plan.visual_entity_detection;
-    entity_options.depth_threads = settings.thread_plan.depth;
-    entity_options.embedding_threads = settings.thread_plan.visual_entity_embedding;
-    const auto parsed_quality =
-        svp::vision::parse_visual_tracking_quality(settings.visual_tracking_quality);
-    if (!parsed_quality) {
-      throw std::invalid_argument(
-          "visual tracking quality must be off, low, medium, or high");
-    }
-    entity_options.quality = *parsed_quality;
-    if (svp::vision::visual_tracking_enabled(entity_options.quality)) {
-      VisualEntityArtifactWriter artifact_writer(settings.staging_dir);
-      entity_options.assembly.handoff_retention_us =
-          svp::vision::visual_tracking_quality_policy(entity_options.quality)
-              .window_overlap_us;
-      entity_options.assembly.artifact_sink =
-          [&artifact_writer](const std::vector<svp::vision::TrackedRegion>& regions,
-                             const std::vector<svp::vision::MaskWriteEntry>& masks) {
-            artifact_writer.append(regions, masks);
-          };
-      if (on_progress) {
-        entity_options.on_progress = [&on_progress](std::size_t current,
-                                                    std::size_t total) {
-          on_progress("visual_tracking", current, total, "");
-        };
-      }
-
-      auto entity_result = svp::vision::run_visual_entity_pipeline(
-          *settings.media_plan, settings.ffmpeg_path, settings.model_cache_root,
-          shot_boundaries, frame_catalog, entity_options);
-
-      std::set<std::string> retained_entity_ids;
-      for (const auto& entity : entity_result.assembled.tracker_result.entities) {
-        retained_entity_ids.insert(entity.entity_id);
-      }
-      const auto streamed_artifacts = artifact_writer.finish(retained_entity_ids);
-
-      const auto visual_entity_summary = write_visual_entity_artifacts(
-          settings.staging_dir, entity_result.assembled.tracker_result, nullptr,
-          &streamed_artifacts);
-      result.masks_index_written = visual_entity_summary.masks_written;
-      result.masks_blocks_written = visual_entity_summary.masks_written;
-      result.processor = visual_entity_summary.processor_record;
-    }
-  }
-
-  if (!result.masks_index_written) {
-    detail::write_mask_placeholder_files(settings.staging_dir);
-    result.masks_index_written = true;
-    result.masks_blocks_written = true;
-  }
   return result;
 }
 

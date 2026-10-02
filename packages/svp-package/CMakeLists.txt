@@ -33,6 +33,7 @@ add_library(svp-package
   src/vision_lane_files.cpp
   src/vision_lane_placeholders.cpp
   src/vision_lane_stages.cpp
+  src/vision_tracking_stage.cpp
   src/vision_lane_stage_json.cpp
   src/timeline_writer.cpp
   src/validation_report_storage.cpp
@@ -142,6 +143,18 @@ if(BUILD_TESTING)
   )
 
   target_link_libraries(svp-embedded-svpi-tests PRIVATE svp::package)
+
+  add_executable(svp-vision-tracking-reduce-tests
+    tests/vision_tracking_reduce_tests.cpp
+  )
+  target_compile_features(svp-vision-tracking-reduce-tests PRIVATE cxx_std_20)
+  target_link_libraries(svp-vision-tracking-reduce-tests
+    PRIVATE
+      svp::package
+      svp::media
+      svp::vision
+  )
+  add_test(NAME svp-vision-tracking-reduce-tests COMMAND svp-vision-tracking-reduce-tests)
 
   add_test(NAME svp-package-tests COMMAND svp-package-tests)
   add_test(NAME svp-svpi-tests COMMAND svp-svpi-tests)
