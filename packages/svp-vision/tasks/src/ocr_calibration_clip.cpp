@@ -8,6 +8,7 @@
 #include <numeric>
 #include <stdexcept>
 #include <string>
+#include <fcntl.h>
 #include <sys/wait.h>
 
 namespace svp::vision::tasks {
@@ -99,6 +100,11 @@ OcrCalibrationClip write_ocr_calibration_clip(const std::filesystem::path& ffmpe
   if (pipe == nullptr) {
     throw std::runtime_error("cannot run " + ffmpeg.string() + " for the calibration clip");
   }
+#ifdef F_SETNOSIGPIPE
+  // If ffmpeg exits early, a write fails (EPIPE) and is reported below
+  // instead of SIGPIPE ending the coordinator.
+  ::fcntl(::fileno(pipe), F_SETNOSIGPIPE, 1);
+#endif
   std::int64_t timestamp = 0;
   std::uint32_t seed = 1;
   for (const int lines : kOcrCalibrationFrameLines) {
