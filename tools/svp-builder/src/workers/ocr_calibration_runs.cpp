@@ -321,17 +321,26 @@ bool calibrate_for_workers_command(const svp::exec::worker::CoordinatorPairingRe
         record.key, supplies, ack, setup, clip, store, never_cancelled);
     std::cout << "worker: " << (worker.measured ? "calibrated: " : "calibration current: ")
               << describe_calibration(worker.ocr) << "\n";
+    // The dispatched types are measured best effort: the command's outcome
+    // stays OCR's, and a distributed build measures any type missing here.
     for (const std::string& type : calibration::dispatched_task_types(dispatched.vision)) {
-      const CapacityOutcome local_capacity = ensure_coordinator_capacity(
-          type, dispatched, svp::exec::blake3_prefixed(runtime.runtime_id), clip, store,
-          model_cache, setup.ffmpeg_path, never_cancelled);
-      std::cout << "this Mac: " << (local_capacity.measured ? "calibrated: " : "calibration current: ")
-                << describe_capacity(type, local_capacity.capacity) << "\n";
-      const CapacityOutcome worker_capacity =
-          ensure_worker_capacity(record.key, supplies, ack, type, dispatched, clip,
-                                 setup.ffmpeg_path, store, never_cancelled);
-      std::cout << "worker: " << (worker_capacity.measured ? "calibrated: " : "calibration current: ")
-                << describe_capacity(type, worker_capacity.capacity) << "\n";
+      try {
+        const CapacityOutcome local_capacity = ensure_coordinator_capacity(
+            type, dispatched, svp::exec::blake3_prefixed(runtime.runtime_id), clip, store,
+            model_cache, setup.ffmpeg_path, never_cancelled);
+        std::cout << "this Mac: "
+                  << (local_capacity.measured ? "calibrated: " : "calibration current: ")
+                  << describe_capacity(type, local_capacity.capacity) << "\n";
+        const CapacityOutcome worker_capacity =
+            ensure_worker_capacity(record.key, supplies, ack, type, dispatched, clip,
+                                   setup.ffmpeg_path, store, never_cancelled);
+        std::cout << "worker: "
+                  << (worker_capacity.measured ? "calibrated: " : "calibration current: ")
+                  << describe_capacity(type, worker_capacity.capacity) << "\n";
+      } catch (const std::exception& error) {
+        std::cerr << "svp-builder: warning: " << type << " capacity calibration failed: "
+                  << error.what() << "\n  a --distributed build measures it again\n";
+      }
     }
     return true;
   } catch (const std::exception& error) {

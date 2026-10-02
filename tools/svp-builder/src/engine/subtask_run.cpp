@@ -33,7 +33,7 @@ svp::exec::SchedulerPolicy subtask_policy(const std::string& task_type) {
 
 class OrderedSink final : public svp::exec::ResultCommitSink {
  public:
-  OrderedSink(const SubtaskRunRequest& request) : request_(request) {
+  explicit OrderedSink(const SubtaskRunRequest& request) : request_(request) {
     for (std::size_t index = 0; index < request.nodes.size(); ++index) {
       index_.emplace(request.nodes[index].spec.task_id, index);
     }
