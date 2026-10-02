@@ -12,6 +12,7 @@
 
 #include "svp/builder/build_pipeline.hpp"
 #include "svp/media/media_ingest_plan.hpp"
+#include "svp/package/vision_lane_stages.hpp"
 #include "svp/models/thread_plan.hpp"
 #include "svp/vision/frame_catalog.hpp"
 #include "svp/vision/tasks/pp_ocr_session_pool.hpp"
@@ -62,6 +63,9 @@ struct StageTaskEnvironment {
   // PP-OCR sessions shared by this process's frame-batch tasks and the OCR
   // reducer's evidence-crop re-read.
   std::shared_ptr<svp::vision::tasks::PpOcrSessionPool> pp_ocr_sessions;
+  // --distributed only: where the vision stages send their per-item work
+  // (vision_work_dispatch.hpp). Null in every other build.
+  const svp::package::VisionWorkDispatch* vision_dispatch = nullptr;
 };
 
 // Named state blobs a task returns (stage_task_products.hpp).

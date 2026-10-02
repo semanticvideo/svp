@@ -11,6 +11,8 @@
 #include "engine/build_inputs_digest.hpp"
 #include "engine/build_journal_session.hpp"
 #include "engine/committed_stage_results.hpp"
+#include "engine/build_vision_dispatch.hpp"
+#include "engine/distributed_vision_work.hpp"
 #include "engine/ocr_batch_observer.hpp"
 #include "engine/ocr_execution_policy.hpp"
 #include "engine/ocr_frame_batch_plan.hpp"
@@ -146,6 +148,11 @@ struct PlannedOcrExecution {
   std::optional<engine::OcrFrameBatchPlan> batches;
   std::size_t coordinator_slots = engine::kLocalOnlyOcrBatchSlots;
   std::vector<svp::exec::Executor*> workers;
+  // --distributed only: the vision stage work this build dispatches (M4) and
+  // the models its workers were given.
+  std::map<std::string, DispatchedTypeCapacity, std::less<>> dispatched_capacity;
+  std::shared_ptr<DispatchedWorkerExecutors> dispatched_workers;
+  std::vector<svp::exec::TaskModelRef> dispatched_model_refs;
 };
 
 PlannedOcrExecution plan_ocr_execution(
@@ -172,6 +179,8 @@ PlannedOcrExecution plan_ocr_execution(
   }
   svp::vision::OcrBatchPolicy batch_policy;
   if (options.distributed) {
+    const DistributedVisionWork vision =
+        engine::plan_distributed_vision_work(options.model_cache_dir, thread_plan);
     const DistributedFleet fleet = options.distributed->prepare(DistributedOcrWork{
         .build_session_id = build_session_id,
         .source = work->source,
@@ -183,11 +192,21 @@ PlannedOcrExecution plan_ocr_execution(
         .ffmpeg_build = work->ffmpeg_build,
         .thread_plan = thread_plan,
         .cancellation = &cancellation,
+        .vision = vision,
     });
     execution.workers = fleet.workers;
     execution.coordinator_slots = std::max<std::size_t>(1, fleet.coordinator_ocr_slots);
     if (fleet.seconds_per_sample) {
       batch_policy.estimated_seconds_per_sample = *fleet.seconds_per_sample;
+    }
+    execution.dispatched_capacity = fleet.dispatched_capacity;
+    execution.dispatched_workers = fleet.dispatched_workers;
+    execution.dispatched_model_refs = work->model_refs;
+    for (const std::optional<DistributedOnnxWork>* onnx :
+         {&vision.text_embeddings, &vision.keyframe_embeddings, &vision.depth}) {
+      if (*onnx) {
+        execution.dispatched_model_refs.push_back((*onnx)->model_ref);
+      }
     }
   }
   const std::vector<std::string> depends_on = engine::ocr_stage_dependencies(tasks);
@@ -388,6 +407,31 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     report_resume(started, graph.size(), journal_session.journal_root(),
                   effective_options.quiet);
 
+    svp::exec::TaskTypeRegistry registry;
+    engine::StageOutputAccess outputs;
+    engine::StageExitRecord stage_exits;
+    const auto pp_ocr_sessions = std::make_shared<svp::vision::tasks::PpOcrSessionPool>();
+    // --distributed: the vision stages hand their per-item work to tasks on
+    // this Mac's measured slots and the workers (M4, vision_dispatch_setup
+    // .hpp). Other builds have no dispatch, and their stages run as always.
+    std::unique_ptr<engine::BuildVisionDispatch> vision_dispatch;
+    if (ocr_batches != nullptr && !ocr_execution.dispatched_capacity.empty()) {
+      vision_dispatch = engine::make_build_vision_dispatch({
+          .outputs = outputs,
+          .registry = registry,
+          .model_cache_root = effective_options.model_cache_dir,
+          .ffmpeg_path = effective_options.ffmpeg_path,
+          .pp_ocr_sessions = pp_ocr_sessions,
+          .setup = {.build_session_id = build_session_id,
+                    .source = ocr_batches->work.source,
+                    .ffmpeg_build = ocr_batches->work.ffmpeg_build,
+                    .model_refs = ocr_execution.dispatched_model_refs,
+                    .capacity = ocr_execution.dispatched_capacity,
+                    .workers = ocr_execution.dispatched_workers,
+                    .cancellation = &cancellation,
+                    .report = !effective_options.quiet,
+                    .release_idle_models = {}}});
+    }
     const engine::StageTaskEnvironment environment{
         .options = effective_options,
         .stage_plan = stage_plan,
@@ -400,10 +444,8 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         .progress_sink = *sink,
         .results = results,
         .ocr_batches = ocr_batches,
-        .pp_ocr_sessions = std::make_shared<svp::vision::tasks::PpOcrSessionPool>()};
-    svp::exec::TaskTypeRegistry registry;
-    engine::StageOutputAccess outputs;
-    engine::StageExitRecord stage_exits;
+        .pp_ocr_sessions = pp_ocr_sessions,
+        .vision_dispatch = vision_dispatch ? &vision_dispatch->dispatch : nullptr};
     engine::register_stage_task_types(registry, tasks, environment, outputs, stage_exits);
     if (ocr_batches != nullptr) {
       outputs.register_input(ocr_batches->work.source, ocr_batches->work.source_path);

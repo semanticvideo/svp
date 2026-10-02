@@ -16,9 +16,13 @@ namespace svp::builder::engine {
 namespace {
 
 svp::package::VisionLaneSettings vision_settings(const StageTaskEnvironment& environment) {
-  return make_vision_lane_settings(environment.options, environment.plan, environment.plan_json,
-                                   environment.staging_dir, environment.thread_plan,
-                                   environment.model_runtime_available);
+  svp::package::VisionLaneSettings settings = make_vision_lane_settings(
+      environment.options, environment.plan, environment.plan_json, environment.staging_dir,
+      environment.thread_plan, environment.model_runtime_available);
+  if (environment.vision_dispatch != nullptr) {
+    settings.dispatch = *environment.vision_dispatch;
+  }
+  return settings;
 }
 
 svp::vision::DecodedCanonicalFrames committed_canonical_frames(

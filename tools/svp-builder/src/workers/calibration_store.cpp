@@ -6,6 +6,7 @@
 
 #include <fstream>
 #include <sstream>
+#include <vector>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -37,6 +38,47 @@ CalibrationConditions conditions_from(const nlohmann::json& value) {
       .physical_memory_bytes = value.at("physical_memory_bytes").get<std::uint64_t>(),
       .parameters_blake3 = value.at("parameters_blake3").get<std::string>(),
       .model_bundles = value.at("model_bundles").get<std::string>()};
+}
+
+std::filesystem::path capacity_file(const std::filesystem::path& directory,
+                                    const std::string& name, std::string_view task_type) {
+  return directory / (name + "." + std::string(task_type) + ".json");
+}
+
+std::optional<nlohmann::json> read_json(const std::filesystem::path& path) {
+  std::ifstream file(path, std::ios::binary);
+  if (!file) {
+    return std::nullopt;
+  }
+  std::ostringstream text;
+  text << file.rdbuf();
+  nlohmann::json value = nlohmann::json::parse(text.str(), nullptr, false);
+  if (value.is_discarded()) {
+    return std::nullopt;
+  }
+  return value;
+}
+
+void write_json_atomically(const std::filesystem::path& directory,
+                           const std::filesystem::path& target, const nlohmann::json& value) {
+  std::error_code error;
+  std::filesystem::create_directories(directory, error);
+  ::chmod(directory.c_str(), 0700);
+  const std::filesystem::path temporary =
+      target.parent_path() / (target.filename().string() + ".tmp-" + std::to_string(::getpid()));
+  {
+    std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+    file << value.dump(2) << "\n";
+    if (!file) {
+      throw WorkerError(WorkerErrorCode::io, "cannot write " + temporary.string());
+    }
+  }
+  ::chmod(temporary.c_str(), 0600);
+  std::filesystem::rename(temporary, target, error);
+  if (error) {
+    std::filesystem::remove(temporary, error);
+    throw WorkerError(WorkerErrorCode::io, "cannot write " + target.string());
+  }
 }
 
 }  // namespace
@@ -95,9 +137,51 @@ void CalibrationStore::write(const std::string& name, const CalibrationRecord& r
   }
 }
 
+std::optional<CapacityRecord> CalibrationStore::read_capacity(const std::string& name,
+                                                              std::string_view task_type) const {
+  try {
+    const std::optional<nlohmann::json> value =
+        read_json(capacity_file(directory_, name, task_type));
+    if (!value || value->at("schema").get<std::string>() != kCapacityRecordSchema ||
+        value->at("task_type").get<std::string>() != task_type) {
+      return std::nullopt;
+    }
+    return CapacityRecord{
+        .conditions = conditions_from(value->at("conditions")),
+        .capacity = calibration::capacity_calibration_from_json(value->at("capacity")),
+        .measured_at = value->at("measured_at").get<std::string>()};
+  } catch (const std::exception&) {
+    return std::nullopt;
+  }
+}
+
+void CalibrationStore::write_capacity(const std::string& name, std::string_view task_type,
+                                      const CapacityRecord& record) const {
+  write_json_atomically(
+      directory_, capacity_file(directory_, name, task_type),
+      nlohmann::json{{"capacity", calibration::capacity_calibration_to_json(record.capacity)},
+                     {"conditions", conditions_json(record.conditions)},
+                     {"measured_at", record.measured_at},
+                     {"schema", std::string(kCapacityRecordSchema)},
+                     {"task_type", std::string(task_type)}});
+}
+
 void CalibrationStore::remove(const std::string& name) const {
   std::error_code error;
   std::filesystem::remove(directory_ / (name + ".json"), error);
+  // Every task type's record: <name>.<task type>.json.
+  const std::string prefix = name + ".";
+  std::vector<std::filesystem::path> records;
+  for (std::filesystem::directory_iterator entry(directory_, error), end;
+       !error && entry != end; entry.increment(error)) {
+    const std::string file = entry->path().filename().string();
+    if (file.starts_with(prefix) && file.ends_with(".json")) {
+      records.push_back(entry->path());
+    }
+  }
+  for (const std::filesystem::path& record : records) {
+    std::filesystem::remove(record, error);
+  }
   // The directory goes once its last record does.
   if (std::filesystem::is_empty(directory_, error) && !error) {
     std::filesystem::remove(directory_, error);

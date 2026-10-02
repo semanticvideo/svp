@@ -1,6 +1,7 @@
 #include "distributed_fleet.hpp"
 
 #include "coordinator_context.hpp"
+#include "dispatched_calibration_runs.hpp"
 #include "worker_reach.hpp"
 
 #include "calibration/ocr_capacity_calibration.hpp"
@@ -15,6 +16,7 @@
 #include <algorithm>
 #include <chrono>
 #include <future>
+#include <map>
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -30,7 +32,56 @@ struct WorkerOutcome {
   bool ready = false;
   std::string problem;
   std::size_t slots = 0;
+  // Measured slots per dispatched vision task type (types it could not
+  // measure are missing: it runs none of them).
+  std::map<std::string, std::size_t, std::less<>> dispatched_slots;
   std::string detail;
+};
+
+// The dispatched vision work's calibration setup: the OCR work's PP-OCR, the
+// vision models, and the decoder.
+calibration::DispatchedCalibrationSetup dispatched_setup(const DistributedOcrWork& work) {
+  return calibration::DispatchedCalibrationSetup{.pp_ocr = work.pp_ocr,
+                                                 .pp_ocr_model_refs = work.model_refs,
+                                                 .vision = work.vision,
+                                                 .ffmpeg_build = work.ffmpeg_build};
+}
+
+// Fresh executors per dispatched stage run (DispatchedWorkerExecutors): one
+// RemoteExecutor per worker that measured the type, with its slots for it.
+// Each run opens its own sessions, so a stage's tasks never wait behind
+// another run's leases, and the worker admits each lease by memory.
+class FleetDispatchedExecutors final : public DispatchedWorkerExecutors {
+ public:
+  struct Worker {
+    svp::exec::remote::PairingKey key;
+    std::map<std::string, std::size_t, std::less<>> slots;
+  };
+
+  FleetDispatchedExecutors(std::vector<Worker> workers,
+                           std::shared_ptr<const WorkerSupplies> supplies)
+      : workers_(std::move(workers)), supplies_(std::move(supplies)) {}
+
+  std::vector<std::unique_ptr<svp::exec::Executor>> make(std::string_view task_type) override {
+    std::vector<std::unique_ptr<svp::exec::Executor>> executors;
+    for (const Worker& worker : workers_) {
+      const auto slots = worker.slots.find(task_type);
+      if (slots == worker.slots.end() || slots->second == 0) {
+        continue;
+      }
+      executors.push_back(std::make_unique<svp::exec::remote::RemoteExecutor>(
+          svp::exec::remote::RemoteExecutorOptions{
+              .executor_id = "worker." + worker.key.pairing_id,
+              .connector = {.pairing = worker.key},
+              .slots = slots->second,
+              .session_preamble = make_supplying_preamble(supplies_)}));
+    }
+    return executors;
+  }
+
+ private:
+  std::vector<Worker> workers_;
+  std::shared_ptr<const WorkerSupplies> supplies_;
 };
 
 std::string seconds_since(std::chrono::steady_clock::time_point start) {
@@ -67,8 +118,9 @@ std::unique_ptr<WorkerConnection> connect_within_window(
 }
 
 WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSupplies& supplies,
-                             const OcrCalibrationSetup& setup, CalibrationClipFile& clip,
-                             const CalibrationStore& store,
+                             const OcrCalibrationSetup& setup,
+                             const calibration::DispatchedCalibrationSetup& dispatched,
+                             CalibrationClipFile& clip, const CalibrationStore& store,
                              const svp::exec::CancellationToken& cancellation) {
   WorkerOutcome outcome{.record = std::move(record)};
   const auto start = std::chrono::steady_clock::now();
@@ -99,7 +151,21 @@ WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSuppli
            << (stats.runtime_pushed ? "runtime, " : "") << stats.model_bundles_pushed.size()
            << " model bundle(s), " << stats.blobs_sent << " blob(s)), "
            << (calibration.measured ? "calibrated now: " : "calibration: ")
-           << describe_calibration(calibration.ocr) << ", ready in " << seconds_since(start);
+           << describe_calibration(calibration.ocr);
+    // A type this worker cannot measure is left to the other executors.
+    for (const std::string& type : calibration::dispatched_task_types(dispatched.vision)) {
+      try {
+        const CapacityOutcome capacity =
+            ensure_worker_capacity(outcome.record.key, supplies, ack, type, dispatched, clip,
+                                   setup.ffmpeg_path, store, cancellation);
+        outcome.dispatched_slots[type] = capacity.capacity.slots;
+        detail << "; " << (capacity.measured ? "calibrated now: " : "")
+               << describe_capacity(type, capacity.capacity);
+      } catch (const std::exception& error) {
+        detail << "; " << type << " not used: " << error.what();
+      }
+    }
+    detail << ", ready in " << seconds_since(start);
     outcome.detail = detail.str();
   } catch (const std::exception& error) {
     outcome.problem = error.what();
@@ -144,6 +210,14 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
     for (const svp::exec::TaskModelRef& ref : work.model_refs) {
       model_ids.push_back(ref.model_id);
     }
+    // The dispatched vision work's models (M4).
+    for (const std::optional<DistributedOnnxWork>* onnx :
+         {&work.vision.text_embeddings, &work.vision.keyframe_embeddings, &work.vision.depth}) {
+      if (*onnx && std::find(model_ids.begin(), model_ids.end(), (*onnx)->model_ref.model_id) ==
+                       model_ids.end()) {
+        model_ids.push_back((*onnx)->model_ref.model_id);
+      }
+    }
     supplies->models = prepare_model_bundles(work.model_cache_root, model_ids);
     supplies->blobs = {BlobSource{.ref = BlobRef{.blake3 = work.source.blake3,
                                                  .bytes = work.source.bytes},
@@ -164,6 +238,7 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
                                   .model_refs = work.model_refs,
                                   .ffmpeg_path = work.ffmpeg_path,
                                   .ffmpeg_build = work.ffmpeg_build};
+  const calibration::DispatchedCalibrationSetup dispatched = dispatched_setup(work);
   CalibrationClipFile clip(work.ffmpeg_path);
   const CalibrationStore store;
   const std::string runtime_id = svp::exec::blake3_prefixed(supplies->runtime.runtime_id);
@@ -183,7 +258,8 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
   std::vector<std::future<WorkerOutcome>> pending;
   for (CoordinatorPairingRecord& record : records) {
     pending.push_back(std::async(std::launch::async, [&, record = std::move(record)]() mutable {
-      return prepare_worker(std::move(record), *supplies, setup, clip, store, cancellation);
+      return prepare_worker(std::move(record), *supplies, setup, dispatched, clip, store,
+                            cancellation);
     }));
   }
   const auto coordinator_start = std::chrono::steady_clock::now();
@@ -210,6 +286,32 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
     // measurements runs (kLocalOnlyOcrBatchSlots).
     fleet.coordinator_ocr_slots = 1;
     log(std::string("warning: could not calibrate this Mac's OCR capacity: ") + error.what());
+  }
+  // The dispatched vision types this Mac measured; a type it cannot measure
+  // is not dispatched, and its stage does its work itself as a local build
+  // does.
+  for (const std::string& type : calibration::dispatched_task_types(work.vision)) {
+    try {
+      const auto type_start = std::chrono::steady_clock::now();
+      const CapacityOutcome capacity =
+          ensure_coordinator_capacity(type, dispatched, runtime_id, clip, store,
+                                      work.model_cache_root, work.ffmpeg_path, cancellation);
+      // As for OCR: never more slots than the memory free right now admits.
+      const svp::exec::worker::HostFacts host = svp::exec::worker::detect_host_facts();
+      const std::size_t admitted_now = calibration::capacity_max_slots(
+          svp::exec::worker::sample_memory().available_bytes,
+          svp::exec::worker::AdmissionPolicy{}.reserve_bytes(host.physical_memory_bytes),
+          host.logical_cpus, calibration::dispatched_task_peak_rss_mb(type));
+      fleet.dispatched_capacity[type] =
+          DispatchedTypeCapacity{.coordinator_slots = std::min(capacity.capacity.slots, admitted_now),
+                                 .seconds_per_item = capacity.capacity.seconds_per_item};
+      log("this Mac: " + std::string(capacity.measured ? "calibrated now: " : "calibration: ") +
+          describe_capacity(type, capacity.capacity) +
+          (capacity.measured ? ", in " + seconds_since(type_start) : std::string()));
+    } catch (const std::exception& error) {
+      log("warning: " + type + " is not dispatched: could not calibrate this Mac: " +
+          error.what());
+    }
   }
 
   std::vector<WorkerOutcome> outcomes;
@@ -242,9 +344,14 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
     log("warning: no worker is ready; OCR runs on this Mac only");
   }
 
+  std::vector<FleetDispatchedExecutors::Worker> dispatched_workers;
   for (const WorkerOutcome& outcome : outcomes) {
     if (!outcome.ready) {
       continue;
+    }
+    if (!outcome.dispatched_slots.empty()) {
+      dispatched_workers.push_back(
+          {.key = outcome.record.key, .slots = outcome.dispatched_slots});
     }
     auto executor = std::make_unique<svp::exec::remote::RemoteExecutor>(
         svp::exec::remote::RemoteExecutorOptions{
@@ -258,6 +365,10 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
     fleet.workers.push_back(restricted.get());
     remotes_.push_back(std::move(executor));
     restricted_.push_back(std::move(restricted));
+  }
+  if (!dispatched_workers.empty()) {
+    fleet.dispatched_workers =
+        std::make_shared<FleetDispatchedExecutors>(std::move(dispatched_workers), supplies);
   }
   return fleet;
 }

@@ -1,6 +1,8 @@
 #include "ocr_calibration_runs.hpp"
 
 #include "coordinator_context.hpp"
+#include "dispatched_calibration_runs.hpp"
+#include "engine/distributed_vision_work.hpp"
 
 #include "svp/builder/build_thread_plan.hpp"
 #include "svp/builder/runtime_tools.hpp"
@@ -81,6 +83,14 @@ CalibrationOutcome stored_or_measure(const std::string& name, const CalibrationC
 }
 
 }  // namespace
+
+svp::models::ThreadPlan default_build_thread_plan(const std::filesystem::path& model_cache) {
+  BuildPipelineOptions options;
+  options.model_cache_dir = model_cache;
+  return resolve_build_thread_plan(options, svp::models::detect_host_cpu_topology(),
+                                   svp::models::process_environment_lookup(), false)
+      .plan;
+}
 
 OcrCalibrationSetup default_ocr_calibration_setup(const std::filesystem::path& model_cache) {
   BuildPipelineOptions options;
@@ -270,12 +280,26 @@ bool calibrate_for_workers_command(const svp::exec::worker::CoordinatorPairingRe
                                    const std::filesystem::path& model_cache) {
   try {
     const OcrCalibrationSetup setup = default_ocr_calibration_setup(model_cache);
+    // The default build's dispatched vision work (M4), measured beside OCR.
+    const calibration::DispatchedCalibrationSetup dispatched{
+        .pp_ocr = setup.pp_ocr,
+        .pp_ocr_model_refs = setup.model_refs,
+        .vision = engine::plan_distributed_vision_work(model_cache,
+                                                       default_build_thread_plan(model_cache)),
+        .ffmpeg_build = setup.ffmpeg_build};
     WorkerSupplies supplies;
     supplies.hello = hello;
     supplies.runtime = runtime;
     std::vector<std::string> model_ids;
     for (const svp::exec::TaskModelRef& ref : setup.model_refs) {
       model_ids.push_back(ref.model_id);
+    }
+    for (const std::optional<DistributedOnnxWork>* onnx :
+         {&dispatched.vision.text_embeddings, &dispatched.vision.keyframe_embeddings,
+          &dispatched.vision.depth}) {
+      if (*onnx) {
+        model_ids.push_back((*onnx)->model_ref.model_id);
+      }
     }
     supplies.models = svp::exec::worker::prepare_model_bundles(model_cache, model_ids);
     CalibrationClipFile clip(setup.ffmpeg_path);
@@ -297,6 +321,18 @@ bool calibrate_for_workers_command(const svp::exec::worker::CoordinatorPairingRe
         record.key, supplies, ack, setup, clip, store, never_cancelled);
     std::cout << "worker: " << (worker.measured ? "calibrated: " : "calibration current: ")
               << describe_calibration(worker.ocr) << "\n";
+    for (const std::string& type : calibration::dispatched_task_types(dispatched.vision)) {
+      const CapacityOutcome local_capacity = ensure_coordinator_capacity(
+          type, dispatched, svp::exec::blake3_prefixed(runtime.runtime_id), clip, store,
+          model_cache, setup.ffmpeg_path, never_cancelled);
+      std::cout << "this Mac: " << (local_capacity.measured ? "calibrated: " : "calibration current: ")
+                << describe_capacity(type, local_capacity.capacity) << "\n";
+      const CapacityOutcome worker_capacity =
+          ensure_worker_capacity(record.key, supplies, ack, type, dispatched, clip,
+                                 setup.ffmpeg_path, store, never_cancelled);
+      std::cout << "worker: " << (worker_capacity.measured ? "calibrated: " : "calibration current: ")
+                << describe_capacity(type, worker_capacity.capacity) << "\n";
+    }
     return true;
   } catch (const std::exception& error) {
     std::cerr << "svp-builder: OCR capacity calibration failed: " << error.what()
