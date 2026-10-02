@@ -154,7 +154,8 @@ PlannedOcrExecution plan_ocr_execution(
     const svp::models::ThreadPlan& thread_plan, bool model_runtime_available,
     const svp::exec::SourceFingerprintRecord& source,
     const std::vector<engine::PlannedStageTask>& tasks, const std::string& build_session_id,
-    const engine::BuildJournalSession& journal_session) {
+    const engine::BuildJournalSession& journal_session,
+    const svp::exec::CancellationToken& cancellation) {
   PlannedOcrExecution execution;
   std::optional<engine::OcrWorkPlan> work = engine::plan_ocr_work({
       .options = options,
@@ -181,6 +182,7 @@ PlannedOcrExecution plan_ocr_execution(
         .ffmpeg_path = options.ffmpeg_path,
         .ffmpeg_build = work->ffmpeg_build,
         .thread_plan = thread_plan,
+        .cancellation = &cancellation,
     });
     execution.workers = fleet.workers;
     execution.coordinator_slots = std::max<std::size_t>(1, fleet.coordinator_ocr_slots);
@@ -349,7 +351,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     const std::string build_session_id = journal_session.prepare();
     PlannedOcrExecution ocr_execution = plan_ocr_execution(
         effective_options, stage_plan, plan, plan_json, thread_plan, model_runtime_available,
-        source, tasks, build_session_id, journal_session);
+        source, tasks, build_session_id, journal_session, cancellation);
     const engine::OcrFrameBatchPlan* ocr_batches =
         ocr_execution.batches ? &*ocr_execution.batches : nullptr;
     const svp::exec::TaskGraph graph =

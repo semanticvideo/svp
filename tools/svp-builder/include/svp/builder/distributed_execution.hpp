@@ -14,9 +14,12 @@
 // measured capacity. Workers that cannot be used are reported on stderr and
 // left out; the build then runs with the rest, or alone (one Mac is a
 // complete configuration). prepare() throws DistributedPreparationError only
-// when the build asked for a minimum number of workers it cannot have.
+// when the build asked for a minimum number of workers it cannot have. A
+// cancelled build (Ctrl-C) stops waiting for workers and returns no workers;
+// the build then ends as cancelled.
 
 #include "svp/exec/artifact_ref.hpp"
+#include "svp/exec/cancellation_token.hpp"
 #include "svp/exec/executor.hpp"
 #include "svp/exec/task_spec.hpp"
 #include "svp/models/thread_plan.hpp"
@@ -52,6 +55,8 @@ struct DistributedOcrWork {
   // The build's thread plan; sent in HELLO, refused by workers when it is
   // not host-independent.
   svp::models::ThreadPlan thread_plan;
+  // The build's Ctrl-C / SIGTERM token; null when the caller has none.
+  const svp::exec::CancellationToken* cancellation = nullptr;
 };
 
 struct DistributedFleet {

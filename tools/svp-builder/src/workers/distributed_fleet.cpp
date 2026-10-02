@@ -3,12 +3,16 @@
 #include "coordinator_context.hpp"
 #include "worker_reach.hpp"
 
+#include "calibration/ocr_capacity_calibration.hpp"
 #include "svp/exec/remote/remote_error.hpp"
+#include "svp/exec/worker/admission.hpp"
+#include "svp/exec/worker/host_facts.hpp"
 #include "svp/exec/worker/pairing_store.hpp"
 #include "svp/exec/worker/worker_connection.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_parameters.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <future>
 #include <iostream>
@@ -41,7 +45,8 @@ std::string seconds_since(std::chrono::steady_clock::time_point start) {
 // reconnect window: a worker whose job launchd just (re)started can be
 // advertised before it accepts connections. Authentication failures end at
 // once; waiting does not change who holds the secret.
-std::unique_ptr<WorkerConnection> connect_within_window(const remote::PairingKey& key) {
+std::unique_ptr<WorkerConnection> connect_within_window(
+    const remote::PairingKey& key, const svp::exec::CancellationToken& cancellation) {
   const auto give_up =
       std::chrono::steady_clock::now() + remote::kDefaultReconnectWindow;
   while (true) {
@@ -49,11 +54,15 @@ std::unique_ptr<WorkerConnection> connect_within_window(const remote::PairingKey
       return connect_to_worker(key);
     } catch (const remote::RemoteTransportError& error) {
       if (error.code() == remote::RemoteErrorCode::authentication_failed ||
+          cancellation.requested() ||
           std::chrono::steady_clock::now() + remote::kDefaultReconnectPause >= give_up) {
         throw;
       }
     }
     std::this_thread::sleep_for(remote::kDefaultReconnectPause);
+    if (cancellation.requested()) {
+      throw std::runtime_error("build cancelled");
+    }
   }
 }
 
@@ -68,7 +77,8 @@ WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSuppli
     TransferStats stats;
     std::string route;
     {
-      const std::unique_ptr<WorkerConnection> connection = connect_within_window(outcome.record.key);
+      const std::unique_ptr<WorkerConnection> connection =
+          connect_within_window(outcome.record.key, cancellation);
       route = connection->connection.route.route.interface_name + " (" +
               std::string(remote::route_medium_name(connection->connection.route.route.medium)) +
               ")";
@@ -114,21 +124,41 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
       std::cerr << "svp-builder: " << line << "\n";
     }
   };
-  const PairingDirectory pairings(default_coordinator_pairings_dir());
-  std::vector<CoordinatorPairingRecord> records = load_coordinator_pairings(pairings);
+  const svp::exec::CancellationToken never_cancelled;
+  const svp::exec::CancellationToken& cancellation =
+      work.cancellation != nullptr ? *work.cancellation : never_cancelled;
 
+  // What every worker is sent. If this Mac cannot assemble it (no pairing
+  // store, no runtime manifest, a model bundle missing), no worker can be
+  // used: the build runs on this Mac alone, unless --require-workers asks
+  // for workers it cannot have.
+  std::vector<CoordinatorPairingRecord> records;
   auto supplies = std::make_shared<WorkerSupplies>();
-  supplies->runtime = locate_coordinator_runtime(current_executable());
-  supplies->hello = make_coordinator_hello(supplies->runtime, work.thread_plan,
-                                           model_set_summary(work.model_cache_root));
-  std::vector<std::string> model_ids;
-  for (const svp::exec::TaskModelRef& ref : work.model_refs) {
-    model_ids.push_back(ref.model_id);
+  try {
+    const PairingDirectory pairings(default_coordinator_pairings_dir());
+    records = load_coordinator_pairings(pairings);
+    supplies->runtime = locate_coordinator_runtime(current_executable());
+    supplies->hello = make_coordinator_hello(supplies->runtime, work.thread_plan,
+                                             model_set_summary(work.model_cache_root));
+    std::vector<std::string> model_ids;
+    for (const svp::exec::TaskModelRef& ref : work.model_refs) {
+      model_ids.push_back(ref.model_id);
+    }
+    supplies->models = prepare_model_bundles(work.model_cache_root, model_ids);
+    supplies->blobs = {BlobSource{.ref = BlobRef{.blake3 = work.source.blake3,
+                                                 .bytes = work.source.bytes},
+                                  .file = work.source_path}};
+  } catch (const std::exception& error) {
+    if (options_.require_workers > 0) {
+      throw DistributedPreparationError("--require-workers " +
+                                        std::to_string(options_.require_workers) +
+                                        ": cannot prepare workers: " + error.what());
+    }
+    log(std::string("warning: --distributed: cannot prepare workers (") + error.what() +
+        "); OCR runs on this Mac only");
+    // As a build without measurements runs (kLocalOnlyOcrBatchSlots).
+    return DistributedFleet{.workers = {}, .coordinator_ocr_slots = 1, .seconds_per_sample = {}};
   }
-  supplies->models = prepare_model_bundles(work.model_cache_root, model_ids);
-  supplies->blobs = {BlobSource{.ref = BlobRef{.blake3 = work.source.blake3,
-                                               .bytes = work.source.bytes},
-                                .file = work.source_path}};
 
   const OcrCalibrationSetup setup{.pp_ocr = work.pp_ocr,
                                   .model_refs = work.model_refs,
@@ -136,7 +166,6 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
                                   .ffmpeg_build = work.ffmpeg_build};
   CalibrationClipFile clip(work.ffmpeg_path);
   const CalibrationStore store;
-  const svp::exec::CancellationToken never_cancelled;
   const std::string runtime_id = svp::exec::blake3_prefixed(supplies->runtime.runtime_id);
 
   if (records.empty()) {
@@ -154,15 +183,23 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
   std::vector<std::future<WorkerOutcome>> pending;
   for (CoordinatorPairingRecord& record : records) {
     pending.push_back(std::async(std::launch::async, [&, record = std::move(record)]() mutable {
-      return prepare_worker(std::move(record), *supplies, setup, clip, store, never_cancelled);
+      return prepare_worker(std::move(record), *supplies, setup, clip, store, cancellation);
     }));
   }
   const auto coordinator_start = std::chrono::steady_clock::now();
   DistributedFleet fleet;
   try {
     const CalibrationOutcome local =
-        ensure_coordinator_calibration(setup, runtime_id, clip, store, never_cancelled);
-    fleet.coordinator_ocr_slots = local.ocr.slots;
+        ensure_coordinator_calibration(setup, runtime_id, clip, store, cancellation);
+    // The record was measured on an otherwise idle Mac, possibly long ago:
+    // never run more slots than the memory free right now admits (the same
+    // bound the sweep used).
+    const svp::exec::worker::HostFacts host = svp::exec::worker::detect_host_facts();
+    const std::size_t admitted_now = calibration::ocr_calibration_max_slots(
+        svp::exec::worker::sample_memory().available_bytes,
+        svp::exec::worker::AdmissionPolicy{}.reserve_bytes(host.physical_memory_bytes),
+        host.logical_cpus);
+    fleet.coordinator_ocr_slots = std::min(local.ocr.slots, admitted_now);
     fleet.seconds_per_sample = local.ocr.seconds_per_frame;
     log("this Mac: " + std::string(local.measured ? "calibrated now: " : "calibration: ") +
         describe_calibration(local.ocr) +
@@ -178,6 +215,11 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
   std::vector<WorkerOutcome> outcomes;
   for (std::future<WorkerOutcome>& future : pending) {
     outcomes.push_back(future.get());
+  }
+  if (cancellation.requested()) {
+    // The build ends as cancelled right after this; no worker is used.
+    // As a build without measurements runs (kLocalOnlyOcrBatchSlots).
+    return DistributedFleet{.workers = {}, .coordinator_ocr_slots = 1, .seconds_per_sample = {}};
   }
   std::size_t ready = 0;
   std::string problems;
