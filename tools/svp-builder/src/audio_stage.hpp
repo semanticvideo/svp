@@ -18,6 +18,10 @@
 
 namespace svp::builder {
 
+namespace engine {
+struct AudioWorkDispatch;
+}  // namespace engine
+
 // What transcription needs from extraction.
 struct AudioExtractStageState {
   // The audio foundation record so far (plan, extraction, VAD boundary).
@@ -44,7 +48,10 @@ struct AudioExtractStageState {
 
 // Sets context.output["audio_foundation"]. Returns the lane's exit status when
 // it must stop the build (diarization required but unavailable).
+// `dispatch` (--distributed only, else null) runs ASR chunks and
+// diarization windows as tasks (engine/audio_work_dispatch.hpp).
 [[nodiscard]] std::optional<int> run_audio_transcribe_stage(
-    BuildPipelineContext& context, const AudioExtractStageState& extracted);
+    BuildPipelineContext& context, const AudioExtractStageState& extracted,
+    const engine::AudioWorkDispatch* dispatch = nullptr);
 
 }  // namespace svp::builder

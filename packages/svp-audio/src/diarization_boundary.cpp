@@ -130,7 +130,8 @@ DiarizationExecutionBoundary execute_diarization_boundary(
     bool allow_fallback,
     bool force_single_speaker,
     const std::vector<AsrWord>& words,
-    DiarizationProgressCallback on_progress) {
+    DiarizationProgressCallback on_progress,
+    const DiarizationWindowDispatch& dispatch) {
   if (force_single_speaker) {
     SpeakerSegment single_segment;
     single_segment.id = segment_id_for_ordinal(0);
@@ -221,7 +222,7 @@ DiarizationExecutionBoundary execute_diarization_boundary(
 
   SherpaDiarizationResult diar_result =
       run_sherpa_diarization(wav_path, model_dir, threads, words,
-                             std::move(on_progress));
+                             std::move(on_progress), dispatch);
 
   if (!diar_result.ran) {
     for (const auto& blocker : diar_result.blockers) {

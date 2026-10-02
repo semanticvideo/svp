@@ -1,11 +1,14 @@
 #include "distributed_fleet.hpp"
 
+#include "audio_calibration_runs.hpp"
 #include "coordinator_context.hpp"
 #include "dispatched_calibration_runs.hpp"
 #include "track_window_calibration_runs.hpp"
 #include "worker_reach.hpp"
 
+#include "calibration/audio_capacity_workloads.hpp"
 #include "calibration/ocr_capacity_calibration.hpp"
+#include "svp/audio/tasks/diarize_window.hpp"
 #include "svp/exec/remote/remote_error.hpp"
 #include "svp/exec/worker/admission.hpp"
 #include "svp/exec/worker/host_facts.hpp"
@@ -51,6 +54,12 @@ struct TrackingCalibration {
   std::unique_ptr<CalibrationClipFile> clip;
 };
 
+// The audio work's calibration setup and speech clip (M5).
+struct AudioCalibration {
+  calibration::AudioCalibrationSetup setup;
+  std::shared_ptr<CalibrationClipFile> clip;
+};
+
 // The dispatched vision work's calibration setup: the OCR work's PP-OCR, the
 // vision models, and the decoder.
 calibration::DispatchedCalibrationSetup dispatched_setup(const DistributedOcrWork& work) {
@@ -76,23 +85,51 @@ class FleetDispatchedExecutors final : public DispatchedWorkerExecutors {
       : workers_(std::move(workers)), supplies_(std::move(supplies)) {}
 
   std::vector<std::unique_ptr<svp::exec::Executor>> make(std::string_view task_type) override {
+    return make(task_type, {});
+  }
+
+  // Sessions that run tasks reading files made after prepare() (the staged
+  // analysis audio) are supplied those too, each sent only when the worker
+  // lacks it.
+  std::vector<std::unique_ptr<svp::exec::Executor>> make(
+      std::string_view task_type, const std::vector<DispatchedInput>& inputs) override {
+    std::shared_ptr<const WorkerSupplies> supplies = supplies_;
+    if (!inputs.empty()) {
+      auto with_inputs = std::make_shared<WorkerSupplies>(*supplies_);
+      for (const DispatchedInput& input : inputs) {
+        with_inputs->blobs.push_back(BlobSource{
+            .ref = BlobRef{.blake3 = input.ref.blake3, .bytes = input.ref.bytes},
+            .file = input.file});
+      }
+      supplies = std::move(with_inputs);
+    }
     std::vector<std::unique_ptr<svp::exec::Executor>> executors;
     for (const Worker& worker : workers_) {
-      const auto slots = worker.slots.find(task_type);
-      if (slots == worker.slots.end() || slots->second == 0) {
+      if (!takes(worker, task_type)) {
         continue;
       }
+      const std::size_t slots = worker.slots.find(task_type)->second;
       executors.push_back(std::make_unique<svp::exec::remote::RemoteExecutor>(
           svp::exec::remote::RemoteExecutorOptions{
               .executor_id = "worker." + worker.key.pairing_id,
               .connector = {.pairing = worker.key},
-              .slots = slots->second,
-              .session_preamble = make_supplying_preamble(supplies_)}));
+              .slots = slots,
+              .session_preamble = make_supplying_preamble(supplies)}));
     }
     return executors;
   }
 
+  bool takes(std::string_view task_type) const override {
+    return std::any_of(workers_.begin(), workers_.end(),
+                       [&](const Worker& worker) { return takes(worker, task_type); });
+  }
+
  private:
+  static bool takes(const Worker& worker, std::string_view task_type) {
+    const auto slots = worker.slots.find(task_type);
+    return slots != worker.slots.end() && slots->second > 0;
+  }
+
   std::vector<Worker> workers_;
   std::shared_ptr<const WorkerSupplies> supplies_;
 };
@@ -133,8 +170,8 @@ std::unique_ptr<WorkerConnection> connect_within_window(
 WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSupplies& supplies,
                              const OcrCalibrationSetup& setup,
                              const calibration::DispatchedCalibrationSetup& dispatched,
-                             const TrackingCalibration* tracking, CalibrationClipFile& clip,
-                             const CalibrationStore& store,
+                             const TrackingCalibration* tracking, const AudioCalibration& audio,
+                             CalibrationClipFile& clip, const CalibrationStore& store,
                              const svp::exec::CancellationToken& cancellation) {
   WorkerOutcome outcome{.record = std::move(record)};
   const auto start = std::chrono::steady_clock::now();
@@ -177,6 +214,19 @@ WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSuppli
         const CapacityOutcome capacity =
             ensure_worker_capacity(outcome.record.key, supplies, ack, type, dispatched, clip,
                                    setup.ffmpeg_path, store, cancellation);
+        outcome.dispatched_slots[type] = capacity.capacity.slots;
+        detail << "; " << (capacity.measured ? "calibrated now: " : "")
+               << describe_capacity(type, capacity.capacity);
+      } catch (const std::exception& error) {
+        detail << "; " << type << " not used: " << error.what();
+      }
+    }
+    // The audio types (M5), on the speech clip.
+    for (const std::string& type : calibration::audio_task_types(audio.setup.audio)) {
+      try {
+        const CapacityOutcome capacity =
+            ensure_worker_audio_capacity(outcome.record.key, supplies, ack, type, audio.setup,
+                                         *audio.clip, store, cancellation);
         outcome.dispatched_slots[type] = capacity.capacity.slots;
         detail << "; " << (capacity.measured ? "calibrated now: " : "")
                << describe_capacity(type, capacity.capacity);
@@ -266,6 +316,16 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
         model_ids.push_back((*onnx)->model_ref.model_id);
       }
     }
+    // The audio work's models (M5).
+    std::vector<svp::exec::TaskModelRef> audio_refs = work.audio.asr_model_refs;
+    if (work.audio.diarization_model_ref) {
+      audio_refs.push_back(*work.audio.diarization_model_ref);
+    }
+    for (const svp::exec::TaskModelRef& ref : audio_refs) {
+      if (std::find(model_ids.begin(), model_ids.end(), ref.model_id) == model_ids.end()) {
+        model_ids.push_back(ref.model_id);
+      }
+    }
     supplies->models = prepare_model_bundles(work.model_cache_root, model_ids);
     supplies->blobs = {BlobSource{.ref = BlobRef{.blake3 = work.source.blake3,
                                                  .bytes = work.source.bytes},
@@ -298,6 +358,25 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
                                                   .ffmpeg_build = work.ffmpeg_build};
     tracking->clip = track_window_calibration_clip_file(tracking->setup);
   }
+  AudioCalibration audio;
+  audio.setup = calibration::AudioCalibrationSetup{.audio = work.audio,
+                                                   .thread_plan = work.thread_plan,
+                                                   .sherpa_library = {}};
+  if (audio.setup.audio.diarization_model_ref) {
+    // Named without loading it: sherpa-onnx must not load in this process
+    // before the build's own ONNX Runtime models. Workers refuse windows
+    // from another library, so without one there are no windows to send.
+    if (const std::optional<std::string> library =
+            svp::audio::tasks::expected_sherpa_library_identity()) {
+      audio.setup.sherpa_library = *library;
+    } else {
+      audio.setup.audio.diarization_model_ref.reset();
+    }
+  }
+  audio.clip = std::make_shared<CalibrationClipFile>(
+      work.ffmpeg_path, [](const std::filesystem::path& ffmpeg, const std::filesystem::path& dir) {
+        return calibration::write_speech_calibration_clip(ffmpeg, dir);
+      });
   const CalibrationStore store;
   const std::string runtime_id = svp::exec::blake3_prefixed(supplies->runtime.runtime_id);
 
@@ -317,7 +396,7 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
   for (CoordinatorPairingRecord& record : records) {
     pending.push_back(std::async(std::launch::async, [&, record = std::move(record)]() mutable {
       return prepare_worker(std::move(record), *supplies, setup, dispatched,
-                            tracking ? &*tracking : nullptr, clip, store, cancellation);
+                            tracking ? &*tracking : nullptr, audio, clip, store, cancellation);
     }));
   }
   const auto coordinator_start = std::chrono::steady_clock::now();
@@ -370,6 +449,92 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
       log("warning: " + type + " is not dispatched: could not calibrate this Mac: " +
           error.what());
     }
+  }
+
+  // The audio types on this Mac (M5). asr.chunk_batch is measured now;
+  // diarize.window loads sherpa-onnx, which must not load in this process
+  // before the build's own ONNX Runtime models, so it is measured in the
+  // diarization stage, once sherpa-onnx is loaded there (measure_in_stage).
+  const auto admitted_audio_slots = [](std::string_view type, std::size_t measured) {
+    const svp::exec::worker::HostFacts host = svp::exec::worker::detect_host_facts();
+    return std::min(measured,
+                    calibration::capacity_max_slots(
+                        svp::exec::worker::sample_memory().available_bytes,
+                        svp::exec::worker::AdmissionPolicy{}.reserve_bytes(
+                            host.physical_memory_bytes),
+                        host.logical_cpus, calibration::audio_task_peak_rss_mb(type)));
+  };
+  for (const std::string& type : calibration::audio_task_types(audio.setup.audio)) {
+    if (type == svp::audio::tasks::kDiarizeWindowTaskType) {
+      continue;
+    }
+    try {
+      const auto type_start = std::chrono::steady_clock::now();
+      const CapacityOutcome capacity =
+          ensure_coordinator_audio_capacity(type, audio.setup, runtime_id, *audio.clip, store,
+                                            work.model_cache_root, cancellation);
+      fleet.dispatched_capacity[type] =
+          DispatchedTypeCapacity{.coordinator_slots = admitted_audio_slots(type, capacity.capacity.slots),
+                                 .seconds_per_item = capacity.capacity.seconds_per_item};
+      log("this Mac: " + std::string(capacity.measured ? "calibrated now: " : "calibration: ") +
+          describe_capacity(type, capacity.capacity) +
+          (capacity.measured ? ", in " + seconds_since(type_start) : std::string()));
+    } catch (const std::exception& error) {
+      log("warning: " + type + " is not dispatched: could not calibrate this Mac: " +
+          error.what());
+    }
+  }
+  if (audio.setup.audio.diarization_model_ref) {
+    fleet.measure_in_stage =
+        [audio, runtime_id, model_cache = work.model_cache_root, quiet = options_.quiet,
+         admitted_audio_slots](std::string_view type) -> std::optional<DispatchedTypeCapacity> {
+      if (type != svp::audio::tasks::kDiarizeWindowTaskType) {
+        return std::nullopt;
+      }
+      calibration::AudioCalibrationSetup setup = audio.setup;
+      const std::optional<std::string> loaded = svp::audio::tasks::loaded_sherpa_library_identity();
+      if (!loaded) {
+        return std::nullopt;
+      }
+      // The workers were calibrated, and run windows, against the library
+      // named before it loaded. If this process loaded another one (the
+      // first candidate failed to load), every window would carry an
+      // identity the workers' calibration never saw: map them here instead,
+      // as a build without workers does.
+      if (*loaded != audio.setup.sherpa_library) {
+        if (!quiet) {
+          std::cerr << "svp-builder: warning: " << type
+                    << " is not dispatched: this Mac loaded sherpa-onnx " << *loaded
+                    << ", not the library " << audio.setup.sherpa_library
+                    << " the workers were calibrated for\n";
+        }
+        return std::nullopt;
+      }
+      try {
+        const auto type_start = std::chrono::steady_clock::now();
+        const svp::exec::CancellationToken never_cancelled;
+        const CalibrationStore store;
+        const CapacityOutcome capacity = ensure_coordinator_audio_capacity(
+            type, setup, runtime_id, *audio.clip, store, model_cache, never_cancelled);
+        if (!quiet) {
+          std::cerr << "svp-builder: this Mac: "
+                    << (capacity.measured ? "calibrated now: " : "calibration: ")
+                    << describe_capacity(type, capacity.capacity)
+                    << (capacity.measured ? ", in " + seconds_since(type_start) : std::string())
+                    << "\n";
+        }
+        return DispatchedTypeCapacity{
+            .coordinator_slots = admitted_audio_slots(type, capacity.capacity.slots),
+            .seconds_per_item = capacity.capacity.seconds_per_item};
+      } catch (const std::exception& error) {
+        if (!quiet) {
+          std::cerr << "svp-builder: warning: " << type
+                    << " is not dispatched: could not calibrate this Mac: " << error.what()
+                    << "\n";
+        }
+        return std::nullopt;
+      }
+    };
   }
 
   if (tracking) {

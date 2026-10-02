@@ -1,5 +1,7 @@
 #include "dispatched_calibration_runs.hpp"
 
+#include "capacity_record_support.hpp"
+
 #include "svp/exec/blake3_digest.hpp"
 #include "svp/exec/cas_store.hpp"
 #include "svp/exec/cas_task_artifact_access.hpp"
@@ -88,57 +90,6 @@ CalibrationConditions capacity_conditions(std::string_view task_type,
       .model_bundles = bundles};
 }
 
-CapacityOutcome stored_or_measure(const std::string& name, std::string_view task_type,
-                                  const CalibrationConditions& wanted,
-                                  const CalibrationStore& store,
-                                  const std::function<calibration::CapacityCalibration()>& measure) {
-  if (const std::optional<CapacityRecord> record = store.read_capacity(name, task_type);
-      record && record->conditions == wanted) {
-    return CapacityOutcome{.capacity = record->capacity, .measured = false};
-  }
-  CapacityRecord record{.conditions = wanted,
-                        .capacity = measure(),
-                        .measured_at = svp::exec::worker::utc_timestamp_now()};
-  store.write_capacity(name, task_type, record);
-  return CapacityOutcome{.capacity = record.capacity, .measured = true};
-}
-
-std::vector<std::byte> read_file(const std::filesystem::path& path) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file) {
-    throw std::runtime_error("cannot open the calibration clip " + path.string());
-  }
-  const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-  if (file.bad()) {
-    throw std::runtime_error("cannot read the calibration clip " + path.string());
-  }
-  std::vector<std::byte> bytes(text.size());
-  std::memcpy(bytes.data(), text.data(), text.size());
-  return bytes;
-}
-
-// A private temporary directory, removed with this object.
-class TemporaryDirectory {
- public:
-  explicit TemporaryDirectory(const std::string& stem) {
-    std::string pattern = (std::filesystem::temp_directory_path() / (stem + "-XXXXXX")).string();
-    if (::mkdtemp(pattern.data()) == nullptr) {
-      throw WorkerError(WorkerErrorCode::io, "cannot create a calibration directory");
-    }
-    path_ = pattern;
-  }
-  ~TemporaryDirectory() {
-    std::error_code error;
-    std::filesystem::remove_all(path_, error);
-  }
-  TemporaryDirectory(const TemporaryDirectory&) = delete;
-  TemporaryDirectory& operator=(const TemporaryDirectory&) = delete;
-  [[nodiscard]] const std::filesystem::path& path() const { return path_; }
-
- private:
-  std::filesystem::path path_;
-};
-
 }  // namespace
 
 CapacityOutcome ensure_coordinator_capacity(std::string_view task_type,
@@ -150,18 +101,18 @@ CapacityOutcome ensure_coordinator_capacity(std::string_view task_type,
                                             const std::filesystem::path& ffmpeg,
                                             const svp::exec::CancellationToken& cancellation) {
   const svp::exec::worker::HostFacts host = svp::exec::worker::detect_host_facts();
-  return stored_or_measure(
+  return stored_or_measured_capacity(
       std::string(kCoordinatorCalibrationName), task_type,
       capacity_conditions(task_type, setup, runtime_id, host), store, [&] {
         const svp::exec::worker::BlobSource source = clip.blob();
-        const TemporaryDirectory cas_root("svp-dispatch-calibration-cas");
-        const TemporaryDirectory scratch("svp-dispatch-calibration-scratch");
+        const CalibrationTemporaryDirectory cas_root("svp-dispatch-calibration-cas");
+        const CalibrationTemporaryDirectory scratch("svp-dispatch-calibration-scratch");
         svp::exec::CacheResult<svp::exec::CasStore> cas = svp::exec::CasStore::at(cas_root.path());
         if (!cas) {
           throw WorkerError(WorkerErrorCode::io, "calibration cache: " + cas.error().message);
         }
         svp::exec::CasTaskArtifactAccess artifacts(std::move(cas).value(), kCalibrationSession);
-        const std::vector<std::byte> bytes = read_file(source.file);
+        const std::vector<std::byte> bytes = read_calibration_clip(source.file);
         if (bytes.size() != source.ref.bytes) {
           throw std::runtime_error("the calibration clip changed size while it was in use");
         }
@@ -210,7 +161,7 @@ CapacityOutcome ensure_worker_capacity(const svp::exec::remote::PairingKey& pair
                                        const std::filesystem::path& ffmpeg,
                                        const CalibrationStore& store,
                                        const svp::exec::CancellationToken& cancellation) {
-  return stored_or_measure(
+  return stored_or_measured_capacity(
       pairing.pairing_id, task_type,
       capacity_conditions(task_type, setup,
                           svp::exec::blake3_prefixed(supplies.runtime.runtime_id), ack.host),

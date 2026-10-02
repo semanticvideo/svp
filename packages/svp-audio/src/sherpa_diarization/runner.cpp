@@ -1,5 +1,6 @@
 #include "private.hpp"
 #include "chunk_embedding_pass.hpp"
+#include "window_map.hpp"
 #include "fragmented_speaker_fallback.hpp"
 #include "speaker_count_estimator.hpp"
 
@@ -8,7 +9,9 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <iterator>
+#include <optional>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -65,7 +68,8 @@ SherpaDiarizationResult run_sherpa_diarization(
     const std::filesystem::path& model_dir,
     const svp::models::SherpaThreadCounts& threads,
     const std::vector<AsrWord>& words,
-    DiarizationProgressCallback on_progress) {
+    DiarizationProgressCallback on_progress,
+    const DiarizationWindowDispatch& dispatch) {
   SherpaDiarizationResult result;
   if (threads.segmentation <= 0 || threads.embedding <= 0) {
     result.blockers.push_back(
@@ -88,10 +92,9 @@ SherpaDiarizationResult run_sherpa_diarization(
     return result;
   }
 
-  const std::filesystem::path segmentation_model =
-      model_dir / "sherpa-onnx-pyannote-segmentation-3-0" / "model.onnx";
-  const std::filesystem::path embedding_model =
-      model_dir / "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx";
+  const DiarizationModelFiles model_files = diarization_model_files(model_dir);
+  const std::filesystem::path segmentation_model = model_files.segmentation;
+  const std::filesystem::path embedding_model = model_files.embedding;
 
   if (!std::filesystem::exists(segmentation_model)) {
     result.blockers.push_back("segmentation model not found: " + segmentation_model.string());
@@ -115,44 +118,22 @@ SherpaDiarizationResult run_sherpa_diarization(
     return result;
   }
 
-  const std::string seg_path = segmentation_model.string();
-  const std::string emb_path = embedding_model.string();
+  const SherpaOnnxOfflineSpeakerDiarizationConfig config =
+      diarization_pipeline_config(model_files, threads);
 
-  SherpaOnnxOfflineSpeakerDiarizationConfig config;
-  std::memset(&config, 0, sizeof(config));
-  config.segmentation.pyannote.model = seg_path.c_str();
-  config.segmentation.num_threads = threads.segmentation;
-  config.segmentation.debug = 0;
-  config.segmentation.provider = "cpu";
-  config.embedding.model = emb_path.c_str();
-  config.embedding.num_threads = threads.embedding;
-  config.embedding.debug = 0;
-  config.embedding.provider = "cpu";
-  config.clustering.num_clusters = -1;
-  config.clustering.threshold = kSherpaLocalClusteringThreshold;
-  config.min_duration_on = 0.3f;
-  config.min_duration_off = 0.5f;
+  const bool embedding_api = embedding_api_available(api);
 
-  bool embedding_api_available = (api.emb_create && api.emb_destroy && api.emb_dim &&
-                                   api.emb_create_stream && api.stream_accept &&
-                                   api.stream_input_finished && api.emb_is_ready &&
-                                   api.emb_compute && api.emb_destroy_vec && api.stream_destroy);
+  const SherpaOnnxSpeakerEmbeddingExtractorConfig emb_config =
+      diarization_extractor_config(model_files, threads);
 
-  SherpaOnnxSpeakerEmbeddingExtractorConfig emb_config;
-  std::memset(&emb_config, 0, sizeof(emb_config));
-  emb_config.model = emb_path.c_str();
-  emb_config.num_threads = threads.embedding;
-  emb_config.debug = 0;
-  emb_config.provider = "cpu";
-
-  if (!embedding_api_available) {
+  if (!embedding_api) {
     result.blockers.push_back(
         "sherpa-onnx embedding extractor C API not available; using window-local speakers");
   }
 
   const void* extractor = nullptr;
   int32_t embedding_dim = 0;
-  if (embedding_api_available) {
+  if (embedding_api) {
     extractor = api.emb_create(&emb_config);
     if (extractor) {
       embedding_dim = api.emb_dim(extractor);
@@ -188,14 +169,40 @@ SherpaDiarizationResult run_sherpa_diarization(
       on_progress(total_chunks, total_chunks);
     }
   };
+
+  // Windows mapped elsewhere (diarization_window_map.hpp); a window without
+  // a dispatched map is mapped here, exactly as when nothing is dispatched.
+  std::optional<std::vector<std::optional<DiarizationWindowMap>>> dispatched;
+  if (dispatch) {
+    try {
+      dispatched = dispatch(
+          DiarizationWindowWork{
+              .wav_path = wav_path,
+              .sample_count = wav_info.sample_count,
+              .window_count = windows.size(),
+              .settings = {.threads = threads,
+                           .compute_embeddings = extractor != nullptr && embedding_dim > 0}},
+          on_progress);
+    } catch (...) {
+      destroy_extractor();
+      throw;
+    }
+    if (dispatched && dispatched->size() != windows.size()) {
+      destroy_extractor();
+      throw AudioDispatchError("diarization dispatch returned " +
+                               std::to_string(dispatched->size()) + " window maps for " +
+                               std::to_string(windows.size()) + " windows");
+    }
+  }
+  const std::function<void()> local_piece_progress = [&]() {
+    ++completed_chunks;
+    if (on_progress && !dispatched) {
+      on_progress(completed_chunks, total_chunks);
+    }
+  };
+
   for (std::size_t wi = 0; wi < windows.size(); ++wi) {
     const auto& win = windows[wi];
-    const float accepted_start_sec =
-        static_cast<float>(win.accepted_start) /
-        static_cast<float>(kDiarizationSampleRate);
-    const float accepted_end_sec =
-        static_cast<float>(win.accepted_end) /
-        static_cast<float>(kDiarizationSampleRate);
 
     svp::core::trace_memory_event("diarization.window.start", {
         {"window_index", std::to_string(wi)},
@@ -207,87 +214,44 @@ SherpaDiarizationResult run_sherpa_diarization(
         {"speaker_observation_count", std::to_string(speaker_observations.size())}
     });
 
-    const void* sd = api.create(&config);
-    if (!sd) {
-      result.blockers.push_back(
-          "sherpa-onnx failed to create diarization pipeline "
-          "(config validation failed) at window " + std::to_string(wi));
+    DiarizationWindowOutcome window_outcome;
+    if (dispatched && (*dispatched)[wi]) {
+      window_outcome.map = std::move(*(*dispatched)[wi]);
+      completed_chunks += window_outcome.map->pieces.size();
+    } else {
+      window_outcome = map_diarization_window(api, config, extractor, embedding_dim, wav_info,
+                                              win, wi, local_piece_progress);
+    }
+    if (window_outcome.failure) {
+      result.blockers.push_back(window_outcome.failure->blocker);
       destroy_extractor();
       return result;
     }
-
-    std::vector<float> window_samples;
-    try {
-      window_samples =
-          read_pcm_s16le_mono_wav_range(wav_info, win.process_start, win.process_end);
-    } catch (const std::exception& e) {
-        result.blockers.push_back(
-            std::string("failed to read WAV window: ") + e.what());
-      api.destroy(sd);
-      destroy_extractor();
-      return result;
-    }
-    if (window_samples.empty()) {
-      api.destroy(sd);
+    const DiarizationWindowMap& window_map = *window_outcome.map;
+    if (window_map.pieces.empty()) {
       continue;
     }
 
     int32_t window_speaker_groups = 0;
-    std::map<int32_t, LocalSpeakerAssignment> window_local_to_global;
+    // Global observation ID of each window-local observation, in the order
+    // the window started them.
+    std::vector<int32_t> window_observation_ids;
     std::set<int32_t> traced_observation_ids;
-    for (std::size_t sample_offset = 0;
-         sample_offset < window_samples.size();
-         sample_offset += static_cast<std::size_t>(kMaxDiarizationChunkSamples)) {
-      const std::size_t remaining = window_samples.size() - sample_offset;
-      const int32_t chunk_samples = static_cast<int32_t>(
-          std::min<std::size_t>(remaining,
-              static_cast<std::size_t>(kMaxDiarizationChunkSamples)));
-
-      const void* diar_result =
-          api.process(sd, window_samples.data() + sample_offset, chunk_samples);
-      if (!diar_result) {
-        result.blockers.push_back(
-            "sherpa-onnx diarization process returned null at window " +
-            std::to_string(wi));
-        api.destroy(sd);
-        destroy_extractor();
-        return result;
-      }
-
+    for (const DiarizationWindowPiece& piece : window_map.pieces) {
       std::map<int32_t, std::vector<SherpaDiarizationSegment>> chunk_speakers;
-      const int32_t num_segments = api.get_num_segments(diar_result);
-      const float chunk_start_sec =
-          static_cast<float>(win.process_start + sample_offset) /
-          static_cast<float>(kDiarizationSampleRate);
-
-      const SherpaOnnxOfflineSpeakerDiarizationSegment* seg_array =
-          reinterpret_cast<const SherpaOnnxOfflineSpeakerDiarizationSegment*>(
-              api.sort_by_start_time(diar_result));
-
-      for (int32_t i = 0; i < num_segments; ++i) {
-        SherpaDiarizationSegment seg;
-        seg.start_sec = chunk_start_sec + seg_array[i].start;
-        seg.end_sec = chunk_start_sec + seg_array[i].end;
-        seg.speaker_id = seg_array[i].speaker;
-
-        if (clip_segment_to_range(seg, accepted_start_sec,
-                                  accepted_end_sec)) {
-          chunk_speakers[seg.speaker_id].push_back(seg);
-        }
+      for (const DiarizationPieceSpeaker& speaker : piece.speakers) {
+        chunk_speakers[speaker.local_speaker] = speaker.segments;
       }
-
-      api.destroy_segment(seg_array);
-      api.destroy_result(diar_result);
+      if (chunk_speakers.size() != piece.speakers.size()) {
+        throw std::invalid_argument("diarization window " + std::to_string(wi) +
+                                    " repeats a local speaker within a piece");
+      }
 
       std::vector<ChunkSpeakerEvidence> chunk_speaker_evidence;
       chunk_speaker_evidence.reserve(chunk_speakers.size());
       for (const auto& [local_speaker, segments] : chunk_speakers) {
         const float first_start_sec = segments.front().start_sec;
         const float last_end_sec = segments.back().end_sec;
-        float speech_sec = 0.0f;
-        for (const auto& seg : segments) {
-          speech_sec += std::max(0.0f, seg.end_sec - seg.start_sec);
-        }
         chunk_speaker_evidence.push_back(
             {local_speaker, first_start_sec, last_end_sec,
              {}});
@@ -297,30 +261,25 @@ SherpaDiarizationResult run_sherpa_diarization(
       chunk_observation_ids.reserve(chunk_speaker_evidence.size());
       for (std::size_t evidence_index = 0;
            evidence_index < chunk_speaker_evidence.size(); ++evidence_index) {
-        auto& evidence = chunk_speaker_evidence[evidence_index];
+        const DiarizationPieceSpeaker& speaker = piece.speakers[evidence_index];
+        const auto& evidence = chunk_speaker_evidence[evidence_index];
         int32_t global_speaker = -1;
-        auto known = window_local_to_global.find(evidence.local_speaker);
-        if (known != window_local_to_global.end() &&
-            evidence.first_start_sec - known->second.last_end_sec <=
-                kLocalSpeakerAssignmentMaxGapSec) {
-          global_speaker = known->second.global_speaker;
-          known->second.last_end_sec =
-              std::max(known->second.last_end_sec, evidence.last_end_sec);
-        } else {
-          global_speaker = static_cast<int32_t>(speaker_observations.size());
-          if (extractor && embedding_dim > 0) {
-            const auto& segments =
-                std::next(chunk_speakers.begin(), evidence_index)->second;
-            evidence.embedding = compute_bounded_speaker_embedding(
-                api, extractor, embedding_dim, window_samples,
-                win.process_start, segments);
+        if (speaker.starts_observation) {
+          if (speaker.window_observation != window_observation_ids.size()) {
+            throw std::invalid_argument("diarization window " + std::to_string(wi) +
+                                        " starts its observations out of order");
           }
+          global_speaker = static_cast<int32_t>(speaker_observations.size());
           speaker_observations.push_back(
-              {global_speaker, evidence.first_start_sec,
-               std::move(evidence.embedding)});
-          window_local_to_global[evidence.local_speaker] =
-              {global_speaker, evidence.last_end_sec};
+              {global_speaker, evidence.first_start_sec, speaker.embedding});
+          window_observation_ids.push_back(global_speaker);
           ++window_speaker_groups;
+        } else {
+          if (speaker.window_observation >= window_observation_ids.size()) {
+            throw std::invalid_argument("diarization window " + std::to_string(wi) +
+                                        " continues an observation it never started");
+          }
+          global_speaker = window_observation_ids[speaker.window_observation];
         }
         chunk_observation_ids.push_back(global_speaker);
       }
@@ -394,12 +353,7 @@ SherpaDiarizationResult run_sherpa_diarization(
               std::minmax(chunk_observation_ids[i], chunk_observation_ids[j]));
         }
       }
-      ++completed_chunks;
-      if (on_progress) {
-        on_progress(completed_chunks, total_chunks);
-      }
     }
-    api.destroy(sd);
 
     svp::core::check_memory_limit("diarization.window.process_done", {
         {"window_index", std::to_string(wi)},

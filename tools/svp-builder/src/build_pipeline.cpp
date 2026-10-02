@@ -11,7 +11,10 @@
 #include "engine/build_inputs_digest.hpp"
 #include "engine/build_journal_session.hpp"
 #include "engine/committed_stage_results.hpp"
+#include "engine/build_audio_dispatch.hpp"
 #include "engine/build_vision_dispatch.hpp"
+#include "engine/distributed_audio_work.hpp"
+#include "svp/audio/tasks/asr_chunk_batch.hpp"
 #include "engine/distributed_vision_work.hpp"
 #include "engine/ocr_batch_observer.hpp"
 #include "engine/ocr_execution_policy.hpp"
@@ -187,6 +190,9 @@ struct PlannedSplitExecution {
   std::map<std::string, DispatchedTypeCapacity, std::less<>> dispatched_capacity;
   std::shared_ptr<DispatchedWorkerExecutors> dispatched_workers;
   std::vector<svp::exec::TaskModelRef> dispatched_model_refs;
+  // --distributed only: measures a dispatched type on this Mac in its stage
+  // (DistributedFleet::measure_in_stage).
+  std::function<std::optional<DispatchedTypeCapacity>(std::string_view)> measure_in_stage;
   std::optional<engine::TrackingWindowPlan> windows;
   std::size_t coordinator_tracking_slots = engine::kCoordinatorTrackWindowSlotsWithoutMeasurement;
   std::vector<svp::exec::Executor*> tracking_workers;
@@ -247,6 +253,8 @@ PlannedSplitExecution plan_split_execution(
     svp::vision::OcrBatchPolicy batch_policy;
     const DistributedVisionWork vision =
         engine::plan_distributed_vision_work(options.model_cache_dir, thread_plan);
+    const DistributedAudioWork audio =
+        engine::plan_distributed_audio_work(options, stage_plan, plan, thread_plan);
     const DistributedFleet fleet = options.distributed->prepare(DistributedOcrWork{
         .build_session_id = build_session_id,
         .source = work->source,
@@ -261,6 +269,7 @@ PlannedSplitExecution plan_split_execution(
         .vision = vision,
         .tracking = tracking ? std::optional(distributed_tracking_work(*tracking))
                              : std::nullopt,
+        .audio = audio,
     });
     execution.workers = fleet.workers;
     execution.release_ocr_workers = fleet.release_ocr_workers;
@@ -277,6 +286,13 @@ PlannedSplitExecution plan_split_execution(
         execution.dispatched_model_refs.push_back((*onnx)->model_ref);
       }
     }
+    for (const svp::exec::TaskModelRef& ref : audio.asr_model_refs) {
+      execution.dispatched_model_refs.push_back(ref);
+    }
+    if (audio.diarization_model_ref) {
+      execution.dispatched_model_refs.push_back(*audio.diarization_model_ref);
+    }
+    execution.measure_in_stage = fleet.measure_in_stage;
     execution.tracking_workers = fleet.tracking_workers;
     execution.coordinator_tracking_slots =
         std::max<std::size_t>(1, fleet.coordinator_tracking_slots);
@@ -519,6 +535,28 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
                     .report = !effective_options.quiet,
                     .release_idle_models = {}}});
     }
+    // --distributed: the audio transcription stage hands its ASR chunks and
+    // diarization windows to tasks on this Mac's measured slots and the
+    // workers (M5, audio_work_dispatch.hpp).
+    std::unique_ptr<engine::BuildAudioDispatch> audio_dispatch;
+    if (ocr_batches != nullptr && ocr_execution.dispatched_workers &&
+        (ocr_execution.dispatched_capacity.contains(
+             svp::audio::tasks::kAsrChunkBatchTaskType) ||
+         ocr_execution.measure_in_stage)) {
+      audio_dispatch = engine::make_build_audio_dispatch({
+          .registry = registry,
+          .model_cache_root = effective_options.model_cache_dir,
+          .setup = {.build_session_id = build_session_id,
+                    .source = ocr_batches->work.source,
+                    .ffmpeg_build = ocr_batches->work.ffmpeg_build,
+                    .model_refs = ocr_execution.dispatched_model_refs,
+                    .capacity = ocr_execution.dispatched_capacity,
+                    .workers = ocr_execution.dispatched_workers,
+                    .cancellation = &cancellation,
+                    .report = !effective_options.quiet,
+                    .release_idle_models = {}},
+          .extras = {.measure_in_stage = ocr_execution.measure_in_stage}});
+    }
     const engine::StageTaskEnvironment environment{
         .options = effective_options,
         .stage_plan = stage_plan,
@@ -533,6 +571,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         .ocr_batches = ocr_batches,
         .pp_ocr_sessions = pp_ocr_sessions,
         .vision_dispatch = vision_dispatch ? &vision_dispatch->dispatch : nullptr,
+        .audio_dispatch = audio_dispatch ? &audio_dispatch->dispatch : nullptr,
         .tracking_windows = tracking_windows,
         .track_window_runtimes = std::make_shared<svp::vision::tasks::TrackWindowRuntimePool>(),
         .tracking_progress = tracking_progress ? &*tracking_progress : nullptr};

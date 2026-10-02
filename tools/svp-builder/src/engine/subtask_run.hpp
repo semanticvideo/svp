@@ -28,6 +28,11 @@ struct SubtaskRunRequest {
   // Called on the scheduler thread as each task commits, with how many items
   // it carried.
   std::function<void(const svp::exec::TaskNode& node)> on_committed;
+  // Files the tasks read that the workers were not given when the build
+  // prepared them (the staged analysis audio): each worker session is
+  // supplied them before its leases are sent. This Mac's slots resolve them
+  // through the caller's artifact access.
+  std::vector<DispatchedInput> inputs;
 };
 
 // The committed results, in `request.nodes` order. Throws

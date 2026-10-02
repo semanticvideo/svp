@@ -1,6 +1,8 @@
 #pragma once
 
 #include "svp/audio/asr_chunk_planner.hpp"
+#include "svp/audio/diarization_window_map.hpp"
+#include "svp/audio/sherpa_diarization_segment.hpp"
 #include "svp/audio/transcript_records.hpp"
 #include "svp/models/thread_plan.hpp"
 
@@ -13,17 +15,8 @@
 
 namespace svp::audio {
 
-using DiarizationProgressCallback =
-    std::function<void(std::size_t current, std::size_t total)>;
-
 [[nodiscard]] std::size_t diarization_chunk_count(
     const std::filesystem::path& wav_path);
-
-struct SherpaDiarizationSegment {
-  float start_sec = 0.0f;
-  float end_sec = 0.0f;
-  int32_t speaker_id = 0;
-};
 
 struct ClusterMergeDecision {
   int32_t cluster_a = 0;
@@ -68,7 +61,10 @@ struct ReconciliationResult {
     const std::filesystem::path& model_dir,
     const svp::models::SherpaThreadCounts& threads,
     const std::vector<AsrWord>& words = {},
-    DiarizationProgressCallback on_progress = {});
+    DiarizationProgressCallback on_progress = {},
+    // Maps windows elsewhere (diarization_window_map.hpp); empty maps every
+    // window here.
+    const DiarizationWindowDispatch& dispatch = {});
 
 [[nodiscard]] std::vector<std::string> refine_word_speakers_by_embedding(
     const std::filesystem::path& wav_path,
@@ -103,6 +99,13 @@ void set_sherpa_bundled_lib_path(const std::string& path);
 [[nodiscard]] std::string_view sherpa_lib_source_name(SherpaLibSource source);
 
 [[nodiscard]] std::string sherpa_lib_path_used();
+
+// The library the search order would load, without loading it: the loaded
+// one once a library is loaded, otherwise the first candidate that is a
+// file (a candidate that exists but fails to load is not seen here). Empty
+// when there is none. For naming the library before this process may load
+// it (sherpa-onnx must not load before the build's ONNX Runtime models).
+[[nodiscard]] std::string sherpa_lib_path_expected();
 
 [[nodiscard]] std::vector<std::string> sherpa_lib_paths_attempted();
 

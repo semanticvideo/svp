@@ -2,6 +2,7 @@
 
 #include "worker_model_view.hpp"
 
+#include "svp/audio/tasks/audio_task_environment.hpp"
 #include "svp/vision/tasks/dispatched_vision_tasks.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_task.hpp"
 #include "svp/vision/tasks/track_window_task.hpp"
@@ -45,6 +46,14 @@ void register_builder_worker_task_types(svp::exec::TaskTypeRegistry& registry,
                                                     .write_output = write_output,
                                                     .record_start_failures = false},
       pp_ocr_sessions);
+  // ASR chunks and diarization windows (M5). An item that cannot run here,
+  // or goes wrong here, fails retryably so another Mac takes it.
+  svp::audio::tasks::register_audio_tasks(
+      registry, svp::audio::tasks::AudioTaskEnvironment{.model_cache_root = {},
+                                                        .model_cache_for = model_cache_for,
+                                                        .scratch_dir = environment.session_dir,
+                                                        .write_output = write_output,
+                                                        .record_start_failures = false});
   // Tracking windows (M4). A window that cannot start here, or that goes
   // wrong here, fails retryably so another Mac takes it.
   svp::vision::tasks::register_track_window_task(

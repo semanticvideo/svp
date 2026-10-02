@@ -135,7 +135,7 @@ std::vector<svp::exec::CommittedResult> run_subtasks(const SubtaskRunRequest& re
   }
   std::vector<std::unique_ptr<svp::exec::Executor>> workers;
   if (setup.workers) {
-    workers = setup.workers->make(request.task_type);
+    workers = setup.workers->make(request.task_type, request.inputs);
   }
   for (const std::unique_ptr<svp::exec::Executor>& worker : workers) {
     executors.push_back(worker.get());

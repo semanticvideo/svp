@@ -211,6 +211,19 @@ std::vector<std::string> sherpa_lib_paths_attempted() {
   return sherpa_diarization_internal::lib_state().attempted_paths;
 }
 
+std::string sherpa_lib_path_expected() {
+  if (!sherpa_diarization_internal::lib_state().loaded_path.empty()) {
+    return sherpa_diarization_internal::lib_state().loaded_path;
+  }
+  for (const auto& candidate : sherpa_diarization_internal::build_candidate_paths()) {
+    std::error_code error;
+    if (std::filesystem::is_regular_file(candidate.path, error)) {
+      return candidate.path;
+    }
+  }
+  return {};
+}
+
 bool is_sherpa_diarization_available() {
   const sherpa_diarization_internal::SherpaDiarizationApi& api =
       sherpa_diarization_internal::get_api();

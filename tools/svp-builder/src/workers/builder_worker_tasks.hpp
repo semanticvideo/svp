@@ -25,7 +25,8 @@ struct WorkerTaskEnvironment {
 // each task type is a C++ function in svp-builder, and local and remote
 // execution call the same function from the same runtime): ocr.frame_batch
 // and the dispatched vision stage work (ocr.crop_batch, embed.text_batch,
-// embed.keyframe_batch, depth.frame_batch), and track.window, with their
+// embed.keyframe_batch, depth.frame_batch), track.window, and the audio
+// stage work (asr.chunk_batch, diarize.window), with their
 // source from the session's content-addressed cache, their models from the
 // worker's verified bundles, and their scratch files in the session
 // directory. Any other ASSIGN is answered with the
