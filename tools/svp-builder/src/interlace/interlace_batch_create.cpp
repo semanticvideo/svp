@@ -75,7 +75,8 @@ bool create_single_svpi(
     bool serial_pipeline,
     std::string& error_message,
     std::string& blake3_state_out,
-    const std::shared_ptr<BuildProgressSink>& progress_sink) {
+    const std::shared_ptr<BuildProgressSink>& progress_sink,
+    const std::function<std::shared_ptr<DistributedExecution>()>& make_distributed) {
 
   svp::builder::InterlaceCreateOptions opts;
   opts.source_path = source_path.string();
@@ -93,6 +94,7 @@ bool create_single_svpi(
   opts.force_single_speaker = force_single_speaker;
   opts.serial_pipeline = serial_pipeline;
   opts.progress_sink = progress_sink;
+  if (make_distributed) opts.distributed = make_distributed();
 
   auto result = svp::builder::interlace_create(opts);
   blake3_state_out = result.blake3_state;
@@ -364,7 +366,7 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
                         options.allow_fallback_diarization,
                         options.force_single_speaker,
                         options.serial_pipeline, create_err, blake3_state,
-                        item_sink)
+                        item_sink, options.make_distributed)
                   : create_embedded_batch_artifact(
                         options, media_path, file_result.artifact_path,
                         staging_dir, create_err, blake3_state, item_sink,
@@ -396,7 +398,7 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
                     options.allow_fallback_diarization,
                     options.force_single_speaker,
                     options.serial_pipeline, create_err, blake3_state,
-                    item_sink)
+                    item_sink, options.make_distributed)
               : create_embedded_batch_artifact(
                     options, media_path, file_result.artifact_path,
                     staging_dir, create_err, blake3_state, item_sink,

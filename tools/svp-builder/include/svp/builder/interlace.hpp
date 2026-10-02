@@ -34,6 +34,10 @@ struct InterlaceCreateOptions {
   // The recovery journal lives next to output_path (`<out>.svpi-journal/`).
   RecoveryJournalMode journal_mode = RecoveryJournalMode::require_new;
   std::shared_ptr<BuildProgressSink> progress_sink;
+  // --distributed: the paired workers the package build may use
+  // (distributed_execution.hpp), exactly as for an .svp build. Null builds
+  // on this Mac alone.
+  std::shared_ptr<DistributedExecution> distributed;
 };
 
 struct InterlaceCreateResult {

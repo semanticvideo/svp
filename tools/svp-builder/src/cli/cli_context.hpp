@@ -120,6 +120,8 @@ struct InterlaceCliOptions {
   std::string ic_progress_mode = "auto";
   std::string ic_run_report_path;
   bool ic_quiet = false;
+  bool ic_distributed = false;
+  std::size_t ic_require_workers = 0;
   // Filled by apply_cli_runtime_tools() after parsing.
   std::optional<svp::builder::RuntimeToolSelection> ic_runtime_tools;
 
@@ -179,6 +181,8 @@ struct InterlaceCliOptions {
   bool cb_serial_pipeline = false;
   std::string cb_progress_mode = "auto";
   bool cb_quiet = false;
+  bool cb_distributed = false;
+  std::size_t cb_require_workers = 0;
 
   // interlace scan
   std::string sc_source_dir;
