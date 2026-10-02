@@ -13,7 +13,8 @@ namespace {
 svp::builder::InterlaceCreateOptions make_create_options(
     const BuildCliOptions& options,
     const std::filesystem::path& output_path,
-    const std::shared_ptr<svp::builder::BuildProgressSink>& progress_sink) {
+    const std::shared_ptr<svp::builder::BuildProgressSink>& progress_sink,
+    const std::shared_ptr<svp::builder::DistributedExecution>& distributed) {
   svp::builder::InterlaceCreateOptions create;
   create.source_path = options.source_path;
   create.output_path = output_path.string();
@@ -30,6 +31,7 @@ svp::builder::InterlaceCreateOptions make_create_options(
   create.serial_pipeline = options.serial_pipeline;
   create.journal_mode = journal_mode_from_flags(options.resume, options.fresh);
   create.progress_sink = progress_sink;
+  create.distributed = distributed;
   return create;
 }
 
@@ -37,7 +39,8 @@ svp::builder::InterlaceCreateOptions make_create_options(
 
 int run_selected_output_build(
     const BuildCliOptions& options,
-    const std::shared_ptr<svp::builder::BuildProgressSink>& progress_sink) {
+    const std::shared_ptr<svp::builder::BuildProgressSink>& progress_sink,
+    const std::shared_ptr<svp::builder::DistributedExecution>& distributed) {
   if (options.stop_after != "package") {
     std::cerr << "--output-format " << options.output_format
               << " requires the complete package stage\n";
@@ -50,7 +53,7 @@ int run_selected_output_build(
 
   if (options.output_format == "svpi") {
     const auto result = svp::builder::interlace_create(
-        make_create_options(options, options.output_path, progress_sink));
+        make_create_options(options, options.output_path, progress_sink, distributed));
     if (!result.success) {
       std::cerr << "SVPI build failed: " << result.error_message << "\n";
       return result.pipeline_failure == svp::builder::BuildPipelineFailure::cancelled
@@ -62,7 +65,7 @@ int run_selected_output_build(
 
   svp::builder::EmbeddedTransportBuildOptions build;
   build.svpi_options = make_create_options(
-      options, std::filesystem::path{}, progress_sink);
+      options, std::filesystem::path{}, progress_sink, distributed);
   build.output_path = options.output_path;
   build.overwrite_output = options.overwrite;
   const auto result = svp::builder::build_embedded_svpi_transport(build);

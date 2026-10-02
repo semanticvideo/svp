@@ -10,6 +10,7 @@
 #endif
 
 #include <chrono>
+#include <memory>
 #include <iostream>
 #include <optional>
 #include <utility>
@@ -34,13 +35,22 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
   auto progress_sink = telemetry.progress_sink();
 
   const auto started_at = std::chrono::steady_clock::now();
-  if ((options.distributed || options.require_workers > 0) && options.output_format != "svp") {
-    std::cerr << "svp-builder build: --distributed builds --output-format svp only for now\n";
+  // --distributed: the paired workers this build may use, for every output
+  // format (the .svp, SVPI, and embedded SVPI builds run the same pipeline).
+  std::shared_ptr<svp::builder::DistributedExecution> distributed;
+  if (options.distributed || options.require_workers > 0) {
+#if defined(__APPLE__)
+    distributed = std::make_shared<svp::builder::workers::PairedWorkerFleet>(
+        svp::builder::workers::DistributedFleetOptions{
+            .require_workers = options.require_workers, .quiet = options.quiet});
+#else
+    std::cerr << "svp-builder build: --distributed needs macOS (paired workers)\n";
     return 2;
+#endif
   }
   if (options.output_format != "svp") {
     const int exit_code =
-        telemetry.finish(run_selected_output_build(options, progress_sink));
+        telemetry.finish(run_selected_output_build(options, progress_sink, distributed));
     if (exit_code == 0) {
       std::cout << format_cli_completion(
                        build_artifact_label(options.output_format), "created",
@@ -72,16 +82,7 @@ int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand
   pipeline_options.runtime_tools = options.runtime_tools;
   pipeline_options.quiet = options.quiet;
   pipeline_options.verbose = options.verbose;
-  if (options.distributed || options.require_workers > 0) {
-#if defined(__APPLE__)
-    pipeline_options.distributed = std::make_shared<svp::builder::workers::PairedWorkerFleet>(
-        svp::builder::workers::DistributedFleetOptions{
-            .require_workers = options.require_workers, .quiet = options.quiet});
-#else
-    std::cerr << "svp-builder build: --distributed needs macOS (paired workers)\n";
-    return 2;
-#endif
-  }
+  pipeline_options.distributed = distributed;
 
   const svp::builder::BuildPipelineResult result =
       svp::builder::BuildPipeline{}.run(pipeline_options);
