@@ -1,6 +1,7 @@
 #include "engine/committed_stage_results.hpp"
 
 #include "svp/vision/tasks/ocr_frame_batch_parameters.hpp"
+#include "svp/vision/tasks/track_window_parameters.hpp"
 
 #include <stdexcept>
 
@@ -83,11 +84,11 @@ std::vector<std::byte> CommittedStageResults::task_output(std::string_view task_
 
 void record_committed_result(CommittedStageResults& results, const svp::exec::TaskSpec& spec,
                              const svp::exec::CommittedResult& committed) {
-  if (spec.task_type == svp::vision::tasks::kOcrFrameBatchTaskType) {
+  if (spec.task_type == svp::vision::tasks::kOcrFrameBatchTaskType ||
+      spec.task_type == svp::vision::tasks::kTrackWindowTaskType) {
     if (committed.payloads.size() != 1) {
-      throw std::runtime_error("ocr.frame_batch task `" + spec.task_id +
-                               "` committed " + std::to_string(committed.payloads.size()) +
-                               " outputs, not one");
+      throw std::runtime_error(spec.task_type + " task `" + spec.task_id + "` committed " +
+                               std::to_string(committed.payloads.size()) + " outputs, not one");
     }
     results.record_task_output(spec.task_id, committed.payloads.front());
     return;

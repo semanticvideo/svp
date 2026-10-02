@@ -7,6 +7,7 @@
 // update, a hardware change, or different OCR thread counts or decoder).
 
 #include "calibration_store.hpp"
+#include "calibration/ocr_capacity_calibration.hpp"
 #include "worker_supplies.hpp"
 
 #include "svp/exec/cancellation_token.hpp"
@@ -18,6 +19,7 @@
 #include "svp/vision/tasks/ocr_calibration_clip.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -45,11 +47,17 @@ struct OcrCalibrationSetup {
 [[nodiscard]] OcrCalibrationSetup default_ocr_calibration_setup(
     const std::filesystem::path& model_cache);
 
-// The calibration clip, written on first use into a private temporary
+// A calibration clip, written on first use into a private temporary
 // directory removed with this object. Thread-safe.
 class CalibrationClipFile {
  public:
+  // Writes the clip into the directory with ffmpeg and returns its path.
+  using Writer = std::function<std::filesystem::path(const std::filesystem::path& ffmpeg,
+                                                     const std::filesystem::path& directory)>;
+
+  // The OCR calibration clip (ocr_calibration_clip.hpp).
   explicit CalibrationClipFile(std::filesystem::path ffmpeg);
+  CalibrationClipFile(std::filesystem::path ffmpeg, Writer writer);
   ~CalibrationClipFile();
   CalibrationClipFile(const CalibrationClipFile&) = delete;
   CalibrationClipFile& operator=(const CalibrationClipFile&) = delete;
@@ -58,6 +66,7 @@ class CalibrationClipFile {
 
  private:
   std::filesystem::path ffmpeg_;
+  Writer writer_;
   std::mutex mutex_;
   std::filesystem::path directory_;
   std::optional<svp::exec::worker::BlobSource> blob_;

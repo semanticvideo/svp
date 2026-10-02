@@ -1,13 +1,13 @@
 #pragma once
 
 // The seam between a build and the Macs it may send work to (plan §3.1,
-// §7.3, M3). BuildPipeline knows nothing about pairing, discovery, or the
+// §7.3, M3, M4). BuildPipeline knows nothing about pairing, discovery, or the
 // network: a `--distributed` build is given a DistributedExecution, and a
 // local build is given none, so it never loads pairing data or opens a
 // socket (plan §7.1).
 //
-// prepare() runs once, after the build has planned its OCR work and before
-// any task runs. It reaches the paired workers, refuses those whose runtime,
+// prepare() runs once, after the build has planned its OCR work (and the
+// tracking windows it splits, if any) and before any task runs. It reaches the paired workers, refuses those whose runtime,
 // macOS, or thread plan cannot reproduce this build's output, brings each
 // accepted worker the runtime, model bundles, and source it needs, and
 // returns one executor per worker that is ready, sized from that worker's
@@ -25,6 +25,7 @@
 #include "svp/models/thread_plan.hpp"
 #include "svp/vision/dispatched_work.hpp"
 #include "svp/vision/pp_ocr.hpp"
+#include "svp/vision/visual_entity_pipeline.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -65,6 +66,18 @@ struct DistributedVisionWork {
   std::uint32_t embedding_dim = 0;
 };
 
+// What workers need to run this build's track.window tasks (M4).
+struct DistributedTrackingWork {
+  // The detector, depth, and embedding bundles the tasks load.
+  std::vector<svp::exec::TaskModelRef> model_refs;
+  // The tracking stage's options (explicit thread counts, quality).
+  svp::vision::VisualEntityPipelineOptions options;
+  // Estimated peak memory of the build's largest window
+  // (track_window_estimated_peak_rss_mb): this Mac never runs more windows
+  // at once than its free memory admits at that size.
+  std::uint64_t window_peak_rss_mb = 0;
+};
+
 // What workers need to run this build's ocr.frame_batch tasks.
 struct DistributedOcrWork {
   std::string build_session_id;
@@ -84,6 +97,8 @@ struct DistributedOcrWork {
   const svp::exec::CancellationToken* cancellation = nullptr;
   // The vision stage work the build may also dispatch.
   DistributedVisionWork vision;
+  // The tracking windows the build splits, when it does.
+  std::optional<DistributedTrackingWork> tracking;
 };
 
 // How one dispatched task type runs on this Mac, from its measured capacity
@@ -118,6 +133,19 @@ struct DistributedFleet {
   std::map<std::string, DispatchedTypeCapacity, std::less<>> dispatched_capacity;
   // The workers' executors for those types; null when no worker is ready.
   std::shared_ptr<DispatchedWorkerExecutors> dispatched_workers;
+  // Closes the OCR executors' idle worker sessions, so each worker's OCR
+  // session process exits and frees its PP-OCR models. Called once the
+  // build's last OCR batch has committed; a later batch (none is expected)
+  // would open a fresh session. Empty when there are no OCR executors.
+  std::function<void()> release_ocr_workers;
+  // One per worker ready for tracking, accepting only track.window tasks;
+  // owned like `workers`. Empty when the build has no tracking work.
+  std::vector<svp::exec::Executor*> tracking_workers;
+  // track.window tasks this Mac runs at once, from its measured capacity.
+  std::size_t coordinator_tracking_slots = 0;
+  // Measured seconds one tracking frame takes on one of this Mac's slots
+  // (lease sizing). Empty when not measured.
+  std::optional<double> seconds_per_tracking_frame;
 };
 
 class DistributedExecution {

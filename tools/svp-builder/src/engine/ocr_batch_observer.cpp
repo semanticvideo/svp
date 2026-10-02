@@ -7,8 +7,9 @@ namespace svp::builder::engine {
 
 OcrBatchObserver::OcrBatchObserver(const OcrFrameBatchPlan& batches, BuildProgressSink& sink,
                                    const svp::exec::Clock& clock, bool quiet,
-                                   const std::set<std::string>& resumed_task_ids)
-    : sink_(sink), clock_(clock), quiet_(quiet) {
+                                   const std::set<std::string>& resumed_task_ids,
+                                   std::function<void()> on_all_committed)
+    : sink_(sink), on_all_committed_(std::move(on_all_committed)), clock_(clock), quiet_(quiet) {
   for (std::size_t index = 0; index < batches.nodes.size(); ++index) {
     const std::string& task_id = batches.nodes[index].spec.task_id;
     const std::uint64_t samples = batches.batches[index].count;
@@ -59,6 +60,7 @@ void OcrBatchObserver::observe(const svp::exec::AttemptEvent& event) {
       if (pending_batches_ == 0 && !completed_) {
         completed_ = true;
         sink_.emit(make_stage_completed(ProgressStageId::ocr));
+        if (on_all_committed_) on_all_committed_();
       }
       return;
     }

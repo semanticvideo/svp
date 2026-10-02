@@ -19,6 +19,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -36,9 +37,12 @@ struct OcrExecutorTotals {
 
 class OcrBatchObserver {
  public:
+  // `on_all_committed`, when set, runs once (on the scheduler thread) when
+  // the last batch commits: nothing will lease a batch again.
   OcrBatchObserver(const OcrFrameBatchPlan& batches, BuildProgressSink& sink,
                    const svp::exec::Clock& clock, bool quiet,
-                   const std::set<std::string>& resumed_task_ids);
+                   const std::set<std::string>& resumed_task_ids,
+                   std::function<void()> on_all_committed = {});
 
   void observe(const svp::exec::AttemptEvent& event);
 
@@ -53,6 +57,7 @@ class OcrBatchObserver {
 
  private:
   BuildProgressSink& sink_;
+  std::function<void()> on_all_committed_;
   const svp::exec::Clock& clock_;
   bool quiet_;
   std::map<std::string, std::uint64_t> samples_by_task_;

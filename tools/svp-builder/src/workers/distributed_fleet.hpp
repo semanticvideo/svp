@@ -1,25 +1,28 @@
 #pragma once
 
-// `svp-builder build --distributed` (plan §3.1, §3.5, §7.3, M3): the paired
-// workers a build's OCR frame batches may also run on.
+// `svp-builder build --distributed` (plan §3.1, §3.5, §7.3, M3, M4): the
+// paired workers a build's OCR frame batches and tracking windows may also run
+// on.
 //
 // prepare(), once per build, for every pairing this Mac holds, all at once:
 //   1. reach the worker by pairing id and send HELLO with this build's
 //      runtime, macOS, and thread plan; the worker refuses a different macOS
 //      version or a host-dependent thread plan, and is left out;
-//   2. make sure it holds this runtime, the PP-OCR bundles the batches name
-//      (verified there against the model lock), and the source media as a
+//   2. make sure it holds this runtime, the bundles the split stages' tasks
+//      name (PP-OCR; detector, depth, and embedding for tracking; verified
+//      there against the model lock), and the source media as a
 //      BLAKE3-verified blob;
-//   3. take its OCR slots from its calibration record, measuring it first
-//      when the record is missing or stale;
-// while this Mac's own OCR capacity is taken (or measured) the same way.
+//   3. take its OCR and tracking slots from its calibration records,
+//      measuring a type first when its record is missing or stale;
+// while this Mac's own capacities are taken (or measured) the same way.
 // A worker that cannot be reached or used is reported and left out; the
 // build goes on with the others, or with this Mac alone. With
 // `--require-workers N`, fewer than N ready workers fails the build before
 // any task runs.
 //
-// Each ready worker becomes one RemoteExecutor, restricted to
-// ocr.frame_batch, whose sessions repeat the HELLO and supply checks (cheap
+// Each ready worker becomes one RemoteExecutor per split stage, restricted to
+// that stage's task type (ocr.frame_batch, track.window) and sized by its
+// measured slots, whose sessions repeat the HELLO and supply checks (cheap
 // once everything is there) before their leases are sent.
 
 #include "ocr_calibration_runs.hpp"

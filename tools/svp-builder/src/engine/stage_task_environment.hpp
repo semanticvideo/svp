@@ -16,6 +16,7 @@
 #include "svp/models/thread_plan.hpp"
 #include "svp/vision/frame_catalog.hpp"
 #include "svp/vision/tasks/pp_ocr_session_pool.hpp"
+#include "svp/vision/tasks/track_window_runtime_pool.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -30,6 +31,8 @@
 namespace svp::builder::engine {
 
 struct OcrFrameBatchPlan;
+struct TrackingWindowPlan;
+class TrackingWindowProgress;
 
 // A stage that ends the build with a specific exit status rather than an
 // error (the audio lane when diarization is required but unavailable).
@@ -66,6 +69,14 @@ struct StageTaskEnvironment {
   // --distributed only: where the vision stages send their per-item work
   // (vision_work_dispatch.hpp). Null in every other build.
   const svp::package::VisionWorkDispatch* vision_dispatch = nullptr;
+  // Set when the tracking stage runs as window tasks: the `tracking` task
+  // folds their committed outcomes instead of running the whole stage.
+  const TrackingWindowPlan* tracking_windows = nullptr;
+  // The window runtimes this process's window tasks use; the fold empties
+  // it once every window has committed.
+  std::shared_ptr<svp::vision::tasks::TrackWindowRuntimePool> track_window_runtimes;
+  // The tracking stage's progress events while it runs as window tasks.
+  TrackingWindowProgress* tracking_progress = nullptr;
 };
 
 // Named state blobs a task returns (stage_task_products.hpp).

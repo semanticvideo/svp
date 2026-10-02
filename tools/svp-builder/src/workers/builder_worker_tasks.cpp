@@ -4,6 +4,7 @@
 
 #include "svp/vision/tasks/dispatched_vision_tasks.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_task.hpp"
+#include "svp/vision/tasks/track_window_task.hpp"
 
 #include <memory>
 #include <span>
@@ -44,6 +45,14 @@ void register_builder_worker_task_types(svp::exec::TaskTypeRegistry& registry,
                                                     .write_output = write_output,
                                                     .record_start_failures = false},
       pp_ocr_sessions);
+  // Tracking windows (M4). A window that cannot start here, or that goes
+  // wrong here, fails retryably so another Mac takes it.
+  svp::vision::tasks::register_track_window_task(
+      registry, svp::vision::tasks::TrackWindowWorkerEnvironment{
+                    .model_cache_root = {},
+                    .ffmpeg_path = environment.ffmpeg_path,
+                    .write_output = write_output,
+                    .model_cache_for = model_cache_for});
 }
 
 }  // namespace svp::builder::workers
