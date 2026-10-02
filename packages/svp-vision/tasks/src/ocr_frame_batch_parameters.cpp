@@ -1,5 +1,6 @@
 #include "svp/vision/tasks/ocr_frame_batch_parameters.hpp"
 
+#include "svp/exec/blake3_digest.hpp"
 #include "svp/models/model_id.hpp"
 #include "svp/vision/ocr_generation.hpp"
 
@@ -189,7 +190,8 @@ Json ocr_frame_batch_parameters_to_json(const OcrFrameBatchParameters& parameter
     timestamps.push_back(sample.timestamp_us);
   }
   Json value{
-      {"decode", {{"frame_height", parameters.frame_height},
+      {"decode", {{"ffmpeg_build", parameters.ffmpeg_build},
+                  {"frame_height", parameters.frame_height},
                   {"frame_width", parameters.frame_width}}},
       {"detector",
        {{"box_thresh", ocr.det_box_thresh},
@@ -229,7 +231,11 @@ OcrFrameBatchParameters ocr_frame_batch_parameters_from_json(const Json& value) 
   parameters.samples = samples_from_json(value.at("samples"));
 
   const Json& decode = value.at("decode");
-  require_fields(decode, {"frame_height", "frame_width"}, "decode");
+  require_fields(decode, {"ffmpeg_build", "frame_height", "frame_width"}, "decode");
+  parameters.ffmpeg_build = string_at(decode, "ffmpeg_build", "decode");
+  if (!svp::exec::parse_blake3_prefixed(parameters.ffmpeg_build)) {
+    reject("decode.ffmpeg_build must be b3:<64 hex>");
+  }
   parameters.frame_width =
       integer_at<int>(decode, "frame_width", "decode", 1, kOcrMaxFrameDimension);
   parameters.frame_height =

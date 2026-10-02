@@ -6,6 +6,7 @@
 #include "svp/vision/depth_generation.hpp"
 #include "svp/vision/embedding_generation.hpp"
 #include "svp/vision/frame_catalog.hpp"
+#include "svp/vision/ocr_frame_batch_reduction.hpp"
 #include "svp/vision/ocr_generation.hpp"
 #include "svp/vision/visual_entity_pipeline.hpp"
 #include "svp/vision/visual_entity_tracker.hpp"
@@ -168,9 +169,8 @@ VisionDepthStageResult run_vision_depth_stage(
   return result;
 }
 
-VisionOcrStageResult run_vision_ocr_stage(
+svp::vision::OcrGenerationOptions make_vision_ocr_options(
     const VisionLaneSettings& settings,
-    const svp::vision::DecodedCanonicalFrames& frames,
     svp::vision::FrameCatalog* frame_catalog,
     const SpatialProgressCallback& on_progress) {
   const RasterSize raster = canonical_raster(settings.media_plan_json);
@@ -202,15 +202,12 @@ VisionOcrStageResult run_vision_ocr_stage(
   ocr_opts.recognition_threads = settings.thread_plan.ocr_recognition;
   ocr_opts.frame_catalog = frame_catalog;
   attach_ocr_progress_callbacks(ocr_opts, on_progress);
+  return ocr_opts;
+}
 
-  svp::vision::OcrGenerationResult ocr;
-  try {
-    ocr = svp::vision::generate_ocr_observations(ocr_opts, frames,
-                                                 settings.staging_dir);
-  } catch (const std::exception& e) {
-    ocr.blocker = std::string("OCR generation error: ") + e.what();
-  }
+namespace {
 
+VisionOcrStageResult vision_ocr_stage_result(const svp::vision::OcrGenerationResult& ocr) {
   VisionOcrStageResult result;
   result.ocr_available = ocr.ocr_available;
   result.ocr_frame_input_available = ocr.ocr_frame_input_available;
@@ -221,6 +218,50 @@ VisionOcrStageResult run_vision_ocr_stage(
   result.ocr_generation_detail = svp::vision::ocr_generation_result_to_json(ocr);
   result.processors = ocr.processors;
   return result;
+}
+
+}  // namespace
+
+VisionOcrStageResult run_vision_ocr_stage(
+    const VisionLaneSettings& settings,
+    const svp::vision::DecodedCanonicalFrames& frames,
+    svp::vision::FrameCatalog* frame_catalog,
+    const SpatialProgressCallback& on_progress) {
+  const svp::vision::OcrGenerationOptions ocr_opts =
+      make_vision_ocr_options(settings, frame_catalog, on_progress);
+  svp::vision::OcrGenerationResult ocr;
+  try {
+    ocr = svp::vision::generate_ocr_observations(ocr_opts, frames,
+                                                 settings.staging_dir);
+  } catch (const std::exception& e) {
+    ocr.blocker = std::string("OCR generation error: ") + e.what();
+  }
+  return vision_ocr_stage_result(ocr);
+}
+
+VisionOcrStageResult run_vision_ocr_reduce_stage(
+    const VisionLaneSettings& settings,
+    const svp::vision::OcrSamplePlan& plan,
+    std::vector<std::vector<svp::vision::OcrSampleDetections>> batch_results,
+    const svp::vision::PpOcrSession& pp_ocr_session,
+    const svp::vision::PpOcrOptions& pp_ocr_options,
+    svp::vision::FrameCatalog* frame_catalog,
+    const SpatialProgressCallback& on_progress) {
+  const svp::vision::OcrGenerationOptions ocr_opts =
+      make_vision_ocr_options(settings, frame_catalog, on_progress);
+  svp::vision::OcrGenerationResult ocr;
+  try {
+    ocr = svp::vision::reduce_ocr_frame_batches(ocr_opts, plan, std::move(batch_results),
+                                                pp_ocr_session, pp_ocr_options,
+                                                settings.staging_dir);
+  } catch (const svp::vision::OcrFrameBatchReductionError&) {
+    // Batches that do not cover the plan are a build failure, never an OCR
+    // stage that silently produced nothing.
+    throw;
+  } catch (const std::exception& e) {
+    ocr.blocker = std::string("OCR generation error: ") + e.what();
+  }
+  return vision_ocr_stage_result(ocr);
 }
 
 VisionTextEmbeddingStageResult run_vision_text_embedding_stage(

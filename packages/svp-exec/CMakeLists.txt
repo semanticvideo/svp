@@ -168,6 +168,7 @@ target_sources(svp-exec
     src/scheduler_run.cpp
     src/task_attempt_runner.cpp
     src/task_graph.cpp
+    src/task_type_restricted_executor.cpp
     src/worker_loop.cpp
     src/worker_session_leases.cpp
 )

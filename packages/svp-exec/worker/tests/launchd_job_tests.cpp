@@ -68,6 +68,18 @@ void test_agent_plist_lints_and_runs_the_runtime() {
   expect_equal(plutil_extract(scratch.path, plist, "Umask"), "63", "umask 077");
   expect_equal(plutil_extract(scratch.path, plist, "UserName"), "<missing>",
                "an agent runs as its own user");
+  expect_equal(plutil_extract(scratch.path, plist, "EnvironmentVariables.PATH"), "<missing>",
+               "without a recorded PATH the agent keeps launchd's environment");
+
+  const WorkerServiceSpec with_path =
+      make_worker_service_spec(WorkerServiceMode::user_agent, layout, layout.runtime(kRuntime),
+                               "w", "/Users/w", "/opt/tools/bin:/usr/bin:/bin");
+  const std::string path_plist = render_launchd_plist(with_path);
+  expect_plutil_lint(scratch.path, path_plist);
+  expect_equal(plutil_extract(scratch.path, path_plist, "EnvironmentVariables.PATH"),
+               "/opt/tools/bin:/usr/bin:/bin", "the worker user's login PATH");
+  expect_equal(plutil_extract(scratch.path, path_plist, "EnvironmentVariables.HOME"), "<missing>",
+               "an agent inherits HOME from its login session");
 }
 
 void test_daemon_plist_runs_as_the_worker_user() {
@@ -134,6 +146,13 @@ void test_probe_runs_here() {
   expect_equal(probe.product_version, host.os.product_version, "probe macOS matches");
   expect(probe.uid == ::getuid(), "probe uid matches");
   expect(probe.home_available_bytes > 0, "probe reports free disk");
+  expect(probe.login_path.find("/usr/bin") != std::string::npos,
+         "probe reports the login shell's PATH: " + probe.login_path);
+  const WorkerProbe without_path = parse_probe_output(
+      "arch=arm64\nproduct_version=1\nbuild=b\nuser=u\nuid=1\nhome=/h\n"
+      "home_available_bytes=1\nlibrary_available_bytes=1\nuser_agent_pairings=0\n"
+      "system_daemon_pairings=0\nuser_agent_job=absent\nsystem_daemon_plist=absent\n");
+  expect(without_path.login_path.empty(), "a probe without login_path still parses");
   expect_worker_error(WorkerErrorCode::command,
                       [] { (void)parse_probe_output("arch=arm64\n"); },
                       "a truncated probe is an error");

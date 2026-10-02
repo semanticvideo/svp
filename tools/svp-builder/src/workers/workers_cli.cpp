@@ -62,6 +62,8 @@ void register_workers_cli(CLI::App& app, WorkersCliOptions& workers, WorkerCliOp
                             "Serve one coordinator session on this descriptor");
   worker.worker->add_option("--cas-root", worker.cas_root, "Worker content-addressed cache");
   worker.worker->add_option("--session-dir", worker.session_dir, "Session scratch directory");
+  worker.worker->add_option("--model-store", worker.model_store,
+                            "The worker's verified model bundles");
   worker.worker->add_option("--worker-session-id", worker.worker_session_id, "Session id");
   worker.worker->add_option("--runtime-id", worker.runtime_id, "This runtime's id (b3:<hex>)");
   worker.serve = worker.worker->add_subcommand("serve", "Run the worker agent");

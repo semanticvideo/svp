@@ -36,6 +36,8 @@ struct OcrFrameBatchTaskInputs {
   std::vector<svp::exec::TaskModelRef> model_refs;
   // From make_ocr_pp_ocr_options(): explicit thread counts required.
   PpOcrOptions pp_ocr;
+  // ffmpeg_build_identity() of the coordinator's ffmpeg.
+  std::string ffmpeg_build;
   // Its per-sample estimate sizes the task's est_seconds.
   OcrBatchPolicy batch_policy;
 };

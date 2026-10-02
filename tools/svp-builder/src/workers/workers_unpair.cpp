@@ -2,6 +2,7 @@
 // both Macs and, when it was the worker's last pairing, the launchd job, its
 // plist, and the worker root (runtimes, models, cache, logs).
 
+#include "calibration_store.hpp"
 #include "ssh_session.hpp"
 #include "svp/exec/worker/pairing_store.hpp"
 #include "svp/exec/worker/worker_scripts.hpp"
@@ -36,10 +37,14 @@ int run_workers_unpair(const WorkersCliOptions& options) {
     }
   }
   store.remove(record.key.pairing_id);
+  CalibrationStore().remove(record.key.pairing_id);
   // The last pairing takes the (then empty) store directory with it.
   std::error_code ignored;
   if (std::filesystem::is_empty(store.path(), ignored)) {
     std::filesystem::remove(store.path(), ignored);
+    // With no worker left, this Mac's own OCR calibration (kept only for
+    // distributed builds) goes too.
+    CalibrationStore().remove(std::string(kCoordinatorCalibrationName));
   }
   std::cout << "unpaired " << record.key.pairing_id << " (" << record.worker.ssh_target << ")"
             << (options.forget ? "; the worker was not contacted" : "") << "\n";

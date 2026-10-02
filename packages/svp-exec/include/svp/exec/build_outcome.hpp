@@ -27,7 +27,8 @@ enum class BuildFailureKind {
   permanent_task_failure,
   // Two verified results for one task disagree (plan §4.4 duplicates).
   determinism_incident,
-  // Work remains but every executor is quarantined.
+  // Work remains but no usable executor accepts it (every executor that
+  // accepts the remaining task types is quarantined).
   no_usable_executor,
   // The ResultCommitSink threw.
   commit_failed,

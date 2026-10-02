@@ -27,7 +27,11 @@ void SchedulerRun::dispatch() {
 // prefer_different_executor, a task this executor already failed is left for
 // another usable executor, and taken only when none exists.
 std::optional<std::size_t> SchedulerRun::pick_task(std::size_t executor) const {
+  const Executor& candidate = *executors_[executor].executor;
   for (const std::size_t task : ready_queue_) {
+    if (!candidate.accepts(graph_.node(task).spec)) {
+      continue;
+    }
     if (!policy_.retry.prefer_different_executor || !tasks_[task].avoid.contains(executor) ||
         !has_other_usable_executor(task, executor)) {
       return task;
@@ -39,7 +43,8 @@ std::optional<std::size_t> SchedulerRun::pick_task(std::size_t executor) const {
 bool SchedulerRun::has_other_usable_executor(std::size_t task, std::size_t executor) const {
   for (std::size_t other = 0; other < executors_.size(); ++other) {
     if (other != executor && !executors_[other].quarantined &&
-        !tasks_[task].avoid.contains(other)) {
+        !tasks_[task].avoid.contains(other) &&
+        executors_[other].executor->accepts(graph_.node(task).spec)) {
       return true;
     }
   }
@@ -61,7 +66,8 @@ void SchedulerRun::dispatch_speculative() {
       for (const auto& [lease_id, lease] : leases_) {
         const TaskRecord& task = tasks_[lease.task];
         if (lease.executor == executor || task.phase == TaskPhase::committed ||
-            task.active_leases.size() != 1 || task.avoid.contains(executor)) {
+            task.active_leases.size() != 1 || task.avoid.contains(executor) ||
+            !record.executor->accepts(graph_.node(lease.task).spec)) {
           continue;
         }
         if (oldest == nullptr || lease.granted_at < oldest->granted_at) {
@@ -86,14 +92,15 @@ void SchedulerRun::grant(std::size_t task_index, std::size_t executor, bool spec
   lease.executor = executor;
   lease.speculative = speculative;
   lease.grant_sequence = next_lease_number_;
+  const LeasePolicy& lease_policy = lease_policy_for(policy_, spec.task_type);
   lease.lease = Lease{.lease_id = "lease_" + std::to_string(next_lease_number_++),
                       .attempt = ++task.attempts_started,
-                      .duration = lease_duration(policy_.lease, spec.resources.est_seconds),
-                      .heartbeat_interval = policy_.lease.heartbeat_interval};
+                      .duration = lease_duration(lease_policy, spec.resources.est_seconds),
+                      .heartbeat_interval = lease_policy.heartbeat_interval};
   lease.granted_at = clock_.now();
   lease.expires_at = lease.granted_at + lease.lease.duration;
   lease.deadline_at =
-      lease.granted_at + attempt_deadline(policy_.lease, spec.resources.est_seconds);
+      lease.granted_at + attempt_deadline(lease_policy, spec.resources.est_seconds);
 
   task.phase = TaskPhase::leased;
   task.active_leases.insert(lease.lease.lease_id);

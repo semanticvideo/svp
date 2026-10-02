@@ -23,6 +23,7 @@ constexpr std::array kStatuses = {
     OcrSampleStatus::decode_missed,
     OcrSampleStatus::frame_invalid,
     OcrSampleStatus::ocr_failed,
+    OcrSampleStatus::not_started,
 };
 
 [[noreturn]] void fail(const std::string& message) {
@@ -37,7 +38,7 @@ std::optional<OcrSampleStatus> parse_status(std::string_view name) {
 }
 
 bool has_frame_size(OcrSampleStatus status) {
-  return status != OcrSampleStatus::decode_missed;
+  return status != OcrSampleStatus::decode_missed && status != OcrSampleStatus::not_started;
 }
 
 std::string dump_canonical(const Json& value) {
@@ -98,7 +99,7 @@ void validate_record(const OcrSampleDetections& record) {
   }
   if (!has_frame_size(record.status) &&
       (record.frame_width != 0 || record.frame_height != 0)) {
-    fail("a decode_missed sample has no frame size");
+    fail("a decode_missed or not_started sample has no frame size");
   }
   for (const OcrTextDetection& detection : record.detections) {
     if (!std::isfinite(detection.confidence)) {
@@ -174,6 +175,8 @@ std::string_view ocr_sample_status_name(OcrSampleStatus status) {
       return "frame_invalid";
     case OcrSampleStatus::ocr_failed:
       return "ocr_failed";
+    case OcrSampleStatus::not_started:
+      return "not_started";
   }
   return "unknown";
 }

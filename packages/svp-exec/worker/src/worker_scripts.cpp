@@ -80,7 +80,10 @@ std::string render_probe_script(std::string_view label) {
       << "if launchctl print \"gui/$(id -u)/" << label
       << "\" >/dev/null 2>&1; then echo user_agent_job=loaded; else echo user_agent_job=absent; fi\n"
       << "if [ -f " << shell_quote(daemon_plist)
-      << " ]; then echo system_daemon_plist=present; else echo system_daemon_plist=absent; fi\n";
+      << " ]; then echo system_daemon_plist=present; else echo system_daemon_plist=absent; fi\n"
+      // The login shell may print from its profile; only the marked line counts.
+      << "echo \"login_path=$(\"${SHELL:-/bin/sh}\" -lc 'printf \"\\nsvp_login_path=%s\\n\" \"$PATH\"' "
+         "</dev/null 2>/dev/null | sed -n 's/^svp_login_path=//p' | tail -n 1)\"\n";
   return out.str();
 }
 
@@ -116,6 +119,9 @@ WorkerProbe parse_probe_output(std::string_view output) {
   probe.system_daemon_pairings =
       parse_unsigned(get("system_daemon_pairings"), "system_daemon_pairings");
   probe.user_agent_job_loaded = get("user_agent_job") == "loaded";
+  if (const auto found = values.find("login_path"); found != values.end()) {
+    probe.login_path = found->second;
+  }
   probe.system_daemon_plist_present = get("system_daemon_plist") == "present";
   return probe;
 }

@@ -28,6 +28,11 @@ enum class OcrSampleStatus {
   frame_invalid,
   // PP-OCR threw on this frame; the stage reports OCR as failed.
   ocr_failed,
+  // OCR could not start for the whole batch on the coordinator (PP-OCR did
+  // not load, or ffmpeg could not decode at all). Never a frame result: the
+  // OCR stage then runs exactly as a build without frame batches would
+  // (run_vision_ocr_stage), which reports why. Workers never emit it.
+  not_started,
 };
 
 [[nodiscard]] std::string_view ocr_sample_status_name(OcrSampleStatus status);

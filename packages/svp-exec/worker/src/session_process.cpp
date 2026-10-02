@@ -27,12 +27,14 @@ constexpr std::chrono::milliseconds kExitPollInterval{20};
 SessionLaunch make_session_launch(const std::filesystem::path& runtime_dir,
                                   const std::filesystem::path& cas_root,
                                   const std::filesystem::path& session_dir,
+                                  const std::filesystem::path& model_store,
                                   const std::string& worker_session_id,
                                   const Blake3Digest& runtime_id) {
   return SessionLaunch{
       .program = runtime_dir / std::string(kSessionProgram),
       .arguments = {"worker", "--serve-fd", std::to_string(kSessionFrameFd), "--cas-root",
                     cas_root.string(), "--session-dir", session_dir.string(),
+                    "--model-store", model_store.string(),
                     "--worker-session-id", worker_session_id, "--runtime-id",
                     blake3_prefixed(runtime_id)},
       .working_directory = session_dir};

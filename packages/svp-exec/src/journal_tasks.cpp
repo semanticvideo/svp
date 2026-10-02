@@ -116,6 +116,16 @@ void RecoveryJournal::set_task_state(std::string_view task_id, TaskState next) {
   transaction.commit();
 }
 
+std::vector<std::pair<std::string, std::string>> RecoveryJournal::recorded_tasks() const {
+  std::vector<std::pair<std::string, std::string>> tasks;
+  detail::SqliteStatement query =
+      state().database.prepare("SELECT task_id, task_type FROM task ORDER BY task_id");
+  while (query.step()) {
+    tasks.emplace_back(query.text(0), query.text(1));
+  }
+  return tasks;
+}
+
 std::optional<TaskState> RecoveryJournal::task_state(std::string_view task_id) const {
   return read_task_state(state().database, task_id);
 }

@@ -3,6 +3,7 @@
 #include "svp/exec/parameters_digest.hpp"
 #include "svp/exec/scheduler.hpp"
 #include "svp/exec/task_attempt_runner.hpp"
+#include "svp/exec/task_type_restricted_executor.hpp"
 
 #include <algorithm>
 #include <future>
@@ -795,6 +796,73 @@ void test_deadline_cancels_a_live_stuck_attempt() {
 
 }  // namespace
 
+void test_executor_only_gets_task_types_it_accepts() {
+  const TaskGraph graph = make_toy_graph(two_lane_toy_tasks(3));
+  ToyRuntime runtime;
+  ScriptedExecutor elsewhere("elsewhere");
+  TaskTypeRestrictedExecutor other_types(elsewhere, {"other.type"});
+  InProcessExecutor local(runtime.registry, runtime.store, {.threads = 1});
+  TaskTypeExcludingExecutor not_other(local, {"other.type"});
+  InMemoryResultCommitSink sink;
+  expect_succeeded(run_sync(graph, {&other_types, &not_other}, sink), "restricted run");
+  expect(elsewhere.assignments().empty(), "no toy task offered to an executor that refuses it");
+  expect(sink.size() == graph.size(), "every task committed by the accepting executor");
+}
+
+void test_task_no_executor_accepts_fails_build() {
+  const TaskGraph graph = single_task_graph();
+  ToyRuntime runtime;
+  InProcessExecutor local(runtime.registry, runtime.store, {.threads = 1});
+  TaskTypeRestrictedExecutor other_types(local, {"other.type"});
+  InMemoryResultCommitSink sink;
+  const BuildOutcome outcome = run_sync(graph, {&other_types}, sink);
+  expect(outcome.failure && outcome.failure->kind == BuildFailureKind::no_usable_executor,
+         "a task no executor accepts fails the build instead of hanging");
+}
+
+void test_task_type_policy_overrides_attempts_and_lease() {
+  const TaskGraph graph = single_task_graph();
+  ToyRuntime runtime;
+  ScriptedExecutor flaky("flaky", [&](const TaskSpec& spec, const Lease& lease,
+                                      ExecutorEvents& events) {
+    AttemptOutput output = correct_output(runtime, spec, lease);
+    output.result.status = TaskStatus::failed;
+    output.result.outputs.clear();
+    output.result.output_digest = compute_output_digest({});
+    output.result.error = TaskError{.code = "flaky", .message = "try again", .retryable = true};
+    output.payloads.clear();
+    events.attempt_finished(lease.lease_id, std::move(output));
+  });
+  SchedulerPolicy policy = test_policy();
+  policy.retry.max_attempts = 5;
+  TaskTypePolicy toy;
+  toy.lease = policy.lease;
+  toy.lease.lease_floor = policy.lease.lease_floor * 2;
+  toy.lease.attempt_deadline_floor = policy.lease.attempt_deadline_floor * 2;
+  toy.max_attempts = 2;
+  policy.task_types.emplace(std::string(kToyTaskType), toy);
+  InMemoryResultCommitSink sink;
+  const BuildOutcome outcome = run_sync(graph, {&flaky}, sink, policy);
+  expect(outcome.failure && outcome.failure->kind == BuildFailureKind::retries_exhausted,
+         "retries exhausted under the task type's limit");
+  expect(flaky.assignments().size() == 2, "the task type's max_attempts, not the policy's");
+  expect(flaky.assignments().front().duration ==
+             lease_duration(toy.lease, graph.node(0).spec.resources.est_seconds),
+         "the task type's lease length");
+}
+
+void test_invalid_task_type_policy_is_rejected() {
+  SchedulerPolicy policy = test_policy();
+  policy.task_types.emplace("toy.digest", TaskTypePolicy{.lease = policy.lease, .max_attempts = 0});
+  bool threw = false;
+  try {
+    validate_scheduler_policy(policy);
+  } catch (const ExecError&) {
+    threw = true;
+  }
+  expect(threw, "a task-type override with zero attempts is invalid");
+}
+
 int main() {
   return run_tests("svp-exec-scheduler-tests",
                    {
@@ -815,6 +883,14 @@ int main() {
                        {"cancellation between tasks", test_cancellation_between_tasks},
                        {"commit failure fails build", test_commit_failure_fails_build},
                        {"no usable executor", test_no_usable_executor},
+                       {"executor only gets task types it accepts",
+                        test_executor_only_gets_task_types_it_accepts},
+                       {"task no executor accepts fails build",
+                        test_task_no_executor_accepts_fails_build},
+                       {"task type policy overrides attempts and lease",
+                        test_task_type_policy_overrides_attempts_and_lease},
+                       {"invalid task type policy is rejected",
+                        test_invalid_task_type_policy_is_rejected},
                        {"repeated losses quarantine executor",
                         test_repeated_losses_quarantine_executor},
                        {"one crash of a many-slot executor is one loss event",

@@ -109,6 +109,16 @@ class Executor {
   [[nodiscard]] virtual LossQuarantine loss_quarantine() const {
     return LossQuarantine::after_repeated_losses;
   }
+  // Whether this executor may be offered `spec` at all (plan §3.1: a build
+  // decides which task types may leave the coordinator; a worker runtime
+  // registers only some types). The scheduler never leases a task to an
+  // executor that does not accept it, and a task no usable executor accepts
+  // is not ready work for anyone. Fixed for the executor's lifetime; every
+  // executor accepts every task unless it says otherwise.
+  [[nodiscard]] virtual bool accepts(const TaskSpec& spec) const {
+    (void)spec;
+    return true;
+  }
 
   // Called once before any assign(). `events` outlives stop().
   virtual void start(ExecutorEvents& events) = 0;

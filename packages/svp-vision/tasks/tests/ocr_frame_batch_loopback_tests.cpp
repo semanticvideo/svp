@@ -28,6 +28,7 @@
 #include "svp/vision/ocr_frame_batch_reduction.hpp"
 #include "svp/vision/ocr_generation.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_parameters.hpp"
+#include "svp/vision/tasks/ffmpeg_build_identity.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_spec.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_task.hpp"
 
@@ -200,6 +201,7 @@ int run(const std::filesystem::path& worker) {
       .source = source_ref,
       .model_refs = tasks::ocr_frame_batch_model_refs(pp_ocr),
       .pp_ocr = pp_ocr,
+      .ffmpeg_build = tasks::ffmpeg_build_identity(*ffmpeg).value(),
       .batch_policy = policy,
   };
   std::vector<exec::TaskNode> nodes;

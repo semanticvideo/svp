@@ -84,6 +84,10 @@ struct BuildCliOptions {
   // --resume / --fresh (RC2 §21), mutually exclusive.
   bool resume = false;
   bool fresh = false;
+  // --distributed: OCR frame batches may also run on paired workers.
+  // --require-workers N (implies --distributed): fail unless N are ready.
+  bool distributed = false;
+  std::size_t require_workers = 0;
   std::string progress_mode = "auto";
   std::string run_report_path;
   bool quiet = false;

@@ -43,6 +43,9 @@ struct WorkerProbe {
   std::uint64_t system_daemon_pairings = 0;
   bool user_agent_job_loaded = false;
   bool system_daemon_plist_present = false;
+  // PATH of the worker user's login shell; empty when it could not be read
+  // (optional in the probe output).
+  std::string login_path;
 };
 
 // Throws WorkerError(command) naming the first missing or malformed key.

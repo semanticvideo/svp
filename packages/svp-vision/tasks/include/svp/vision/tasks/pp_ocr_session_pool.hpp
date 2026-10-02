@@ -19,6 +19,11 @@ namespace svp::vision::tasks {
 // execution provider, per-model threads, graph optimization, execution
 // mode), and per-frame values (thresholds, sizes) are passed on every call.
 //
+// The coordinator shares one pool between its frame-batch tasks and the OCR
+// reducer (whose evidence-crop re-read needs the same recognizer), so a
+// build holds one set of sessions per concurrent OCR task, not one more for
+// the reducer.
+//
 // Each concurrently running task holds its own session, so the pool grows to
 // at most the number of tasks the worker runs at once, which the scheduler
 // bounds by the worker's advertised slots and memory. Idle sessions live
@@ -26,7 +31,7 @@ namespace svp::vision::tasks {
 // never kept, so a later task retries the load. Thread-safe.
 class PpOcrSessionPool {
  public:
-  explicit PpOcrSessionPool(std::filesystem::path model_cache_root);
+  PpOcrSessionPool() = default;
 
   class Lease {
    public:
@@ -43,17 +48,18 @@ class PpOcrSessionPool {
     std::unique_ptr<PpOcrSession> session_;
   };
 
-  // An idle session created with the same session settings, or a new one.
-  // `options.model_cache_root` is ignored; the pool's root is used.
+  // An idle session created with the same session settings (the model cache
+  // root included), or a new one.
   [[nodiscard]] std::unique_ptr<Lease> acquire(const PpOcrOptions& options);
 
-  // `options` with this pool's model cache root.
-  [[nodiscard]] PpOcrOptions with_model_cache(PpOcrOptions options) const;
+  // Destroys every idle session (their memory is returned); leased sessions
+  // are unaffected. A coordinator calls it once its OCR stage has reduced,
+  // so later stages do not run beside sessions nothing will use again.
+  void clear_idle();
 
  private:
   void release(const std::string& key, std::unique_ptr<PpOcrSession> session);
 
-  std::filesystem::path model_cache_root_;
   std::mutex mutex_;
   std::map<std::string, std::vector<std::unique_ptr<PpOcrSession>>> idle_;
 };

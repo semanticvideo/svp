@@ -13,6 +13,8 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace svp::exec {
 
@@ -72,6 +74,9 @@ class RecoveryJournal {
   // (invalid_transition); `committed` is only reachable via commit_task.
   void set_task_state(std::string_view task_id, TaskState next);
   [[nodiscard]] std::optional<TaskState> task_state(std::string_view task_id) const;
+  // Every recorded task's ID and type, in task ID order (read-only; a
+  // resuming build reads the partition an interrupted run planned).
+  [[nodiscard]] std::vector<std::pair<std::string, std::string>> recorded_tasks() const;
 
   // result_received -> committed. Every artifact is staged and verified
   // before any row changes; a mismatch throws (artifact_mismatch) and leaves

@@ -223,3 +223,33 @@ Workers are found by pairing id over Bonjour, never by address. `unpair`
 removes the job, runtimes, models, cache, and the secret on both Macs.
 `--dry-run` writes the plist and scripts locally, lints them, and changes
 nothing on the worker.
+
+`pair` and `sync` also measure OCR capacity on this Mac and on the worker:
+a short synthetic text slice runs at 1, 2, ... concurrent OCR tasks until
+another slot adds less than 10% throughput (or memory and CPUs admit no
+more). The result is kept beside the pairings (`.../SVP/Calibration/`) and
+measured again whenever the runtime, macOS, hardware, OCR thread counts,
+decoder build, or model bundles change.
+
+Distributed builds:
+
+```
+svp-builder build <source> --out <out.svp> --distributed [--require-workers <n>]
+```
+
+`--distributed` runs the OCR stage's frame batches on this Mac and on every
+ready paired worker; every other stage stays on this Mac. Before any task
+runs, each worker is reached by pairing id, refused if its macOS or the
+build's thread plan does not match, and sent what it lacks: the runtime, the
+PP-OCR bundles, and the source media (BLAKE3-verified). Each Mac runs as many
+batches at once as its calibration found worthwhile, and batches are sized
+from this Mac's measured seconds per frame. Workers decode with the
+coordinator's ffmpeg build only (a different `ffmpeg -version` is refused).
+A worker that cannot be reached is reported and skipped (`--require-workers`
+fails the build instead when fewer are ready); a worker lost mid-build has
+its batches run again elsewhere; `--resume --distributed` continues from the
+journal. Output does not depend on which or how many Macs ran a build.
+Without `--distributed` nothing above is loaded and no socket is opened.
+Run the coordinator from Terminal or an SSH session in the foreground: a
+process detached from them is subject to Local Network privacy and cannot
+reach workers.

@@ -7,7 +7,12 @@
 //
 //   <runtime>/bin/svp-builder worker --serve-fd 3
 //       --cas-root <worker cache/cas> --session-dir <session scratch>
-//       --worker-session-id <id> --runtime-id b3:<hex>
+//       --model-store <worker models> --worker-session-id <id>
+//       --runtime-id b3:<hex>
+//
+// --model-store is the worker's content-addressed store of verified model
+// bundles (model_bundles.hpp); task types that load models build their
+// model cache from the bundles a task names.
 //
 // stdin is /dev/null and stdout/stderr are the agent's (its log), so nothing
 // a task prints can corrupt the frame stream. Every path here is the
@@ -35,6 +40,7 @@ struct SessionLaunch {
 [[nodiscard]] SessionLaunch make_session_launch(const std::filesystem::path& runtime_dir,
                                                 const std::filesystem::path& cas_root,
                                                 const std::filesystem::path& session_dir,
+                                                const std::filesystem::path& model_store,
                                                 const std::string& worker_session_id,
                                                 const Blake3Digest& runtime_id);
 
