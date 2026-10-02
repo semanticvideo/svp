@@ -12,6 +12,9 @@ add_library(svp-vision
   src/embedding_generation.cpp
   src/embedding_generation/shot_keyframe_embedding.cpp
   src/evidence_crop.cpp
+  src/evidence_crop_work.cpp
+  src/keyframe_embedding_work.cpp
+  src/text_embedding_work.cpp
   src/foundation_color_observations.cpp
   src/foundation_color_staging.cpp
   src/foundation_ocr_staging.cpp

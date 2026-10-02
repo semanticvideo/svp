@@ -20,133 +20,10 @@
 namespace svp::vision {
 namespace {
 
-std::string shell_quote(const std::filesystem::path& path) {
-  std::string quoted = "'";
-  for (const char c : path.string()) {
-    if (c == '\'') {
-      quoted += "'\\''";
-    } else {
-      quoted += c;
-    }
-  }
-  quoted += "'";
-  return quoted;
-}
-
-std::string shell_quote_str(const std::string& s) {
-  std::string quoted = "'";
-  for (const char c : s) {
-    if (c == '\'') {
-      quoted += "'\\''";
-    } else {
-      quoted += c;
-    }
-  }
-  quoted += "'";
-  return quoted;
-}
-
-std::string trim(const std::string& s) {
-  std::size_t start = s.find_first_not_of(" \t\r\n");
-  if (start == std::string::npos) return "";
-  std::size_t end = s.find_last_not_of(" \t\r\n");
-  return s.substr(start, end - start + 1);
-}
-
-std::string microseconds_to_seek_string(std::int64_t us) {
-  const std::int64_t seconds = us / 1000000;
-  const std::int64_t fraction = us % 1000000;
-  std::ostringstream oss;
-  oss << seconds << "." << std::setw(6) << std::setfill('0') << fraction;
-  return oss.str();
-}
-
 std::string pad_id(const std::string& prefix, int index, int width = 6) {
   std::ostringstream oss;
   oss << prefix << std::setw(width) << std::setfill('0') << index;
   return oss.str();
-}
-
-// Extract a crop from the source video at a given timestamp and bbox.
-bool extract_crop_from_source(
-    const std::filesystem::path& ffmpeg_path,
-    const std::filesystem::path& source_path,
-    std::int64_t seek_us,
-    int crop_left, int crop_top, int crop_width, int crop_height,
-    int target_width, int target_height,
-    const std::string& image_format,
-    int jpeg_quality,
-    const std::filesystem::path& output_path,
-    std::string& error) {
-  const std::string seek = microseconds_to_seek_string(seek_us);
-
-  std::string crop_filter =
-      "crop=" + std::to_string(crop_width) + ":" +
-      std::to_string(crop_height) + ":" +
-      std::to_string(crop_left) + ":" +
-      std::to_string(crop_top);
-
-  const int min_ocr_width = 500;
-  const int max_crop_width = 2000;
-  if (target_width < min_ocr_width) {
-    const int scaled_width = std::min(target_width * 2, max_crop_width);
-    const int scaled_height = static_cast<int>(
-        std::round(static_cast<double>(target_height) * scaled_width /
-                   std::max(1, target_width)));
-    crop_filter += ",scale=" + std::to_string(scaled_width) + ":" +
-                    std::to_string(scaled_height);
-  } else if (target_width > max_crop_width) {
-    const int scaled_width = max_crop_width;
-    const int scaled_height = static_cast<int>(
-        std::round(static_cast<double>(target_height) * scaled_width /
-                   std::max(1, target_width)));
-    crop_filter += ",scale=" + std::to_string(scaled_width) + ":" +
-                    std::to_string(scaled_height);
-  }
-
-  std::string codec_opts;
-  if (image_format == "jpeg" || image_format == "jpg") {
-    codec_opts = " -c:v mjpeg -q:v " + std::to_string(
-        std::max(1, std::min(31, 31 - (jpeg_quality * 31) / 100)));
-    crop_filter += ",format=yuvj420p";
-  }
-
-  std::string cmd =
-      shell_quote(ffmpeg_path) +
-      " -v error"
-      " -ss " + seek +
-      " -i " + shell_quote(source_path) +
-      " -vf " + shell_quote_str(crop_filter) +
-      " -vframes 1" +
-      codec_opts +
-      " -y " + shell_quote(output_path) +
-      " 2>&1";
-
-  FILE* pipe = popen(cmd.c_str(), "r");
-  if (!pipe) {
-    error = "popen failed: " + std::string(std::strerror(errno));
-    return false;
-  }
-
-  std::string output;
-  char buffer[4096];
-  while (true) {
-    const std::size_t n = fread(buffer, 1, sizeof(buffer), pipe);
-    if (n == 0) break;
-    output.append(buffer, n);
-  }
-  const int status = pclose(pipe);
-  const bool ok = WIFEXITED(status) && WEXITSTATUS(status) == 0 &&
-      std::filesystem::exists(output_path);
-
-  if (!ok) {
-    error = trim(output);
-    if (error.empty()) {
-      error = "ffmpeg exited with status " +
-              std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : status);
-    }
-  }
-  return ok;
 }
 
 void expand_text_line_bbox(
@@ -184,7 +61,105 @@ std::int64_t get_file_size(const std::filesystem::path& path) {
   return static_cast<std::int64_t>(size);
 }
 
+// OCR-frame and source-frame sizes of a crop run and the transform between
+// them.
+struct CropFrameScale {
+  int ocr_w = 0;
+  int ocr_h = 0;
+  int src_w = 0;
+  int src_h = 0;
+  double scale_x = 1.0;
+  double scale_y = 1.0;
+};
+
+CropFrameScale crop_frame_scale(const EvidenceCropOptions& options) {
+  CropFrameScale scale;
+  scale.ocr_w = options.ocr_frame_width > 0 ?
+      options.ocr_frame_width : 0;
+  scale.ocr_h = options.ocr_frame_height > 0 ?
+      options.ocr_frame_height : 0;
+  scale.src_w = options.source_frame_width > 0 ?
+      options.source_frame_width : scale.ocr_w;
+  scale.src_h = options.source_frame_height > 0 ?
+      options.source_frame_height : scale.ocr_h;
+  scale.scale_x = (scale.ocr_w > 0) ?
+      static_cast<double>(scale.src_w) / static_cast<double>(scale.ocr_w) : 1.0;
+  scale.scale_y = (scale.ocr_h > 0) ?
+      static_cast<double>(scale.src_h) / static_cast<double>(scale.ocr_h) : 1.0;
+  return scale;
+}
+
+EvidenceCropJob make_crop_job(const EvidenceCropOptions& options,
+                              const CropGenerationInput& input,
+                              const EvidenceCropGeometry& geometry,
+                              std::size_t ordinal,
+                              int jpeg_quality) {
+  return EvidenceCropJob{.ordinal = ordinal,
+                         .seek_us = input.source_timestamp_us,
+                         .left = geometry.source_left,
+                         .top = geometry.source_top,
+                         .width = geometry.source_width,
+                         .height = geometry.source_height,
+                         .image_format = options.crop_image_format,
+                         .jpeg_quality = jpeg_quality};
+}
+
+constexpr const char* kOneCropPerObservationPolicy = "one_per_observation";
+
 }  // namespace
+
+EvidenceCropGeometry evidence_crop_geometry(const EvidenceCropOptions& options,
+                                            const CropGenerationInput& input) {
+  const CropFrameScale scale = crop_frame_scale(options);
+  const int clamp_w = (scale.ocr_w > 0) ? scale.ocr_w : input.frame_width;
+  const int clamp_h = (scale.ocr_h > 0) ? scale.ocr_h : input.frame_height;
+
+  EvidenceCropGeometry geometry;
+  expand_text_line_bbox(
+      input.bbox_left, input.bbox_top,
+      input.bbox_right, input.bbox_bottom,
+      clamp_w, clamp_h,
+      geometry.ocr_left, geometry.ocr_top, geometry.ocr_width, geometry.ocr_height);
+
+  int src_crop_left = static_cast<int>(std::round(geometry.ocr_left * scale.scale_x));
+  int src_crop_top = static_cast<int>(std::round(geometry.ocr_top * scale.scale_y));
+  int src_crop_width = static_cast<int>(std::round(geometry.ocr_width * scale.scale_x));
+  int src_crop_height = static_cast<int>(std::round(geometry.ocr_height * scale.scale_y));
+
+  src_crop_left = std::max(0, std::min(src_crop_left, scale.src_w));
+  src_crop_top = std::max(0, std::min(src_crop_top, scale.src_h));
+  src_crop_width = std::min(src_crop_width, scale.src_w - src_crop_left);
+  src_crop_height = std::min(src_crop_height, scale.src_h - src_crop_top);
+
+  geometry.source_left = src_crop_left;
+  geometry.source_top = src_crop_top;
+  geometry.source_width = src_crop_width;
+  geometry.source_height = src_crop_height;
+  return geometry;
+}
+
+bool evidence_crop_caps_never_bind(const EvidenceCropOptions& options) {
+  // generate_evidence_crops_internal: under this policy the count cap is at
+  // least the input count and the byte budget is the largest int64, which no
+  // sum of crop file sizes reaches.
+  return options.crop_coverage_policy == kOneCropPerObservationPolicy;
+}
+
+std::vector<EvidenceCropJob> plan_evidence_crop_jobs(
+    const EvidenceCropOptions& options,
+    const std::vector<CropGenerationInput>& inputs) {
+  std::vector<EvidenceCropJob> jobs;
+  jobs.reserve(inputs.size());
+  for (std::size_t index = 0; index < inputs.size(); ++index) {
+    const EvidenceCropGeometry geometry = evidence_crop_geometry(options, inputs[index]);
+    if (geometry.source_width < 1 || geometry.source_height < 1) {
+      continue;
+    }
+    jobs.push_back(make_crop_job(options, inputs[index], geometry, index,
+                                 options.jpeg_quality));
+  }
+  return jobs;
+}
 
 nlohmann::json evidence_crop_to_json(const EvidenceCropRecord& record) {
   nlohmann::json j = {
@@ -265,7 +240,8 @@ nlohmann::json evidence_crop_result_to_json(const EvidenceCropResult& result) {
 EvidenceCropResult generate_evidence_crops_internal(
     const EvidenceCropOptions& options,
     const std::vector<CropGenerationInput>& inputs,
-    const std::filesystem::path& staging_dir) {
+    const std::filesystem::path& staging_dir,
+    const EvidenceCropImageWriter& write_image) {
   EvidenceCropResult result;
   result.crop_coverage_policy = options.crop_coverage_policy;
   result.total_observations_requested = static_cast<std::int64_t>(inputs.size());
@@ -279,7 +255,7 @@ EvidenceCropResult generate_evidence_crops_internal(
   // Determine effective max_total_crops and byte budget based on coverage policy.
   std::size_t effective_max_crops = options.max_total_crops;
   std::int64_t effective_byte_budget = options.max_total_crop_bytes;
-  if (options.crop_coverage_policy == "one_per_observation") {
+  if (options.crop_coverage_policy == kOneCropPerObservationPolicy) {
     effective_max_crops = std::max(options.max_total_crops, inputs.size());
     effective_byte_budget = std::numeric_limits<std::int64_t>::max();
   }
@@ -295,19 +271,21 @@ EvidenceCropResult generate_evidence_crops_internal(
 
   result.roi_ocr_results.resize(inputs.size());
 
-  const int ocr_w = options.ocr_frame_width > 0 ?
-      options.ocr_frame_width : 0;
-  const int ocr_h = options.ocr_frame_height > 0 ?
-      options.ocr_frame_height : 0;
-  const int src_w = options.source_frame_width > 0 ?
-      options.source_frame_width : ocr_w;
-  const int src_h = options.source_frame_height > 0 ?
-      options.source_frame_height : ocr_h;
+  const CropFrameScale frame_scale = crop_frame_scale(options);
+  const int ocr_w = frame_scale.ocr_w;
+  const int ocr_h = frame_scale.ocr_h;
+  const int src_w = frame_scale.src_w;
+  const int src_h = frame_scale.src_h;
+  const double scale_x = frame_scale.scale_x;
+  const double scale_y = frame_scale.scale_y;
 
-  const double scale_x = (ocr_w > 0) ?
-      static_cast<double>(src_w) / static_cast<double>(ocr_w) : 1.0;
-  const double scale_y = (ocr_h > 0) ?
-      static_cast<double>(src_h) / static_cast<double>(ocr_h) : 1.0;
+  const auto extract = [&](const EvidenceCropJob& job, const std::filesystem::path& path,
+                           std::string& error) {
+    return write_image ? write_image(job, path, error)
+                       : extract_evidence_crop_image(options.ffmpeg_path,
+                                                     options.source_media_path, job, path,
+                                                     error);
+  };
 
   // Adaptive JPEG quality: start at configured quality, reduce if byte
   // budget is tight to fit more crops.
@@ -341,25 +319,15 @@ EvidenceCropResult generate_evidence_crops_internal(
       continue;
     }
 
-    const int clamp_w = (ocr_w > 0) ? ocr_w : input.frame_width;
-    const int clamp_h = (ocr_h > 0) ? ocr_h : input.frame_height;
-
-    int ocr_crop_left, ocr_crop_top, ocr_crop_width, ocr_crop_height;
-    expand_text_line_bbox(
-        input.bbox_left, input.bbox_top,
-        input.bbox_right, input.bbox_bottom,
-        clamp_w, clamp_h,
-        ocr_crop_left, ocr_crop_top, ocr_crop_width, ocr_crop_height);
-
-    int src_crop_left = static_cast<int>(std::round(ocr_crop_left * scale_x));
-    int src_crop_top = static_cast<int>(std::round(ocr_crop_top * scale_y));
-    int src_crop_width = static_cast<int>(std::round(ocr_crop_width * scale_x));
-    int src_crop_height = static_cast<int>(std::round(ocr_crop_height * scale_y));
-
-    src_crop_left = std::max(0, std::min(src_crop_left, src_w));
-    src_crop_top = std::max(0, std::min(src_crop_top, src_h));
-    src_crop_width = std::min(src_crop_width, src_w - src_crop_left);
-    src_crop_height = std::min(src_crop_height, src_h - src_crop_top);
+    const EvidenceCropGeometry geometry = evidence_crop_geometry(options, input);
+    const int ocr_crop_left = geometry.ocr_left;
+    const int ocr_crop_top = geometry.ocr_top;
+    const int ocr_crop_width = geometry.ocr_width;
+    const int ocr_crop_height = geometry.ocr_height;
+    const int src_crop_left = geometry.source_left;
+    const int src_crop_top = geometry.source_top;
+    const int src_crop_width = geometry.source_width;
+    const int src_crop_height = geometry.source_height;
 
     if (src_crop_width < 1 || src_crop_height < 1) {
       crops_skipped++;
@@ -374,14 +342,8 @@ EvidenceCropResult generate_evidence_crops_internal(
     const std::filesystem::path crop_path = crops_dir / crop_filename;
 
     std::string extract_error;
-    bool crop_ok = extract_crop_from_source(
-        options.ffmpeg_path, options.source_media_path,
-        input.source_timestamp_us,
-        src_crop_left, src_crop_top, src_crop_width, src_crop_height,
-        src_crop_width, src_crop_height,
-        options.crop_image_format,
-        current_jpeg_quality,
-        crop_path, extract_error);
+    bool crop_ok = extract(make_crop_job(options, input, geometry, i, current_jpeg_quality),
+                           crop_path, extract_error);
 
     if (!crop_ok) {
       crops_skipped++;
@@ -406,13 +368,8 @@ EvidenceCropResult generate_evidence_crops_internal(
         if (reduced_quality < current_jpeg_quality) {
           current_jpeg_quality = reduced_quality;
           // Re-try this crop at lower quality
-          crop_ok = extract_crop_from_source(
-              options.ffmpeg_path, options.source_media_path,
-              input.source_timestamp_us,
-              src_crop_left, src_crop_top, src_crop_width, src_crop_height,
-              src_crop_width, src_crop_height,
-              options.crop_image_format,
-              current_jpeg_quality,
+          crop_ok = extract(
+              make_crop_job(options, input, geometry, i, current_jpeg_quality),
               crop_path, extract_error);
           if (crop_ok) {
             const std::int64_t reduced_bytes = get_file_size(crop_path);

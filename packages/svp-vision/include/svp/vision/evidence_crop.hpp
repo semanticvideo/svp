@@ -1,5 +1,7 @@
 #pragma once
 
+#include "svp/vision/evidence_crop_work.hpp"
+
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -107,6 +109,12 @@ struct RoiOcrResult {
   int word_count = 0;
 };
 
+// The encoding the OCR stage gives evidence crops: JPEG at quality 95, high
+// enough that the ROI re-read sees the source's glyphs, small enough that a
+// crop per observation stays cheap to package.
+inline constexpr const char* kEvidenceCropImageFormat = "jpeg";
+inline constexpr int kEvidenceCropJpegQuality = 95;
+
 // Options controlling evidence crop generation.
 struct EvidenceCropOptions {
   std::filesystem::path ffmpeg_path;
@@ -199,12 +207,52 @@ struct CropGenerationInput {
 
 [[nodiscard]] nlohmann::json evidence_crop_result_to_json(const EvidenceCropResult& result);
 
+// Where one input's crop lies: the text-line rectangle expanded with
+// margins in OCR-frame pixels, and that rectangle transformed and clamped to
+// source-frame pixels. A source rectangle narrower or shorter than one pixel
+// means the input gets no crop (an extraction skip).
+struct EvidenceCropGeometry {
+  int ocr_left = 0;
+  int ocr_top = 0;
+  int ocr_width = 0;
+  int ocr_height = 0;
+  int source_left = 0;
+  int source_top = 0;
+  int source_width = 0;
+  int source_height = 0;
+};
+
+[[nodiscard]] EvidenceCropGeometry evidence_crop_geometry(
+    const EvidenceCropOptions& options,
+    const CropGenerationInput& input);
+
+// True when neither the crop-count cap nor the byte budget can stop an
+// extraction or lower its JPEG quality, so every input with a crop
+// rectangle is extracted once at options.jpeg_quality, whatever the other
+// inputs produce. That holds under the one_per_observation policy, whose
+// effective caps cover every input.
+[[nodiscard]] bool evidence_crop_caps_never_bind(const EvidenceCropOptions& options);
+
+// The extractions generate_evidence_crops_internal makes when the caps never
+// bind: one job per input with a non-empty source rectangle, in input order,
+// ordinal = input index.
+[[nodiscard]] std::vector<EvidenceCropJob> plan_evidence_crop_jobs(
+    const EvidenceCropOptions& options,
+    const std::vector<CropGenerationInput>& inputs);
+
+// Writes one job's crop image to `output_path`; false (with `error`) when no
+// image was written. Empty means extract_evidence_crop_image from the
+// options' ffmpeg and source.
+using EvidenceCropImageWriter = std::function<bool(
+    const EvidenceCropJob& job, const std::filesystem::path& output_path, std::string& error)>;
+
 // Generate evidence crops for reconciled text observations.
 // Extracts crop images from the source video, computes BLAKE3 hashes,
 // and writes crop metadata + images.
 [[nodiscard]] EvidenceCropResult generate_evidence_crops_internal(
     const EvidenceCropOptions& options,
     const std::vector<CropGenerationInput>& inputs,
-    const std::filesystem::path& staging_dir);
+    const std::filesystem::path& staging_dir,
+    const EvidenceCropImageWriter& write_image = {});
 
 }  // namespace svp::vision

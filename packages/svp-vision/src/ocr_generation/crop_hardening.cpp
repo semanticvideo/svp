@@ -1,7 +1,9 @@
 #include "ocr_generation_internal.hpp"
 
 #include "svp/media/media_ingest_plan.hpp"
+#include "svp/vision/dispatched_work.hpp"
 #include "svp/vision/evidence_crop.hpp"
+#include "svp/vision/evidence_crop_work.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -13,69 +15,6 @@
 
 namespace svp::vision::ocr_generation_internal {
 namespace {
-
-std::string shell_quote(const std::filesystem::path& path) {
-  std::string quoted = "'";
-  for (const char c : path.string()) {
-    if (c == '\'') {
-      quoted += "'\\''";
-    } else {
-      quoted += c;
-    }
-  }
-  quoted += "'";
-  return quoted;
-}
-
-std::optional<ColorRasterFrame> decode_crop_image_with_ffmpeg(
-    const std::filesystem::path& ffmpeg_path,
-    const std::filesystem::path& image_path,
-    int width,
-    int height,
-    const std::string& frame_id,
-    std::int64_t timestamp_us) {
-  if (width <= 0 || height <= 0 || !std::filesystem::exists(image_path)) {
-    return std::nullopt;
-  }
-
-  const std::string cmd =
-      shell_quote(ffmpeg_path) +
-      " -v error"
-      " -i " + shell_quote(image_path) +
-      " -vf scale=" + std::to_string(width) + ":" + std::to_string(height) +
-      " -vframes 1"
-      " -f rawvideo"
-      " -pix_fmt rgb24"
-      " pipe:1"
-      " 2>/dev/null";
-
-  FILE* pipe = popen(cmd.c_str(), "r");
-  if (pipe == nullptr) return std::nullopt;
-
-  const std::size_t expected_bytes =
-      static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3;
-  std::vector<std::uint8_t> raw_bytes(expected_bytes);
-  const std::size_t bytes_read = std::fread(raw_bytes.data(), 1, expected_bytes, pipe);
-  const int status = pclose(pipe);
-
-  if (bytes_read != expected_bytes ||
-      !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-    return std::nullopt;
-  }
-
-  ColorRasterFrame frame;
-  frame.frame_id = frame_id;
-  frame.frame_index = 0;
-  frame.timestamp_us = timestamp_us;
-  frame.width = width;
-  frame.height = height;
-  frame.keyframe = false;
-  frame.pixels.reserve(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
-  for (std::size_t i = 0; i < raw_bytes.size(); i += 3) {
-    frame.pixels.push_back({raw_bytes[i], raw_bytes[i + 1], raw_bytes[i + 2]});
-  }
-  return frame;
-}
 
 std::vector<CropGenerationInput> build_crop_inputs(
     const OcrGenerationResult& result,
@@ -129,8 +68,8 @@ EvidenceCropOptions build_crop_options(const OcrGenerationOptions& options) {
   crop_opts.max_total_crop_bytes = options.max_total_crop_bytes;
   crop_opts.crop_coverage_policy = options.crop_coverage_policy;
   crop_opts.min_jpeg_quality = options.crop_min_jpeg_quality;
-  crop_opts.crop_image_format = "jpeg";
-  crop_opts.jpeg_quality = 95;
+  crop_opts.crop_image_format = kEvidenceCropImageFormat;
+  crop_opts.jpeg_quality = kEvidenceCropJpegQuality;
   crop_opts.on_progress = options.on_evidence_crop_progress;
   return crop_opts;
 }
@@ -164,6 +103,111 @@ void rewrite_evidence_crop_jsonl(const std::filesystem::path& staging_dir,
   }
 }
 
+// Crop work a dispatcher already did (dispatched_work.hpp): its successful
+// outcomes by crop-input index, each with the job it was computed for. The
+// stage writes these bytes and takes these ROI re-reads instead of running
+// ffmpeg and PP-OCR again; every other crop, a failed one included, is
+// computed here exactly as without a dispatcher.
+struct DispatchedCrops {
+  std::vector<std::optional<EvidenceCropJob>> jobs;
+  std::vector<std::optional<EvidenceCropJobOutcome>> outcomes;
+  // Set by the image writer: input i's crop file holds the dispatched bytes.
+  std::vector<bool> written;
+};
+
+std::optional<DispatchedCrops> dispatch_evidence_crops(
+    const OcrGenerationOptions& options,
+    const EvidenceCropOptions& crop_options,
+    const std::vector<CropGenerationInput>& crop_inputs,
+    const PpOcrOptions& roi_options) {
+  if (!options.evidence_crop_dispatcher || !evidence_crop_caps_never_bind(crop_options)) {
+    return std::nullopt;
+  }
+  const std::vector<EvidenceCropJob> jobs = plan_evidence_crop_jobs(crop_options, crop_inputs);
+  const std::size_t input_count = crop_inputs.size();
+  const auto report = [&options, input_count](std::size_t done, std::size_t total) {
+    if (options.on_evidence_crop_progress && total > 0) {
+      // Extraction progress is per crop input, as the stage reports it.
+      options.on_evidence_crop_progress(done * input_count / total, input_count);
+    }
+  };
+  std::optional<std::vector<EvidenceCropJobOutcome>> outcomes =
+      options.evidence_crop_dispatcher(jobs, roi_options, report);
+  if (!outcomes) {
+    return std::nullopt;
+  }
+  if (outcomes->size() != jobs.size()) {
+    throw DispatchedWorkError("evidence crops: " + std::to_string(outcomes->size()) +
+                              " outcomes for " + std::to_string(jobs.size()) + " crops");
+  }
+  DispatchedCrops dispatched;
+  dispatched.jobs.resize(input_count);
+  dispatched.outcomes.resize(input_count);
+  dispatched.written.assign(input_count, false);
+  for (std::size_t index = 0; index < jobs.size(); ++index) {
+    EvidenceCropJobOutcome& outcome = (*outcomes)[index];
+    if (outcome.ordinal != jobs[index].ordinal) {
+      throw DispatchedWorkError("evidence crops: outcome " + std::to_string(index) +
+                                " is for crop " + std::to_string(outcome.ordinal) +
+                                ", not " + std::to_string(jobs[index].ordinal));
+    }
+    if (!outcome.extracted) {
+      continue;  // computed again here
+    }
+    dispatched.jobs[jobs[index].ordinal] = jobs[index];
+    dispatched.outcomes[jobs[index].ordinal] = std::move(outcome);
+  }
+  if (options.on_evidence_crop_progress) {
+    options.on_evidence_crop_progress(input_count, input_count);
+  }
+  return dispatched;
+}
+
+bool write_image_bytes(const std::vector<std::byte>& bytes, const std::filesystem::path& path) {
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  out.write(reinterpret_cast<const char*>(bytes.data()),
+            static_cast<std::streamsize>(bytes.size()));
+  out.close();
+  return static_cast<bool>(out);
+}
+
+EvidenceCropImageWriter dispatched_image_writer(const EvidenceCropOptions& crop_options,
+                                                DispatchedCrops& dispatched) {
+  return [&crop_options, &dispatched](const EvidenceCropJob& job,
+                                      const std::filesystem::path& path, std::string& error) {
+    const std::size_t index = static_cast<std::size_t>(job.ordinal);
+    if (index < dispatched.outcomes.size()) {
+      dispatched.written[index] = false;
+      if (dispatched.outcomes[index] && dispatched.jobs[index] == job &&
+          write_image_bytes(dispatched.outcomes[index]->image, path)) {
+        dispatched.written[index] = true;
+        return true;
+      }
+    }
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    return extract_evidence_crop_image(crop_options.ffmpeg_path,
+                                       crop_options.source_media_path, job, path, error);
+  };
+}
+
+// The dispatched ROI re-read of input `index`, when its crop file holds the
+// dispatched bytes and the re-read found text. A re-read that could not
+// decode the crop or produced no text is done again here: PP-OCR reports a
+// failed inference as empty text, so only text is taken as settled.
+std::optional<EvidenceCropRoi> dispatched_roi(const DispatchedCrops* dispatched,
+                                              std::optional<std::size_t> index) {
+  if (dispatched == nullptr || !index || *index >= dispatched->written.size() ||
+      !dispatched->written[*index]) {
+    return std::nullopt;
+  }
+  const EvidenceCropRoi& roi = dispatched->outcomes[*index]->roi;
+  if (!roi.decoded || roi.text.empty()) {
+    return std::nullopt;
+  }
+  return roi;
+}
+
 }  // namespace
 
 RoiHardeningSummary generate_and_harden_evidence_crops(
@@ -181,15 +225,38 @@ RoiHardeningSummary generate_and_harden_evidence_crops(
   }
 
   EvidenceCropResult crop_result;
+  std::optional<EvidenceCropOptions> crop_options;
+  std::vector<CropGenerationInput> crop_inputs;
+  std::optional<DispatchedCrops> dispatched;
   try {
-    crop_result = generate_evidence_crops_internal(
-        build_crop_options(options),
-        build_crop_inputs(result, reconciled),
-        staging_dir);
+    crop_options = build_crop_options(options);
+    crop_inputs = build_crop_inputs(result, reconciled);
   } catch (const std::exception& e) {
     crop_result.crops_written = false;
     crop_result.crops_skipped_reason =
         std::string("Evidence crop generation error: ") + e.what();
+  }
+  if (crop_options) {
+    // Outside the try: a dispatcher that fails ends the build
+    // (DispatchedWorkError), never as a crop blocker.
+    dispatched = dispatch_evidence_crops(options, *crop_options, crop_inputs, pp_ocr_opts);
+    EvidenceCropOptions writing_options = *crop_options;
+    if (dispatched) {
+      // Extraction progress was reported as the dispatched work arrived.
+      writing_options.on_progress = nullptr;
+    }
+    try {
+      crop_result = generate_evidence_crops_internal(
+          writing_options,
+          crop_inputs,
+          staging_dir,
+          dispatched ? dispatched_image_writer(*crop_options, *dispatched)
+                     : EvidenceCropImageWriter{});
+    } catch (const std::exception& e) {
+      crop_result.crops_written = false;
+      crop_result.crops_skipped_reason =
+          std::string("Evidence crop generation error: ") + e.what();
+    }
   }
 
   copy_crop_result_to_generation_result(crop_result, result);
@@ -198,6 +265,10 @@ RoiHardeningSummary generate_and_harden_evidence_crops(
   std::map<std::string, std::size_t> observation_index_by_id;
   for (std::size_t i = 0; i < result.text_observations.size(); ++i) {
     observation_index_by_id[result.text_observations[i].text_observation_id] = i;
+  }
+  std::map<std::string, std::size_t> crop_input_index_by_observation;
+  for (std::size_t i = 0; i < crop_inputs.size(); ++i) {
+    crop_input_index_by_observation.emplace(crop_inputs[i].text_observation_id, i);
   }
 
   if (options.on_evidence_roi_progress) {
@@ -228,17 +299,27 @@ RoiHardeningSummary generate_and_harden_evidence_crops(
       obs.evidence_crop_refs.push_back(crop.crop_id);
     }
 
-    const int crop_width = crop.crop_bbox_right - crop.crop_bbox_left;
-    const int crop_height = crop.crop_bbox_bottom - crop.crop_bbox_top;
-    std::optional<ColorRasterFrame> crop_frame =
-        decode_crop_image_with_ffmpeg(
-            options.ffmpeg_path,
-            staging_dir / crop.crop_file_path,
-            crop_width,
-            crop_height,
-            crop.source_frame_id,
-            crop.source_timestamp_us);
-    if (!crop_frame.has_value()) {
+    std::optional<std::size_t> crop_input_index;
+    if (const auto found = crop_input_index_by_observation.find(crop.text_observation_id);
+        found != crop_input_index_by_observation.end()) {
+      crop_input_index = found->second;
+    }
+    std::optional<EvidenceCropRoi> roi =
+        dispatched_roi(dispatched ? &*dispatched : nullptr, crop_input_index);
+    if (!roi) {
+      const int crop_width = crop.crop_bbox_right - crop.crop_bbox_left;
+      const int crop_height = crop.crop_bbox_bottom - crop.crop_bbox_top;
+      roi = reread_evidence_crop(
+          pp_ocr_session, pp_ocr_opts,
+          decode_evidence_crop_image(
+              options.ffmpeg_path,
+              staging_dir / crop.crop_file_path,
+              crop_width,
+              crop_height,
+              crop.source_frame_id,
+              crop.source_timestamp_us));
+    }
+    if (!roi->decoded) {
       crop.evidence_quality = "unsupported";
       crop.evidence_quality_reason =
           "Crop image could not be decoded for ROI OCR verification";
@@ -246,24 +327,22 @@ RoiHardeningSummary generate_and_harden_evidence_crops(
       continue;
     }
 
-    const PpOcrDetection roi_detection =
-        run_pp_ocr_recognition_on_crop(pp_ocr_session, pp_ocr_opts, *crop_frame);
-    if (roi_detection.text.empty()) {
+    if (roi->text.empty()) {
       crop.evidence_quality = "weak";
       crop.evidence_quality_reason = "Crop was decoded but ROI OCR produced no text";
       report_crop_processed();
       continue;
     }
 
-    crop.roi_ocr_text = roi_detection.text;
-    crop.roi_ocr_confidence = roi_detection.score;
+    crop.roi_ocr_text = roi->text;
+    crop.roi_ocr_confidence = roi->score;
     crop.roi_ocr_word_count =
-        alphanumeric_key(normalize_text(roi_detection.text)).empty() ? 0 : 1;
+        alphanumeric_key(normalize_text(roi->text)).empty() ? 0 : 1;
 
-    if (roi_text_is_better(obs.raw_text, roi_detection.text)) {
-      obs.raw_text = roi_detection.text;
-      obs.normalized_text = normalize_text(roi_detection.text);
-      obs.confidence = std::max(obs.confidence, roi_detection.score);
+    if (roi_text_is_better(obs.raw_text, roi->text)) {
+      obs.raw_text = roi->text;
+      obs.normalized_text = normalize_text(roi->text);
+      obs.confidence = std::max(obs.confidence, roi->score);
       if (obs.language.has_value()) {
         (*obs.language)["confidence"] = obs.confidence;
       }

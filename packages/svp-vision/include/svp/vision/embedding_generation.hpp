@@ -4,6 +4,8 @@
 
 #include "svp/blocks/block_writer.hpp"
 #include "svp/models/runtime.hpp"
+#include "svp/vision/keyframe_embedding_work.hpp"
+#include "svp/vision/text_embedding_work.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -33,6 +35,10 @@ struct EmbeddingGenerationOptions {
   svp::models::OrtThreadCounts vision_threads;
   std::uint32_t embedding_dim = 768;
   std::function<void(std::size_t current, std::size_t total)> on_progress;
+  // Optional: embed text observations and shot keyframes elsewhere
+  // (dispatched_work.hpp). Empty in every build that is not --distributed.
+  TextEmbeddingDispatcher text_dispatcher;
+  KeyframeEmbeddingDispatcher keyframe_dispatcher;
 };
 
 struct EmbeddingEntry {

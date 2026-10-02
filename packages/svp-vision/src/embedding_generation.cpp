@@ -2,6 +2,9 @@
 
 #include "embedding_generation/shot_keyframe_embedding.hpp"
 
+#include "svp/vision/dispatched_work.hpp"
+#include "svp/vision/text_embedding_work.hpp"
+
 #include "svp/core/memory_diagnostics.hpp"
 #include "svp/models/cache.hpp"
 #include "svp/models/manifest.hpp"
@@ -127,62 +130,6 @@ std::vector<TextObservationInput> load_text_observations_from_staging(
     }
   }
   return inputs;
-}
-
-std::vector<float> mean_pool_and_normalize(
-    const std::vector<float>& last_hidden_state,
-    const std::vector<std::int64_t>& attention_mask,
-    std::size_t seq_len,
-    std::uint32_t embedding_dim) {
-  std::vector<float> pooled(embedding_dim, 0.0f);
-  float mask_sum = 0.0f;
-
-  for (std::size_t t = 0; t < seq_len; ++t) {
-    if (attention_mask[t] == 0) continue;
-    mask_sum += 1.0f;
-    for (std::uint32_t d = 0; d < embedding_dim; ++d) {
-      pooled[d] += last_hidden_state[t * embedding_dim + d];
-    }
-  }
-
-  if (mask_sum > 0.0f) {
-    const float inv = 1.0f / mask_sum;
-    for (std::uint32_t d = 0; d < embedding_dim; ++d) {
-      pooled[d] *= inv;
-    }
-  }
-
-  float norm = 0.0f;
-  for (std::uint32_t d = 0; d < embedding_dim; ++d) {
-    norm += pooled[d] * pooled[d];
-  }
-  norm = std::sqrt(norm);
-  if (norm > 1e-12f) {
-    const float inv_norm = 1.0f / norm;
-    for (std::uint32_t d = 0; d < embedding_dim; ++d) {
-      pooled[d] *= inv_norm;
-    }
-  }
-
-  return pooled;
-}
-
-bool validate_embedding(const std::vector<float>& embedding,
-                        std::uint32_t expected_dim) {
-  if (embedding.size() != expected_dim) return false;
-  bool has_nan = false;
-  bool has_inf = false;
-  float norm_sq = 0.0f;
-  for (std::uint32_t d = 0; d < expected_dim; ++d) {
-    if (std::isnan(embedding[d])) has_nan = true;
-    if (std::isinf(embedding[d])) has_inf = true;
-    norm_sq += embedding[d] * embedding[d];
-  }
-  if (has_nan || has_inf) return false;
-  const float norm = std::sqrt(norm_sq);
-  if (norm < 0.9f || norm > 1.1f) return false;
-  if (norm_sq < 1e-20f) return false;
-  return true;
 }
 
 }  // namespace
@@ -321,6 +268,33 @@ EmbeddingGenerationResult generate_embedding_blocks(
     options.on_progress(0, total_inputs);
   }
 
+  // Text observations embedded elsewhere (dispatched_work.hpp), one outcome
+  // per observation in file order.
+  std::optional<std::vector<TextEmbeddingOutcome>> dispatched;
+  if (options.text_dispatcher && !text_inputs.empty()) {
+    std::vector<TextEmbeddingItem> items;
+    items.reserve(text_inputs.size());
+    for (const auto& text_input : text_inputs) {
+      items.push_back({text_input.id, text_input.text});
+    }
+    dispatched = options.text_dispatcher(
+        items,
+        DispatchedModel{.model_id = manifest.model_id,
+                        .execution_provider = options.execution_provider,
+                        .threads = options.threads},
+        options.embedding_dim,
+        [&options, total_inputs](std::size_t done, std::size_t) {
+          if (options.on_progress) {
+            options.on_progress(done, total_inputs);
+          }
+        });
+    if (dispatched && dispatched->size() != items.size()) {
+      throw DispatchedWorkError("text embeddings: " + std::to_string(dispatched->size()) +
+                                " outcomes for " + std::to_string(items.size()) +
+                                " observations");
+    }
+  }
+
   for (std::size_t input_index = 0; input_index < text_inputs.size(); ++input_index) {
     const auto& text_input = text_inputs[input_index];
     if (input_index == 0 || ((input_index + 1) % 25) == 0 ||
@@ -332,111 +306,28 @@ EmbeddingGenerationResult generate_embedding_blocks(
           {"text_size", std::to_string(text_input.text.size())}
       });
     }
-    TokenizedText tokenized = tokenizer.tokenize(text_input.text, 512);
-
-    svp::models::TextEmbeddingOutput embedding_output;
-    try {
-      embedding_output = session.run_text_embedding(
-          tokenized.input_ids.data(),
-          tokenized.token_type_ids.data(),
-          tokenized.attention_mask.data(),
-          1,
-          tokenized.seq_len);
-    } catch (const std::exception& e) {
-      result.blocker = std::string("ONNX text embedding inference failed for ") +
-          text_input.id + ": " + e.what();
-      result.processor_provenance = make_embedding_processor_provenance(
-          manifest.model_id, manifest.model_bundle_id,
-          options.execution_provider, "error", result.blocker);
-      return result;
-    }
-
-    if (embedding_output.shape.size() != 3) {
-      result.blocker = std::string("ONNX output shape validation failed for ") +
-          text_input.id + ": expected rank-3 output, got rank " +
-          std::to_string(embedding_output.shape.size());
-      result.processor_provenance = make_embedding_processor_provenance(
-          manifest.model_id, manifest.model_bundle_id,
-          options.execution_provider, "error", result.blocker);
-      return result;
-    }
-
-    for (std::size_t i = 0; i < 3; ++i) {
-      if (embedding_output.shape[i] <= 0) {
-        result.blocker = std::string("ONNX output shape validation failed for ") +
-            text_input.id + ": dimension " + std::to_string(i) +
-            " is not positive, got " +
-            std::to_string(embedding_output.shape[i]);
-        result.processor_provenance = make_embedding_processor_provenance(
-            manifest.model_id, manifest.model_bundle_id,
-            options.execution_provider, "error", result.blocker);
-        return result;
+    TextEmbeddingOutcome outcome;
+    if (dispatched && (*dispatched)[input_index].error.empty()) {
+      outcome = std::move((*dispatched)[input_index]);
+      if (outcome.vector.size() != options.embedding_dim) {
+        throw DispatchedWorkError("text embeddings: vector for " + text_input.id + " has " +
+                                  std::to_string(outcome.vector.size()) + " values, not " +
+                                  std::to_string(options.embedding_dim));
       }
+    } else {
+      // No dispatcher, or the dispatched item failed: embed it here, so a
+      // failure is this Mac's (dispatched_work.hpp).
+      outcome = embed_text_item(session, tokenizer, {text_input.id, text_input.text},
+                                options.embedding_dim);
     }
-
-    if (embedding_output.shape[0] != 1) {
-      result.blocker = std::string("ONNX output batch mismatch for ") +
-          text_input.id + ": expected 1, got " +
-          std::to_string(embedding_output.shape[0]);
+    if (!outcome.error.empty()) {
+      result.blocker = outcome.error;
       result.processor_provenance = make_embedding_processor_provenance(
           manifest.model_id, manifest.model_bundle_id,
           options.execution_provider, "error", result.blocker);
       return result;
     }
-
-    const std::size_t out_batch =
-        static_cast<std::size_t>(embedding_output.shape[0]);
-    const std::size_t out_seq_len =
-        static_cast<std::size_t>(embedding_output.shape[1]);
-    const std::size_t out_dim =
-        static_cast<std::size_t>(embedding_output.shape[2]);
-
-    const std::size_t expected_elements = out_batch * out_seq_len * out_dim;
-    if (embedding_output.data.size() != expected_elements) {
-      result.blocker = std::string("ONNX output element count mismatch for ") +
-          text_input.id + ": shape implies " +
-          std::to_string(expected_elements) + " elements, got " +
-          std::to_string(embedding_output.data.size());
-      result.processor_provenance = make_embedding_processor_provenance(
-          manifest.model_id, manifest.model_bundle_id,
-          options.execution_provider, "error", result.blocker);
-      return result;
-    }
-
-    if (out_dim != options.embedding_dim) {
-      result.blocker = std::string("ONNX output dimension mismatch for ") +
-          text_input.id + ": expected " +
-          std::to_string(options.embedding_dim) + ", got " +
-          std::to_string(out_dim);
-      result.processor_provenance = make_embedding_processor_provenance(
-          manifest.model_id, manifest.model_bundle_id,
-          options.execution_provider, "error", result.blocker);
-      return result;
-    }
-
-    if (out_seq_len != tokenized.seq_len) {
-      result.blocker = std::string("ONNX output seq_len mismatch for ") +
-          text_input.id + ": expected " +
-          std::to_string(tokenized.seq_len) + ", got " +
-          std::to_string(out_seq_len);
-      result.processor_provenance = make_embedding_processor_provenance(
-          manifest.model_id, manifest.model_bundle_id,
-          options.execution_provider, "error", result.blocker);
-      return result;
-    }
-
-    std::vector<float> embedding = mean_pool_and_normalize(
-        embedding_output.data, tokenized.attention_mask,
-        tokenized.seq_len, options.embedding_dim);
-
-    if (!validate_embedding(embedding, options.embedding_dim)) {
-      result.blocker = std::string("Embedding validation failed for ") +
-          text_input.id + ": invalid vector (NaN, Inf, zero, or wrong dimension)";
-      result.processor_provenance = make_embedding_processor_provenance(
-          manifest.model_id, manifest.model_bundle_id,
-          options.execution_provider, "error", result.blocker);
-      return result;
-    }
+    const std::vector<float>& embedding = outcome.vector;
 
     svp::blocks::BlockWriteSpec spec;
     spec.block_type = svp::blocks::BlockType::embedding;
@@ -505,7 +396,8 @@ EmbeddingGenerationResult generate_embedding_blocks(
         {"block_blake3", entry.block_blake3}
     });
 
-    if (options.on_progress) {
+    // Dispatched progress was reported as the outcomes arrived.
+    if (options.on_progress && !dispatched) {
       options.on_progress(result.entries.size(), total_inputs);
     }
     if (input_index == 0 || ((input_index + 1) % 25) == 0 ||
@@ -531,6 +423,7 @@ EmbeddingGenerationResult generate_embedding_blocks(
     request.execution_provider = options.execution_provider;
     request.threads = options.vision_threads;
     request.embedding_dim = options.embedding_dim;
+    request.dispatcher = options.keyframe_dispatcher;
     request.on_keyframe = [&](std::size_t done, std::size_t) {
       if (options.on_progress) {
         options.on_progress(text_entry_count + done, total_inputs);
@@ -543,7 +436,7 @@ EmbeddingGenerationResult generate_embedding_blocks(
   }
 
   for (const auto& shot_vector : shot_embeddings.vectors) {
-    if (!validate_embedding(shot_vector.vector, options.embedding_dim)) {
+    if (!embedding_vector_is_valid(shot_vector.vector, options.embedding_dim)) {
       result.blocker = std::string("Embedding validation failed for keyframe of ") +
           shot_vector.shot_id + ": invalid vector (NaN, Inf, zero, or wrong dimension)";
       result.processor_provenance = make_embedding_processor_provenance(

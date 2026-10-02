@@ -4,6 +4,7 @@
 #include "svp/package/entity_writer.hpp"
 #include "svp/package/visual_entity_artifact_writer.hpp"
 #include "svp/vision/depth_generation.hpp"
+#include "svp/vision/dispatched_work.hpp"
 #include "svp/vision/embedding_generation.hpp"
 #include "svp/vision/frame_catalog.hpp"
 #include "svp/vision/ocr_frame_batch_reduction.hpp"
@@ -104,6 +105,7 @@ svp::vision::DepthGenerationResult generate_depth(
   depth_opts.raster_width = raster.width;
   depth_opts.raster_height = raster.height;
   depth_opts.frame_input = frames;
+  depth_opts.frame_dispatcher = settings.dispatch.depth_frames;
   if (on_progress) {
     depth_opts.on_progress = [&on_progress](std::size_t current, std::size_t total) {
       on_progress("depth", current, total, "");
@@ -113,6 +115,10 @@ svp::vision::DepthGenerationResult generate_depth(
   svp::vision::DepthGenerationResult result;
   try {
     result = svp::vision::generate_depth_blocks(depth_opts, settings.staging_dir);
+  } catch (const svp::vision::DispatchedWorkError&) {
+    // Dispatched work that could not be delivered fails the build; it is
+    // never a depth blocker (dispatched_work.hpp).
+    throw;
   } catch (const std::exception& e) {
     result.blocker = std::string("Depth generation error: ") + e.what();
     result.onnx_runtime_available = settings.model_runtime_available;
@@ -201,6 +207,7 @@ svp::vision::OcrGenerationOptions make_vision_ocr_options(
   ocr_opts.detection_threads = settings.thread_plan.ocr_detection;
   ocr_opts.recognition_threads = settings.thread_plan.ocr_recognition;
   ocr_opts.frame_catalog = frame_catalog;
+  ocr_opts.evidence_crop_dispatcher = settings.dispatch.evidence_crops;
   attach_ocr_progress_callbacks(ocr_opts, on_progress);
   return ocr_opts;
 }
@@ -233,6 +240,8 @@ VisionOcrStageResult run_vision_ocr_stage(
   try {
     ocr = svp::vision::generate_ocr_observations(ocr_opts, frames,
                                                  settings.staging_dir);
+  } catch (const svp::vision::DispatchedWorkError&) {
+    throw;
   } catch (const std::exception& e) {
     ocr.blocker = std::string("OCR generation error: ") + e.what();
   }
@@ -258,6 +267,9 @@ VisionOcrStageResult run_vision_ocr_reduce_stage(
     // Batches that do not cover the plan are a build failure, never an OCR
     // stage that silently produced nothing.
     throw;
+  } catch (const svp::vision::DispatchedWorkError&) {
+    // Likewise dispatched evidence-crop work that could not be delivered.
+    throw;
   } catch (const std::exception& e) {
     ocr.blocker = std::string("OCR generation error: ") + e.what();
   }
@@ -276,6 +288,8 @@ VisionTextEmbeddingStageResult run_vision_text_embedding_stage(
     emb_opts.media_plan = settings.media_plan;
     emb_opts.ffmpeg_path = settings.ffmpeg_path;
     emb_opts.vision_threads = settings.thread_plan.visual_entity_embedding;
+    emb_opts.text_dispatcher = settings.dispatch.text_embeddings;
+    emb_opts.keyframe_dispatcher = settings.dispatch.keyframe_embeddings;
     if (on_progress) {
       emb_opts.on_progress = [&on_progress](std::size_t current, std::size_t total) {
         on_progress("text_embeddings", current, total, "");
@@ -283,6 +297,8 @@ VisionTextEmbeddingStageResult run_vision_text_embedding_stage(
     }
     try {
       embeddings = svp::vision::generate_embedding_blocks(emb_opts, settings.staging_dir);
+    } catch (const svp::vision::DispatchedWorkError&) {
+      throw;
     } catch (const std::exception& e) {
       embeddings.blocker = std::string("Embedding generation error: ") + e.what();
       embeddings.onnx_runtime_available = settings.model_runtime_available;

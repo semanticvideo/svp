@@ -25,11 +25,15 @@
 #include "svp/models/thread_plan.hpp"
 #include "svp/package/spatial_embedding_placeholders.hpp"
 #include "svp/vision/canonical_frame_input.hpp"
+#include "svp/vision/depth_frame_work.hpp"
+#include "svp/vision/evidence_crop_work.hpp"
 #include "svp/vision/inference_performance.hpp"
+#include "svp/vision/keyframe_embedding_work.hpp"
 #include "svp/vision/ocr_frame_detections.hpp"
 #include "svp/vision/ocr_generation.hpp"
 #include "svp/vision/ocr_sample_plan.hpp"
 #include "svp/vision/pp_ocr.hpp"
+#include "svp/vision/text_embedding_work.hpp"
 
 #include <filesystem>
 #include <nlohmann/json.hpp>
@@ -40,6 +44,16 @@ namespace svp::media { struct MediaIngestPlan; }
 namespace svp::vision { class FrameCatalog; }
 
 namespace svp::package {
+
+// Where a build sends the per-item work of its vision stages
+// (svp/vision/dispatched_work.hpp). Every hook is empty unless the build is
+// --distributed; an empty hook means the stage does the work itself.
+struct VisionWorkDispatch {
+  svp::vision::EvidenceCropDispatcher evidence_crops;
+  svp::vision::TextEmbeddingDispatcher text_embeddings;
+  svp::vision::KeyframeEmbeddingDispatcher keyframe_embeddings;
+  svp::vision::DepthFrameDispatcher depth_frames;
+};
 
 // Inputs every vision stage shares. `media_plan` may be null (the legacy
 // placeholder-only path used by package tests).
@@ -54,6 +68,7 @@ struct VisionLaneSettings {
   svp::models::ThreadPlan thread_plan;
   std::string visual_tracking_quality{
       svp::vision::kDefaultVisualTrackingQualityName};
+  VisionWorkDispatch dispatch;
 };
 
 // Depth over the canonical frames, or the honest depth placeholder.
