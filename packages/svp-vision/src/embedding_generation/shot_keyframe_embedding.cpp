@@ -139,13 +139,14 @@ void load_vision_model(const ShotKeyframeEmbeddingRequest& request,
 // The keyframes embedded by request.dispatcher (dispatched_work.hpp): the
 // model is loaded and verified here first, so its blockers are this Mac's;
 // a keyframe the dispatcher could not embed is embedded again here. nullopt
-// when the dispatcher hands the keyframes back to the stage.
+// when the dispatcher hands the keyframes back to the stage; `loaded` and
+// `session` then hold the model it loaded, for the stage to embed with.
 std::optional<ShotKeyframeEmbeddings> embed_dispatched_keyframes(
     const std::vector<ShotKeyframe>& keyframes,
-    const ShotKeyframeEmbeddingRequest& request) {
-  ShotKeyframeEmbeddings result;
+    const ShotKeyframeEmbeddingRequest& request, ShotKeyframeEmbeddings& loaded,
+    svp::models::OnnxSession& session) {
+  ShotKeyframeEmbeddings& result = loaded;
   result.keyframes_requested = keyframes.size();
-  svp::models::OnnxSession session;
   load_vision_model(request, result, session);
   if (!result.blocker.empty()) {
     return result;
@@ -241,11 +242,20 @@ ShotKeyframeEmbeddings embed_shot_keyframes(
     result.blocker = "no media plan or ffmpeg available to decode keyframes";
     return result;
   }
+  // A dispatcher that hands the keyframes back leaves its loaded model for
+  // the stage, so the model is loaded once either way.
+  svp::models::OnnxSession session;
+  bool model_loaded = false;
   if (request.dispatcher) {
+    ShotKeyframeEmbeddings loaded;
     if (std::optional<ShotKeyframeEmbeddings> dispatched =
-            embed_dispatched_keyframes(keyframes, request)) {
+            embed_dispatched_keyframes(keyframes, request, loaded, session)) {
       return std::move(*dispatched);
     }
+    result.model_id = loaded.model_id;
+    result.model_bundle_id = loaded.model_bundle_id;
+    result.model_blake3 = loaded.model_blake3;
+    model_loaded = true;
   }
 
   // Decoding (one ffmpeg seek per keyframe) runs on a producer thread so it
@@ -268,8 +278,9 @@ ShotKeyframeEmbeddings embed_shot_keyframes(
     queue.close();
   });
 
-  svp::models::OnnxSession session;
-  load_vision_model(request, result, session);
+  if (!model_loaded) {
+    load_vision_model(request, result, session);
+  }
   if (!result.blocker.empty()) {
     queue.cancel();
     producer.join();
