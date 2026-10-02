@@ -48,6 +48,7 @@ add_library(svp-vision
   src/visual_entity_depth_schedule.cpp
   src/visual_entity_cut_detection.cpp
   src/visual_entity_frame_decoder.cpp
+  src/visual_entity_grabcut.cpp
   src/visual_entity_detector.cpp
   src/visual_entity_identity_reconciliation.cpp
   src/visual_entity_motion_policy.cpp
@@ -228,6 +229,24 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-vision-visual-entity-motion-policy-tests
            COMMAND svp-vision-visual-entity-motion-policy-tests)
+
+  add_executable(svp-vision-visual-entity-grabcut-tests
+    tests/visual_entity_grabcut_tests.cpp
+  )
+
+  target_compile_features(svp-vision-visual-entity-grabcut-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-visual-entity-grabcut-tests
+    PRIVATE
+      svp::vision
+      opencv_core
+      opencv_imgproc
+  )
+
+  add_test(NAME svp-vision-visual-entity-grabcut-tests
+           COMMAND svp-vision-visual-entity-grabcut-tests)
 
   add_executable(svp-vision-visual-entity-depth-schedule-tests
     tests/visual_entity_depth_schedule_tests.cpp

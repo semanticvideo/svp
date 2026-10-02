@@ -2,6 +2,7 @@
 #include "svp/vision/vision_embedding_input.hpp"
 #include "svp/vision/noise_suppression.hpp"
 #include "visual_entity_depth_proposals.hpp"
+#include "visual_entity_grabcut.hpp"
 #include "visual_entity_motion_policy.hpp"
 
 #include "svp/core/process_stdio.hpp"
@@ -414,13 +415,13 @@ cv::Mat refine_mask_grabcut(
     cv::rectangle(mask, inner, cv::GC_FGD, cv::FILLED);
   }
 
-  cv::Mat bgd_model, fgd_model;
   try {
     std::optional<StderrSuppressor> suppressor;
     if (!svp::vision::opencv_verbose()) {
       suppressor.emplace();
     }
-    cv::grabCut(color_frame, mask, bbox, bgd_model, fgd_model, iterations, cv::GC_INIT_WITH_RECT);
+    visual_entity_internal::run_seeded_grabcut(color_frame, mask, bbox,
+                                               iterations);
   } catch (...) {
     mask = cv::Mat::zeros(color_frame.size(), CV_8UC1);
     cv::rectangle(mask, bbox, 1, cv::FILLED);
