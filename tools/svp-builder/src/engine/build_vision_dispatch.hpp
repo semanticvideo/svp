@@ -22,13 +22,16 @@ struct BuildVisionDispatch {
   // Where this Mac's dispatched tasks write temporary files; removed with
   // this object, after the build.
   DispatchScratch scratch;
+  // This Mac's dispatched tasks' source and outputs. Outputs are released
+  // once read back (StageOutputRetention::release_after_read): a stage takes
+  // them straight from the scheduler and nothing reads them again.
+  StageOutputAccess outputs{StageOutputRetention::release_after_read};
   svp::package::VisionWorkDispatch dispatch;
 };
 
 struct BuildVisionDispatchInputs {
-  // Holds the build's source (registered by the caller), and receives task
-  // outputs.
-  StageOutputAccess& outputs;
+  // The build's source file (setup.source names its bytes).
+  std::filesystem::path source_path;
   svp::exec::TaskTypeRegistry& registry;
   // This Mac's model cache and ffmpeg.
   std::filesystem::path model_cache_root;

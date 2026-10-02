@@ -11,7 +11,8 @@ namespace svp::builder::engine {
 std::unique_ptr<BuildVisionDispatch> make_build_vision_dispatch(
     BuildVisionDispatchInputs inputs) {
   auto built = std::make_unique<BuildVisionDispatch>();
-  StageOutputAccess& outputs = inputs.outputs;
+  StageOutputAccess& outputs = built->outputs;
+  outputs.register_input(inputs.setup.source, inputs.source_path);
   // This Mac's tasks: a start failure here is every item failed, so the
   // stage does that work itself as a local build does
   // (record_start_failures).

@@ -417,7 +417,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     std::unique_ptr<engine::BuildVisionDispatch> vision_dispatch;
     if (ocr_batches != nullptr && !ocr_execution.dispatched_capacity.empty()) {
       vision_dispatch = engine::make_build_vision_dispatch({
-          .outputs = outputs,
+          .source_path = ocr_batches->work.source_path,
           .registry = registry,
           .model_cache_root = effective_options.model_cache_dir,
           .ffmpeg_path = effective_options.ffmpeg_path,

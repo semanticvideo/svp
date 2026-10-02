@@ -26,8 +26,23 @@
 
 namespace svp::builder::engine {
 
+// What happens to an output once the attempt runner has read it back.
+enum class StageOutputRetention {
+  // Kept for the access's lifetime (whole-stage and OCR frame-batch tasks).
+  keep,
+  // Released after it has been read as many times as it was put: for the
+  // dispatched vision tasks (vision_dispatch_setup.hpp), whose outputs the
+  // scheduler hands to their stage right away and nothing reads again (they
+  // are not journaled), so the coordinator's memory does not grow with a
+  // stage's item count.
+  release_after_read,
+};
+
 class StageOutputAccess final : public svp::exec::TaskArtifactAccess {
  public:
+  explicit StageOutputAccess(StageOutputRetention retention = StageOutputRetention::keep)
+      : retention_(retention) {}
+
   // Holds `payloads` for the task's next read_outputs (replacing any left by
   // an abandoned attempt).
   void stage(const std::string& task_id, std::vector<svp::exec::FramePayload> payloads);
@@ -45,16 +60,27 @@ class StageOutputAccess final : public svp::exec::TaskArtifactAccess {
   [[nodiscard]] svp::exec::ResolvedInputs resolve_inputs(
       const svp::exec::TaskSpec& spec) override;
   // Staged payloads for the task when there are any, otherwise each output's
-  // bytes by digest. Throws std::runtime_error when an output is missing or
-  // the staged count differs from the result's outputs.
+  // bytes by digest (released afterwards under release_after_read once every
+  // put of those bytes has been read). Throws std::runtime_error when an
+  // output is missing or the staged count differs from the result's outputs.
   [[nodiscard]] std::vector<svp::exec::FramePayload> read_outputs(
       const svp::exec::TaskResult& result) override;
 
+  // Distinct outputs held now.
+  [[nodiscard]] std::size_t stored_outputs() const;
+
  private:
-  std::mutex mutex_;
+  struct StoredOutput {
+    svp::exec::FramePayload bytes;
+    // Puts not yet read back (release_after_read).
+    std::size_t unread = 0;
+  };
+
+  StageOutputRetention retention_;
+  mutable std::mutex mutex_;
   std::map<std::string, std::vector<svp::exec::FramePayload>> pending_;
   std::map<svp::exec::Blake3Digest, std::pair<std::uint64_t, std::filesystem::path>> inputs_;
-  std::map<svp::exec::Blake3Digest, svp::exec::FramePayload> outputs_;
+  std::map<svp::exec::Blake3Digest, StoredOutput> outputs_;
 };
 
 }  // namespace svp::builder::engine

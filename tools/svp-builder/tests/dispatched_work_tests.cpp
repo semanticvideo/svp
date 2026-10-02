@@ -18,6 +18,9 @@
 #include "svp/vision/tasks/ocr_crop_batch_parameters.hpp"
 
 #include <atomic>
+#include <functional>
+#include <new>
+#include <system_error>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -216,6 +219,102 @@ void test_dispatchers_hand_back_unplanned_work() {
           "undispatched types hand their work back");
 }
 
+// A worker fleet whose executors cannot be made (the network or the system
+// failed under it).
+class FailingWorkers final : public svp::builder::DispatchedWorkerExecutors {
+ public:
+  explicit FailingWorkers(std::function<void()> fail) : fail_(std::move(fail)) {}
+  std::vector<std::unique_ptr<exec::Executor>> make(std::string_view) override {
+    fail_();
+    return {};
+  }
+
+ private:
+  std::function<void()> fail_;
+};
+
+// Whatever goes wrong while a dispatcher delivers (scheduler, executors,
+// transport, memory), it leaves as DispatchedWorkError, the one exception
+// the stages rethrow instead of recording as a blocker; its message is kept.
+void test_dispatcher_failures_fail_the_build() {
+  const std::vector<std::pair<std::string, std::function<void()>>> failures = {
+      {"socket refused", [] {
+         throw std::system_error(std::make_error_code(std::errc::connection_refused),
+                                 "socket refused");
+       }},
+      {"graph broke", [] { throw exec::ExecError(exec::ExecErrorCode::invalid_value, "graph broke"); }},
+      {"bad_alloc", [] { throw std::bad_alloc(); }},
+  };
+  for (const auto& [what, fail] : failures) {
+    exec::TaskTypeRegistry registry;
+    engine::StageOutputAccess outputs(engine::StageOutputRetention::release_after_read);
+    auto setup = std::make_shared<engine::VisionDispatchSetup>();
+    setup->build_session_id = "bs_test";
+    setup->capacity[std::string(tasks::kEmbedTextBatchTaskType)] = {.coordinator_slots = 1,
+                                                                     .seconds_per_item = 0.01};
+    exec::Blake3Digest digest{};
+    digest.fill(0x44);
+    setup->model_refs = {{.model_id = "model_nomic_embed_text_v1_5",
+                          .model_bundle_id = "model_nomic_embed_text_v1_5@test+blake3_" +
+                                             exec::blake3_hex(digest).substr(0, 12),
+                          .bundle_blake3 = digest}};
+    setup->workers = std::make_shared<FailingWorkers>(fail);
+    const svp::package::VisionWorkDispatch dispatch =
+        engine::make_vision_work_dispatch(setup, registry, outputs);
+    const vision::DispatchedModel model{.model_id = "model_nomic_embed_text_v1_5",
+                                        .execution_provider = "cpu",
+                                        .threads = {.intra_op = 2, .inter_op = 1}};
+    bool converted = false;
+    try {
+      (void)dispatch.text_embeddings({{.id = "a", .text = "alpha"}}, model, 768, {});
+    } catch (const vision::DispatchedWorkError& error) {
+      converted = std::string(error.what()).find(what) != std::string::npos;
+    } catch (...) {
+    }
+    require(converted, what + " leaves the dispatcher as DispatchedWorkError, message kept");
+  }
+}
+
+// The coordinator's dispatched outputs are released once read back, so its
+// memory does not grow with a stage's item count; the default store keeps
+// them (whole-stage and OCR frame-batch tasks are unchanged).
+void test_dispatched_outputs_are_released() {
+  const std::vector<std::byte> bytes = bytes_of("vector");
+  engine::StageOutputAccess releasing(engine::StageOutputRetention::release_after_read);
+  const exec::ArtifactRef ref = releasing.put(bytes, "text/plain", "echo");
+  (void)releasing.put(bytes, "text/plain", "echo");  // the same bytes from a second task
+  exec::TaskResult result;
+  result.task_id = "task.test.echo.items_1000";
+  result.outputs = {ref};
+  require(releasing.read_outputs(result).front() == bytes && releasing.stored_outputs() == 1,
+          "bytes another task put stay until that task's read");
+  require(releasing.read_outputs(result).front() == bytes && releasing.stored_outputs() == 0,
+          "bytes go once every put was read");
+  bool missing = false;
+  try {
+    (void)releasing.read_outputs(result);
+  } catch (const std::runtime_error&) {
+    missing = true;
+  }
+  require(missing, "released bytes are gone");
+
+  engine::StageOutputAccess keeping;
+  (void)keeping.put(bytes, "text/plain", "echo");
+  (void)keeping.read_outputs(result);
+  (void)keeping.read_outputs(result);
+  require(keeping.stored_outputs() == 1, "the default store keeps outputs");
+
+  // A whole dispatched run leaves nothing behind.
+  exec::TaskTypeRegistry registry;
+  engine::StageOutputAccess outputs(engine::StageOutputRetention::release_after_read);
+  register_echo(registry, outputs);
+  const auto results = engine::run_subtasks(
+      {.task_type = kEchoType, .nodes = echo_nodes(12), .on_committed = {}}, echo_setup(3),
+      registry, outputs);
+  require(results.size() == 12 && outputs.stored_outputs() == 0,
+          "a stage's dispatched outputs are released as they are committed");
+}
+
 // The sweep graph of a dispatched type: step k runs k warm-ups, then k timed
 // copies of the batch after all of them, after the previous step.
 void test_dispatched_calibration_graph() {
@@ -272,6 +371,8 @@ int main() {
   test_lost_worker_tasks_run_here();
   test_undeliverable_runs_fail();
   test_dispatchers_hand_back_unplanned_work();
+  test_dispatcher_failures_fail_the_build();
+  test_dispatched_outputs_are_released();
   test_dispatched_calibration_graph();
   test_planned_vision_work();
   std::cout << "dispatched work tests passed\n";

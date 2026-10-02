@@ -87,7 +87,7 @@ std::vector<Outcome> run_and_read(const std::string& task_type, std::vector<svp:
               on_progress(done, item_count);
             }
           }};
-  const std::vector<svp::exec::CommittedResult> results = [&] {
+  std::vector<svp::exec::CommittedResult> results = [&] {
     // This Mac's idle models go once the stage's tasks are done, whatever
     // the outcome; the stage does not reuse them.
     struct Release {
@@ -105,6 +105,9 @@ std::vector<Outcome> run_and_read(const std::string& task_type, std::vector<svp:
       std::vector<Outcome> part =
           read(request.nodes[index].spec, results[index].result.outputs, results[index].payloads);
       std::move(part.begin(), part.end(), std::back_inserter(outcomes));
+      // Each task's bytes go as soon as its outcomes are read, so the
+      // stage never holds a payload and its outcome copy for every task.
+      std::vector<svp::exec::FramePayload>().swap(results[index].payloads);
     } catch (const std::exception& error) {
       throw svp::vision::DispatchedWorkError(task_type + ": " + error.what());
     }
@@ -137,6 +140,26 @@ std::optional<PlannedTasks> plan_or_skip(const VisionDispatchSetup& setup,
     }
     return std::nullopt;
   }
+}
+
+// A dispatcher that cannot deliver must fail the build, never become a
+// stage blocker: the stages rethrow only DispatchedWorkError and turn any
+// other exception into a blocker (svp/vision/dispatched_work.hpp). So every
+// exception leaving a dispatcher (scheduler, executor, transport, memory)
+// leaves it as DispatchedWorkError, its message kept.
+template <typename Function>
+Function guarded(std::string task_type, Function inner) {
+  return [task_type = std::move(task_type), inner = std::move(inner)](const auto&... arguments) {
+    try {
+      return inner(arguments...);
+    } catch (const svp::vision::DispatchedWorkError&) {
+      throw;
+    } catch (const std::exception& error) {
+      throw svp::vision::DispatchedWorkError(task_type + ": " + error.what());
+    } catch (...) {
+      throw svp::vision::DispatchedWorkError(task_type + ": unknown failure");
+    }
+  };
 }
 
 }  // namespace
@@ -320,6 +343,14 @@ svp::package::VisionWorkDispatch make_vision_work_dispatch(
         type, std::move(planned->nodes), planned->batches, frames.size(), on_progress, *setup,
         registry, artifacts, tasks::read_depth_frame_batch_output);
   };
+  dispatch.evidence_crops =
+      guarded(std::string(tasks::kOcrCropBatchTaskType), std::move(dispatch.evidence_crops));
+  dispatch.text_embeddings =
+      guarded(std::string(tasks::kEmbedTextBatchTaskType), std::move(dispatch.text_embeddings));
+  dispatch.keyframe_embeddings = guarded(std::string(tasks::kEmbedKeyframeBatchTaskType),
+                                         std::move(dispatch.keyframe_embeddings));
+  dispatch.depth_frames =
+      guarded(std::string(tasks::kDepthFrameBatchTaskType), std::move(dispatch.depth_frames));
   return dispatch;
 }
 
