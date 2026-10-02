@@ -1,8 +1,8 @@
 #include "svp/audio/asr_execution_boundary.hpp"
 #include "svp/audio/asr_chunk_context.hpp"
+#include "svp/audio/asr_chunk_run.hpp"
 #include "svp/audio/asr_slice_workspace.hpp"
 #include "svp/audio/transcript_records.hpp"
-#include "svp/audio/wav_slice.hpp"
 #include "svp/audio/whisper_cpp_model.hpp"
 #include "svp/audio/whisper_model.hpp"
 #include "svp/core/memory_diagnostics.hpp"
@@ -268,7 +268,8 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
                                           const std::filesystem::path& staging_root,
                                           const std::filesystem::path& model_cache_root,
                                           const WhisperRuntimeThreads& threads,
-                                          AsrChunkProgressCallback on_chunk_progress) {
+                                          AsrChunkProgressCallback on_chunk_progress,
+                                          const AsrChunkDispatch& dispatch) {
   std::filesystem::path vad_model_path;
   try {
     const std::filesystem::path vad_model_dir =
@@ -340,6 +341,30 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
       throw std::runtime_error("staged analysis WAV file not found: " + input_wav.string());
     }
 
+    // Chunks dispatched elsewhere (asr_chunk_run.hpp); a chunk without a
+    // dispatched outcome runs here, exactly as when nothing is dispatched.
+    std::optional<std::vector<std::optional<AsrChunkOutcome>>> dispatched;
+    if (dispatch) {
+      AsrChunkWork work{.input_wav = input_wav,
+                        .chunks = boundary.chunk_plan.chunks,
+                        .model_id = boundary.model_id,
+                        .vad_model_id = boundary.vad_model_id,
+                        .alignment_model_id = std::nullopt,
+                        .threads = threads};
+      if (!aligner_model_dir.empty()) {
+        work.alignment_model_id = boundary.alignment_model_id;
+      }
+      dispatched = dispatch(work, on_chunk_progress);
+      if (dispatched && dispatched->size() != boundary.chunk_plan.chunks.size()) {
+        throw AudioDispatchError("ASR dispatch returned " + std::to_string(dispatched->size()) +
+                                 " chunk outcomes for " +
+                                 std::to_string(boundary.chunk_plan.chunks.size()) + " chunks");
+      }
+    }
+    const AsrChunkModels chunk_models{.model_dir = model_dir,
+                                      .vad_model_path = vad_model_path,
+                                      .aligner_model_dir = aligner_model_dir};
+
     // Per-execution slice directory: concurrent builds must never share or
     // overwrite each other's chunk slices. Removed when this scope exits.
     const AsrSliceWorkspace slice_workspace;
@@ -367,40 +392,30 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
         });
       }
 
-      if (on_chunk_progress) {
+      // A dispatcher reports its own progress as its tasks finish.
+      if (on_chunk_progress && !dispatched) {
         on_chunk_progress(i, boundary.chunk_plan.chunks.size());
       }
 
-      const AsrChunkContextPlan context = plan_asr_chunk_context(chunk);
-      const std::filesystem::path chunk_wav =
-          slice_wav_to_temp(input_wav, context.slice_start_us,
-                            context.slice_end_us, temp_slice_dir);
-
-      WhisperInferenceResult whisper_result;
-      try {
-        whisper_result = run_whisper_inference(
-            chunk_wav, model_dir, vad_model_path, chunk.chunk_id, 0,
-            context.slice_end_us - context.slice_start_us, threads,
-            aligner_model_dir);
-      } catch (...) {
-        std::error_code cleanup_error;
-        std::filesystem::remove(chunk_wav, cleanup_error);
-        throw;
+      AsrChunkOutcome outcome;
+      if (dispatched && (*dispatched)[i]) {
+        outcome = std::move(*(*dispatched)[i]);
+      } else {
+        outcome = run_asr_chunk(input_wav, chunk, static_cast<std::int64_t>(i), chunk_models,
+                                threads, temp_slice_dir);
       }
-      std::error_code cleanup_error;
-      std::filesystem::remove(chunk_wav, cleanup_error);
       if (i == 0 || ((i + 1) % 10) == 0 ||
           i + 1 == boundary.chunk_plan.chunks.size()) {
         svp::core::check_memory_limit("asr.chunk.after_inference", {
             {"index", std::to_string(i)},
             {"chunk_id", chunk.chunk_id},
-            {"ran", whisper_result.ran ? "true" : "false"},
-            {"word_count", std::to_string(whisper_result.all_words.size())}
+            {"ran", outcome.ran ? "true" : "false"},
+            {"word_count", std::to_string(outcome.decoded_word_count)}
         });
       }
 
-      if (!whisper_result.ran) {
-        for (const std::string& blocker : whisper_result.blockers) {
+      if (!outcome.ran) {
+        for (const std::string& blocker : outcome.blockers) {
           if (std::find(boundary.blockers.begin(), boundary.blockers.end(), blocker) ==
               boundary.blockers.end()) {
             boundary.blockers.push_back(blocker);
@@ -410,10 +425,8 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
         continue;
       }
 
-      chunk_words.push_back(retain_nominal_chunk_words(
-          whisper_result.all_words, context, chunk,
-          static_cast<std::int64_t>(i)));
-      chunk_alignment_status.push_back(whisper_result.alignment_status);
+      chunk_words.push_back(std::move(outcome.words));
+      chunk_alignment_status.push_back(outcome.alignment_status);
     }
     if (boundary.alignment_status == "resolved") {
       const auto count = [&](const std::string& status) {
@@ -462,6 +475,8 @@ AsrExecutionBoundary execute_asr_boundary(AsrExecutionBoundary boundary,
         {"raw_word_count", std::to_string(boundary.raw_word_count)},
         {"reconciled_word_count", std::to_string(boundary.reconciled_word_count)}
     });
+  } catch (const AudioDispatchError&) {
+    throw;
   } catch (const std::exception& error) {
     boundary.asr_status = AsrStatus::blocked;
     boundary.blockers.push_back(std::string("ASR execution blocked: ") + error.what());

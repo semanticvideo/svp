@@ -68,7 +68,10 @@ struct DiarizationExecutionBoundary {
     bool allow_fallback = false,
     bool force_single_speaker = false,
     const std::vector<AsrWord>& words = {},
-    DiarizationProgressCallback on_progress = {});
+    DiarizationProgressCallback on_progress = {},
+    // run_sherpa_diarization's window dispatcher; empty maps every window
+    // here.
+    const DiarizationWindowDispatch& dispatch = {});
 
 [[nodiscard]] std::string diarization_status_to_string(DiarizationStatus status);
 

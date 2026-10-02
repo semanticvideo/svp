@@ -26,6 +26,10 @@ struct WhisperInferenceResult {
   std::string termination_reason;
   // not_requested | applied | applied_partial | fallback
   std::string alignment_status = "not_requested";
+  // Why the requested alignment fell back by throwing (a model that did not
+  // load, a runtime error); empty otherwise. Such a fallback depends on the
+  // host, not on the chunk.
+  std::string alignment_error;
   std::vector<std::string> blockers;
 };
 

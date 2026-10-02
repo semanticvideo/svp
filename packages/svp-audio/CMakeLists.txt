@@ -14,6 +14,7 @@ endif()
 add_library(svp-audio
   src/asr_chunk_context.cpp
   src/asr_chunk_planner.cpp
+  src/asr_chunk_run.cpp
   src/asr_chunk_reconciliation.cpp
   src/asr_execution_boundary.cpp
   src/asr_slice_workspace.cpp
@@ -38,6 +39,7 @@ add_library(svp-audio
   src/sherpa_diarization/chunk_embedding_pass.cpp
   src/sherpa_diarization/wav_reader.cpp
   src/sherpa_diarization/windowing.cpp
+  src/sherpa_diarization/window_map.cpp
   src/sherpa_diarization/word_assignment/delayed_segment_handoff_repair.cpp
   src/sherpa_diarization/word_assignment/dominant_speaker.cpp
   src/sherpa_diarization/word_assignment/fingerprint_update.cpp
@@ -150,3 +152,5 @@ if(BUILD_TESTING)
   target_link_libraries(svp-audio-exit-teardown-test PRIVATE svp::audio)
   add_test(NAME svp-audio-exit-teardown-test COMMAND svp-audio-exit-teardown-test)
 endif()
+
+add_subdirectory(tasks)

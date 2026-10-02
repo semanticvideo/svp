@@ -604,8 +604,9 @@ WhisperInferenceResult run_whisper_cpp_inference(
       apply_phoneme_alignment(result, samples, aligner_bundle_dir,
                               threads.forced_alignment, chunk_start_us,
                               chunk_end_us);
-    } catch (const std::exception&) {
+    } catch (const std::exception& error) {
       result.alignment_status = "fallback";
+      result.alignment_error = error.what();
     }
   }
   result.ran = true;

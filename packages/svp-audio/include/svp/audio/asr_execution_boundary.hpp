@@ -4,6 +4,7 @@
 #include "svp/models/reference_processor_model_ids.hpp"
 
 #include "svp/audio/asr_chunk_planner.hpp"
+#include "svp/audio/asr_chunk_run.hpp"
 #include "svp/audio/transcript_records.hpp"
 
 #include <cstddef>
@@ -93,7 +94,9 @@ using AsrChunkProgressCallback =
     const std::filesystem::path& staging_root,
     const std::filesystem::path& model_cache_root,
     const WhisperRuntimeThreads& threads,
-    AsrChunkProgressCallback on_chunk_progress = {});
+    AsrChunkProgressCallback on_chunk_progress = {},
+    // Runs chunks elsewhere (asr_chunk_run.hpp); empty runs every chunk here.
+    const AsrChunkDispatch& dispatch = {});
 
 [[nodiscard]] nlohmann::json asr_execution_boundary_to_json(
     const AsrExecutionBoundary& boundary);
