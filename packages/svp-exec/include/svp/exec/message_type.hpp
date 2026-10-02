@@ -28,6 +28,9 @@ enum class MessageType {
   shutdown,
   unpair,
   error,
+  // Worker protocol 1.1 (M6): a coordinator fetching a blob from the
+  // worker's CAS (worker/transfer_messages.hpp).
+  blob_get,
 };
 
 inline constexpr std::array kAllMessageTypes = {
@@ -36,7 +39,7 @@ inline constexpr std::array kAllMessageTypes = {
     MessageType::calibrate, MessageType::assign,    MessageType::accept,
     MessageType::reject,    MessageType::heartbeat, MessageType::result,
     MessageType::cancel,    MessageType::drain,     MessageType::shutdown,
-    MessageType::unpair,    MessageType::error,
+    MessageType::unpair,    MessageType::error,     MessageType::blob_get,
 };
 
 [[nodiscard]] std::string_view message_type_name(MessageType type) noexcept;

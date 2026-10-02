@@ -16,6 +16,7 @@
 #include "engine/distributed_audio_work.hpp"
 #include "svp/audio/tasks/asr_chunk_batch.hpp"
 #include "engine/distributed_vision_work.hpp"
+#include "engine/local_load_executor.hpp"
 #include "engine/ocr_batch_observer.hpp"
 #include "engine/ocr_execution_policy.hpp"
 #include "engine/build_task_graph.hpp"
@@ -196,6 +197,9 @@ struct PlannedSplitExecution {
   std::optional<engine::TrackingWindowPlan> windows;
   std::size_t coordinator_tracking_slots = engine::kCoordinatorTrackWindowSlotsWithoutMeasurement;
   std::vector<svp::exec::Executor*> tracking_workers;
+  // --distributed only: where this Mac's own slots report what they run
+  // (DistributedFleet::local_load).
+  std::shared_ptr<LocalTaskLoad> local_load;
 };
 
 DistributedTrackingWork distributed_tracking_work(const engine::TrackingWorkPlan& tracking) {
@@ -293,6 +297,7 @@ PlannedSplitExecution plan_split_execution(
       execution.dispatched_model_refs.push_back(*audio.diarization_model_ref);
     }
     execution.measure_in_stage = fleet.measure_in_stage;
+    execution.local_load = fleet.local_load;
     execution.tracking_workers = fleet.tracking_workers;
     execution.coordinator_tracking_slots =
         std::max<std::size_t>(1, fleet.coordinator_tracking_slots);
@@ -533,7 +538,8 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
                     .workers = ocr_execution.dispatched_workers,
                     .cancellation = &cancellation,
                     .report = !effective_options.quiet,
-                    .release_idle_models = {}}});
+                    .release_idle_models = {},
+                    .local_load = ocr_execution.local_load}});
     }
     // --distributed: the audio transcription stage hands its ASR chunks and
     // diarization windows to tasks on this Mac's measured slots and the
@@ -554,7 +560,8 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
                     .workers = ocr_execution.dispatched_workers,
                     .cancellation = &cancellation,
                     .report = !effective_options.quiet,
-                    .release_idle_models = {}},
+                    .release_idle_models = {},
+                    .local_load = ocr_execution.local_load},
           .extras = {.measure_in_stage = ocr_execution.measure_in_stage}});
     }
     const engine::StageTaskEnvironment environment{
@@ -630,6 +637,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     svp::exec::TaskTypeExcludingExecutor stages_only(executor, subtask_types);
     std::optional<svp::exec::InProcessExecutor> ocr_executor;
     std::optional<svp::exec::TaskTypeRestrictedExecutor> ocr_only;
+    std::optional<engine::LoadReportingExecutor> ocr_reported;
     std::vector<svp::exec::Executor*> executors{&stages_only};
     if (ocr_batches != nullptr) {
       ocr_executor.emplace(registry, outputs,
@@ -640,11 +648,16 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
                                .runtime_id = {}});
       ocr_only.emplace(*ocr_executor, frame_batch_types);
       executors.push_back(&*ocr_only);
+      if (ocr_execution.local_load) {
+        ocr_reported.emplace(*ocr_only, ocr_execution.local_load);
+        executors.back() = &*ocr_reported;
+      }
       executors.insert(executors.end(), ocr_execution.workers.begin(),
                        ocr_execution.workers.end());
     }
     std::optional<svp::exec::InProcessExecutor> window_executor;
     std::optional<svp::exec::TaskTypeRestrictedExecutor> windows_only;
+    std::optional<engine::LoadReportingExecutor> windows_reported;
     if (tracking_windows != nullptr) {
       window_executor.emplace(registry, outputs,
                               svp::exec::InProcessExecutorOptions{
@@ -654,6 +667,10 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
                                   .runtime_id = {}});
       windows_only.emplace(*window_executor, window_types);
       executors.push_back(&*windows_only);
+      if (ocr_execution.local_load) {
+        windows_reported.emplace(*windows_only, ocr_execution.local_load);
+        executors.back() = &*windows_reported;
+      }
       executors.insert(executors.end(), ocr_execution.tracking_workers.begin(),
                        ocr_execution.tracking_workers.end());
     }

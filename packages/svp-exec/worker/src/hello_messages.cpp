@@ -130,6 +130,13 @@ Frame make_hello_frame(const CoordinatorHello& hello) {
         {"model_lock_blake3", blake3_hex(hello.model_set->model_lock_blake3)},
         {"model_set_id", hello.model_set->model_set_id}};
   }
+  if (!hello.capacity.empty()) {
+    nlohmann::json capacity = nlohmann::json::object();
+    for (const auto& [task_type, slots] : hello.capacity) {
+      capacity[task_type] = slots;
+    }
+    body["capacity"] = std::move(capacity);
+  }
   return Frame{.type = MessageType::hello, .body = std::move(body), .payloads = {}};
 }
 
@@ -157,6 +164,18 @@ CoordinatorHello hello_from_frame(const Frame& frame) {
     hello.model_set = ModelSetSummary{
         .model_set_id = required_string(*model_set, "model_set_id", model_path),
         .model_lock_blake3 = required_blake3_hex(*model_set, "model_lock_blake3", model_path)};
+  }
+  if (const auto capacity = body.find("capacity"); capacity != body.end()) {
+    const std::string capacity_path = child_path(path, "capacity");
+    require_object(*capacity, capacity_path);
+    for (const auto& [task_type, slots] : capacity->items()) {
+      const std::uint64_t value = required_unsigned(*capacity, task_type, capacity_path);
+      if (task_type.empty() || value == 0) {
+        throw ExecError(ExecErrorCode::invalid_value,
+                        capacity_path + " needs a task type and at least one slot per entry");
+      }
+      hello.capacity.emplace(task_type, value);
+    }
   }
   return hello;
 }

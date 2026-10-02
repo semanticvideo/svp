@@ -57,6 +57,15 @@ void test_hello_round_trips() {
   CoordinatorHello bare = hello;
   bare.model_set.reset();
   expect(hello_from_frame(wire(make_hello_frame(bare))) == bare, "HELLO without model set");
+  CoordinatorHello declaring = hello;
+  declaring.capacity = {{"ocr.frame_batch", 2}, {"track.window", 1}};
+  expect(hello_from_frame(wire(make_hello_frame(declaring))) == declaring,
+         "HELLO with declared capacity");
+  Frame zero = make_hello_frame(declaring);
+  zero.body["capacity"]["ocr.frame_batch"] = 0;
+  svp::exec::test::expect_exec_error(
+      ExecErrorCode::invalid_value, [&] { (void)hello_from_frame(wire(zero)); },
+      "a declared type needs at least one slot");
 }
 
 void test_hello_ignores_members_a_newer_minor_adds() {
@@ -180,6 +189,7 @@ void test_transfer_messages_round_trip() {
   const BlobPut chunk = blob_put_from_frame(chunk_frame);
   expect(std::get<BlobChunk>(chunk) == (BlobChunk{.blob = blob, .offset = 4}), "BLOB_PUT chunk");
   expect(chunk_frame.payloads.front().size() == 6, "chunk payload");
+  expect(blob_get_from_frame(wire(make_blob_get_frame(blob))) == blob, "BLOB_GET");
 
   const ModelBundlePut model{.lock = nlohmann::json{{"models", nlohmann::json::array()}},
                              .manifest = manifest};

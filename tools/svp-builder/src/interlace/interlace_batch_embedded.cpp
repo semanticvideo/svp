@@ -108,8 +108,20 @@ bool create_embedded_batch_artifact(
     return false;
   }
 
-  blake3_state = "present";
+  blake3_state = std::string(kEmbeddedBatchBlake3State);
   return true;
+}
+
+std::string svpi_blake3_state(const std::filesystem::path& svpi_path) {
+  const auto binding_entry = svp::package::read_package_entry(svpi_path, "media_binding.json");
+  if (!binding_entry.has_value()) {
+    return {};
+  }
+  const auto binding = svp::package::parse_media_binding_json(binding_entry.value());
+  if (binding.bindings.empty()) {
+    return {};
+  }
+  return svp::package::to_string(binding.bindings.front().identity.blake3_state);
 }
 
 }  // namespace svp::builder

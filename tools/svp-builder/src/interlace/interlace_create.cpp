@@ -96,6 +96,7 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
   pipeline_opts.force_single_speaker = options.force_single_speaker;
   pipeline_opts.serial_pipeline = options.serial_pipeline;
   pipeline_opts.distributed = options.distributed;
+  pipeline_opts.thread_plan = options.thread_plan;
   pipeline_opts.reset_staging_before_stages = true;
   pipeline_opts.progress_sink = sink;
   // Binding and the SVPI write are tasks of the same journaled build, and the

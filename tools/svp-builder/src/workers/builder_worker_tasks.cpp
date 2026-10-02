@@ -2,6 +2,8 @@
 
 #include "worker_model_view.hpp"
 
+#include "../batch/video_build_task.hpp"
+
 #include "svp/audio/tasks/audio_task_environment.hpp"
 #include "svp/vision/tasks/dispatched_vision_tasks.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_task.hpp"
@@ -62,6 +64,15 @@ void register_builder_worker_task_types(svp::exec::TaskTypeRegistry& registry,
                     .ffmpeg_path = environment.ffmpeg_path,
                     .write_output = write_output,
                     .model_cache_for = model_cache_for});
+  // Whole-video jobs of another Mac's batch (M6).
+  svp::builder::batch::register_video_build_task(
+      registry, artifacts,
+      svp::builder::batch::VideoBuildWorkerEnvironment{
+          .session_dir = environment.session_dir,
+          .cas_root = environment.cas_root,
+          .worker_session_id = environment.worker_session_id,
+          .models = models,
+          .tools = environment.tools});
 }
 
 }  // namespace svp::builder::workers

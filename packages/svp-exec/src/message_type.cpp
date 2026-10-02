@@ -38,6 +38,8 @@ std::string_view message_type_name(MessageType type) noexcept {
       return "UNPAIR";
     case MessageType::error:
       return "ERROR";
+    case MessageType::blob_get:
+      return "BLOB_GET";
   }
   return "UNKNOWN";
 }

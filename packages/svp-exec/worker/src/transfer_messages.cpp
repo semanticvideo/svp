@@ -225,4 +225,16 @@ BlobPut blob_put_from_frame(const Frame& frame) {
   unknown_kind(path, kind);
 }
 
+Frame make_blob_get_frame(const BlobRef& blob) {
+  return Frame{.type = MessageType::blob_get,
+               .body = nlohmann::json{{"blob", blob_ref_to_json(blob)}},
+               .payloads = {}};
+}
+
+BlobRef blob_get_from_frame(const Frame& frame) {
+  const std::string path = require_frame(frame, MessageType::blob_get, 0);
+  reject_unknown_fields(frame.body, {"blob"}, path);
+  return blob_ref_from_json(required_field(frame.body, "blob", path), child_path(path, "blob"));
+}
+
 }  // namespace svp::exec::worker

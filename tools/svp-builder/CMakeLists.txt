@@ -54,6 +54,7 @@ add_library(svp-builder-lib
   src/engine/stage_tasks_vision.cpp
   src/engine/staging_capture_check.cpp
   src/engine/staging_scope.cpp
+  src/engine/local_load_executor.cpp
   src/engine/subtask_run.cpp
   src/engine/tracking_execution_policy.cpp
   src/engine/tracking_window_plan.cpp
@@ -79,6 +80,11 @@ add_library(svp-builder-lib
   src/transport/embedded_transport_strip.cpp
   src/transport/replacement_binding_media.cpp
   src/transport/transport_output_policy.cpp
+  src/batch/batch_dispatch.cpp
+  src/batch/build_batch.cpp
+  src/batch/existing_output_check.cpp
+  src/batch/video_build_parameters.cpp
+  src/batch/video_build_run.cpp
   src/interlace/interlace_batch_discovery.cpp
   src/interlace/interlace_batch_sidecar.cpp
   src/interlace/interlace_batch_output.cpp
@@ -129,6 +135,8 @@ add_executable(svp-builder
   src/cli/cli_run_telemetry.cpp
   src/cli/cli_completion.cpp
   src/cli/probe_command.cpp
+  src/cli/batch_coordinators_cli.cpp
+  src/cli/build_batch_command.cpp
   src/cli/build_command.cpp
   src/cli/build_selected_output.cpp
   src/cli/distributed_cli.cpp
@@ -148,6 +156,8 @@ target_compile_features(svp-builder PRIVATE cxx_std_20)
 # `worker --serve-fd`. Apple-only, like the remote transport they use.
 if(APPLE)
   target_sources(svp-builder PRIVATE
+    src/batch/paired_video_builder.cpp
+    src/batch/video_build_task.cpp
     src/workers/audio_calibration_runs.cpp
     src/workers/builder_worker_tasks.cpp
     src/workers/calibration_store.cpp
@@ -229,6 +239,22 @@ if(BUILD_TESTING)
   )
   add_test(NAME svp-builder-ocr-frame-batch-plan-tests
            COMMAND svp-builder-ocr-frame-batch-plan-tests)
+
+  add_executable(svp-builder-batch-tests
+    tests/batch_tests.cpp
+  )
+  target_include_directories(svp-builder-batch-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_compile_features(svp-builder-batch-tests PRIVATE cxx_std_20)
+  target_link_libraries(svp-builder-batch-tests
+    PRIVATE
+      svp::builder
+      svp::exec
+      svp::models
+      nlohmann_json::nlohmann_json
+  )
+  add_test(NAME svp-builder-batch-tests COMMAND svp-builder-batch-tests)
 
   add_executable(svp-builder-dispatched-work-tests
     tests/dispatched_work_tests.cpp

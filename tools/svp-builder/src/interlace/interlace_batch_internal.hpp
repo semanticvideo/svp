@@ -35,6 +35,20 @@ bool batch_artifact_is_contained(
     const std::filesystem::path& output_directory,
     std::string& error_message);
 
+// An SVPI that validates and whose media binding verifies against `media_path`.
+bool check_svpi_valid_and_bound(
+    const std::filesystem::path& svpi_path,
+    const std::filesystem::path& media_path,
+    const std::string& validation_codes_path,
+    std::string& error_message);
+
+// The blake3_state an embedded SVPI batch item reports once created.
+inline constexpr std::string_view kEmbeddedBatchBlake3State = "present";
+
+// The blake3_state an SVPI records in its media binding (empty when it
+// cannot be read): what a create-batch item built on another Mac reports.
+std::string svpi_blake3_state(const std::filesystem::path& svpi_path);
+
 enum class EmbeddedBatchArtifactState {
   absent,
   valid,

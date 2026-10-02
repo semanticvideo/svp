@@ -121,9 +121,13 @@ void render_create_batch_json(const svp::builder::BatchCreateResult& result) {
     file["status"] = std::string(svp::builder::batch_file_status_label(r.status));
     if (!r.error_message.empty()) file["error"] = r.error_message;
     if (!r.blake3_state.empty()) file["blake3_state"] = r.blake3_state;
+    if (!r.built_on.empty()) file["built_on"] = r.built_on;
     files.push_back(std::move(file));
   }
   j["files"] = files;
+  if (!result.dropped_coordinators.empty()) {
+    j["dropped_coordinators"] = result.dropped_coordinators;
+  }
   std::cout << j.dump(2) << "\n";
 }
 
@@ -140,9 +144,15 @@ void render_create_batch_plain(const svp::builder::BatchCreateResult& result) {
     if (!r.artifact_path.empty()) {
       std::cout << "    artifact: " << r.artifact_path.string() << "\n";
     }
+    if (!r.built_on.empty()) {
+      std::cout << "    built on: " << r.built_on << "\n";
+    }
     if (!r.error_message.empty()) {
       std::cout << "    error: " << r.error_message << "\n";
     }
+  }
+  for (const auto& dropped : result.dropped_coordinators) {
+    std::cout << "  coordinator not used: " << dropped << "\n";
   }
 }
 

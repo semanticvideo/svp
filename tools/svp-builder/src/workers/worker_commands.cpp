@@ -58,15 +58,26 @@ int run_worker_session(const WorkerCliOptions& options) {
   svp::exec::CasTaskArtifactAccess artifacts(std::move(store).value(), options.worker_session_id);
   // ffmpeg the way a local build of this runtime resolves it: the bundle
   // next to this svp-builder, $SVP_FFMPEG, or ffmpeg on the job's PATH.
-  const RuntimeToolChoice ffmpeg = resolve_runtime_tool(
-      RuntimeTool::ffmpeg, std::nullopt, locate_runtime_bundle(current_executable()),
-      process_environment());
+  const std::optional<RuntimeBundle> bundle = locate_runtime_bundle(current_executable());
+  const RuntimeToolChoice ffmpeg =
+      resolve_runtime_tool(RuntimeTool::ffmpeg, std::nullopt, bundle, process_environment());
+  // ffprobe too, for whole-video jobs, which run a complete build.
+  RuntimeToolSelection tools;
+  if (bundle) {
+    tools.bundle_root = bundle->root;
+    tools.runtime_id = bundle->runtime_id;
+  }
+  tools.ffmpeg = ffmpeg;
+  tools.ffprobe =
+      resolve_runtime_tool(RuntimeTool::ffprobe, std::nullopt, bundle, process_environment());
+  tools.uses_sherpa = true;
   // sherpa-onnx the way a local build of this runtime finds it: the
   // bundle's pinned library before the unpinned locations (diarize.window
   // tasks still refuse any library but the coordinator's).
-  if (const std::optional<RuntimeToolChoice> sherpa = bundled_runtime_tool(
-          RuntimeTool::sherpa_onnx, locate_runtime_bundle(current_executable()))) {
+  if (const std::optional<RuntimeToolChoice> sherpa =
+          bundled_runtime_tool(RuntimeTool::sherpa_onnx, bundle)) {
     svp::audio::set_sherpa_bundled_lib_path(sherpa->path);
+    tools.sherpa_bundled = sherpa;
   }
   svp::exec::TaskTypeRegistry registry;
   register_builder_worker_task_types(
@@ -75,7 +86,10 @@ int run_worker_session(const WorkerCliOptions& options) {
                                                ? std::filesystem::current_path()
                                                : std::filesystem::path(options.session_dir),
                             .model_store = options.model_store,
-                            .ffmpeg_path = ffmpeg.path});
+                            .ffmpeg_path = ffmpeg.path,
+                            .cas_root = options.cas_root,
+                            .worker_session_id = options.worker_session_id,
+                            .tools = tools});
   const svp::exec::WorkerLoopExit exit = svp::exec::run_worker_loop(
       options.serve_fd, options.serve_fd, registry, artifacts,
       svp::exec::WorkerLoopOptions{.worker_session_id = options.worker_session_id,

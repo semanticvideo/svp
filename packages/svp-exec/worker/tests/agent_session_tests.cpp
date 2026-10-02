@@ -32,7 +32,8 @@ fs::path g_test_worker;
 
 class AgentHarness {
  public:
-  AgentHarness() : scratch_("svp-agent-session") {
+  explicit AgentHarness(SlotSharing::LocalLoad local_load = {})
+      : scratch_("svp-agent-session") {
     core_ = std::make_unique<AgentCore>(AgentCoreOptions{
         .layout = WorkerLayout{.root = scratch_.path / "Worker"},
         .host = detect_host_facts(),
@@ -45,7 +46,8 @@ class AgentHarness {
               return MemorySnapshot{.available_bytes = available_.load(),
                                     .pressure = MemoryPressure::normal};
             },
-        .launcher = {}});
+        .launcher = {},
+        .local_load = std::move(local_load)});
     agent_ = std::thread([this] {
       end_ = serve_agent_session(*core_, *channel_.right_reader, *channel_.right_writer,
                                  "ws-test-" + std::to_string(++sessions_),
@@ -207,6 +209,50 @@ void test_admission_rejects_a_task_that_does_not_fit() {
   expect(agent.core().ledger().committed_bytes() == 0, "finished lease released");
 }
 
+void test_declared_slots_are_shared_with_the_local_build() {
+  // This Mac's own build runs one toy task: a coordinator that declared one
+  // toy slot finds it taken, one that declared two gets the second.
+  AgentHarness agent([] {
+    return TaskTypeCounts{{std::string(svp::exec::test::kToyTaskType), 1}};
+  });
+  const CoordinatorRuntime runtime = toy_runtime();
+  WorkerSessionClient client = agent.client();
+  CoordinatorHello hello = hello_for(runtime);
+  hello.capacity = {{std::string(svp::exec::test::kToyTaskType), 1}};
+  (void)client.hello(hello);
+  TransferStats stats;
+  client.ensure_runtime(runtime, stats);
+  agent.writer().write(make_leased_assign_frame(toy_spec("task.toy.a_001", 8), lease("l1")));
+  const Frame reply = next_reply(agent.reader());
+  expect(reply.type == MessageType::reject &&
+             lease_rejection_from_frame(reply).code == kRejectInsufficientSlots,
+         "the only declared slot is in use here");
+  expect(agent.core().slots().held(svp::exec::test::kToyTaskType) == 0, "nothing held");
+}
+
+void test_blob_get_returns_a_verified_blob() {
+  AgentHarness agent;
+  WorkerSessionClient client = agent.client();
+  (void)client.hello(hello_for(toy_runtime()));
+  const fs::path source = agent.scratch() / "package.bin";
+  std::string content;
+  for (int index = 0; index < 1000; ++index) {
+    content += "package bytes " + std::to_string(index) + "\n";
+  }
+  write_file(source, content);
+  const BlobRef blob = blob_ref_for(svp::exec::test::to_bytes(content));
+  TransferStats stats;
+  client.send_blobs({BlobSource{.ref = blob, .file = source}}, stats);
+  const fs::path fetched = agent.scratch() / "fetched.bin";
+  client.fetch_blob(blob, fetched);
+  expect(read_file(fetched) == content, "the fetched blob is the stored blob");
+  BlobRef absent = blob_ref_for(svp::exec::test::to_bytes("never stored"));
+  expect_worker_error(
+      WorkerErrorCode::configuration, [&] { client.fetch_blob(absent, fetched); },
+      "a blob the worker does not hold");
+  expect(read_file(fetched) == content, "a failed fetch leaves the destination alone");
+}
+
 void test_tampered_runtime_is_never_run() {
   AgentHarness agent;
   const CoordinatorRuntime runtime = toy_runtime();
@@ -311,6 +357,9 @@ int main(int argc, char** argv) {
           {"pushed runtime runs a toy task", test_pushed_runtime_runs_a_toy_task},
           {"admission rejects a task that does not fit",
            test_admission_rejects_a_task_that_does_not_fit},
+          {"declared slots are shared with the local build",
+           test_declared_slots_are_shared_with_the_local_build},
+          {"BLOB_GET returns a verified blob", test_blob_get_returns_a_verified_blob},
           {"tampered runtime is never run", test_tampered_runtime_is_never_run},
           {"bad blob is refused", test_bad_blob_is_refused},
           {"model bundle push is lock-verified", test_model_bundle_push_is_lock_verified},

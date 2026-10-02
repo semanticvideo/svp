@@ -24,6 +24,13 @@
 //               bundle {"kind":"model_bundle","lock":{model-lock with exactly
 //                       one entry},"manifest":{BlobRef}}
 //
+// BLOB_GET      {"blob":BlobRef}                               (protocol 1.1)
+//               The coordinator asks for a blob in the worker's CAS (the
+//               package a whole-video job stored there). The worker answers
+//               with the BLOB_HAVE blobs answer: `missing` [] when it holds
+//               the blob, followed by the blob as BLOB_PUT chunks in order,
+//               or `missing` [BlobRef] and nothing else when it does not.
+//
 // BlobRef = {"blake3":"<hex>","bytes":n}. All bodies are strict: unknown
 // members are rejected.
 
@@ -116,5 +123,9 @@ using BlobPut = std::variant<BlobChunk, ModelBundlePut>;
 [[nodiscard]] Frame make_model_bundle_put_frame(const ModelBundlePut& put);
 // For a chunk, the payload is frame.payloads[0] (checked to fit the blob).
 [[nodiscard]] BlobPut blob_put_from_frame(const Frame& frame);
+
+// BLOB_GET
+[[nodiscard]] Frame make_blob_get_frame(const BlobRef& blob);
+[[nodiscard]] BlobRef blob_get_from_frame(const Frame& frame);
 
 }  // namespace svp::exec::worker

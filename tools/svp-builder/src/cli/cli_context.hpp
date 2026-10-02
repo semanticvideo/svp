@@ -97,6 +97,39 @@ struct BuildCliOptions {
   std::optional<svp::builder::RuntimeToolSelection> runtime_tools;
 };
 
+// `svp-builder build-batch` (M6, batch/build_batch.hpp): many videos, each
+// built as `build` builds one, spread over this Mac and --coordinators.
+struct BuildBatchCliOptions {
+  std::vector<std::string> sources;
+  std::string out_dir;
+  std::string output_format = "svp";
+  std::string ffprobe_path = "ffprobe";
+  std::string ffmpeg_path = "ffmpeg";
+  std::string staging_dir;
+  std::string model_cache_dir;
+  svp::vision::InferencePerformanceOptions performance;
+  std::string visual_tracking_quality{
+      svp::vision::kDefaultVisualTrackingQualityName};
+  std::string sherpa_lib_path;
+  bool allow_fallback_diarization = false;
+  bool force_single_speaker = false;
+  bool serial_pipeline = false;
+  // Batch level: --resume keeps complete, verified outputs; --fresh and
+  // --overwrite build every video again.
+  bool resume = false;
+  bool fresh = false;
+  bool overwrite = false;
+  bool distributed = false;
+  std::size_t require_workers = 0;
+  std::vector<std::string> coordinators;
+  // One run report per video, beside its output (<output>.run-report.json).
+  bool run_report = false;
+  std::string progress_mode = "auto";
+  bool quiet = false;
+  bool verbose = false;
+  std::optional<svp::builder::RuntimeToolSelection> runtime_tools;
+};
+
 struct InterlaceCliOptions {
   // interlace create
   std::string ic_source;
@@ -183,6 +216,8 @@ struct InterlaceCliOptions {
   bool cb_quiet = false;
   bool cb_distributed = false;
   std::size_t cb_require_workers = 0;
+  // --coordinators (M6): other Macs that each build one item at a time.
+  std::vector<std::string> cb_coordinators;
 
   // interlace scan
   std::string sc_source_dir;
@@ -256,6 +291,7 @@ struct TransportCliOptions {
 struct CliContext {
   ProbeCliOptions probe_opts;
   BuildCliOptions build_opts;
+  BuildBatchCliOptions build_batch_opts;
   InterlaceCliOptions interlace_opts;
   TransportCliOptions transport_opts;
 
@@ -273,6 +309,7 @@ struct CliContext {
 
   CLI::App* probe_subcommand = nullptr;
   CLI::App* build_subcommand = nullptr;
+  CLI::App* build_batch_subcommand = nullptr;
   CLI::App* diarize_subcommand = nullptr;
   CLI::App* diarize_replay_subcommand = nullptr;
   CLI::App* interlace_subcommand = nullptr;
@@ -310,6 +347,8 @@ std::shared_ptr<svp::builder::BuildProgressSink> resolve_cli_progress_sink(
 int run_probe_command(const ProbeCliOptions& options);
 
 int run_build_command(const BuildCliOptions& options, CLI::App* build_subcommand);
+
+int run_build_batch_command(const BuildBatchCliOptions& options, CLI::App* subcommand);
 
 int run_diarize_command(const DiarizeCliOptions& options);
 

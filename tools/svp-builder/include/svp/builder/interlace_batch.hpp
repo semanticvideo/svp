@@ -1,6 +1,7 @@
 #pragma once
 
 #include "svp/builder/interlace.hpp"
+#include "svp/builder/remote_video_builder.hpp"
 
 #include <filesystem>
 #include <functional>
@@ -69,6 +70,13 @@ struct BatchCreateOptions {
   // (called once per item, since each item is its own build). Empty builds
   // every item on this Mac alone.
   std::function<std::shared_ptr<DistributedExecution>()> make_distributed;
+  // --coordinators (M6): other Macs that each build one item at a time as a
+  // whole-video job, besides this Mac's --jobs. Empty: this Mac alone.
+  std::vector<std::shared_ptr<batch::RemoteVideoBuilder>> coordinators;
+  // What they build with, from this Mac and these options: the output
+  // format, the SVPI options, this Mac's thread plan and ffmpeg build;
+  // source_name is set per item.
+  batch::VideoBuildParameters remote_parameters;
 };
 
 enum class BatchFileStatus {
@@ -89,6 +97,8 @@ struct BatchFileResult {
   BatchFileStatus status = BatchFileStatus::failed;
   std::string error_message;
   std::string blake3_state;
+  // The other Mac that built it (--coordinators); empty when this Mac did.
+  std::string built_on;
 };
 
 struct BatchCreateResult {
@@ -99,6 +109,8 @@ struct BatchCreateResult {
   int mismatch_count = 0;
   int failed_count = 0;
   int replaced_count = 0;
+  // Other Macs the batch stopped using (--coordinators), and why.
+  std::vector<std::string> dropped_coordinators;
 };
 
 [[nodiscard]] BatchCreateResult interlace_create_batch(const BatchCreateOptions& options);

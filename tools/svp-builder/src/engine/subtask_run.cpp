@@ -1,5 +1,7 @@
 #include "engine/subtask_run.hpp"
 
+#include "engine/local_load_executor.hpp"
+
 #include "svp/exec/attempt_event.hpp"
 #include "svp/exec/clock.hpp"
 #include "svp/exec/in_process_executor.hpp"
@@ -132,6 +134,11 @@ std::vector<svp::exec::CommittedResult> run_subtasks(const SubtaskRunRequest& re
                       .runtime_id = {}});
     local_only.emplace(*local, only_type);
     executors.push_back(&*local_only);
+  }
+  std::optional<LoadReportingExecutor> local_reported;
+  if (local_only && setup.local_load) {
+    local_reported.emplace(*local_only, setup.local_load);
+    executors.back() = &*local_reported;
   }
   std::vector<std::unique_ptr<svp::exec::Executor>> workers;
   if (setup.workers) {

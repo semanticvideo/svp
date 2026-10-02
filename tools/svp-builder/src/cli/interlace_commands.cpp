@@ -1,3 +1,4 @@
+#include "batch_coordinators_cli.hpp"
 #include "distributed_cli.hpp"
 #include "cli_context.hpp"
 #include "cli_completion.hpp"
@@ -237,6 +238,31 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
                                               "interlace create-batch")
             .value_or(nullptr);
       };
+    }
+
+    std::optional<CliBatchCoordinators> coordinators = make_cli_batch_coordinators(
+        opts.cb_coordinators, opts.cb_performance, opts.cb_model_cache, opts.cb_ffmpeg,
+        opts.cb_quiet, "interlace create-batch");
+    if (!coordinators) {
+      return 2;
+    }
+    if (!coordinators->macs.empty()) {
+      cb_opts.coordinators = std::move(coordinators->macs);
+      svp::builder::batch::VideoBuildParameters& remote = coordinators->parameters;
+      remote.output_format = *output_format == svp::builder::BatchOutputFormat::svpi
+                                 ? svp::builder::batch::VideoOutputFormat::svpi
+                                 : svp::builder::batch::VideoOutputFormat::embedded_svpi;
+      remote.performance = opts.cb_performance;
+      remote.visual_tracking_quality = opts.cb_visual_tracking_quality;
+      remote.allow_fallback_diarization = opts.cb_allow_fallback;
+      remote.force_single_speaker = opts.cb_force_single;
+      remote.serial_pipeline = opts.cb_serial_pipeline;
+      remote.compute_full_blake3 = !opts.cb_no_blake3;
+      remote.core_only_diagnostic = opts.cb_core_only;
+      remote.distributed = opts.cb_distributed;
+      remote.require_workers = opts.cb_require_workers;
+      remote.run_report = false;
+      cb_opts.remote_parameters = remote;
     }
 
     auto result = svp::builder::interlace_create_batch(cb_opts);
