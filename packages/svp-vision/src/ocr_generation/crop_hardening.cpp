@@ -228,15 +228,19 @@ RoiHardeningSummary generate_and_harden_evidence_crops(
   std::optional<EvidenceCropOptions> crop_options;
   std::vector<CropGenerationInput> crop_inputs;
   std::optional<DispatchedCrops> dispatched;
+  // As one step, as a build without a dispatcher has always done it: if
+  // either throws, the stage records that error and makes no crops.
+  bool prepared = false;
   try {
     crop_options = build_crop_options(options);
     crop_inputs = build_crop_inputs(result, reconciled);
+    prepared = true;
   } catch (const std::exception& e) {
     crop_result.crops_written = false;
     crop_result.crops_skipped_reason =
         std::string("Evidence crop generation error: ") + e.what();
   }
-  if (crop_options) {
+  if (prepared) {
     // Outside the try: a dispatcher that fails ends the build
     // (DispatchedWorkError), never as a crop blocker.
     dispatched = dispatch_evidence_crops(options, *crop_options, crop_inputs, pp_ocr_opts);
