@@ -32,6 +32,12 @@ struct OcrFrameBatchWorkerEnvironment {
   // the cache is a view over exactly the bundles the spec's model_refs name).
   // Throwing means this runtime cannot provide those bundles now.
   std::function<std::filesystem::path(const svp::exec::TaskSpec& spec)> model_cache_for;
+  // True only on the coordinator: a batch whose OCR cannot start (ffmpeg
+  // cannot decode at all, PP-OCR does not load) succeeds with every sample
+  // not_started, so the OCR stage falls back to running exactly as a build
+  // without batches does. False (workers): a retryable failure, so the batch
+  // runs on another Mac and output never depends on which Mac took it.
+  bool record_start_failures = false;
 };
 
 // Registers ocr.frame_batch version 1 with its strict parameter validator.

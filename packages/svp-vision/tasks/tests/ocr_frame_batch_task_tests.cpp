@@ -16,7 +16,9 @@
 #include <functional>
 #include <iostream>
 #include <stdexcept>
+#include <span>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -340,6 +342,64 @@ void test_execute_failures() {
   std::filesystem::remove_all(empty_cache);
 }
 
+// On the coordinator (record_start_failures), a batch whose OCR cannot start
+// is not a failure: every sample is recorded as not_started, so the OCR stage
+// falls back to running exactly as a build without batches (main's blocker
+// path). Workers keep failing retryably (test_execute_failures).
+void test_coordinator_records_start_failures() {
+  const std::filesystem::path empty_cache =
+      std::filesystem::temp_directory_path() / "svp-ocr-task-tests-empty-cache-coordinator";
+  std::filesystem::create_directories(empty_cache);
+  const std::filesystem::path stand_in_ffmpeg = "/bin/echo";
+  const std::optional<std::string> stand_in_build =
+      tasks::ffmpeg_build_identity(stand_in_ffmpeg);
+  require(stand_in_build.has_value(), "the stand-in decoder has an identity");
+
+  const exec::CancellationToken token;
+  const vision::OcrSamplePlan plan = small_plan();
+  for (const auto& [ffmpeg, build, why] :
+       std::vector<std::tuple<std::filesystem::path, std::string, std::string>>{
+           {"/nonexistent/ffmpeg", kTestFfmpegBuild, "ffmpeg cannot run"},
+           {stand_in_ffmpeg, *stand_in_build, "PP-OCR does not load"}}) {
+    std::string written;
+    exec::TaskTypeRegistry registry;
+    tasks::register_ocr_frame_batch_task(
+        registry,
+        {.model_cache_root = empty_cache,
+         .ffmpeg_path = ffmpeg,
+         .write_output =
+             [&written](std::span<const std::byte> bytes, std::string media_type,
+                        std::string role) {
+               written.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+               exec::Blake3Digest digest{};
+               return exec::ArtifactRef{.blake3 = digest,
+                                        .bytes = bytes.size(),
+                                        .media_type = std::move(media_type),
+                                        .role = std::move(role)};
+             },
+         .model_cache_for = {},
+         .record_start_failures = true});
+    tasks::OcrFrameBatchTaskInputs task = task_inputs();
+    task.ffmpeg_build = build;
+    const exec::TaskSpec spec = tasks::make_ocr_frame_batch_task_spec(
+        task, plan, {.first_ordinal = 0, .count = plan.samples.size()});
+    exec::ResolvedInputs inputs;
+    inputs.emplace("source", exec::ResolvedInput{.ref = spec.inputs.at("source"),
+                                                 .path = "/nonexistent.mp4"});
+    const exec::TaskResult result = registry.execute(spec, inputs, token);
+    require(result.status == exec::TaskStatus::succeeded,
+            "coordinator: " + why + " is recorded, not failed");
+    const std::vector<vision::OcrSampleDetections> records =
+        tasks::read_ocr_frame_batch_output(spec, written);
+    require(records.size() == plan.samples.size(), "coordinator: one record per sample");
+    for (const vision::OcrSampleDetections& record : records) {
+      require(record.status == vision::OcrSampleStatus::not_started,
+              "coordinator: " + why + " marks every sample not_started");
+    }
+  }
+  std::filesystem::remove_all(empty_cache);
+}
+
 }  // namespace
 
 int main() {
@@ -348,6 +408,7 @@ int main() {
   test_parameters_require_explicit_threads();
   test_task_spec();
   test_read_output();
+  test_coordinator_records_start_failures();
   test_execute_failures();
   std::cout << "All ocr.frame_batch task tests passed.\n";
   return 0;

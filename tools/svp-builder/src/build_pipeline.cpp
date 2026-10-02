@@ -417,7 +417,8 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
                              std::string role) {
                     return outputs.put(bytes, std::move(media_type), std::move(role));
                   },
-              .model_cache_for = {}},
+              .model_cache_for = {},
+              .record_start_failures = true},
           environment.pp_ocr_sessions);
     }
 

@@ -50,7 +50,9 @@ std::optional<std::string> ffmpeg_build_identity(const std::filesystem::path& ff
 
 std::optional<std::string> cached_ffmpeg_build_identity(const std::filesystem::path& ffmpeg) {
   static std::mutex mutex;
-  static std::map<std::string, std::optional<std::string>> cache;
+  // Only successes are kept: a failure may be transient (popen under load),
+  // so the next call asks ffmpeg again.
+  static std::map<std::string, std::string> cache;
   {
     const std::lock_guard lock(mutex);
     if (const auto found = cache.find(ffmpeg.string()); found != cache.end()) {
@@ -58,8 +60,11 @@ std::optional<std::string> cached_ffmpeg_build_identity(const std::filesystem::p
     }
   }
   std::optional<std::string> identity = ffmpeg_build_identity(ffmpeg);
+  if (!identity) {
+    return std::nullopt;
+  }
   const std::lock_guard lock(mutex);
-  return cache.emplace(ffmpeg.string(), std::move(identity)).first->second;
+  return cache.emplace(ffmpeg.string(), std::move(*identity)).first->second;
 }
 
 }  // namespace svp::vision::tasks

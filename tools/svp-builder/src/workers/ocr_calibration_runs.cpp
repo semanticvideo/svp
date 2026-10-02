@@ -54,7 +54,13 @@ svp::vision::tasks::OcrFrameBatchTaskInputs calibration_inputs(
 
 std::vector<std::byte> read_file(const std::filesystem::path& path) {
   std::ifstream file(path, std::ios::binary);
+  if (!file) {
+    throw std::runtime_error("cannot open the calibration clip " + path.string());
+  }
   const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+  if (file.bad()) {
+    throw std::runtime_error("cannot read the calibration clip " + path.string());
+  }
   std::vector<std::byte> bytes(text.size());
   std::memcpy(bytes.data(), text.data(), text.size());
   return bytes;
@@ -183,6 +189,9 @@ CalibrationOutcome ensure_coordinator_calibration(const OcrCalibrationSetup& set
         }
         svp::exec::CasTaskArtifactAccess artifacts(std::move(cas).value(), kCalibrationSession);
         const std::vector<std::byte> bytes = read_file(source.file);
+        if (bytes.size() != source.ref.bytes) {
+          throw std::runtime_error("the calibration clip changed size while it was in use");
+        }
         (void)artifacts.put(bytes, kClipMediaType,
                             std::string(svp::vision::tasks::kOcrFrameBatchSourceRole));
         svp::exec::TaskTypeRegistry registry;

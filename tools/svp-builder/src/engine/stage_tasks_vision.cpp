@@ -9,6 +9,7 @@
 #include "svp/package/vision_lane_stages.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_spec.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace svp::builder::engine {
@@ -20,11 +21,22 @@ svp::package::VisionLaneSettings vision_settings(const StageTaskEnvironment& env
                                    environment.model_runtime_available);
 }
 
+svp::vision::DecodedCanonicalFrames committed_canonical_frames(
+    const StageTaskEnvironment& environment) {
+  const std::string_view task_id = stage_task_id(StageTaskKind::canonical_frames);
+  return decode_canonical_frames_state(
+      environment.results.json_state(task_id, vision_state::kCanonicalFramesIndex),
+      environment.results.state(task_id, vision_state::kCanonicalFramePixels));
+}
+
 // The OCR stage's reduce step over committed frame-batch results, in batch
 // (sample-ordinal) order.
 svp::package::VisionOcrStageResult reduce_ocr_frame_batches(
     const StageTaskEnvironment& environment, const OcrFrameBatchPlan& batches,
     StageTaskContext& task, const svp::package::SpatialProgressCallback& on_progress) {
+  if (!environment.pp_ocr_sessions) {
+    throw std::logic_error("OCR frame batches planned without a PP-OCR session pool");
+  }
   std::vector<std::vector<svp::vision::OcrSampleDetections>> results;
   results.reserve(batches.nodes.size());
   for (const svp::exec::TaskNode& node : batches.nodes) {
@@ -32,8 +44,19 @@ svp::package::VisionOcrStageResult reduce_ocr_frame_batches(
     results.push_back(svp::vision::tasks::read_ocr_frame_batch_output(
         node.spec, std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size())));
   }
-  if (!environment.pp_ocr_sessions) {
-    throw std::logic_error("OCR frame batches planned without a PP-OCR session pool");
+  // OCR could not start on this Mac for some batch (ocr_frame_batch_task.hpp,
+  // record_start_failures): run the stage exactly as a build without batches
+  // does, so the package and its blocker are the ones that build writes.
+  const bool started = std::none_of(results.begin(), results.end(), [](const auto& batch) {
+    return std::any_of(batch.begin(), batch.end(), [](const auto& sample) {
+      return sample.status == svp::vision::OcrSampleStatus::not_started;
+    });
+  });
+  if (!started) {
+    environment.pp_ocr_sessions->clear_idle();
+    return svp::package::run_vision_ocr_stage(vision_settings(environment),
+                                              committed_canonical_frames(environment),
+                                              &task.context().frame_catalog, on_progress);
   }
   svp::package::VisionOcrStageResult reduced;
   {
@@ -45,14 +68,6 @@ svp::package::VisionOcrStageResult reduce_ocr_frame_batches(
   // Every batch has committed, so no session in the pool is needed again.
   environment.pp_ocr_sessions->clear_idle();
   return reduced;
-}
-
-svp::vision::DecodedCanonicalFrames committed_canonical_frames(
-    const StageTaskEnvironment& environment) {
-  const std::string_view task_id = stage_task_id(StageTaskKind::canonical_frames);
-  return decode_canonical_frames_state(
-      environment.results.json_state(task_id, vision_state::kCanonicalFramesIndex),
-      environment.results.state(task_id, vision_state::kCanonicalFramePixels));
 }
 
 void add_catalog_delta(StageStates& states, StageTaskContext& task) {

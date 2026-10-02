@@ -34,6 +34,9 @@ std::vector<OcrSampleDetections> assemble_ocr_frame_batches(
              std::to_string(record.timestamp_us) + " us, plan has " +
              std::to_string(planned.timestamp_us) + " us");
       }
+      if (record.status == OcrSampleStatus::not_started) {
+        fail(ordinal_text(ordinal) + " never started; the OCR stage must run without batches");
+      }
       if (record.status != OcrSampleStatus::decode_missed &&
           (record.frame_width != plan.frame_width ||
            record.frame_height != plan.frame_height)) {

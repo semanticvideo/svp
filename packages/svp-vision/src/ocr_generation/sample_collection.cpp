@@ -67,7 +67,10 @@ DecodedCanonicalFrames summarize_ocr_sample_decoding(
 void collect_ocr_sample(const OcrSampleDetections& sample,
                         const OcrSampleFrame& frame,
                         CollectedOcrFrames& collected) {
-  if (sample.status == OcrSampleStatus::decode_missed) return;
+  if (sample.status == OcrSampleStatus::decode_missed ||
+      sample.status == OcrSampleStatus::not_started) {
+    return;
+  }
   ++collected.processed_frame_count;
   if (collected.processed_frame_width == 0 &&
       collected.processed_frame_height == 0) {
@@ -77,6 +80,7 @@ void collect_ocr_sample(const OcrSampleDetections& sample,
 
   switch (sample.status) {
     case OcrSampleStatus::decode_missed:
+    case OcrSampleStatus::not_started:
       return;
     case OcrSampleStatus::frame_invalid:
       collected.frame_diagnostics.push_back({
