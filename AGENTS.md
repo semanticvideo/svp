@@ -4,6 +4,7 @@
 - Keep generated build folders, caches, and local outputs inside the assigned checkout/worktree or ignored paths.
 - Do not modify another worktree to fix your own build.
 - Report the checkout or worktree path in the handoff.
+- Never run parallel or stacked worktrees whose changes touch the same files or lines. Build shared code once, on one branch, merged first; parallelize only work that touches separate files, otherwise work sequentially.
 
 ## Shared Contract Zones
 
