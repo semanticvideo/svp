@@ -103,6 +103,14 @@ class RemoteExecutor final : public Executor {
   void lease_expired(std::string_view lease_id) override;
   void stop() override;
 
+  // Ends the current session when it has no outstanding lease: SHUTDOWN is
+  // sent (or the connection attempt abandoned), so the worker's session
+  // process exits and frees what it holds, such as loaded models. Nothing
+  // is lost or reported; a later assign() opens a fresh session, as after a
+  // lost connection. Returns true when a session was told to close. Does not
+  // wait for the worker. Thread-safe.
+  bool close_idle_session();
+
   // Sessions whose connection opened so far (tests observe reconnects).
   [[nodiscard]] std::size_t connections_opened() const;
   // Route of the most recently opened connection.

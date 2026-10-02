@@ -343,6 +343,39 @@ void test_unadvertised_pairing_is_lost() {
          "failures name the missing worker");
 }
 
+// A build closes a worker's idle session once that worker's kind of task is
+// done (freeing what its session process holds); a later task of that kind
+// (a retry) must still run, on a fresh session. A session with an
+// outstanding lease is never closed.
+void test_idle_session_closes_and_reopens() {
+  Workers workers;
+  const auto worker = workers.start("svp-remote-idle");
+  const ToyTask first{.task_id = "task.toy.first",
+                      .seed = 1,
+                      .order_key = {.lane = "alpha", .ordinals = {0}}};
+  const ToyTask second{.task_id = "task.toy.second",
+                       .depends_on = {first.task_id},
+                       .seed = 2,
+                       .order_key = {.lane = "alpha", .ordinals = {1}}};
+  const TaskGraph graph = make_toy_graph({first, second});
+  RemoteExecutor remote(remote_options("remote", worker->key(), 1));
+  bool closed_busy = true;
+  bool closed_idle = false;
+  const AttemptObserver observer = [&](const AttemptEvent& event) {
+    if (event.task_id != first.task_id) return;
+    if (event.kind == AttemptEventKind::leased) closed_busy = remote.close_idle_session();
+    if (event.kind == AttemptEventKind::committed) closed_idle = remote.close_idle_session();
+  };
+  InMemoryResultCommitSink sink;
+  expect_succeeded(run(graph, {&remote}, sink, test_policy(), observer),
+                   "a task after the idle session closed still runs");
+  expect(!closed_busy, "a session with an outstanding lease is not closed");
+  expect(closed_idle, "an idle session is closed");
+  expect(remote.connections_opened() == 2, "the next task opened a fresh session");
+  expect_equal(to_text(sink.find(second.task_id)->payloads.front()),
+               toy_expected_output(second.task_id, second.seed), "the fresh session's result");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -364,5 +397,6 @@ int main(int argc, char** argv) {
           {"cancel stops promptly", test_cancel_stops_promptly},
           {"wrong secret never runs tasks", test_wrong_secret_never_runs_tasks},
           {"unadvertised pairing is lost", test_unadvertised_pairing_is_lost},
+          {"idle session closes and reopens", test_idle_session_closes_and_reopens},
       });
 }

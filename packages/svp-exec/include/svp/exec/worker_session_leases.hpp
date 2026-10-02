@@ -46,6 +46,10 @@ class WorkerSessionLeases {
   // order: the leases a lost session leaves orphaned.
   std::vector<std::string> take_live();
 
+  // True when no lease is outstanding, cancelled ones included (a cancelled
+  // lease may still have a result in flight).
+  [[nodiscard]] bool empty() const;
+
  private:
   struct Outstanding {
     std::string task_id;
