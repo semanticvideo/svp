@@ -78,6 +78,19 @@ struct DistributedTrackingWork {
   std::uint64_t window_peak_rss_mb = 0;
 };
 
+// The audio stage work a build may dispatch (M5): ASR chunks
+// (asr.chunk_batch) and diarization windows (diarize.window). A kind whose
+// models this Mac cannot name, or whose thread counts are not explicit, is
+// not dispatched; its stage does the work itself.
+struct DistributedAudioWork {
+  // The Whisper, VAD, and (when this Mac's aligner bundle verifies) phoneme
+  // aligner bundles; empty when ASR chunks are not dispatched.
+  std::vector<svp::exec::TaskModelRef> asr_model_refs;
+  // The sherpa-onnx diarization bundle; unset when windows are not
+  // dispatched.
+  std::optional<svp::exec::TaskModelRef> diarization_model_ref;
+};
+
 // What workers need to run this build's ocr.frame_batch tasks.
 struct DistributedOcrWork {
   std::string build_session_id;
@@ -99,6 +112,8 @@ struct DistributedOcrWork {
   DistributedVisionWork vision;
   // The tracking windows the build splits, when it does.
   std::optional<DistributedTrackingWork> tracking;
+  // The audio stage work the build may also dispatch (M5).
+  DistributedAudioWork audio;
 };
 
 // How one dispatched task type runs on this Mac, from its measured capacity
@@ -109,6 +124,14 @@ struct DispatchedTypeCapacity {
   double seconds_per_item = 0.0;
 };
 
+// A file a stage made after prepare() that its dispatched tasks read (the
+// staged analysis audio, M5): every worker session that runs them is
+// supplied it, by BLAKE3, before its leases are sent.
+struct DispatchedInput {
+  svp::exec::ArtifactRef ref;
+  std::filesystem::path file;
+};
+
 // The paired workers' executors for one dispatched task type. Each call
 // returns fresh executors (one per ready worker that measured a capacity for
 // the type, sized from it), to be started and stopped by one scheduler run.
@@ -117,6 +140,17 @@ class DispatchedWorkerExecutors {
   virtual ~DispatchedWorkerExecutors() = default;
   [[nodiscard]] virtual std::vector<std::unique_ptr<svp::exec::Executor>> make(
       std::string_view task_type) = 0;
+  // The same, with sessions that are also supplied `inputs`. Executors that
+  // cannot supply them make none, so the tasks run on this Mac.
+  [[nodiscard]] virtual std::vector<std::unique_ptr<svp::exec::Executor>> make(
+      std::string_view task_type, const std::vector<DispatchedInput>& inputs) {
+    if (!inputs.empty()) {
+      return {};
+    }
+    return make(task_type);
+  }
+  // Whether make() would return any executor for `task_type`.
+  [[nodiscard]] virtual bool takes(std::string_view /*task_type*/) const { return true; }
 };
 
 struct DistributedFleet {
@@ -146,6 +180,16 @@ struct DistributedFleet {
   // Measured seconds one tracking frame takes on one of this Mac's slots
   // (lease sizing). Empty when not measured.
   std::optional<double> seconds_per_tracking_frame;
+  // Measures (or reads the stored measurement of) a dispatched task type on
+  // this Mac when it cannot be measured before the build's stages run: a
+  // diarize.window measurement loads sherpa-onnx, which must not load in
+  // this process before the build's own ONNX Runtime models
+  // (svp/audio/sherpa_diarization.hpp), so it is taken in the diarization
+  // stage, once sherpa-onnx is loaded there. nullopt when it cannot be
+  // measured (the stage then does its work itself). Empty when no worker
+  // takes such a type.
+  std::function<std::optional<DispatchedTypeCapacity>(std::string_view task_type)>
+      measure_in_stage;
 };
 
 class DistributedExecution {

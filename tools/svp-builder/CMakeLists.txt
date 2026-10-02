@@ -4,6 +4,7 @@ find_package(libzip CONFIG REQUIRED)
 
 add_library(svp-builder-lib
   src/audio_stage.cpp
+  src/audio_work_prefetch.cpp
   src/build_frame_plan.cpp
   src/build_pipeline.cpp
   src/build_pipeline_io.cpp
@@ -21,11 +22,14 @@ add_library(svp-builder-lib
   src/package_final_stages.cpp
   src/processor_provenance.cpp
   src/vision_stage_progress.cpp
+  src/calibration/audio_capacity_workloads.cpp
   src/calibration/capacity_sweep.cpp
   src/calibration/dispatched_capacity_workloads.cpp
   src/calibration/ocr_capacity_calibration.cpp
   src/calibration/track_window_capacity_calibration.cpp
+  src/engine/audio_work_dispatch.cpp
   src/engine/build_assembly.cpp
+  src/engine/build_audio_dispatch.cpp
   src/engine/build_inputs_digest.cpp
   src/engine/build_vision_dispatch.cpp
   src/engine/build_journal_session.cpp
@@ -33,6 +37,7 @@ add_library(svp-builder-lib
   src/engine/canonical_frames_codec.cpp
   src/engine/committed_stage_results.cpp
   src/engine/dispatch_scratch.cpp
+  src/engine/distributed_audio_work.cpp
   src/engine/distributed_vision_work.cpp
   src/engine/frame_catalog_delta.cpp
   src/engine/ocr_batch_observer.cpp
@@ -104,6 +109,7 @@ target_link_libraries(svp-builder-lib
   PRIVATE
     nlohmann_json::nlohmann_json
     svp::audio
+    svp::audio_tasks
     svp::core
     svp::vision_tasks
     svp::media
@@ -142,8 +148,10 @@ target_compile_features(svp-builder PRIVATE cxx_std_20)
 # `worker --serve-fd`. Apple-only, like the remote transport they use.
 if(APPLE)
   target_sources(svp-builder PRIVATE
+    src/workers/audio_calibration_runs.cpp
     src/workers/builder_worker_tasks.cpp
     src/workers/calibration_store.cpp
+    src/workers/capacity_record_support.cpp
     src/workers/coordinator_context.cpp
     src/workers/dispatched_calibration_runs.cpp
     src/workers/distributed_fleet.cpp
@@ -160,7 +168,7 @@ if(APPLE)
     src/workers/workers_unpair.cpp
   )
   target_link_libraries(svp-builder PRIVATE svp::exec_worker svp::exec_remote svp::exec
-                                             svp::models svp::vision_tasks)
+                                             svp::models svp::vision_tasks svp::audio_tasks)
 endif()
 
 target_include_directories(svp-builder PRIVATE

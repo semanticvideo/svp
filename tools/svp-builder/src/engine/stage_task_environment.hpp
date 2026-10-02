@@ -30,6 +30,7 @@
 
 namespace svp::builder::engine {
 
+struct AudioWorkDispatch;
 struct OcrFrameBatchPlan;
 struct TrackingWindowPlan;
 class TrackingWindowProgress;
@@ -69,6 +70,10 @@ struct StageTaskEnvironment {
   // --distributed only: where the vision stages send their per-item work
   // (vision_work_dispatch.hpp). Null in every other build.
   const svp::package::VisionWorkDispatch* vision_dispatch = nullptr;
+  // --distributed only: where the audio transcription stage sends its ASR
+  // chunks and diarization windows (audio_work_dispatch.hpp). Null in every
+  // other build.
+  const AudioWorkDispatch* audio_dispatch = nullptr;
   // Set when the tracking stage runs as window tasks: the `tracking` task
   // folds their committed outcomes instead of running the whole stage.
   const TrackingWindowPlan* tracking_windows = nullptr;

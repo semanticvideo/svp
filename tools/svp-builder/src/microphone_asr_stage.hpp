@@ -14,6 +14,10 @@
 
 namespace svp::builder {
 
+namespace engine {
+struct AudioWorkDispatch;
+}  // namespace engine
+
 struct MicrophoneAsrStageResult {
   svp::audio::AsrExecutionBoundary boundary;
   nlohmann::json stream_results = nlohmann::json::array();
@@ -42,6 +46,10 @@ struct MicrophoneDiarizationProgressCallbacks {
     const std::filesystem::path& model_cache_root,
     const svp::models::ThreadPlan& thread_plan,
     MicrophoneAsrProgressCallback progress = {},
-    MicrophoneDiarizationProgressCallbacks diarization_progress = {});
+    MicrophoneDiarizationProgressCallbacks diarization_progress = {},
+    // --distributed only (else null): every stream's ASR chunks, and every
+    // stream's fingerprint diarization windows, run as tasks
+    // (engine/audio_work_dispatch.hpp).
+    const engine::AudioWorkDispatch* dispatch = nullptr);
 
 }  // namespace svp::builder

@@ -1,4 +1,5 @@
 #include "builder_worker_tasks.hpp"
+#include "svp/audio/sherpa_diarization.hpp"
 #include "svp/builder/runtime_tools.hpp"
 #include "coordinator_context.hpp"
 #include "svp/exec/cas_store.hpp"
@@ -60,6 +61,13 @@ int run_worker_session(const WorkerCliOptions& options) {
   const RuntimeToolChoice ffmpeg = resolve_runtime_tool(
       RuntimeTool::ffmpeg, std::nullopt, locate_runtime_bundle(current_executable()),
       process_environment());
+  // sherpa-onnx the way a local build of this runtime finds it: the
+  // bundle's pinned library before the unpinned locations (diarize.window
+  // tasks still refuse any library but the coordinator's).
+  if (const std::optional<RuntimeToolChoice> sherpa = bundled_runtime_tool(
+          RuntimeTool::sherpa_onnx, locate_runtime_bundle(current_executable()))) {
+    svp::audio::set_sherpa_bundled_lib_path(sherpa->path);
+  }
   svp::exec::TaskTypeRegistry registry;
   register_builder_worker_task_types(
       registry, artifacts,

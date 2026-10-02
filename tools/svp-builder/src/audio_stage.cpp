@@ -1,4 +1,5 @@
 #include "audio_stage.hpp"
+#include "engine/audio_work_dispatch.hpp"
 #include "microphone_asr_stage.hpp"
 #include "processor_provenance.hpp"
 
@@ -130,7 +131,8 @@ AudioExtractStageState run_audio_extract_stage(BuildPipelineContext& context) {
 }
 
 std::optional<int> run_audio_transcribe_stage(BuildPipelineContext& context,
-                                              const AudioExtractStageState& extracted) {
+                                              const AudioExtractStageState& extracted,
+                                              const engine::AudioWorkDispatch* dispatch) {
   const svp::audio::AudioStagePlan audio_plan = plan_audio_stage(context);
   nlohmann::json audio_json = extracted.audio_json;
 
@@ -199,7 +201,8 @@ std::optional<int> run_audio_transcribe_stage(BuildPipelineContext& context,
                   static_cast<std::uint64_t>(current),
                   static_cast<std::uint64_t>(total), "chunks");
             },
-        });
+        },
+        dispatch);
     executed_asr_boundary = std::move(microphone_result.boundary);
     microphone_asr_json = std::move(microphone_result.stream_results);
     if (!microphone_result.processor_record.empty()) {
@@ -233,7 +236,8 @@ std::optional<int> run_audio_transcribe_stage(BuildPipelineContext& context,
                                 static_cast<std::uint64_t>(current),
                                 static_cast<std::uint64_t>(total), "chunks");
           }
-        });
+        },
+        engine::single_asr_chunk_dispatch(dispatch));
     svp::audio::release_whisper_cpp_model();
     svp::audio::release_phoneme_aligner();
   }
@@ -324,7 +328,8 @@ std::optional<int> run_audio_transcribe_stage(BuildPipelineContext& context,
               static_cast<std::uint64_t>(current),
               static_cast<std::uint64_t>(total), "chunks");
         }
-      });
+      },
+      engine::single_diarization_window_dispatch(dispatch));
   emit_stage_completed(context, ProgressStageId::diarization);
 
   if (context.stage_plan.run_audio &&

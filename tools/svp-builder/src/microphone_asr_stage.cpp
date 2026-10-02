@@ -1,5 +1,7 @@
 #include "microphone_asr_stage.hpp"
 
+#include "audio_work_prefetch.hpp"
+
 #include "svp/models/reference_processor_model_ids.hpp"
 
 #include "svp/audio/asr_chunk_planner.hpp"
@@ -112,7 +114,8 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
     const std::filesystem::path& model_cache_root,
     const svp::models::ThreadPlan& thread_plan,
     MicrophoneAsrProgressCallback progress,
-    MicrophoneDiarizationProgressCallbacks diarization_progress) {
+    MicrophoneDiarizationProgressCallbacks diarization_progress,
+    const engine::AudioWorkDispatch* dispatch) {
   MicrophoneAsrStageResult result;
   std::vector<svp::audio::AsrExecutionBoundary> boundaries;
   std::vector<svp::audio::MicrophoneTranscript> transcripts;
@@ -128,6 +131,37 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
   }
   std::size_t completed_chunks_before_stream = 0;
   std::vector<std::string> fingerprint_blockers;
+
+  // --distributed: every stream's chunks in one dispatched run; each
+  // stream's boundary below then takes its own results from it.
+  std::vector<svp::audio::AsrChunkWork> chunk_works;
+  if (dispatch != nullptr) {
+    for (std::size_t stream_ordinal = 0;
+         stream_ordinal < extraction_plan.microphone_analysis_streams.size(); ++stream_ordinal) {
+      const auto& microphone_plan = extraction_plan.microphone_analysis_streams[stream_ordinal];
+      const bool microphone_available = stream_ordinal < microphone_streams_staged.size() &&
+                                        microphone_streams_staged[stream_ordinal];
+      const svp::audio::AsrChunkPlanResult chunk_plan = svp::audio::build_asr_chunk_plan(
+          microphone_plan.timeline_duration_us.value_or(media_duration_us),
+          svp::audio::kDefaultAsrChunkDurationUs, svp::audio::kDefaultAsrChunkOverlapUs,
+          microphone_plan.output_ref);
+      const std::optional<svp::audio::AsrChunkWork> work = predicted_asr_chunk_work(
+          svp::audio::build_asr_execution_boundary(chunk_plan, microphone_available,
+                                                   model_runtime_available, asr_model_available,
+                                                   asr_model_verified, microphone_plan.output_ref),
+          staging_dir, model_cache_root, svp::audio::whisper_runtime_threads(thread_plan));
+      if (work) {
+        chunk_works.push_back(*work);
+      }
+    }
+  }
+  const PrefetchedAsrChunks prefetched_chunks(
+      dispatch, std::move(chunk_works), [progress, total_chunks](std::size_t done, std::size_t) {
+        if (progress) {
+          progress(std::min(done, total_chunks), total_chunks);
+        }
+      });
+  const svp::audio::AsrChunkDispatch boundary_dispatch = prefetched_chunks.boundary_dispatch();
 
   // Deliberately sequential: a microphone's ASR completes before the next
   // microphone begins.
@@ -159,7 +193,8 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
                 progress(completed_chunks_before_stream + current,
                          total_chunks);
               }
-            });
+            },
+            boundary_dispatch);
     nlohmann::json stream_result = {
         {"source_audio_stream_id", microphone_plan.selected_source_audio_stream_id},
         {"source_stream_index", microphone_plan.source_stream_index},
@@ -223,6 +258,35 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
     }
   }
 
+  // --distributed: every speech-positive stream's windows in one dispatched
+  // run; each stream's diarization below takes its own maps from it.
+  std::vector<svp::audio::DiarizationWindowWork> window_works;
+  if (dispatch != nullptr && fingerprint_runtime_available) {
+    for (const auto& transcript : transcripts) {
+      if (transcript.words.empty()) continue;
+      try {
+        const std::filesystem::path wav = staging_dir / transcript.analysis_audio_ref;
+        const std::size_t samples = svp::audio::diarization_wav_sample_count(wav);
+        window_works.push_back(svp::audio::DiarizationWindowWork{
+            .wav_path = wav,
+            .sample_count = samples,
+            .window_count = svp::audio::diarization_window_count(samples),
+            .settings = {.threads = thread_plan.sherpa, .compute_embeddings = true}});
+      } catch (const std::exception&) {
+        // The stream's own diarization reports the WAV problem.
+      }
+    }
+  }
+  const PrefetchedDiarizationWindows prefetched_windows(
+      dispatch, std::move(window_works),
+      [diarization_progress, total_fingerprint_chunks](std::size_t done, std::size_t) {
+        if (diarization_progress.progress && total_fingerprint_chunks > 0) {
+          diarization_progress.progress(std::min(done, total_fingerprint_chunks),
+                                        total_fingerprint_chunks);
+        }
+      });
+  const svp::audio::DiarizationWindowDispatch window_dispatch = prefetched_windows.run_dispatch();
+
   std::size_t completed_fingerprint_chunks = 0;
   for (std::size_t transcript_index = 0;
        transcript_index < transcripts.size(); ++transcript_index) {
@@ -253,7 +317,8 @@ MicrophoneAsrStageResult run_microphone_asr_stage(
                       completed_fingerprint_chunks + current,
                       total_fingerprint_chunks);
                 }
-              });
+              },
+              window_dispatch);
       transcript.voice_fingerprint =
           microphone_voice_fingerprint(diarization);
       transcript.voice_tracks = microphone_voice_tracks(diarization);
