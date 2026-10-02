@@ -42,9 +42,13 @@ class Sequence {
   std::uint32_t state_;
 };
 
-cv::Mat render_frame(int lines, std::uint32_t seed) {
-  cv::Mat frame(kOcrCalibrationFrameHeight, kOcrCalibrationFrameWidth, CV_8UC3,
-                cv::Scalar(255, 255, 255));
+struct PlacedLine {
+  std::string text;
+  cv::Point origin;
+};
+
+// The lines of one frame and where they are drawn (text baseline origin).
+std::vector<PlacedLine> layout_frame(int lines, std::uint32_t seed) {
   Sequence sequence(seed);
   std::array<int, kColumns * kRows> cells{};
   std::iota(cells.begin(), cells.end(), 0);
@@ -52,16 +56,29 @@ cv::Mat render_frame(int lines, std::uint32_t seed) {
     std::swap(cells[index], cells[sequence.next() % (index + 1)]);
   }
   static constexpr char kAlphabet[] = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789";
+  std::vector<PlacedLine> placed;
   for (int line = 0; line < lines; ++line) {
     std::string text;
     for (int character = 0; character < kLineCharacters; ++character) {
       text += kAlphabet[sequence.next() % (sizeof(kAlphabet) - 1)];
     }
     const int cell = cells[static_cast<std::size_t>(line)];
-    const cv::Point origin((cell % kColumns) * kCellWidth + kCellMargin,
-                           (cell / kColumns + 1) * kCellHeight - kCellMargin);
-    cv::putText(frame, text, origin, cv::FONT_HERSHEY_SIMPLEX, kFontScale, cv::Scalar(0, 0, 0),
-                kFontThickness, cv::LINE_AA);
+    placed.push_back({std::move(text),
+                      cv::Point((cell % kColumns) * kCellWidth + kCellMargin,
+                                (cell / kColumns + 1) * kCellHeight - kCellMargin)});
+  }
+  return placed;
+}
+
+// Frame i is drawn from seed i + 1.
+constexpr std::uint32_t kFirstFrameSeed = 1;
+
+cv::Mat render_frame(int lines, std::uint32_t seed) {
+  cv::Mat frame(kOcrCalibrationFrameHeight, kOcrCalibrationFrameWidth, CV_8UC3,
+                cv::Scalar(255, 255, 255));
+  for (const PlacedLine& line : layout_frame(lines, seed)) {
+    cv::putText(frame, line.text, line.origin, cv::FONT_HERSHEY_SIMPLEX, kFontScale,
+                cv::Scalar(0, 0, 0), kFontThickness, cv::LINE_AA);
   }
   return frame;
 }
@@ -82,6 +99,26 @@ std::vector<std::int64_t> ocr_calibration_timestamps_us() {
     timestamps.push_back(static_cast<std::int64_t>(frame) * kOcrCalibrationFrameIntervalUs);
   }
   return timestamps;
+}
+
+std::vector<OcrCalibrationTextLine> ocr_calibration_text_lines() {
+  std::vector<OcrCalibrationTextLine> lines;
+  std::uint32_t seed = kFirstFrameSeed;
+  for (std::size_t frame = 0; frame < std::size(kOcrCalibrationFrameLines); ++frame) {
+    for (const PlacedLine& line : layout_frame(kOcrCalibrationFrameLines[frame], seed)) {
+      int baseline = 0;
+      const cv::Size size = cv::getTextSize(line.text, cv::FONT_HERSHEY_SIMPLEX, kFontScale,
+                                            kFontThickness, &baseline);
+      lines.push_back(OcrCalibrationTextLine{.frame = frame,
+                                             .text = line.text,
+                                             .left = line.origin.x,
+                                             .top = line.origin.y - size.height,
+                                             .right = line.origin.x + size.width,
+                                             .bottom = line.origin.y + baseline});
+    }
+    ++seed;
+  }
+  return lines;
 }
 
 OcrCalibrationClip write_ocr_calibration_clip(const std::filesystem::path& ffmpeg,
@@ -106,7 +143,7 @@ OcrCalibrationClip write_ocr_calibration_clip(const std::filesystem::path& ffmpe
   ::fcntl(::fileno(pipe), F_SETNOSIGPIPE, 1);
 #endif
   std::int64_t timestamp = 0;
-  std::uint32_t seed = 1;
+  std::uint32_t seed = kFirstFrameSeed;
   for (const int lines : kOcrCalibrationFrameLines) {
     const cv::Mat frame = render_frame(lines, seed++);
     const std::size_t bytes = frame.total() * frame.elemSize();
