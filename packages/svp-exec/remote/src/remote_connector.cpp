@@ -10,6 +10,8 @@
 #include "wait_signal.hpp"
 
 #include <chrono>
+#include <set>
+#include <utility>
 
 namespace svp::exec::remote {
 
@@ -66,8 +68,17 @@ std::vector<Candidate> resolve_candidates(const std::vector<detail::DiscoveredSe
   const std::vector<std::vector<detail::ResolvedAddress>> resolved = detail::resolve_services(
       requests, policy.discovery_timeout, policy.discovery_settle, signal);
   std::vector<Candidate> candidates;
+  // One endpoint (interface, address, port) is measured once, however many
+  // instances resolve to it (a worker's own and its per-pairing instances
+  // share one port).
+  std::set<std::pair<std::string, std::string>> seen;
   for (std::size_t index = 0; index < slots.size(); ++index) {
     for (const detail::ResolvedAddress& address : resolved[index]) {
+      // "?" is an address getnameinfo could not print: never merged.
+      if (address.text != "?" &&
+          !seen.insert({slots[index].route.interface_name, address.text}).second) {
+        continue;
+      }
       Candidate candidate{.service_name = slots[index].service->name,
                           .target = {.interface = slots[index].interface,
                                      .address = address.address,

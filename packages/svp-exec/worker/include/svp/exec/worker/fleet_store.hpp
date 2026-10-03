@@ -15,7 +15,14 @@
 //                 "member_key":"<64 hex>",        after the first pairing
 //                 "schema":"svp.worker.join/1",
 //                 "token":{"expires_at","join_key","token_id"},
-//                 "worker_join_id":"svpj-<24 hex>"}
+//                 "worker_join_id":"svpj-<24 hex>",
+//                 "worker_key":"<194 hex>"}
+//                worker_key is the worker's long-term P-256 private key,
+//                created once at install; worker_join_id is
+//                worker_join_id_for(its public key) (fleet_keys.hpp), so a
+//                join proves the worker owns its id (fleet_join.hpp).
+//                Credentials written before worker_key existed are migrated
+//                (migrate_join_credential).
 //
 // Neither is ever passed on a command line.
 
@@ -56,6 +63,9 @@ void save_fleet_membership(const std::filesystem::path& directory,
 
 struct WorkerJoinCredential {
   std::string worker_join_id;
+  // P-256 private key (fleet_crypto.hpp); empty in a credential written
+  // before it existed, until migrate_join_credential.
+  std::vector<std::byte> worker_key;
   WorkerJoinToken token;
   // Set by the first pairing; from then on the join listener's key.
   std::optional<std::vector<std::byte>> member_key;
@@ -63,6 +73,18 @@ struct WorkerJoinCredential {
 
   bool operator==(const WorkerJoinCredential&) const = default;
 };
+
+// A new credential for `token`: a fresh worker key and the join id derived
+// from it. Throws WorkerError(io).
+[[nodiscard]] WorkerJoinCredential new_worker_join_credential(WorkerJoinToken token);
+
+// Brings a credential written before worker keys existed up to date: a new
+// worker key, the join id derived from it, and no member key (it was issued
+// for the old id, which nothing proves this worker owns). The token is kept,
+// so coordinators pair the worker again while it is valid. Returns true when
+// it changed `credential`. A credential whose join id does not match its key
+// is treated the same way.
+bool migrate_join_credential(WorkerJoinCredential& credential);
 
 [[nodiscard]] std::string encode_worker_join_credential(const WorkerJoinCredential& credential);
 [[nodiscard]] WorkerJoinCredential decode_worker_join_credential(std::string_view bytes);

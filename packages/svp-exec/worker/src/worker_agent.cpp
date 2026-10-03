@@ -10,6 +10,7 @@
 #include "svp/exec/worker/pairings_server.hpp"
 #include "svp/exec/worker/worker_identity.hpp"
 #include "svp/exec/remote/service_advertiser.hpp"
+#include "svp/exec/remote/stream_deadline.hpp"
 #include "svp/exec/remote/transport_policy.hpp"
 #include "svp/exec/worker/service_updater.hpp"
 #include "svp/exec/worker/worker_error.hpp"
@@ -47,6 +48,7 @@ class AgentListeners {
       : core_(core),
         updater_(updater),
         layout_(layout),
+        worker_id_(worker_id),
         pairings_(PairingsServerOptions{
             .worker_id = std::move(worker_id),
             .serve =
@@ -82,11 +84,10 @@ class AgentListeners {
       join_->stop();
       join_.reset();
     }
-    std::optional<WorkerJoinCredential> credential;
-    {
-      const std::lock_guard lock(credential_mutex_);
-      credential = load_worker_join_credential(layout_);
-    }
+    // A credential that predates worker keys is migrated here first
+    // (a new key-bound join id; join_service.hpp).
+    const std::optional<WorkerJoinCredential> credential =
+        load_current_join_credential(layout_, credential_mutex_);
     if (!credential) {
       return;
     }
@@ -105,7 +106,8 @@ class AgentListeners {
             .port = join_->port(),
             .txt = {{std::string(remote::kPairingTxtKey), credential->worker_join_id},
                     {std::string(kFleetTxtKey), credential->token.fleet_id},
-                    {std::string(kJoinTxtKey), join_txt_value(*credential)}}},
+                    {std::string(kJoinTxtKey), join_txt_value(*credential)},
+                    {std::string(remote::kWorkerTxtKey), worker_id_}}},
         log_line);
     log_line("joinable fleet=" + credential->token.fleet_id + " join=" +
              join_txt_value(*credential) + " id=" + credential->worker_join_id +
@@ -177,6 +179,9 @@ class AgentListeners {
   }
 
   void serve_join(remote::RemoteStream& stream, const remote::RemoteSessionInfo& info) {
+    // A peer that stalls is cut off (its reads then end) instead of holding
+    // this connection's thread.
+    const remote::StreamDeadline deadline(stream, kJoinExchangeTimeout);
     StreamFrameReader reader(stream, core_.options().frame_limits);
     StreamFrameWriter writer(stream, core_.options().frame_limits);
     try {
@@ -196,6 +201,7 @@ class AgentListeners {
   AgentCore& core_;
   ServiceUpdater& updater_;
   WorkerLayout layout_;
+  std::string worker_id_;
   PairingsServer pairings_;
   std::unique_ptr<remote::RemoteListener> join_;
   std::unique_ptr<remote::ServiceAdvertiser> join_advertisement_;

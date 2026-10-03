@@ -17,6 +17,7 @@
 #include "svp/exec/worker/worker_identity.hpp"
 #include "worker_test_support.hpp"
 
+#include <atomic>
 #include <set>
 
 namespace {
@@ -46,6 +47,7 @@ CoordinatorHello sample_hello() {
 // the refusal) in an ERROR-typed frame's message, then ends.
 struct Harness {
   std::string worker_id = random_fleet_identifier(kWorkerIdPrefix);
+  std::atomic<bool> fail_listener_change{false};
   std::mutex mutex;
   std::vector<std::string> resolved;
   PairingsServer server{PairingsServerOptions{
@@ -77,7 +79,14 @@ struct Harness {
       .advertise_each_pairing = true,
       // Unique per run, so parallel runs never rename each other.
       .service_name = worker_id,
-      .transport = {}}};
+      .transport = {},
+      .before_listener_change =
+          [this] {
+            if (fail_listener_change) {
+              throw remote::RemoteTransportError(remote::RemoteErrorCode::listener_failed,
+                                                 "the port could not be bound (test)");
+            }
+          }}};
 };
 
 // Coordinator side: connects (by worker id when given) and sends HELLO with
@@ -190,6 +199,25 @@ void test_pairings_change_while_serving() {
          "no pairing: neither listening nor advertising");
 }
 
+void test_a_failed_listener_change_is_rebuilt() {
+  Harness harness;
+  const remote::PairingKey first = random_key();
+  const remote::PairingKey added = random_key();
+  harness.server.set_pairings({first});
+  harness.fail_listener_change = true;
+  expect_transport_error(remote::RemoteErrorCode::listener_failed,
+                         [&] { harness.server.set_pairings({first, added}); },
+                         "the replacement fails");
+  expect(harness.server.port() == 0, "nothing listens after the failure");
+  expect(harness.server.pairing_count() == 1, "the keys it had are restored");
+  harness.fail_listener_change = false;
+  harness.server.set_pairings({first, added});
+  expect(harness.server.port() != 0 && harness.server.pairing_count() == 2,
+         "the next rescan builds the listener again");
+  expect_equal(session(added, harness.worker_id), "coordinator=" + added.pairing_id,
+               "and serves every pairing");
+}
+
 void test_worker_identity_and_book() {
   TemporaryDirectory scratch("svp-worker-identity");
   const WorkerLayout layout{.root = scratch.path / "Worker"};
@@ -226,6 +254,7 @@ int main() {
                        {"many pairings, one listener", test_many_pairings_one_listener},
                        {"proofs cannot be forged", test_proofs_cannot_be_forged},
                        {"pairings change while serving", test_pairings_change_while_serving},
+                       {"a failed listener change is rebuilt", test_a_failed_listener_change_is_rebuilt},
                        {"worker identity and book", test_worker_identity_and_book},
                    });
 }

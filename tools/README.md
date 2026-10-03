@@ -275,7 +275,10 @@ Bonjour. Every coordinator holding the fleet secret pairs it on
 runs over the SVP transport: P-256 ECDH and a transcript signed with the
 fleet's key, so only a coordinator that holds the fleet secret can pair a
 worker, and nobody who watches the network learns the resulting key. A
-worker token cannot pair Macs or pose as a coordinator. After a worker's
+worker token cannot pair Macs or pose as a coordinator. Each worker also
+holds its own key, created once at install, and its join id is derived from
+it, so no other Mac can answer for that worker or obtain its fleet
+membership. After a worker's
 first pairing it stays pairable by every coordinator of the fleet, even
 once its token has expired. Fleet secrets live in
 `~/Library/Application Support/SVP/Fleet/fleet.json` (0600). Tokens read

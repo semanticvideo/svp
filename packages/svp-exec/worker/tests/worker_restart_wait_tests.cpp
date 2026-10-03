@@ -11,6 +11,7 @@
 #include "worker_test_support.hpp"
 
 #include <deque>
+#include <system_error>
 
 namespace {
 
@@ -246,6 +247,32 @@ void test_waits_for_another_coordinators_runtime() {
          "a repeated session waits for a pending switch it did not cause");
 }
 
+void test_a_failing_sleep_ends_the_wait_without_throwing() {
+  Script script;
+  RestartWaitHooks hooks = script.hooks();
+  hooks.sleep = [](std::chrono::milliseconds) {
+    throw std::system_error(std::make_error_code(std::errc::interrupted), "sleep");
+  };
+  const RestartWaitOutcome outcome = wait_for_worker_restart(kOffer, std::chrono::seconds(30), hooks);
+  expect(outcome.end == RestartWaitEnd::timed_out, "the wait ends");
+  expect(outcome.last_error.find("restart wait failed") != std::string::npos,
+         "with the reason: " + outcome.last_error);
+}
+
+void test_switch_state_survives_a_wait_that_did_not_settle() {
+  RuntimeSwitchWatch watch(kOffer);
+  const WorkerHelloAck due = ack_on(kOld, 10);
+  watch.observed(due);
+  const std::optional<WorkerHelloAck> taken = watch.take_due();
+  expect(taken.has_value(), "due");
+  watch.after_wait(std::nullopt, *taken);
+  expect(watch.take_due().has_value(), "a wait that timed out leaves the switch due");
+  watch.after_wait(ack_on(kOld, 10, true, 3), due);
+  expect(watch.take_due().has_value(), "a deferred wait leaves it due");
+  watch.after_wait(ack_on(kNew, 20), due);
+  expect(!watch.take_due(), "a wait that settled on the new runtime clears it");
+}
+
 }  // namespace
 
 int main() {
@@ -266,5 +293,9 @@ int main() {
           {"expected switch includes other coordinators' runtimes",
            test_expected_switch_includes_other_coordinators_runtimes},
           {"waits for another coordinator's runtime", test_waits_for_another_coordinators_runtime},
+          {"a failing sleep ends the wait without throwing",
+           test_a_failing_sleep_ends_the_wait_without_throwing},
+          {"switch state survives a wait that did not settle",
+           test_switch_state_survives_a_wait_that_did_not_settle},
       });
 }

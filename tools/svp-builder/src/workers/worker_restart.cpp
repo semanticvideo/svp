@@ -23,7 +23,9 @@ RuntimeOffer runtime_offer(const CoordinatorRuntime& runtime) {
                       .bytes = bytes};
 }
 
-std::optional<WorkerHelloAck> await_worker_runtime_switch(
+namespace {
+
+std::optional<WorkerHelloAck> await_unguarded(
     const remote::PairingKey& key, const CoordinatorHello& hello,
     const CoordinatorRuntime& runtime, const WorkerHelloAck& ack,
     const std::function<bool()>& cancelled, const std::function<void(const std::string&)>& log) {
@@ -74,6 +76,26 @@ std::optional<WorkerHelloAck> await_worker_runtime_switch(
     return std::nullopt;
   }
   return outcome.ack;
+}
+
+}  // namespace
+
+std::optional<WorkerHelloAck> await_worker_runtime_switch(
+    const remote::PairingKey& key, const CoordinatorHello& hello,
+    const CoordinatorRuntime& runtime, const WorkerHelloAck& ack,
+    const std::function<bool()>& cancelled, const std::function<void(const std::string&)>& log) {
+  try {
+    return await_unguarded(key, hello, runtime, ack, cancelled, log);
+  } catch (const std::exception& error) {
+    // Documented never to throw: every caller goes on without the wait.
+    if (log) {
+      try {
+        log(key.pairing_id + ": restart wait failed (" + error.what() + ")");
+      } catch (const std::exception&) {
+      }
+    }
+    return std::nullopt;
+  }
 }
 
 std::shared_ptr<RuntimeSwitchWatch> runtime_switch_watch(const std::string& pairing_id,

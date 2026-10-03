@@ -198,8 +198,9 @@ RemoteVideoOutcome PairedVideoBuilder::build(const RemoteVideoRequest& request) 
     // The previous job's session left a runtime this Mac's service moves to:
     // it restarts once that session ended, so wait for it to come back.
     if (const std::optional<WorkerHelloAck> due = switch_watch_.take_due()) {
-      (void)svp::builder::workers::await_worker_runtime_switch(
-          record_.key, supplies.hello, supplies.runtime, *due, {}, {});
+      switch_watch_.after_wait(svp::builder::workers::await_worker_runtime_switch(
+                                   record_.key, supplies.hello, supplies.runtime, *due, {}, {}),
+                               *due);
     }
     std::unique_ptr<WorkerConnection> connection;
     try {

@@ -54,6 +54,9 @@ struct PairingsServerOptions {
   // Empty: this Mac's computer name.
   std::string service_name;
   svp::exec::remote::TransportPolicy transport{};
+  // Runs before the listener is opened or its keys replaced; throwing makes
+  // that change fail as a port that cannot be bound would (tests).
+  std::function<void()> before_listener_change;
 };
 
 class PairingsServer {
@@ -65,7 +68,8 @@ class PairingsServer {
 
   // Serves exactly `pairings` from now on (none: stops listening and
   // advertising). Throws RemoteTransportError(listener_failed) only when no
-  // port could be listened on.
+  // port could be listened on; it then serves nothing and holds the keys it
+  // had before, so the next call opens a listener again.
   void set_pairings(const std::vector<svp::exec::remote::PairingKey>& pairings);
 
   // 0 while not listening.
@@ -86,6 +90,8 @@ class PairingsServer {
   [[nodiscard]] std::string resolve(const CoordinatorHello& hello,
                                     const std::vector<std::byte>& exporter) const;
   void advertise_all(std::uint16_t port);
+  void open_or_replace_listener(const svp::exec::remote::PairingKey& first,
+                                const std::vector<svp::exec::remote::PairingKey>& accepted);
 
   PairingsServerOptions options_;
   mutable std::mutex mutex_;

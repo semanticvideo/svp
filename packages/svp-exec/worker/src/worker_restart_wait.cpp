@@ -67,7 +67,9 @@ std::string_view restart_wait_end_name(RestartWaitEnd end) noexcept {
   return "unknown";
 }
 
-RestartWaitOutcome wait_for_worker_restart(const std::optional<RuntimeOffer>& offered,
+namespace {
+
+RestartWaitOutcome wait_unguarded(const std::optional<RuntimeOffer>& offered,
                                            std::chrono::milliseconds deadline,
                                            const RestartWaitHooks& hooks) {
   const std::function<std::chrono::steady_clock::time_point()> now =
@@ -110,6 +112,23 @@ RestartWaitOutcome wait_for_worker_restart(const std::optional<RuntimeOffer>& of
   }
 }
 
+}  // namespace
+
+RestartWaitOutcome wait_for_worker_restart(const std::optional<RuntimeOffer>& offered,
+                                           std::chrono::milliseconds deadline,
+                                           const RestartWaitHooks& hooks) {
+  try {
+    return wait_unguarded(offered, deadline, hooks);
+  } catch (const std::exception& error) {
+    // A clock or sleep that fails (std::system_error) ends the wait; the
+    // next session finds the worker or reports it as before.
+    return RestartWaitOutcome{.end = RestartWaitEnd::timed_out,
+                              .ack = std::nullopt,
+                              .attempts = 0,
+                              .last_error = std::string("restart wait failed: ") + error.what()};
+  }
+}
+
 void RuntimeSwitchWatch::observed(const WorkerHelloAck& ack) {
   const std::lock_guard lock(mutex_);
   if (expected_switch(ack, offered_)) {
@@ -117,6 +136,11 @@ void RuntimeSwitchWatch::observed(const WorkerHelloAck& ack) {
   } else {
     due_.reset();
   }
+}
+
+void RuntimeSwitchWatch::after_wait(const std::optional<WorkerHelloAck>& acknowledged,
+                                    const WorkerHelloAck& due) {
+  observed(acknowledged.value_or(due));
 }
 
 std::optional<WorkerHelloAck> RuntimeSwitchWatch::take_due() {

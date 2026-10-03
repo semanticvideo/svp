@@ -81,6 +81,7 @@ struct Transcript {
   std::string pairing_id;
   std::string worker_ephemeral;
   std::string worker_join_id;
+  std::string worker_public_key;
 
   [[nodiscard]] Blake3Digest hash() const {
     return blake3_digest(encode_canonical_json(
@@ -89,7 +90,8 @@ struct Transcript {
                        {"fleet_id", fleet_id},
                        {"pairing_id", pairing_id},
                        {"worker_ephemeral", worker_ephemeral},
-                       {"worker_join_id", worker_join_id}}));
+                       {"worker_join_id", worker_join_id},
+                       {"worker_public_key", worker_public_key}}));
   }
 };
 
@@ -114,6 +116,12 @@ std::vector<std::byte> wrap_member_key(const std::vector<std::byte>& member,
 std::string signed_message(const Blake3Digest& transcript_hash, std::string_view wrapped_hex) {
   return std::string(kJoinSignaturePrefix) + blake3_hex(transcript_hash) + "\n" +
          std::string(wrapped_hex);
+}
+
+// What the worker signs with its long-term key to prove it owns its join id
+// in this join (both ephemerals and the coordinator are in the transcript).
+std::string worker_signed_message(const Blake3Digest& transcript_hash) {
+  return std::string(kJoinWorkerSignaturePrefix) + blake3_hex(transcript_hash);
 }
 
 std::string confirmation(const std::vector<std::byte>& secret,
@@ -249,15 +257,25 @@ WorkerJoinResult serve_fleet_join(FrameReader& input, FrameWriter& output,
       throw WorkerError(WorkerErrorCode::protocol, "malformed coordinator id");
     }
 
+    if (credential.worker_key.empty()) {
+      throw WorkerError(WorkerErrorCode::configuration,
+                        "the join credential has no worker key (migrate_join_credential)");
+    }
+    const std::vector<std::byte> worker_public_key = ec_public_key_of(credential.worker_key);
     const EcKeyPair ephemeral = generate_ec_key_pair();
     transcript.worker_ephemeral = bytes_hex(ephemeral.public_key);
     transcript.worker_join_id = credential.worker_join_id;
+    transcript.worker_public_key = bytes_hex(worker_public_key);
     transcript.pairing_id = fleet_pairing_id(transcript.coordinator_id, credential.worker_join_id);
+    const std::vector<std::byte> worker_signature =
+        ec_sign(credential.worker_key, as_bytes(worker_signed_message(transcript.hash())));
     output.write(make_frame(MessageType::join_challenge,
                             nlohmann::json{{"host", host_facts_to_json(host)},
                                            {"worker", endpoint_to_json(self)},
                                            {"worker_ephemeral", transcript.worker_ephemeral},
-                                           {"worker_join_id", credential.worker_join_id}}));
+                                           {"worker_join_id", credential.worker_join_id},
+                                           {"worker_public_key", transcript.worker_public_key},
+                                           {"worker_signature", bytes_hex(worker_signature)}}));
 
     constexpr std::string_view kAccept = "JOIN_ACCEPT.body";
     const nlohmann::json accept = expect_frame(input, MessageType::join_accept);
@@ -323,6 +341,27 @@ CoordinatorJoinResult join_fleet_worker(FrameReader& input, FrameWriter& output,
         hex_bytes_field(challenge, "worker_ephemeral", kEcPublicKeyBytes, kChallenge);
     transcript.worker_ephemeral = bytes_hex(worker_ephemeral);
     transcript.pairing_id = fleet_pairing_id(transcript.coordinator_id, transcript.worker_join_id);
+    // The worker must own its join id: the id is the hash of its long-term
+    // public key, and it signs this join's transcript (both ephemerals) with
+    // that key. Without this, any holder of a token could answer for another
+    // worker's id and receive that worker's member key.
+    const std::vector<std::byte> worker_public_key =
+        hex_bytes_field(challenge, "worker_public_key", kEcPublicKeyBytes, kChallenge);
+    if (worker_join_id_for(worker_public_key) != transcript.worker_join_id) {
+      throw WorkerError(WorkerErrorCode::verification,
+                        "the worker's join id is not derived from the key it presented");
+    }
+    transcript.worker_public_key = bytes_hex(worker_public_key);
+    const std::string worker_signature_hex =
+        required_string(challenge, "worker_signature", kChallenge);
+    const std::optional<std::vector<std::byte>> worker_signature =
+        parse_hex_bytes(worker_signature_hex, worker_signature_hex.size() / 2);
+    if (!worker_signature ||
+        !ec_verify(worker_public_key, as_bytes(worker_signed_message(transcript.hash())),
+                   *worker_signature)) {
+      throw WorkerError(WorkerErrorCode::verification,
+                        "the worker did not prove it owns join id " + transcript.worker_join_id);
+    }
     CoordinatorJoinResult result;
     result.host = host_facts_from_json(required_object(challenge, "host", kChallenge),
                                        child_path(kChallenge, "host"));

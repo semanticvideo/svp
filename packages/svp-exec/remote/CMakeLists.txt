@@ -17,6 +17,7 @@ add_library(svp-exec-remote
   src/route_probe_responder.cpp
   src/service_advertiser.cpp
   src/service_resolver.cpp
+  src/stream_deadline.cpp
   src/tls_psk_parameters.cpp
   src/transport_policy.cpp
 )

@@ -102,6 +102,11 @@ struct WorkerJoinToken {
   bool operator==(const WorkerJoinToken&) const = default;
 };
 
+// A worker's join id: "svpj-" + the first 24 hex digits of BLAKE3 of its
+// long-term P-256 public key (fleet_store.hpp WorkerJoinCredential), so only
+// the holder of that key can answer for the id (fleet_join.hpp).
+[[nodiscard]] std::string worker_join_id_for(const std::vector<std::byte>& worker_public_key);
+
 // prefix + 24 random hex digits. Throws WorkerError(io) without entropy.
 [[nodiscard]] std::string random_fleet_identifier(std::string_view prefix);
 

@@ -59,6 +59,29 @@ void PairingsServer::advertise_all(std::uint16_t port) {
       options_.log);
 }
 
+void PairingsServer::open_or_replace_listener(const remote::PairingKey& first,
+                                              const std::vector<remote::PairingKey>& accepted) {
+  if (options_.before_listener_change) {
+    options_.before_listener_change();
+  }
+  if (listener_) {
+    listener_->replace_keys(first, accepted);
+    return;
+  }
+  remote::RemoteListenerOptions listener_options;
+  listener_options.pairing = first;
+  listener_options.accepted_keys = accepted;
+  listener_options.advertise = false;
+  listener_options.transport = options_.transport;
+  auto listener = std::make_unique<remote::RemoteListener>(
+      listener_options,
+      [this](remote::RemoteStream& stream, const remote::RemoteSessionInfo& info) {
+        serve(stream, info);
+      });
+  listener->start();
+  listener_ = std::move(listener);
+}
+
 void PairingsServer::set_pairings(const std::vector<remote::PairingKey>& pairings) {
   const std::lock_guard changing(changing_);
   std::map<std::string, remote::PairingKey> wanted;
@@ -94,30 +117,32 @@ void PairingsServer::set_pairings(const std::vector<remote::PairingKey>& pairing
   }
   const remote::PairingKey first = accepted.front();
   accepted.erase(accepted.begin());
+  std::map<std::string, remote::PairingKey> previous;
   {
     // New keys are known before the listener accepts them, removed ones
     // stay until it no longer does: a session never finds its key missing.
     const std::lock_guard lock(mutex_);
+    previous = keys_;
     for (const auto& [id, key] : wanted) {
       keys_[id] = key;
     }
   }
   const std::uint16_t old_port = listener_ ? listener_->port() : 0;
-  if (!listener_) {
-    remote::RemoteListenerOptions listener_options;
-    listener_options.pairing = first;
-    listener_options.accepted_keys = accepted;
-    listener_options.advertise = false;
-    listener_options.transport = options_.transport;
-    auto listener = std::make_unique<remote::RemoteListener>(
-        listener_options,
-        [this](remote::RemoteStream& stream, const remote::RemoteSessionInfo& info) {
-          serve(stream, info);
-        });
-    listener->start();
-    listener_ = std::move(listener);
-  } else {
-    listener_->replace_keys(first, accepted);
+  try {
+    open_or_replace_listener(first, accepted);
+  } catch (...) {
+    // Nothing listens any more (replace_keys released the port first, or the
+    // first start failed): forget the listener and the keys, so the next
+    // set_pairings builds both again instead of finding them unchanged.
+    if (listener_) {
+      listener_->stop();
+      listener_.reset();
+    }
+    own_advertisement_.reset();
+    pairing_advertisements_.clear();
+    const std::lock_guard lock(mutex_);
+    keys_ = previous;
+    throw;
   }
   {
     const std::lock_guard lock(mutex_);

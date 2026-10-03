@@ -33,11 +33,24 @@ WorkerEndpoint describe_this_worker(const WorkerLayout& layout) {
   return endpoint;
 }
 
+std::optional<WorkerJoinCredential> load_current_join_credential(const WorkerLayout& layout,
+                                                                std::mutex& credential_mutex) {
+  const std::lock_guard lock(credential_mutex);
+  std::optional<WorkerJoinCredential> credential = load_worker_join_credential(layout);
+  if (credential && migrate_join_credential(*credential)) {
+    save_worker_join_credential(layout, *credential);
+  }
+  return credential;
+}
+
 JoinServiceOutcome handle_join_connection(FrameReader& input, FrameWriter& output,
                                           const WorkerLayout& layout,
                                           std::mutex& credential_mutex) {
-  const std::lock_guard lock(credential_mutex);
-  std::optional<WorkerJoinCredential> credential = load_worker_join_credential(layout);
+  // The credential is read under the lock and the exchange runs without it,
+  // so a peer that stalls never blocks other joins or the join listener's
+  // restart; only storing the result takes the lock again.
+  const std::optional<WorkerJoinCredential> credential =
+      load_current_join_credential(layout, credential_mutex);
   if (!credential) {
     throw WorkerError(WorkerErrorCode::configuration,
                       "no join credential at " + layout.join_credential().string());
@@ -47,11 +60,14 @@ JoinServiceOutcome handle_join_connection(FrameReader& input, FrameWriter& outpu
   const WorkerJoinResult result = serve_fleet_join(
       input, output, *credential, describe_this_worker(layout), host,
       [&](const WorkerJoinResult& joined) {
+        const std::lock_guard lock(credential_mutex);
         PairingDirectory(layout.pairings())
             .write(joined.pairing.key.pairing_id, encode_worker_pairing(joined.pairing));
-        if (credential->member_key != joined.member_key) {
-          credential->member_key = joined.member_key;
-          save_worker_join_credential(layout, *credential);
+        std::optional<WorkerJoinCredential> current = load_worker_join_credential(layout);
+        if (current && current->worker_join_id == credential->worker_join_id &&
+            current->member_key != joined.member_key) {
+          current->member_key = joined.member_key;
+          save_worker_join_credential(layout, *current);
           outcome.listener_key_changed = true;
         }
       });

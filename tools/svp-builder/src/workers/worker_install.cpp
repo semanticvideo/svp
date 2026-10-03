@@ -105,20 +105,20 @@ int run_worker_install(const WorkerCliOptions& options) {
 
   const WorkerLayout layout{.root = default_worker_root(WorkerServiceMode::system_daemon,
                                                         probe.home)};
-  WorkerJoinCredential credential;
-  credential.token = token;
-  credential.created_at = utc_timestamp_now();
+  // A Mac installed again for the same fleet keeps its worker key, join id,
+  // and member key, so its coordinators do not pair it twice; one installed
+  // before worker keys existed gets a key-bound id now (fleet_store.hpp).
+  WorkerJoinCredential credential = new_worker_join_credential(token);
   try {
-    if (const std::optional<WorkerJoinCredential> existing = load_worker_join_credential(layout);
-        existing && existing->token.fleet_id == token.fleet_id) {
+    if (std::optional<WorkerJoinCredential> existing = load_worker_join_credential(layout);
+        existing && existing->token.fleet_id == token.fleet_id &&
+        !migrate_join_credential(*existing)) {
+      credential.worker_key = existing->worker_key;
       credential.worker_join_id = existing->worker_join_id;
       credential.member_key = existing->member_key;
     }
   } catch (const std::exception&) {
     // An unreadable earlier credential is replaced.
-  }
-  if (credential.worker_join_id.empty()) {
-    credential.worker_join_id = random_fleet_identifier(kWorkerJoinIdPrefix);
   }
 
   const CoordinatorRuntime runtime = locate_coordinator_runtime(current_executable());

@@ -38,11 +38,7 @@ FleetMembership make_membership(const FleetSecret& fleet) {
 }
 
 WorkerJoinCredential make_credential(const FleetSecret& fleet) {
-  return WorkerJoinCredential{
-      .worker_join_id = random_fleet_identifier(kWorkerJoinIdPrefix),
-      .token = issue_worker_token(fleet, kNow, std::chrono::hours(24)),
-      .member_key = std::nullopt,
-      .created_at = "2026-10-03T00:00:00Z"};
+  return new_worker_join_credential(issue_worker_token(fleet, kNow, std::chrono::hours(24)));
 }
 
 WorkerEndpoint sample_endpoint() {
@@ -351,6 +347,147 @@ void test_join_service_stores_the_pairing() {
          "the worker describes its own root");
 }
 
+void test_join_id_is_bound_to_the_worker_key() {
+  const WorkerJoinCredential credential = make_credential(generate_fleet_secret());
+  expect(credential.worker_key.size() == kEcPrivateKeyBytes, "a long-term worker key");
+  expect_equal(credential.worker_join_id,
+               worker_join_id_for(ec_public_key_of(credential.worker_key)),
+               "the join id is derived from its public key");
+  expect(is_fleet_identifier(credential.worker_join_id, kWorkerJoinIdPrefix),
+         "join id form: " + credential.worker_join_id);
+  expect(decode_worker_join_credential(encode_worker_join_credential(credential)) == credential,
+         "the key is stored with the credential");
+}
+
+void test_a_token_holder_cannot_claim_another_workers_id() {
+  const FleetMembership coordinator = make_membership(generate_fleet_secret());
+  const WorkerJoinCredential victim = make_credential(coordinator.fleet);
+  // The attacker holds a valid token (its own Mac's credential) and answers
+  // for the victim's join id, with its own key, or with the victim's public
+  // key it cannot sign for.
+  WorkerJoinCredential attacker = make_credential(coordinator.fleet);
+  attacker.worker_join_id = victim.worker_join_id;
+  const JoinRun own_key = run_join(coordinator, attacker, victim.worker_join_id);
+  expect(!own_key.coordinator && own_key.coordinator_code == WorkerErrorCode::verification,
+         "an id not derived from the presented key is refused: " + own_key.coordinator_error);
+  expect(own_key.persisted == 0, "the attacker received no pairing and no member key");
+
+  // The attacker presents the victim's public key (so the id matches) but
+  // can only sign with its own key.
+  {
+    FrameChannel channel;
+    std::thread fake_worker([&] {
+      try {
+        (void)channel.right_reader->read();  // JOIN_OFFER
+        const EcKeyPair ephemeral = generate_ec_key_pair();
+        const auto hex = [](const std::vector<std::byte>& bytes) {
+          static constexpr char kDigits[] = "0123456789abcdef";
+          std::string text;
+          for (const std::byte byte : bytes) {
+            text += kDigits[static_cast<unsigned>(byte) >> 4U];
+            text += kDigits[static_cast<unsigned>(byte) & 0xFU];
+          }
+          return text;
+        };
+        const std::vector<std::byte> signature =
+            ec_sign(attacker.worker_key, bytes_of("anything the attacker can sign"));
+        channel.right_writer->write(svp::exec::Frame{
+            .type = svp::exec::MessageType::join_challenge,
+            .body = {{"host", host_facts_to_json(detect_host_facts())},
+                     {"worker",
+                      {{"home", "/Users/w"},
+                       {"label", std::string(kWorkerJobLabel)},
+                       {"plist", "/Library/LaunchDaemons/org.svp.worker.plist"},
+                       {"root", "/Library/Application Support/SVP/Worker"},
+                       {"service_mode", "system_daemon"},
+                       {"uid", 501},
+                       {"user", "w"}}},
+                     {"worker_ephemeral", hex(ephemeral.public_key)},
+                     {"worker_join_id", victim.worker_join_id},
+                     {"worker_public_key", hex(ec_public_key_of(victim.worker_key))},
+                     {"worker_signature", hex(signature)}},
+            .payloads = {}});
+        while (channel.right_reader->read()) {
+        }
+      } catch (const std::exception&) {
+      }
+      channel.close_right();
+    });
+    std::string refusal;
+    WorkerErrorCode code = WorkerErrorCode::protocol;
+    bool paired = false;
+    try {
+      (void)join_fleet_worker(*channel.left_reader, *channel.left_writer, coordinator,
+                              victim.worker_join_id);
+      paired = true;
+    } catch (const WorkerError& error) {
+      refusal = error.what();
+      code = error.code();
+    }
+    channel.close_left();
+    fake_worker.join();
+    expect(!paired && code == WorkerErrorCode::verification,
+           "a signature not made with the id's key is refused before the member key is "
+           "wrapped: " + refusal);
+  }
+
+  const JoinRun genuine = run_join(coordinator, victim, victim.worker_join_id);
+  expect(genuine.coordinator && genuine.worker, "the owner of the id joins");
+}
+
+void test_legacy_credential_is_migrated() {
+  const FleetSecret fleet = generate_fleet_secret();
+  WorkerJoinCredential legacy = make_credential(fleet);
+  legacy.worker_key.clear();
+  legacy.worker_join_id = random_fleet_identifier(kWorkerJoinIdPrefix);
+  legacy.member_key = member_key(fleet, legacy.worker_join_id);
+  const std::string legacy_text = encode_worker_join_credential(legacy);
+  expect(legacy_text.find("worker_key") == std::string::npos, "the old file format");
+  WorkerJoinCredential migrated = decode_worker_join_credential(legacy_text);
+  expect(migrate_join_credential(migrated), "a credential without a key is migrated");
+  expect_equal(migrated.worker_join_id, worker_join_id_for(ec_public_key_of(migrated.worker_key)),
+               "to a key-bound join id");
+  expect(!migrated.member_key, "the member key of the unproven old id is dropped");
+  expect(migrated.token == legacy.token, "the token is kept");
+  expect(!migrate_join_credential(migrated), "a migrated credential stays as it is");
+
+  TemporaryDirectory scratch("svp-join-migrate");
+  const WorkerLayout layout{.root = scratch.path / "Worker"};
+  create_worker_layout(layout);
+  save_worker_join_credential(layout, legacy);
+  std::mutex mutex;
+  const std::optional<WorkerJoinCredential> loaded = load_current_join_credential(layout, mutex);
+  expect(loaded && !loaded->worker_key.empty(), "loading migrates");
+  expect(load_worker_join_credential(layout) == loaded, "and saves the migrated credential");
+}
+
+void test_join_service_does_not_hold_the_lock_while_waiting() {
+  TemporaryDirectory scratch("svp-join-lock");
+  const WorkerLayout layout{.root = scratch.path / "Worker"};
+  create_worker_layout(layout);
+  const FleetMembership coordinator = make_membership(generate_fleet_secret());
+  save_worker_join_credential(layout, make_credential(coordinator.fleet));
+  std::mutex mutex;
+  FrameChannel channel;
+  std::thread worker([&] {
+    try {
+      (void)handle_join_connection(*channel.right_reader, *channel.right_writer, layout, mutex);
+    } catch (const std::exception&) {
+      // The peer went away without a word.
+    }
+  });
+  // The peer says nothing: the worker waits for JOIN_OFFER.
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  const bool free = mutex.try_lock();
+  if (free) {
+    mutex.unlock();
+  }
+  expect(free, "a join waiting on a silent peer does not hold the credential lock");
+  channel.close_left();
+  worker.join();
+  expect(kJoinExchangeTimeout.count() > 0, "both sides bound the exchange");
+}
+
 }  // namespace
 
 int main() {
@@ -364,5 +501,11 @@ int main() {
                        {"join pairs both sides", test_join_pairs_both_sides},
                        {"refuses without the fleet secret", test_refuses_without_the_fleet_secret},
                        {"join service stores the pairing", test_join_service_stores_the_pairing},
+                       {"join id is bound to the worker key", test_join_id_is_bound_to_the_worker_key},
+                       {"a token holder cannot claim another worker's id",
+                        test_a_token_holder_cannot_claim_another_workers_id},
+                       {"legacy credential is migrated", test_legacy_credential_is_migrated},
+                       {"join service does not hold the lock while waiting",
+                        test_join_service_does_not_hold_the_lock_while_waiting},
                    });
 }

@@ -49,8 +49,9 @@ svp::exec::remote::RemoteExecutorOptions with_supplied_sessions(
   };
   options.before_connect = [supplies, watch, key](const std::function<bool()>& stop_requested) {
     if (const std::optional<svp::exec::worker::WorkerHelloAck> due = watch->take_due()) {
-      (void)await_worker_runtime_switch(key, supplies->hello, supplies->runtime, *due,
-                                        stop_requested, {});
+      watch->after_wait(await_worker_runtime_switch(key, supplies->hello, supplies->runtime,
+                                                    *due, stop_requested, {}),
+                        *due);
     }
   };
   return options;

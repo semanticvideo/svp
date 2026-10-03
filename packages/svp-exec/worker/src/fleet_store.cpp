@@ -108,6 +108,34 @@ void save_fleet_membership(const std::filesystem::path& directory,
   PairingDirectory(directory).write(kFleetRecordName, encode_fleet_membership(membership));
 }
 
+WorkerJoinCredential new_worker_join_credential(WorkerJoinToken token) {
+  const EcKeyPair key = generate_ec_key_pair();
+  WorkerJoinCredential credential;
+  credential.worker_key = key.private_key;
+  credential.worker_join_id = worker_join_id_for(key.public_key);
+  credential.token = std::move(token);
+  credential.created_at = utc_timestamp_now();
+  return credential;
+}
+
+bool migrate_join_credential(WorkerJoinCredential& credential) {
+  if (!credential.worker_key.empty()) {
+    try {
+      if (worker_join_id_for(ec_public_key_of(credential.worker_key)) ==
+          credential.worker_join_id) {
+        return false;
+      }
+    } catch (const WorkerError&) {
+      // A malformed key is replaced below.
+    }
+  }
+  const EcKeyPair key = generate_ec_key_pair();
+  credential.worker_key = key.private_key;
+  credential.worker_join_id = worker_join_id_for(key.public_key);
+  credential.member_key.reset();
+  return true;
+}
+
 std::string encode_worker_join_credential(const WorkerJoinCredential& credential) {
   nlohmann::json body{
       {"created_at", credential.created_at},
@@ -121,6 +149,9 @@ std::string encode_worker_join_credential(const WorkerJoinCredential& credential
   if (credential.member_key) {
     body["member_key"] = bytes_hex(*credential.member_key);
   }
+  if (!credential.worker_key.empty()) {
+    body["worker_key"] = bytes_hex(credential.worker_key);
+  }
   return encode_canonical_json(body);
 }
 
@@ -130,7 +161,7 @@ WorkerJoinCredential decode_worker_join_credential(std::string_view bytes) {
     const nlohmann::json body = decode_canonical_json(bytes);
     require_object(body, kPath);
     reject_unknown_fields(body, {"created_at", "fleet_id", "fleet_public_key", "member_key",
-                                 "schema", "token", "worker_join_id"},
+                                 "schema", "token", "worker_join_id", "worker_key"},
                           kPath);
     if (required_string(body, "schema", kPath) != kWorkerJoinSchema) {
       throw ExecError(ExecErrorCode::invalid_value,
@@ -150,6 +181,9 @@ WorkerJoinCredential decode_worker_join_credential(std::string_view bytes) {
     decoded.token.token_id = required_string(token, "token_id", token_path);
     if (body.contains("member_key")) {
       decoded.member_key = hex_field(body, "member_key", kFleetKeyBytes, kPath);
+    }
+    if (body.contains("worker_key")) {
+      decoded.worker_key = hex_field(body, "worker_key", kEcPrivateKeyBytes, kPath);
     }
     return decoded;
   });

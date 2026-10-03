@@ -70,6 +70,11 @@ bool is_fleet_identifier(std::string_view id, std::string_view prefix) noexcept 
   return true;
 }
 
+std::string worker_join_id_for(const std::vector<std::byte>& worker_public_key) {
+  return std::string(kWorkerJoinIdPrefix) + blake3_hex(blake3_digest(worker_public_key))
+                                                .substr(0, 2 * kFleetIdentifierRandomBytes);
+}
+
 std::string random_fleet_identifier(std::string_view prefix) {
   return std::string(prefix) + bytes_hex(secure_random_bytes(kFleetIdentifierRandomBytes));
 }

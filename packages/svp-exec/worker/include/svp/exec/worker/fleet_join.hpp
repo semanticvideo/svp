@@ -20,7 +20,9 @@
 //                           "coordinator_id","fleet_id"}
 //   W -> C  JOIN_CHALLENGE {"host":{HostFacts},"worker":{endpoint, with its
 //                           worker_id (worker_identity.hpp)},
-//                           "worker_ephemeral":"<130 hex>","worker_join_id"}
+//                           "worker_ephemeral":"<130 hex>","worker_join_id",
+//                           "worker_public_key":"<130 hex>",
+//                           "worker_signature":"<hex DER>"}
 //   C -> W  JOIN_ACCEPT    {"member_key_wrapped":"<64 hex>","pairing_id",
 //                           "signature":"<hex DER>"}
 //   W -> C  JOIN_DONE      {"confirm":"<64 hex>"}
@@ -28,11 +30,16 @@
 //
 // Both ephemerals are fresh P-256 keys (fleet_crypto.hpp). With
 //   T  = canonical JSON {"coordinator_ephemeral","coordinator_id","fleet_id",
-//        "pairing_id","worker_ephemeral","worker_join_id"}
+//        "pairing_id","worker_ephemeral","worker_join_id","worker_public_key"}
 //   th = BLAKE3(T)
 //   S  = derive_key(kJoinPairingSecretContext, ECDH || th)   the pair's PSK
 //   W  = member key XOR derive_key(kJoinMemberWrapContext, S)
-// the coordinator signs kJoinSignaturePrefix + hex(th) + "\n" + hex(W) with
+// the worker proves it owns its join id: worker_join_id must equal
+// worker_join_id_for(worker_public_key) (its long-term key, created once at
+// install, fleet_store.hpp), and worker_signature must verify over
+// kJoinWorkerSignaturePrefix + hex(th) with that key; the coordinator checks
+// both before it wraps the member key. Then the coordinator signs
+// kJoinSignaturePrefix + hex(th) + "\n" + hex(W) with
 // the fleet signing key. The worker checks that pairing_id is
 // fleet_pairing_id(coordinator_id, worker_join_id), verifies the signature
 // with the fleet public key from its token, stores the pairing (S) and the
@@ -41,10 +48,12 @@
 //
 // What each party can do:
 //   - Without the token or fleet secret: nothing (TLS fails).
-//   - Another worker (holds a token or its own member key): cannot sign, so
-//     cannot pair anyone or pose as a coordinator; cannot learn S from the
-//     traffic (ECDH), even though TLS-PSK with a shared token key is not
-//     forward secret; can at most pose as a new worker with its own token.
+//   - Another worker (holds a token or its own member key): cannot sign with
+//     the fleet key, so cannot pair anyone or pose as a coordinator; cannot
+//     sign with another worker's key, so cannot answer for another worker's
+//     join id or receive its member key; cannot learn S from the traffic
+//     (ECDH), even though TLS-PSK with a shared token key is not forward
+//     secret; can at most pose as a new worker with its own key.
 //   - A coordinator with the fleet secret: pairs any worker of the fleet.
 // After the join, the coordinator and worker hold their own pairing (S) and
 // meet exactly as SSH-paired ones do.
@@ -55,6 +64,7 @@
 #include "svp/exec/worker/host_facts.hpp"
 #include "svp/exec/worker/pairing_store.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -73,6 +83,13 @@ inline constexpr std::string_view kJoinPairingSecretContext = "svp fleet join pa
 inline constexpr std::string_view kJoinMemberWrapContext = "svp fleet join member wrap v1";
 inline constexpr std::string_view kJoinSignaturePrefix = "svp fleet join transcript v1\n";
 inline constexpr std::string_view kJoinConfirmPrefix = "svp fleet join confirm v1\n";
+inline constexpr std::string_view kJoinWorkerSignaturePrefix = "svp fleet join worker v1\n";
+
+// How long one join exchange may take on either side before its connection
+// is cancelled: four frames and a few P-256 operations take milliseconds on
+// any network the transport serves, so a peer silent this long is gone or
+// stalling; 30 s allows a busy Mac and Wi-Fi latency spikes many times over.
+inline constexpr std::chrono::seconds kJoinExchangeTimeout{30};
 
 // The join TXT value for a credential.
 [[nodiscard]] std::string join_txt_value(const WorkerJoinCredential& credential);

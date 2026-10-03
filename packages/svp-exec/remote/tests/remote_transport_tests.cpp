@@ -400,6 +400,39 @@ void test_unadvertised_listener_replaces_its_keys() {
                       "an advertising listener cannot change its keys");
 }
 
+void test_a_spoofed_advertisement_does_not_displace_the_worker() {
+  const PairingKey genuine_key = pairing::random_pairing("svp-transport-genuine");
+  const PairingKey spoof_key = pairing::random_pairing("svp-transport-spoof");
+  const std::string worker_id = "svpn-" + genuine_key.pairing_id;
+  RemoteListenerOptions genuine_options;
+  genuine_options.pairing = genuine_key;
+  genuine_options.advertise = false;
+  RemoteListener genuine(genuine_options, echo_frames);
+  genuine.start();
+  RemoteListenerOptions spoof_options;
+  spoof_options.pairing = spoof_key;
+  spoof_options.advertise = false;
+  RemoteListener spoof(spoof_options, echo_frames);
+  spoof.start();
+  // The spoof advertises the worker's id under a name that sorts first and
+  // without a pairing entry, as a worker's own instance looks.
+  ServiceAdvertiser spoof_ad(ServiceAdvertisement{
+      .name = "0-" + genuine_key.pairing_id, .port = spoof.port(), .txt = {{"worker", worker_id}}});
+  ServiceAdvertiser genuine_ad(ServiceAdvertisement{
+      .name = "1-" + genuine_key.pairing_id, .port = genuine.port(), .txt = {{"worker", worker_id}}});
+  expect(spoof_ad.wait_registered(std::chrono::seconds(10)) &&
+             genuine_ad.wait_registered(std::chrono::seconds(10)),
+         "both registered");
+  RemoteConnector connector(RemoteConnectorOptions{.pairing = genuine_key, .worker_id = worker_id});
+  RemoteConnection connection = connector.connect();
+  StreamFrameReader reader(*connection.stream);
+  StreamFrameWriter writer(*connection.stream);
+  writer.write(Frame{.type = MessageType::hello, .body = nlohmann::json::object(), .payloads = {}});
+  expect(reader.read().has_value(), "the coordinator reaches the genuine worker");
+  expect(genuine.sessions_started() == 1 && spoof.sessions_started() == 0,
+         "the spoofed instance is never served a session");
+}
+
 void test_advertiser_registers_and_withdraws() {
   const std::string id = pairing::random_pairing("svp-transport-ad").pairing_id;
   {
@@ -501,6 +534,8 @@ int main() {
                        {"unadvertised listener replaces its keys",
                         test_unadvertised_listener_replaces_its_keys},
                        {"advertiser registers and withdraws", test_advertiser_registers_and_withdraws},
+                       {"a spoofed advertisement does not displace the worker",
+                        test_a_spoofed_advertisement_does_not_displace_the_worker},
                        {"advertise retry backoff", test_advertise_retry_backoff},
                        {"cancelled connector", test_cancelled_connector},
                        {"cancel interrupts discovery", test_cancel_interrupts_discovery},

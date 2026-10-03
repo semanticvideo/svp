@@ -219,23 +219,12 @@ std::vector<DiscoveredService> browse_for_worker(std::string_view worker_id,
     return (by_worker != txt.end() && by_worker->second == worker) ||
            (by_pairing != txt.end() && by_pairing->second == pairing);
   };
+  // Every match is kept until route measurement authenticates it: a host
+  // on the LAN can advertise any worker id, and must not displace the
+  // genuine instances (it cannot complete TLS without the pairing's secret).
+  // The same worker's instances share one port, so their routes coincide;
+  // the connector measures each distinct route once.
   std::vector<DiscoveredService> found = browse(state, policy, signal);
-  // One worker may advertise itself and, for older coordinators, one
-  // instance per pairing, all on the same port: keep one instance, its
-  // own advertisement when it is there.
-  const auto is_worker = [&](const DiscoveredService& service) {
-    const auto entry = service.txt.find(std::string(kWorkerTxtKey));
-    return entry != service.txt.end() && entry->second == worker_id;
-  };
-  const auto own = std::find_if(found.begin(), found.end(), [&](const DiscoveredService& service) {
-    return is_worker(service) && !service.txt.contains(std::string(kPairingTxtKey));
-  });
-  const auto any = own != found.end() ? own : std::find_if(found.begin(), found.end(), is_worker);
-  if (any != found.end()) {
-    DiscoveredService chosen = std::move(*any);
-    found.clear();
-    found.push_back(std::move(chosen));
-  }
   return found;
 }
 

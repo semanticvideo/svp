@@ -1,8 +1,8 @@
-#include "stream_deadline.hpp"
+#include "svp/exec/remote/stream_deadline.hpp"
 
-namespace svp::builder::workers {
+namespace svp::exec::remote {
 
-StreamDeadline::StreamDeadline(svp::exec::remote::RemoteStream& stream,
+StreamDeadline::StreamDeadline(RemoteStream& stream,
                                std::chrono::milliseconds limit)
     : watcher_([this, &stream, limit] {
         {
@@ -29,4 +29,4 @@ bool StreamDeadline::expired() const {
   return expired_;
 }
 
-}  // namespace svp::builder::workers
+}  // namespace svp::exec::remote

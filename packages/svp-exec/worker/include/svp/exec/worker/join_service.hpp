@@ -7,10 +7,12 @@
 // coordinator is told the join is done.
 
 #include "svp/exec/frame_stream.hpp"
+#include "svp/exec/worker/fleet_store.hpp"
 #include "svp/exec/worker/pairing_store.hpp"
 #include "svp/exec/worker/worker_layout.hpp"
 
 #include <mutex>
+#include <optional>
 #include <string>
 
 namespace svp::exec::worker {
@@ -26,8 +28,17 @@ struct JoinServiceOutcome {
   bool listener_key_changed = false;
 };
 
-// Serves one join; joins are serialized by `credential_mutex`. Throws
-// WorkerError as serve_fleet_join does, or when there is no credential.
+// The join credential under `layout`, migrated (and saved) when it predates
+// worker keys (fleet_store.hpp migrate_join_credential); nullopt without one.
+// Reads and writes under `credential_mutex`.
+[[nodiscard]] std::optional<WorkerJoinCredential> load_current_join_credential(
+    const WorkerLayout& layout, std::mutex& credential_mutex);
+
+// Serves one join. `credential_mutex` guards the credential file only while
+// it is read and while the result is stored, never across the exchange, so a
+// stalled peer blocks nothing else (the caller bounds the exchange with
+// kJoinExchangeTimeout). Throws WorkerError as serve_fleet_join does, or when
+// there is no credential.
 JoinServiceOutcome handle_join_connection(FrameReader& input, FrameWriter& output,
                                           const WorkerLayout& layout,
                                           std::mutex& credential_mutex);

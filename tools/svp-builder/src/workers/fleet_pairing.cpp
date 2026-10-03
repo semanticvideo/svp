@@ -2,6 +2,8 @@
 
 #include "svp/exec/remote/remote_connector.hpp"
 #include "svp/exec/remote/remote_error.hpp"
+#include "svp/exec/remote/stream_deadline.hpp"
+#include "svp/exec/remote/transport_policy.hpp"
 #include "svp/exec/worker/fleet_join.hpp"
 #include "svp/exec/worker/worker_connection.hpp"
 #include "svp/exec/worker/worker_error.hpp"
@@ -28,8 +30,12 @@ FleetPairingReport pair_joinable_fleet_workers(const FleetMembership& membership
     return report;
   }
   std::set<std::string> paired_ids;
+  std::set<std::string> paired_workers;
   for (const CoordinatorPairingRecord& record : load_coordinator_pairings(store)) {
     paired_ids.insert(record.key.pairing_id);
+    if (!record.worker.worker_id.empty()) {
+      paired_workers.insert(record.worker.worker_id);
+    }
   }
   std::set<std::string> seen;
   const std::uint64_t now = utc_seconds_now();
@@ -41,7 +47,12 @@ FleetPairingReport pair_joinable_fleet_workers(const FleetMembership& membership
       continue;
     }
     const std::string pairing_id = fleet_pairing_id(membership.coordinator_id, join_id->second);
-    if (paired_ids.contains(pairing_id)) {
+    // A worker this coordinator already pairs, under an earlier join id (a
+    // credential migrated to a key-bound id, fleet_store.hpp): one pairing
+    // per worker, so a build never counts a worker twice.
+    const auto worker = service.txt.find(std::string(remote::kWorkerTxtKey));
+    if (paired_ids.contains(pairing_id) ||
+        (worker != service.txt.end() && paired_workers.contains(worker->second))) {
       ++report.already_paired;
       continue;
     }
@@ -54,6 +65,9 @@ FleetPairingReport pair_joinable_fleet_workers(const FleetMembership& membership
     }
     try {
       const std::unique_ptr<WorkerConnection> connection = connect_to_worker(*key.key);
+      // A worker that stalls mid-join is cut off instead of holding the
+      // command (fleet_join.hpp kJoinExchangeTimeout).
+      const remote::StreamDeadline deadline(*connection->connection.stream, kJoinExchangeTimeout);
       const CoordinatorJoinResult joined = join_fleet_worker(*connection->reader,
                                                              *connection->writer, membership,
                                                              join_id->second);

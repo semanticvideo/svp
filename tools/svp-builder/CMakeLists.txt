@@ -170,7 +170,6 @@ if(APPLE)
     src/workers/ocr_calibration_runs.cpp
     src/workers/track_window_calibration_runs.cpp
     src/workers/ssh_session.cpp
-    src/workers/stream_deadline.cpp
     src/workers/worker_commands.cpp
     src/workers/worker_install.cpp
     src/workers/worker_model_view.cpp
@@ -516,7 +515,6 @@ if(BUILD_TESTING)
   if(APPLE)
     add_executable(svp-builder-stream-deadline-tests
       tests/stream_deadline_tests.cpp
-      src/workers/stream_deadline.cpp
     )
     target_include_directories(svp-builder-stream-deadline-tests PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/src

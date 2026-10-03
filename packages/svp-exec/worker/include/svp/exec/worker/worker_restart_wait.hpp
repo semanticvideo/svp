@@ -113,7 +113,8 @@ struct RestartWaitHooks {
 
 // Probes until an ACK shows no switch due (expected_switch with `offered` is
 // nullopt: settled) or that other sessions hold the switch (deferred), or
-// `deadline` passes.
+// `deadline` passes. Never throws: a hook that throws (a clock or sleep
+// failing) ends the wait as timed_out with the reason in last_error.
 [[nodiscard]] RestartWaitOutcome wait_for_worker_restart(const std::optional<RuntimeOffer>& offered,
                                                          std::chrono::milliseconds deadline,
                                                          const RestartWaitHooks& hooks);
@@ -139,6 +140,11 @@ class RuntimeSwitchWatch {
   // due, and forgets it (the caller waits once, with
   // wait_for_worker_restart); nullopt when no switch is due.
   [[nodiscard]] std::optional<WorkerHelloAck> take_due();
+
+  // After waiting for a due switch: the ACK the wait ended with, or the due
+  // one when it ended with none (timed out, cancelled). A switch still due
+  // (deferred, timed out) stays due, so the next session waits again.
+  void after_wait(const std::optional<WorkerHelloAck>& acknowledged, const WorkerHelloAck& due);
 
  private:
   std::optional<RuntimeOffer> offered_;
