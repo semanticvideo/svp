@@ -75,6 +75,9 @@ struct AgentCoreOptions {
   // Called after a session installed a runtime (RUNTIME_PUT), so the service
   // can consider moving to it (service_updater.hpp). Empty: nothing.
   std::function<void()> runtime_installed;
+  // The service's self-update state for HELLO_ACK (hello_messages.hpp
+  // `service`). Empty: not reported.
+  std::function<ServiceUpdateState()> service_state;
 };
 
 // State shared by every session of one agent. Thread-safe.

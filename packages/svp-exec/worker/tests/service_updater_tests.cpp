@@ -239,6 +239,23 @@ void test_damaged_candidate_is_not_adopted() {
   expect(read_current_runtime(fixture.layout) == fixture.own, "current is unchanged");
 }
 
+void test_reports_its_state_for_hello_ack() {
+  Fixture fixture(10);
+  const Blake3Digest broken = install_runtime(fixture.layout, 20, "broken");
+  fixture.failing.insert(broken);
+  ServiceUpdater updater = fixture.updater();
+  ServiceUpdateState state = updater.state();
+  expect(state.self_update && state.release_stamp == std::optional<std::uint64_t>(10) &&
+             state.declined_runtimes.empty(),
+         "a self-updating service reports its release");
+  expect(updater.consider() == UpdateStep::failed, "the candidate fails");
+  state = updater.state();
+  expect(state.declined_runtimes == std::vector<Blake3Digest>{broken},
+         "a runtime whose test-start failed is reported as declined");
+  ServiceUpdater off = fixture.updater(/*launched_through_current=*/false);
+  expect(!off.state().self_update, "a service not started through current does not update");
+}
+
 void test_disabled_without_the_current_link() {
   Fixture fixture(10);
   (void)install_runtime(fixture.layout, 20, "newer");
@@ -352,6 +369,7 @@ int main() {
            test_failed_test_start_keeps_the_current_runtime},
           {"next candidate after a failure", test_next_candidate_after_a_failure},
           {"damaged candidate is not adopted", test_damaged_candidate_is_not_adopted},
+          {"reports its state for HELLO_ACK", test_reports_its_state_for_hello_ack},
           {"disabled without the current link", test_disabled_without_the_current_link},
           {"restart exit code", test_restart_exit_code},
           {"real test-start", test_real_test_start},

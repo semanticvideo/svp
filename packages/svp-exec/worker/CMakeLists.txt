@@ -38,6 +38,7 @@ add_library(svp-exec-worker
   src/worker_connection.cpp
   src/worker_error.cpp
   src/worker_layout.cpp
+  src/worker_restart_wait.cpp
   src/worker_scripts.cpp
 )
 
@@ -75,6 +76,7 @@ if(BUILD_TESTING)
     slot_sharing
     agent_session
     service_updater
+    worker_restart_wait
     fleet_join
   )
   foreach(SVP_EXEC_TEST IN LISTS SVP_EXEC_WORKER_TESTS)

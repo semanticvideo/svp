@@ -7,6 +7,7 @@
 #include "fleet_pairing.hpp"
 #include "track_window_calibration_runs.hpp"
 #include "worker_reach.hpp"
+#include "worker_restart.hpp"
 
 #include "calibration/audio_capacity_workloads.hpp"
 #include "calibration/ocr_capacity_calibration.hpp"
@@ -217,10 +218,22 @@ WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSuppli
       stats = session.stats;
       client.shutdown();
     }
+    // A runtime this worker's service will move to (pushed now, or by
+    // another coordinator) restarts it once this session has ended; wait for
+    // it, so the build that delivered the update keeps the worker.
+    std::string restart_note;
+    if (const std::optional<WorkerHelloAck> restarted = await_worker_runtime_switch(
+            outcome.record.key, supplies.hello, supplies.runtime, ack, &cancellation,
+            [&restart_note](const std::string& line) { restart_note = line; })) {
+      ack = *restarted;
+    }
     std::ostringstream detail;
     detail << "via " << route << ", sent " << format_bytes(stats.bytes_sent) << " ("
            << (stats.runtime_pushed ? "runtime, " : "") << stats.model_bundles_pushed.size()
            << " model bundle(s), " << stats.blobs_sent << " blob(s))";
+    if (!restart_note.empty()) {
+      detail << ", " << restart_note;
+    }
     std::string problems;
     try {
       const CalibrationOutcome calibration = ensure_worker_calibration(

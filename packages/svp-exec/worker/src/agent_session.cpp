@@ -491,6 +491,9 @@ WorkerHelloAck AgentCore::describe(const Blake3Digest& requested_runtime,
   ack.model_bundles = models_.list();
   ack.active_sessions = active_sessions.load();
   ack.agent_runtime_id = options_.agent_runtime_id;
+  if (options_.service_state) {
+    ack.service = options_.service_state();
+  }
   return ack;
 }
 

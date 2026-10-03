@@ -7,6 +7,7 @@
 #include "svp/exec/worker/worker_connection.hpp"
 #include "ocr_calibration_runs.hpp"
 #include "worker_reach.hpp"
+#include "worker_restart.hpp"
 #include "workers_cli.hpp"
 
 #include <future>
@@ -183,7 +184,7 @@ int run_workers_sync(const WorkersCliOptions& options) {
   const std::vector<ModelBundleSource> models = select_model_bundles(context, options.models);
   const std::unique_ptr<WorkerConnection> connection = connect_to_worker(record.key);
   WorkerSessionClient client(*connection->reader, *connection->writer);
-  (void)client.hello(context.hello());
+  const WorkerHelloAck ack = client.hello(context.hello());
   TransferStats stats;
   client.ensure_runtime(context.runtime, stats);
   std::cout << "runtime " << svp::exec::blake3_prefixed(context.runtime.runtime_id) << ": "
@@ -191,6 +192,10 @@ int run_workers_sync(const WorkersCliOptions& options) {
   const std::uint64_t runtime_bytes_sent = stats.bytes_sent;
   client.ensure_model_bundles(models, stats);
   client.shutdown();
+  // A runtime the worker's service will move to restarts it right after this
+  // session; calibration's sessions must not find it gone.
+  (void)await_worker_runtime_switch(record.key, context.hello(), context.runtime, ack, nullptr,
+                                    [](const std::string& line) { std::cout << line << "\n" << std::flush; });
   for (const std::string& bundle : stats.model_bundles_pushed) {
     std::cout << "model bundle " << bundle << ": pushed and verified against model-lock\n";
   }

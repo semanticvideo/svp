@@ -207,6 +207,14 @@ Frame make_hello_ack_frame(const WorkerHelloAck& ack) {
   if (ack.agent_runtime_id) {
     body["agent_runtime_id"] = blake3_prefixed(*ack.agent_runtime_id);
   }
+  if (ack.service) {
+    nlohmann::json service{{"declined_runtimes", digests_to_json(ack.service->declined_runtimes, true)},
+                           {"self_update", ack.service->self_update}};
+    if (ack.service->release_stamp) {
+      service["release_stamp"] = *ack.service->release_stamp;
+    }
+    body["service"] = std::move(service);
+  }
   return Frame{.type = MessageType::hello_ack, .body = std::move(body), .payloads = {}};
 }
 
@@ -257,6 +265,18 @@ WorkerHelloAck hello_ack_from_frame(const Frame& frame) {
                                           child_path(path, "sessions"));
   if (body.contains("agent_runtime_id")) {
     ack.agent_runtime_id = required_blake3_prefixed(body, "agent_runtime_id", path);
+  }
+  if (const auto service = body.find("service"); service != body.end()) {
+    const std::string service_path = child_path(path, "service");
+    require_object(*service, service_path);
+    ServiceUpdateState state;
+    state.self_update = required_bool(*service, "self_update", service_path);
+    if (service->contains("release_stamp")) {
+      state.release_stamp = required_unsigned(*service, "release_stamp", service_path);
+    }
+    state.declined_runtimes =
+        required_digest_array(*service, "declined_runtimes", service_path, true);
+    ack.service = std::move(state);
   }
   return ack;
 }

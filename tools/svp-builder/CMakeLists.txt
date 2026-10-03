@@ -175,6 +175,7 @@ if(APPLE)
     src/workers/worker_install.cpp
     src/workers/worker_model_view.cpp
     src/workers/worker_reach.cpp
+    src/workers/worker_restart.cpp
     src/workers/worker_supplies.cpp
     src/workers/workers_cli.cpp
     src/workers/workers_fleet.cpp

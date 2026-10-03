@@ -2,6 +2,7 @@
 
 #include "runtime_files.hpp"
 #include "svp/exec/runtime_manifest_assembly.hpp"
+#include "svp/exec/runtime_release.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 #include "svp/exec/worker/worker_layout.hpp"
 
@@ -123,6 +124,7 @@ CoordinatorRuntime locate_coordinator_runtime(const std::filesystem::path& execu
                           std::string(kSessionProgram));
   }
   runtime.components_bytes = read_file(components_file);
+  runtime.release_stamp = runtime_release_of(runtime.manifest, prefix).release_stamp;
   finish(runtime);
   return runtime;
 }

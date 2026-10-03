@@ -1,4 +1,5 @@
 #include "ocr_calibration_runs.hpp"
+#include "worker_restart.hpp"
 
 #include "coordinator_context.hpp"
 #include "dispatched_calibration_runs.hpp"
@@ -320,6 +321,11 @@ bool calibrate_for_workers_command(const svp::exec::worker::CoordinatorPairingRe
       svp::exec::worker::WorkerSessionClient client(*connection->reader, *connection->writer);
       ack = supply_worker_session(*connection->reader, *connection->writer, supplies).ack;
       client.shutdown();
+    }
+    if (const std::optional<svp::exec::worker::WorkerHelloAck> restarted =
+            await_worker_runtime_switch(record.key, supplies.hello, supplies.runtime, ack, nullptr,
+                                        [](const std::string& line) { std::cout << line << "\n"; })) {
+      ack = *restarted;
     }
     const CalibrationOutcome worker = ensure_worker_calibration(
         record.key, supplies, ack, setup, clip, store, never_cancelled);

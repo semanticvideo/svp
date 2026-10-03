@@ -10,6 +10,7 @@
 #include "svp/exec/worker/worker_connection.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 #include "worker_reach.hpp"
+#include "worker_restart.hpp"
 #include "workers_cli.hpp"
 
 #include <iostream>
@@ -129,11 +130,13 @@ int run_workers_fleet_pair(const WorkersCliOptions& options) {
     try {
       const std::unique_ptr<WorkerConnection> connection = connect_to_worker(record.key);
       WorkerSessionClient client(*connection->reader, *connection->writer);
-      (void)client.hello(context.hello());
+      const WorkerHelloAck ack = client.hello(context.hello());
       TransferStats stats;
       client.ensure_runtime(context.runtime, stats);
       client.ensure_model_bundles(models, stats);
       client.shutdown();
+      (void)await_worker_runtime_switch(record.key, context.hello(), context.runtime, ack, nullptr,
+                                        [](const std::string& line) { std::cout << line << "\n" << std::flush; });
       std::cout << record.key.pairing_id << ": runtime "
                 << (stats.runtime_pushed ? "pushed and verified" : "already present") << ", "
                 << stats.model_bundles_pushed.size() << " model bundle(s) pushed ("

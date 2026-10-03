@@ -92,6 +92,13 @@ void ServiceUpdater::leave_session() {
 
 void ServiceUpdater::runtime_installed() { (void)consider(); }
 
+ServiceUpdateState ServiceUpdater::state() const {
+  const std::lock_guard lock(mutex_);
+  return ServiceUpdateState{.self_update = enabled(),
+                            .release_stamp = own_.release_stamp,
+                            .declined_runtimes = {failed_.begin(), failed_.end()}};
+}
+
 bool ServiceUpdater::restart_requested() const {
   const std::lock_guard lock(mutex_);
   return restarting_;

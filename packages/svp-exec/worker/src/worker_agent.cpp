@@ -237,7 +237,8 @@ int run_worker_agent(const WorkerAgentOptions& options) {
                                     return read_local_load(directory);
                                   },
                                   .slot_contention_window = kDefaultSlotContentionWindow,
-                                  .runtime_installed = [&updater] { updater.runtime_installed(); }});
+                                  .runtime_installed = [&updater] { updater.runtime_installed(); },
+                                  .service_state = [&updater] { return updater.state(); }});
   const HostFacts& host = core.options().host;
   log_line("starting pid=" + std::to_string(::getpid()) + " macOS " + host.os.product_version +
            " (" + host.os.build + ") " + host.arch + " cpus=" + std::to_string(host.logical_cpus) +

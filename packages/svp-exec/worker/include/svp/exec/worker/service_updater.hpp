@@ -33,6 +33,7 @@
 
 #include "svp/exec/blake3_digest.hpp"
 #include "svp/exec/runtime_release.hpp"
+#include "svp/exec/worker/hello_messages.hpp"
 #include "svp/exec/worker/runtime_test_start.hpp"
 #include "svp/exec/worker/worker_layout.hpp"
 
@@ -106,6 +107,11 @@ class ServiceUpdater {
 
   // Steps 1-4 above, synchronously.
   UpdateStep consider();
+
+  // What HELLO_ACK reports (hello_messages.hpp `service`): whether this
+  // service updates itself, its own release stamp, and the runtimes whose
+  // test-start failed.
+  [[nodiscard]] ServiceUpdateState state() const;
 
   [[nodiscard]] bool restart_requested() const;
   [[nodiscard]] std::uint64_t live_sessions() const;
