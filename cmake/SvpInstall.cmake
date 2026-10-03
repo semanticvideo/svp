@@ -137,16 +137,31 @@ if(NOT SVP_RUNTIME_BUNDLE_DIR STREQUAL "")
     endif()
   endforeach()
 
+  # A worker that coordinates a whole video (build-batch) runs the full build,
+  # including strict validation, which needs the registries and schemas, so
+  # they are part of the runtime a coordinator sends its workers.
+  set(svp_runtime_data_arguments "")
+  foreach(relative_path IN LISTS SVP_INSTALL_REGISTRY_RELATIVE_FILES)
+    list(APPEND svp_runtime_data_arguments --add
+         "svp-data=${CMAKE_INSTALL_DATADIR}/svp/registries/${relative_path}")
+  endforeach()
+  foreach(relative_path IN LISTS SVP_INSTALL_SCHEMA_RELATIVE_FILES)
+    list(APPEND svp_runtime_data_arguments --add
+         "svp-data=${CMAKE_INSTALL_DATADIR}/svp/schemas/${relative_path}")
+  endforeach()
+
   # The runtime identity covers the installed svp-builder as well as the
   # bundle, so it is written after both are in place. svp-runtime-manifest
   # also checks every bundled file against its components.json digest.
   install(CODE "
+    set(svp_runtime_data_arguments \"${svp_runtime_data_arguments}\")
     set(svp_runtime_root \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}\")
     execute_process(
       COMMAND \"$<TARGET_FILE:svp-runtime-manifest>\" write
               --root \"\${svp_runtime_root}\"
               --bundle-dir \"${SVP_RUNTIME_INSTALL_DIR}\"
               --add \"svp-builder=${CMAKE_INSTALL_BINDIR}/$<TARGET_FILE_NAME:svp-builder>\"
+              \${svp_runtime_data_arguments}
       RESULT_VARIABLE svp_runtime_manifest_result
       OUTPUT_VARIABLE svp_runtime_id
       ERROR_VARIABLE svp_runtime_manifest_error
