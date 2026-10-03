@@ -34,6 +34,7 @@ constexpr std::string_view kPinHolderSuffix = ".video-build";
 // TaskTypeRegistry::execute validates the result before run_task_attempt
 // stamps the real attempt number and worker session over these.
 constexpr std::uint64_t kUnstampedAttempt = 1;
+constexpr std::string_view kUnstampedWorkerSession = "ws_unstamped";
 
 // The packages this session's jobs stored, pinned so cache eviction cannot
 // remove one before the batch fetched it; released with the session.
@@ -83,6 +84,7 @@ svp::exec::TaskResult failed(const svp::exec::TaskSpec& spec, std::string_view c
   svp::exec::TaskResult result;
   result.task_id = spec.task_id;
   result.attempt = kUnstampedAttempt;
+  result.execution.worker_session_id = std::string(kUnstampedWorkerSession);
   result.status = svp::exec::TaskStatus::failed;
   result.output_digest = svp::exec::compute_output_digest({});
   result.error = svp::exec::TaskError{.code = std::string(code),
@@ -199,6 +201,7 @@ svp::exec::TaskResult execute(const svp::exec::TaskSpec& spec,
   svp::exec::TaskResult result;
   result.task_id = spec.task_id;
   result.attempt = kUnstampedAttempt;
+  result.execution.worker_session_id = std::string(kUnstampedWorkerSession);
   result.status = svp::exec::TaskStatus::succeeded;
   try {
     const std::uint64_t bytes = std::filesystem::file_size(output);
