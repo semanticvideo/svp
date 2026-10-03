@@ -18,11 +18,13 @@ constexpr int kBootstrapAttempts = 20;
 
 std::string bootstrap_with_retry(std::string_view domain, std::string_view plist_variable) {
   std::ostringstream out;
+  // The expected transient error is reported only if every attempt fails.
   out << "attempt=0\n"
-      << "until launchctl bootstrap " << domain << " \"" << plist_variable << "\"; do\n"
+      << "until bootstrap_error=$(launchctl bootstrap " << domain << " \"" << plist_variable
+      << "\" 2>&1); do\n"
       << "  attempt=$((attempt + 1))\n"
       << "  if [ \"$attempt\" -ge " << kBootstrapAttempts << " ]; then\n"
-      << "    echo \"svp: launchctl bootstrap failed\" >&2; exit 1\n"
+      << "    echo \"svp: launchctl bootstrap failed: $bootstrap_error\" >&2; exit 1\n"
       << "  fi\n"
       << "  sleep 1\n"
       << "done\n";
