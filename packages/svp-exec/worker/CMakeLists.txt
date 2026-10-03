@@ -14,6 +14,7 @@ add_library(svp-exec-worker
   src/fleet_crypto.cpp
   src/fleet_join.cpp
   src/fleet_keys.cpp
+  src/fleet_member_messages.cpp
   src/fleet_store.cpp
   src/hex_bytes.cpp
   src/hello_messages.cpp

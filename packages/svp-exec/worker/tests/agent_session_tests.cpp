@@ -10,6 +10,7 @@
 #include "svp/exec/task_frames.hpp"
 #include "svp/exec/worker/agent_session.hpp"
 #include "svp/exec/worker/coordinator_session.hpp"
+#include "svp/exec/worker/fleet_member_messages.hpp"
 #include "svp/exec/worker/runtime_source.hpp"
 #include "svp/exec/worker/transfer_messages.hpp"
 #include "toy_tasks.hpp"
@@ -170,6 +171,81 @@ std::size_t entries(const fs::path& directory) {
     ++count;
   }
   return count;
+}
+
+// A session of an agent whose core reports fleet state and stores issued
+// member keys, from `coordinator` ("" for an unproven one).
+struct FleetAgent {
+  TemporaryDirectory scratch{"svp-agent-fleet"};
+  std::mutex mutex;
+  std::vector<std::pair<std::string, std::vector<std::byte>>> stored;
+  bool member = false;
+  std::unique_ptr<AgentCore> core;
+
+  FleetAgent() {
+    core = std::make_unique<AgentCore>(AgentCoreOptions{
+        .layout = WorkerLayout{.root = scratch.path / "Worker"},
+        .host = detect_host_facts(),
+        .fleet_state =
+            [this] {
+              const std::lock_guard lock(mutex);
+              return std::optional<FleetJoinState>(
+                  FleetJoinState{.fleet_id = "svpf-0123456789abcdef01234567",
+                                 .join_id = "svpj-0123456789abcdef01234567",
+                                 .member = member});
+            },
+        .store_member_key =
+            [this](const std::string& join_id, const std::vector<std::byte>& key) {
+              const std::lock_guard lock(mutex);
+              if (join_id != "svpj-0123456789abcdef01234567") {
+                return std::string("not this worker's join id");
+              }
+              stored.emplace_back(join_id, key);
+              member = true;
+              return std::string();
+            }});
+  }
+
+  // Runs one session: HELLO, then FLEET_MEMBER when the ACK asks for it.
+  std::string issue(const std::string& coordinator, const std::string& join_id) {
+    FrameChannel channel;
+    std::thread agent([&] {
+      (void)serve_agent_session(*core, *channel.right_reader, *channel.right_writer, "ws-fleet",
+                                [&] { ::shutdown(channel.fds[1], SHUT_RDWR); }, coordinator);
+    });
+    WorkerSessionClient client(*channel.left_reader, *channel.left_writer);
+    std::string outcome;
+    try {
+      const WorkerHelloAck ack = client.hello(hello_for(toy_runtime()));
+      if (!worker_needs_member_key(ack, "svpf-0123456789abcdef01234567")) {
+        outcome = "not needed";
+      } else {
+        client.issue_member_key(join_id, std::vector<std::byte>(32, std::byte{5}));
+        outcome = "stored";
+      }
+      client.shutdown();
+    } catch (const WorkerError& error) {
+      outcome = std::string("refused: ") + error.what();
+    }
+    channel.close_left();
+    agent.join();
+    return outcome;
+  }
+};
+
+void test_member_key_is_issued_over_a_proven_session() {
+  FleetAgent agent;
+  const std::string unproven = agent.issue({}, "svpj-0123456789abcdef01234567");
+  expect(unproven.find("proven") != std::string::npos,
+         "an unproven session cannot set a member key: " + unproven);
+  const std::string wrong = agent.issue("svpw-a", "svpj-ffffffffffffffffffffffff");
+  expect(wrong.find("not this worker's join id") != std::string::npos,
+         "a key for another join id is refused: " + wrong);
+  expect(agent.issue("svpw-a", "svpj-0123456789abcdef01234567") == "stored",
+         "a proven coordinator issues the member key");
+  expect(agent.stored.size() == 1 && agent.stored.front().second.size() == 32, "it was stored");
+  expect(agent.issue("svpw-a", "svpj-0123456789abcdef01234567") == "not needed",
+         "a member is not issued it again");
 }
 
 void test_os_mismatch_refuses_the_session() {
@@ -504,6 +580,8 @@ int main(int argc, char** argv) {
       "svp-exec-worker-agent-session-tests",
       {
           {"OS mismatch refuses the session", test_os_mismatch_refuses_the_session},
+          {"member key is issued over a proven session",
+           test_member_key_is_issued_over_a_proven_session},
           {"pushed runtime runs a toy task", test_pushed_runtime_runs_a_toy_task},
           {"admission rejects a task that does not fit",
            test_admission_rejects_a_task_that_does_not_fit},

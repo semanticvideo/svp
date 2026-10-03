@@ -18,6 +18,7 @@
 #include <dispatch/dispatch.h>
 #include <fcntl.h>
 #include <iostream>
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -44,8 +45,9 @@ void wake_main_thread() { ::kill(::getpid(), kAgentWakeSignal); }
 class AgentListeners {
  public:
   AgentListeners(AgentCore& core, ServiceUpdater& updater, const WorkerLayout& layout,
-                 std::string worker_id)
-      : core_(core),
+                 std::string worker_id, std::mutex& credential_mutex)
+      : credential_mutex_(credential_mutex),
+        core_(core),
         updater_(updater),
         layout_(layout),
         worker_id_(worker_id),
@@ -114,12 +116,13 @@ class AgentListeners {
              " port=" + std::to_string(join_->port()));
   }
 
-  // Main thread: applies what was asked for since the last call.
-  void apply_requests() {
-    bool restart_join = false;
+  // Main thread: applies what was asked for since the last call;
+  // `member_key_changed`: a pairing session stored an issued member key.
+  void apply_requests(bool member_key_changed) {
+    bool restart_join = member_key_changed;
     {
       const std::lock_guard lock(requests_mutex_);
-      restart_join = join_restart_requested_;
+      restart_join = restart_join || join_restart_requested_;
       join_restart_requested_ = false;
     }
     try {
@@ -146,6 +149,8 @@ class AgentListeners {
   }
 
  private:
+  std::mutex& credential_mutex_;
+
   void serve_session(remote::RemoteStream& stream, const remote::RemoteSessionInfo& info,
                      const CoordinatorResolver& resolve) {
     const std::string session_id =
@@ -205,7 +210,6 @@ class AgentListeners {
   PairingsServer pairings_;
   std::unique_ptr<remote::RemoteListener> join_;
   std::unique_ptr<remote::ServiceAdvertiser> join_advertisement_;
-  std::mutex credential_mutex_;
   std::mutex requests_mutex_;
   bool join_restart_requested_ = false;
 };
@@ -286,6 +290,11 @@ int run_worker_agent(const WorkerAgentOptions& options) {
       .test_start = {},
       .log = log_line,
       .request_restart = wake_main_thread});
+  // The join credential's lock and the request to restart the join listener
+  // are shared by the join listener and the pairing sessions that may be
+  // issued a member key (fleet_member_messages.hpp).
+  std::mutex credential_mutex;
+  std::atomic<bool> member_key_changed{false};
   AgentCore core(AgentCoreOptions{.layout = layout,
                                   .host = detect_host_facts(),
                                   .admission = options.admission,
@@ -302,7 +311,26 @@ int run_worker_agent(const WorkerAgentOptions& options) {
                                   .slot_contention_window = kDefaultSlotContentionWindow,
                                   .runtime_installed = [&updater] { updater.runtime_installed(); },
                                   .service_state = [&updater] { return updater.state(); },
-                                  .worker_id = worker_id});
+                                  .worker_id = worker_id,
+                                  .fleet_state =
+                                      [&layout, &credential_mutex] {
+                                        return current_fleet_state(layout, credential_mutex);
+                                      },
+                                  .store_member_key =
+                                      [&layout, &credential_mutex, &member_key_changed](
+                                          const std::string& join_id,
+                                          const std::vector<std::byte>& key) {
+                                        bool changed = false;
+                                        std::string refusal = store_issued_member_key(
+                                            layout, credential_mutex, join_id, key, changed);
+                                        if (changed) {
+                                          log_line("member key issued for " + join_id +
+                                                   "; restarting the join listener");
+                                          member_key_changed = true;
+                                          wake_main_thread();
+                                        }
+                                        return refusal;
+                                      }});
   const HostFacts& host = core.options().host;
   log_line("starting pid=" + std::to_string(::getpid()) + " macOS " + host.os.product_version +
            " (" + host.os.build + ") " + host.arch + " cpus=" + std::to_string(host.logical_cpus) +
@@ -317,7 +345,7 @@ int run_worker_agent(const WorkerAgentOptions& options) {
     return kWorkerRestartExitCode;
   }
 
-  AgentListeners listeners(core, updater, layout, worker_id);
+  AgentListeners listeners(core, updater, layout, worker_id, credential_mutex);
   // Only a listener that cannot open ends the agent (launchd restarts it);
   // advertising never does (pairings_server.hpp).
   listeners.rescan_pairings();
@@ -339,7 +367,7 @@ int run_worker_agent(const WorkerAgentOptions& options) {
       exit_code = kWorkerRestartExitCode;
       break;
     }
-    listeners.apply_requests();
+    listeners.apply_requests(member_key_changed.exchange(false));
   }
   listeners.stop_all();
   clear_worker_scratch(layout);

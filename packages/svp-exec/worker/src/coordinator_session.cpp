@@ -1,5 +1,7 @@
 #include "svp/exec/worker/coordinator_session.hpp"
 
+#include "svp/exec/worker/fleet_member_messages.hpp"
+
 #include "svp/models/hash.hpp"
 
 #include "svp/exec/lease_frames.hpp"
@@ -70,6 +72,18 @@ WorkerHelloAck WorkerSessionClient::hello(const CoordinatorHello& hello) {
                                                     std::to_string(ack.protocol.major));
   }
   return ack;
+}
+
+void WorkerSessionClient::issue_member_key(const std::string& join_id,
+                                           const std::vector<std::byte>& member_key) {
+  writer_.write(make_member_key_issue_frame(MemberKeyIssue{.join_id = join_id,
+                                                           .member_key = member_key}));
+  const MemberKeyAnswer answer =
+      member_key_answer_from_frame(expect(MessageType::fleet_member));
+  if (!answer.stored) {
+    throw WorkerError(WorkerErrorCode::refused,
+                      "the worker did not store its member key: " + answer.message);
+  }
 }
 
 bool WorkerSessionClient::runtime_present(const Blake3Digest& runtime_id) {

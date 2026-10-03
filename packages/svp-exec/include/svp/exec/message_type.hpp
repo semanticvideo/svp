@@ -40,6 +40,9 @@ enum class MessageType {
   join_challenge,
   join_accept,
   join_done,
+  // Fleet membership over a proven pairing session (worker/fleet_join.hpp):
+  // a coordinator issuing a worker's member key, and the worker's answer.
+  fleet_member,
 };
 
 inline constexpr std::array kAllMessageTypes = {
@@ -50,7 +53,7 @@ inline constexpr std::array kAllMessageTypes = {
     MessageType::cancel,    MessageType::drain,     MessageType::shutdown,
     MessageType::unpair,    MessageType::error,     MessageType::blob_get,
     MessageType::blob_release, MessageType::join_offer, MessageType::join_challenge,
-    MessageType::join_accept, MessageType::join_done,
+    MessageType::join_accept, MessageType::join_done, MessageType::fleet_member,
 };
 
 [[nodiscard]] std::string_view message_type_name(MessageType type) noexcept;

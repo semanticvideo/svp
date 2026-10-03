@@ -488,6 +488,36 @@ void test_join_service_does_not_hold_the_lock_while_waiting() {
   expect(kJoinExchangeTimeout.count() > 0, "both sides bound the exchange");
 }
 
+void test_issued_member_key_is_stored_for_this_join_id() {
+  TemporaryDirectory scratch("svp-join-issue");
+  const WorkerLayout layout{.root = scratch.path / "Worker"};
+  create_worker_layout(layout);
+  const FleetSecret fleet = generate_fleet_secret();
+  const WorkerJoinCredential credential = make_credential(fleet);
+  save_worker_join_credential(layout, credential);
+  std::mutex mutex;
+  std::optional<FleetJoinState> state = current_fleet_state(layout, mutex);
+  expect(state && state->join_id == credential.worker_join_id && !state->member &&
+             state->fleet_id == fleet.fleet_id,
+         "the worker reports it holds no member key");
+  bool changed = false;
+  const std::vector<std::byte> key = member_key(fleet, credential.worker_join_id);
+  expect(store_issued_member_key(layout, mutex, "svpj-ffffffffffffffffffffffff", key, changed)
+                 .find("join id") != std::string::npos &&
+             !changed,
+         "a key for another join id is refused");
+  expect(store_issued_member_key(layout, mutex, credential.worker_join_id, key, changed).empty() &&
+             changed,
+         "its own key is stored");
+  expect(load_worker_join_credential(layout)->member_key == key, "in join.json");
+  expect(current_fleet_state(layout, mutex)->member, "and reported");
+  expect(join_listener_key(*load_worker_join_credential(layout)).secret == key,
+         "the join listener switches to member mode");
+  expect(store_issued_member_key(layout, mutex, credential.worker_join_id, key, changed).empty() &&
+             !changed,
+         "storing it again changes nothing");
+}
+
 }  // namespace
 
 int main() {
@@ -505,6 +535,8 @@ int main() {
                        {"a token holder cannot claim another worker's id",
                         test_a_token_holder_cannot_claim_another_workers_id},
                        {"legacy credential is migrated", test_legacy_credential_is_migrated},
+                       {"issued member key is stored for this join id",
+                        test_issued_member_key_is_stored_for_this_join_id},
                        {"join service does not hold the lock while waiting",
                         test_join_service_does_not_hold_the_lock_while_waiting},
                    });

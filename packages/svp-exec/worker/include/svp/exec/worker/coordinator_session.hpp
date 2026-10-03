@@ -75,6 +75,10 @@ class WorkerSessionClient {
   void release_blobs(const std::vector<BlobRef>& blobs);
 
   // SHUTDOWN; the worker ends the session.
+  // FLEET_MEMBER (fleet_member_messages.hpp). Throws WorkerError(refused)
+  // with the worker's reason when it did not store the key.
+  void issue_member_key(const std::string& join_id, const std::vector<std::byte>& member_key);
+
   void shutdown();
 
  private:

@@ -223,6 +223,11 @@ Frame make_hello_ack_frame(const WorkerHelloAck& ack) {
   if (!ack.worker_id.empty()) {
     body["worker_id"] = ack.worker_id;
   }
+  if (ack.fleet) {
+    body["fleet"] = nlohmann::json{{"fleet_id", ack.fleet->fleet_id},
+                                   {"join_id", ack.fleet->join_id},
+                                   {"member", ack.fleet->member}};
+  }
   if (ack.service) {
     nlohmann::json service{{"declined_runtimes", digests_to_json(ack.service->declined_runtimes, true)},
                            {"self_update", ack.service->self_update}};
@@ -290,6 +295,13 @@ WorkerHelloAck hello_ack_from_frame(const Frame& frame) {
   }
   if (body.contains("worker_id")) {
     ack.worker_id = required_string(body, "worker_id", path);
+  }
+  if (const auto fleet = body.find("fleet"); fleet != body.end()) {
+    const std::string fleet_path = child_path(path, "fleet");
+    require_object(*fleet, fleet_path);
+    ack.fleet = FleetJoinState{.fleet_id = required_string(*fleet, "fleet_id", fleet_path),
+                               .join_id = required_string(*fleet, "join_id", fleet_path),
+                               .member = required_bool(*fleet, "member", fleet_path)};
   }
   if (const auto service = body.find("service"); service != body.end()) {
     const std::string service_path = child_path(path, "service");

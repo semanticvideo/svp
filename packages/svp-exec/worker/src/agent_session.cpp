@@ -5,6 +5,7 @@
 #include "svp/exec/lease_frames.hpp"
 #include "svp/exec/task_frames.hpp"
 #include "svp/exec/worker/blob_receiver.hpp"
+#include "svp/exec/worker/fleet_member_messages.hpp"
 #include "svp/exec/worker/transfer_messages.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 
@@ -217,6 +218,20 @@ class AgentSession {
         }
         core_.released().release(coordinator_id_, digests);
         (void)core_.released().sweep(cas_);
+        return;
+      }
+      case MessageType::fleet_member: {
+        const MemberKeyIssue issue = member_key_issue_from_frame(frame);
+        MemberKeyAnswer answer;
+        if (!named_coordinator_) {
+          answer.message = "a member key is accepted only on a session whose pairing is proven";
+        } else if (!core_.options().store_member_key) {
+          answer.message = "this worker has no fleet join credential";
+        } else {
+          answer.message = core_.options().store_member_key(issue.join_id, issue.member_key);
+          answer.stored = answer.message.empty();
+        }
+        output_.write(make_member_key_answer_frame(answer));
         return;
       }
       case MessageType::cancel: {
@@ -509,6 +524,9 @@ WorkerHelloAck AgentCore::describe(const Blake3Digest& requested_runtime,
     ack.service = options_.service_state();
   }
   ack.worker_id = options_.worker_id;
+  if (options_.fleet_state) {
+    ack.fleet = options_.fleet_state();
+  }
   return ack;
 }
 

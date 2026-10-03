@@ -5,6 +5,7 @@
 #include "svp/exec/frame_decoder.hpp"
 #include "svp/exec/lease_frames.hpp"
 #include "svp/exec/worker/admission.hpp"
+#include "svp/exec/worker/fleet_member_messages.hpp"
 #include "svp/exec/worker/hello_messages.hpp"
 #include "svp/exec/worker/transfer_messages.hpp"
 #include "svp/exec/worker_session_leases.hpp"
@@ -111,6 +112,30 @@ void test_hello_ack_round_trips() {
   ack.worker_id = "svpn-0123456789abcdef01234567";
   expect(hello_ack_from_frame(wire(make_hello_ack_frame(ack))) == ack, "an ack with a worker id");
   ack.worker_id.clear();
+  ack.fleet = FleetJoinState{.fleet_id = "svpf-0123456789abcdef01234567",
+                             .join_id = "svpj-0123456789abcdef01234567",
+                             .member = false};
+  expect(hello_ack_from_frame(wire(make_hello_ack_frame(ack))) == ack, "an ack with fleet state");
+  expect(worker_needs_member_key(ack, "svpf-0123456789abcdef01234567"),
+         "a fleet worker without a member key needs one");
+  expect(!worker_needs_member_key(ack, "svpf-ffffffffffffffffffffffff"),
+         "never from another fleet's coordinator");
+  ack.fleet->member = true;
+  expect(!worker_needs_member_key(ack, "svpf-0123456789abcdef01234567"),
+         "a member needs nothing");
+  ack.fleet.reset();
+  expect(!worker_needs_member_key(ack, "svpf-0123456789abcdef01234567"),
+         "a worker that reports no fleet is never sent FLEET_MEMBER");
+
+  const MemberKeyIssue issue{.join_id = "svpj-0123456789abcdef01234567",
+                             .member_key = std::vector<std::byte>(32, std::byte{9})};
+  const MemberKeyIssue issued = member_key_issue_from_frame(wire(make_member_key_issue_frame(issue)));
+  expect(issued.join_id == issue.join_id && issued.member_key == issue.member_key,
+         "FLEET_MEMBER issue round trips");
+  const MemberKeyAnswer answer =
+      member_key_answer_from_frame(wire(make_member_key_answer_frame({.stored = false,
+                                                                      .message = "no"})));
+  expect(!answer.stored && answer.message == "no", "FLEET_MEMBER answer round trips");
   ack.service->release_stamp.reset();
   ack.service->self_update = false;
   expect(hello_ack_from_frame(wire(make_hello_ack_frame(ack))) == ack,

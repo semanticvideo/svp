@@ -50,6 +50,8 @@ std::string_view message_type_name(MessageType type) noexcept {
       return "JOIN_ACCEPT";
     case MessageType::join_done:
       return "JOIN_DONE";
+    case MessageType::fleet_member:
+      return "FLEET_MEMBER";
   }
   return "UNKNOWN";
 }

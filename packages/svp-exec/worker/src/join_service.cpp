@@ -43,6 +43,46 @@ std::optional<WorkerJoinCredential> load_current_join_credential(const WorkerLay
   return credential;
 }
 
+std::optional<FleetJoinState> current_fleet_state(const WorkerLayout& layout,
+                                                  std::mutex& credential_mutex) {
+  try {
+    const std::lock_guard lock(credential_mutex);
+    const std::optional<WorkerJoinCredential> credential = load_worker_join_credential(layout);
+    if (!credential) {
+      return std::nullopt;
+    }
+    return FleetJoinState{.fleet_id = credential->token.fleet_id,
+                          .join_id = credential->worker_join_id,
+                          .member = credential->member_key.has_value()};
+  } catch (const std::exception&) {
+    return std::nullopt;
+  }
+}
+
+std::string store_issued_member_key(const WorkerLayout& layout, std::mutex& credential_mutex,
+                                    const std::string& join_id,
+                                    const std::vector<std::byte>& member_key, bool& changed) {
+  changed = false;
+  try {
+    const std::lock_guard lock(credential_mutex);
+    std::optional<WorkerJoinCredential> credential = load_worker_join_credential(layout);
+    if (!credential) {
+      return "this worker has no fleet join credential";
+    }
+    if (credential->worker_join_id != join_id) {
+      return "this worker's join id is " + credential->worker_join_id + ", not " + join_id;
+    }
+    if (credential->member_key != member_key) {
+      credential->member_key = member_key;
+      save_worker_join_credential(layout, *credential);
+      changed = true;
+    }
+    return {};
+  } catch (const std::exception& error) {
+    return std::string("cannot store the member key: ") + error.what();
+  }
+}
+
 JoinServiceOutcome handle_join_connection(FrameReader& input, FrameWriter& output,
                                           const WorkerLayout& layout,
                                           std::mutex& credential_mutex) {

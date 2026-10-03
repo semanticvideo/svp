@@ -81,6 +81,13 @@ struct AgentCoreOptions {
   // This worker's id, reported in HELLO_ACK (worker_identity.hpp); empty:
   // not reported.
   std::string worker_id;
+  // The worker's fleet state for HELLO_ACK `fleet`; empty or nullopt: not
+  // reported (and FLEET_MEMBER refused).
+  std::function<std::optional<FleetJoinState>()> fleet_state;
+  // Stores a member key a proven coordinator issued (fleet_member_messages.hpp);
+  // returns "" when stored, else why not.
+  std::function<std::string(const std::string& join_id, const std::vector<std::byte>& key)>
+      store_member_key;
 };
 
 // State shared by every session of one agent. Thread-safe.

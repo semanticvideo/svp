@@ -38,7 +38,13 @@
 //               "release_stamp":n,                               optional
 //               "self_update":bool},
 //    "sessions":{"active":n},
+//    "fleet":{"fleet_id","join_id","member":bool},                 optional
 //    "worker_id":"svpn-<24 hex>"}                                   optional
+//
+// `fleet` (workers installed with `worker install --join`): the fleet the
+// worker belongs to, its key-bound join id, and whether it holds its member
+// key; a coordinator of that fleet issues a missing one over its proven
+// pairing session (fleet_join.hpp FLEET_MEMBER).
 //
 // `worker_id` (worker_identity.hpp) is what the worker's own Bonjour
 // instance advertises; coordinators store it with the pairing and find the
@@ -206,6 +212,15 @@ struct ServiceUpdateState {
   bool operator==(const ServiceUpdateState&) const = default;
 };
 
+// HELLO_ACK `fleet`.
+struct FleetJoinState {
+  std::string fleet_id;
+  std::string join_id;
+  bool member = false;
+
+  bool operator==(const FleetJoinState&) const = default;
+};
+
 struct WorkerHelloAck {
   ProtocolVersion protocol = kWorkerProtocolVersion;
   // Set exactly when the worker refused the session.
@@ -229,6 +244,8 @@ struct WorkerHelloAck {
   std::optional<ServiceUpdateState> service;
   // Absent from workers that predate worker ids.
   std::string worker_id;
+  // Absent from workers without a join credential (or predating it).
+  std::optional<FleetJoinState> fleet;
 
   [[nodiscard]] bool accepted() const noexcept { return !refusal.has_value(); }
   bool operator==(const WorkerHelloAck&) const = default;

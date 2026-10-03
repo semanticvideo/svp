@@ -278,7 +278,11 @@ worker, and nobody who watches the network learns the resulting key. A
 worker token cannot pair Macs or pose as a coordinator. Each worker also
 holds its own key, created once at install, and its join id is derived from
 it, so no other Mac can answer for that worker or obtain its fleet
-membership. After a worker's
+membership. A worker that holds no member key while it is already paired
+(for example one installed before worker keys existed, which moves to a
+key-bound join id and drops the old id's key) is issued its member key by
+any coordinator of the fleet over the pairing it already has, on `workers
+fleet pair` or before a `build --distributed`, even after its token expired. After a worker's
 first pairing it stays pairable by every coordinator of the fleet, even
 once its token has expired. Fleet secrets live in
 `~/Library/Application Support/SVP/Fleet/fleet.json` (0600). Tokens read

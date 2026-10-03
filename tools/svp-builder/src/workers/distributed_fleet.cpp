@@ -359,7 +359,8 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
   // --join` takes part in this build. A fleet problem is reported and never
   // keeps the build from the workers already paired.
   const auto pair_fleet_workers = [&](const PairingDirectory& pairings,
-                                      const CoordinatorRuntime& runtime) {
+                                      const CoordinatorRuntime& runtime,
+                                      const CoordinatorHello& hello) {
     try {
       const std::optional<FleetMembership> membership = load_fleet_membership(default_fleet_dir());
       if (!membership) {
@@ -367,7 +368,7 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
       }
       std::ostringstream progress;
       const FleetPairingReport report = pair_joinable_fleet_workers(
-          *membership, pairings, runtime.runtime_id, runtime.kind, &progress);
+          *membership, pairings, runtime.runtime_id, runtime.kind, hello, &progress);
       std::istringstream lines(progress.str());
       for (std::string line; std::getline(lines, line);) {
         log("--distributed: " + line);
@@ -385,10 +386,10 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
   try {
     const PairingDirectory pairings(default_coordinator_pairings_dir());
     supplies->runtime = locate_coordinator_runtime(current_executable());
-    pair_fleet_workers(pairings, supplies->runtime);
-    records = load_coordinator_pairings(pairings);
     supplies->hello = make_coordinator_hello(supplies->runtime, work.thread_plan,
                                              model_set_summary(work.model_cache_root));
+    pair_fleet_workers(pairings, supplies->runtime, supplies->hello);
+    records = load_coordinator_pairings(pairings);
     std::vector<std::string> model_ids;
     for (const svp::exec::TaskModelRef& ref : work.model_refs) {
       model_ids.push_back(ref.model_id);

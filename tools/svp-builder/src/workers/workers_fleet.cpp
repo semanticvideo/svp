@@ -114,7 +114,8 @@ int run_workers_fleet_pair(const WorkersCliOptions& options) {
   const std::vector<ModelBundleSource> models = select_model_bundles(context, options.models);
   const PairingDirectory store(default_coordinator_pairings_dir());
   const FleetPairingReport report = pair_joinable_fleet_workers(
-      membership, store, context.runtime.runtime_id, context.runtime.kind, &std::cout);
+      membership, store, context.runtime.runtime_id, context.runtime.kind, context.hello(),
+      &std::cout);
   bool ok = report.problems.empty();
   for (const std::string& problem : report.problems) {
     std::cerr << "svp-builder: " << problem << "\n";
@@ -152,7 +153,8 @@ int run_workers_fleet_pair(const WorkersCliOptions& options) {
          ok;
   }
   std::cout << "fleet " << membership.fleet.fleet_id << ": " << report.paired.size()
-            << " worker(s) paired now, " << report.already_paired << " already paired\n";
+            << " worker(s) paired now, " << report.already_paired << " already paired ("
+            << report.member_keys_issued << " issued their member key)\n";
   return ok ? 0 : 1;
 }
 
