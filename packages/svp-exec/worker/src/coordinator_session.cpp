@@ -1,5 +1,7 @@
 #include "svp/exec/worker/coordinator_session.hpp"
 
+#include "svp/models/hash.hpp"
+
 #include "svp/exec/lease_frames.hpp"
 #include "svp/exec/worker/transfer_messages.hpp"
 #include "svp/exec/worker/worker_error.hpp"
@@ -129,6 +131,63 @@ void WorkerSessionClient::send_blobs(const std::vector<BlobSource>& blobs, Trans
                             " after it was sent");
     }
   }
+}
+
+void WorkerSessionClient::fetch_blob(const BlobRef& blob,
+                                     const std::filesystem::path& destination) {
+  writer_.write(make_blob_get_frame(blob));
+  if (!blob_answer_from_frame(expect(MessageType::blob_have)).blobs.empty()) {
+    throw WorkerError(WorkerErrorCode::configuration,
+                      "the worker does not hold blob " + blake3_hex(blob.blake3));
+  }
+  const std::filesystem::path partial = destination.string() + ".partial";
+  // Whatever ends the transfer early leaves no .partial file behind.
+  struct RemovePartialUnlessKept {
+    const std::filesystem::path& path;
+    bool keep = false;
+    ~RemovePartialUnlessKept() {
+      if (!keep) {
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+      }
+    }
+  } cleanup{partial};
+  {
+    std::ofstream out(partial, std::ios::binary | std::ios::trunc);
+    if (!out) {
+      throw WorkerError(WorkerErrorCode::io, "cannot write " + partial.string());
+    }
+    std::uint64_t received = 0;
+    while (received < blob.bytes) {
+      const Frame frame = expect(MessageType::blob_put);
+      const BlobPut put = blob_put_from_frame(frame);
+      const BlobChunk* chunk = std::get_if<BlobChunk>(&put);
+      if (chunk == nullptr || chunk->blob != blob || chunk->offset != received) {
+        throw WorkerError(WorkerErrorCode::protocol,
+                          "the worker sent blob " + blake3_hex(blob.blake3) + " out of order");
+      }
+      const FramePayload& bytes = frame.payloads.front();
+      out.write(reinterpret_cast<const char*>(bytes.data()),
+                static_cast<std::streamsize>(bytes.size()));
+      if (!out) {
+        throw WorkerError(WorkerErrorCode::io, "cannot write " + partial.string());
+      }
+      received += bytes.size();
+    }
+  }
+  std::error_code error;
+  if (std::filesystem::file_size(partial, error) != blob.bytes || error ||
+      svp::models::blake3_hex_for_file(partial) != blake3_hex(blob.blake3)) {
+    std::filesystem::remove(partial, error);
+    throw WorkerError(WorkerErrorCode::verification,
+                      "blob " + blake3_hex(blob.blake3) + " from the worker does not verify");
+  }
+  std::filesystem::rename(partial, destination, error);
+  if (error) {
+    throw WorkerError(WorkerErrorCode::io, "cannot move the fetched blob to " +
+                                               destination.string());
+  }
+  cleanup.keep = true;
 }
 
 void WorkerSessionClient::ensure_runtime(const CoordinatorRuntime& runtime, TransferStats& stats) {

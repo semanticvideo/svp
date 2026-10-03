@@ -12,6 +12,7 @@
 #include "svp/exec/remote/remote_error.hpp"
 #include "svp/exec/worker/admission.hpp"
 #include "svp/exec/worker/host_facts.hpp"
+#include "svp/exec/worker/local_load.hpp"
 #include "svp/exec/worker/pairing_store.hpp"
 #include "svp/exec/worker/worker_connection.hpp"
 #include "svp/exec/worker/worker_error.hpp"
@@ -114,7 +115,8 @@ class FleetDispatchedExecutors final : public DispatchedWorkerExecutors {
               .executor_id = "worker." + worker.key.pairing_id,
               .connector = {.pairing = worker.key},
               .slots = slots,
-              .session_preamble = make_supplying_preamble(supplies)}));
+              .session_preamble =
+                  make_supplying_preamble(declaring_capacity(supplies, task_type, slots))}));
     }
     return executors;
   }
@@ -263,6 +265,19 @@ WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSuppli
   return outcome;
 }
 
+// This build's in-process tasks, in this user's LocalLoad record (M6,
+// local_load.hpp). While it lives this Mac also counts as coordinating a
+// video, so the agent here takes no whole-video job from another Mac.
+class RecordedLocalLoad final : public LocalTaskLoad {
+ public:
+  RecordedLocalLoad() { recorder_.add(kCoordinatingTaskType); }
+  void started(std::string_view task_type) override { recorder_.add(task_type); }
+  void finished(std::string_view task_type) override { recorder_.remove(task_type); }
+
+ private:
+  LocalLoadRecorder recorder_;
+};
+
 std::string worker_name(const CoordinatorPairingRecord& record) {
   return record.key.pairing_id + " (" + record.worker.ssh_target + ")";
 }
@@ -283,6 +298,8 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
   const svp::exec::CancellationToken never_cancelled;
   const svp::exec::CancellationToken& cancellation =
       work.cancellation != nullptr ? *work.cancellation : never_cancelled;
+  // From now until the build ends this Mac is coordinating (M6).
+  const std::shared_ptr<LocalTaskLoad> local_load = std::make_shared<RecordedLocalLoad>();
 
   // What every worker is sent. If this Mac cannot assemble it (no pairing
   // store, no runtime manifest, a model bundle missing), no worker can be
@@ -339,7 +356,9 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
     log(std::string("warning: --distributed: cannot prepare workers (") + error.what() +
         "); OCR runs on this Mac only");
     // As a build without measurements runs (kLocalOnlyOcrBatchSlots).
-    return DistributedFleet{.workers = {}, .coordinator_ocr_slots = 1, .seconds_per_sample = {}};
+    DistributedFleet alone{.workers = {}, .coordinator_ocr_slots = 1, .seconds_per_sample = {}};
+    alone.local_load = local_load;
+    return alone;
   }
 
   const OcrCalibrationSetup setup{.pp_ocr = work.pp_ocr,
@@ -401,6 +420,7 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
   }
   const auto coordinator_start = std::chrono::steady_clock::now();
   DistributedFleet fleet;
+  fleet.local_load = local_load;
   try {
     const CalibrationOutcome local =
         ensure_coordinator_calibration(setup, runtime_id, clip, store, cancellation);
@@ -572,7 +592,9 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
   if (cancellation.requested()) {
     // The build ends as cancelled right after this; no worker is used.
     // As a build without measurements runs (kLocalOnlyOcrBatchSlots).
-    return DistributedFleet{.workers = {}, .coordinator_ocr_slots = 1, .seconds_per_sample = {}};
+    DistributedFleet cancelled{.workers = {}, .coordinator_ocr_slots = 1, .seconds_per_sample = {}};
+    cancelled.local_load = local_load;
+    return cancelled;
   }
   std::size_t ready = 0;
   std::string problems;
@@ -608,7 +630,8 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
             .executor_id = "worker." + outcome.record.key.pairing_id + suffix,
             .connector = {.pairing = outcome.record.key},
             .slots = slots,
-            .session_preamble = make_supplying_preamble(supplies)});
+            .session_preamble =
+                make_supplying_preamble(declaring_capacity(supplies, task_type, slots))});
     auto restricted = std::make_unique<svp::exec::TaskTypeRestrictedExecutor>(
         *executor, std::set<std::string, std::less<>>{std::string(task_type)});
     into.push_back(restricted.get());

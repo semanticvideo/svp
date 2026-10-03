@@ -4,6 +4,8 @@
 #include "svp/builder/build_progress.hpp"
 #include "interlace_batch_internal.hpp"
 
+#include "../batch/batch_dispatch.hpp"
+
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
 #include "svp/package/package_layout.hpp"
@@ -14,6 +16,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
+#include <mutex>
+#include <optional>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -119,6 +124,8 @@ std::string batch_item_staging_dir(
   return item_staging.string();
 }
 
+}  // namespace
+
 bool check_svpi_valid_and_bound(
     const std::filesystem::path& svpi_path,
     const std::filesystem::path& media_path,
@@ -152,8 +159,6 @@ bool check_svpi_valid_and_bound(
 
   return true;
 }
-
-}  // namespace
 
 BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
   BatchCreateResult result;
@@ -250,7 +255,48 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
       std::min<std::size_t>(media_files.size(), policy.max_batch_jobs);
   std::atomic<std::size_t> next_index{0};
 
-  auto process_item = [&](std::size_t index) {
+  // How an item's artifact is made: here (create_single_svpi /
+  // create_embedded_batch_artifact, as always), or by another Mac
+  // (--coordinators, remote_create below). `requeue` means that Mac did not
+  // build it (busy or unavailable): the item goes back to the queue and its
+  // result is not recorded.
+  struct CreateOutcome {
+    bool created = false;
+    bool requeue = false;
+    batch::RemoteVideoOutcome remote;
+  };
+  using Creator = std::function<CreateOutcome(
+      const std::filesystem::path& media_path, const std::filesystem::path& artifact_path,
+      const std::string& staging_dir, bool overwrite_output, std::string& error_message,
+      std::string& blake3_state, const std::shared_ptr<BuildProgressSink>& item_sink)>;
+  const Creator local_create = [&](const std::filesystem::path& media_path,
+                                   const std::filesystem::path& artifact_path,
+                                   const std::string& staging_dir, bool overwrite_output,
+                                   std::string& error_message, std::string& blake3_state,
+                                   const std::shared_ptr<BuildProgressSink>& item_sink) {
+    // Spread over other Macs (--coordinators): an absolute source path, as
+    // build-batch does, so the package does not depend on which Mac built it.
+    // Without --coordinators the path is used as given, as always.
+    const std::filesystem::path source =
+        options.coordinators.empty() ? media_path : std::filesystem::absolute(media_path);
+    const bool created =
+        options.output_format == BatchOutputFormat::svpi
+            ? create_single_svpi(source, artifact_path, options.ffprobe_path,
+                                 options.ffmpeg_path, !options.no_blake3, staging_dir,
+                                 options.model_cache_dir, options.sherpa_lib_path,
+                                 options.performance, options.visual_tracking_quality,
+                                 options.core_only_diagnostic,
+                                 options.allow_fallback_diarization,
+                                 options.force_single_speaker, options.serial_pipeline,
+                                 error_message, blake3_state, item_sink,
+                                 options.make_distributed)
+            : create_embedded_batch_artifact(options, source, artifact_path, staging_dir,
+                                             error_message, blake3_state, item_sink,
+                                             overwrite_output);
+    return CreateOutcome{.created = created, .requeue = false, .remote = {}};
+  };
+
+  auto process_item = [&](std::size_t index, const Creator& create) -> std::optional<CreateOutcome> {
     const auto& media_path = media_files[index];
     BatchFileResult file_result;
     file_result.source_filename = media_path.filename().string();
@@ -293,7 +339,7 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
       item_sink->emit(make_stage_completed(
           ProgressStageId::batch_item, media_path.filename().string()));
       result.results[index] = std::move(file_result);
-      return;
+      return std::nullopt;
     }
 
     std::error_code directory_error;
@@ -310,7 +356,7 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
       item_sink->emit(make_stage_completed(
           ProgressStageId::batch_item, media_path.filename().string()));
       result.results[index] = std::move(file_result);
-      return;
+      return std::nullopt;
     }
 
     const auto staging_dir = batch_item_staging_dir(
@@ -330,9 +376,12 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
       } else {
         std::string blake3_state;
         std::string create_error;
-        if (create_embedded_batch_artifact(
-                options, media_path, media_path, staging_dir, create_error,
-                blake3_state, item_sink, true)) {
+        const CreateOutcome made = create(media_path, media_path, staging_dir, true,
+                                          create_error, blake3_state, item_sink);
+        if (made.requeue) {
+          return made;
+        }
+        if (made.created) {
           file_result.status = BatchFileStatus::created;
           file_result.blake3_state = blake3_state;
         } else {
@@ -354,24 +403,12 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
         if (options.replace_mismatched) {
           std::string blake3_state;
           std::string create_err;
-          const bool replaced =
-              options.output_format == BatchOutputFormat::svpi
-                  ? create_single_svpi(
-                        media_path, file_result.artifact_path,
-                        options.ffprobe_path, options.ffmpeg_path,
-                        !options.no_blake3, staging_dir,
-                        options.model_cache_dir, options.sherpa_lib_path,
-                        options.performance, options.visual_tracking_quality,
-                        options.core_only_diagnostic,
-                        options.allow_fallback_diarization,
-                        options.force_single_speaker,
-                        options.serial_pipeline, create_err, blake3_state,
-                        item_sink, options.make_distributed)
-                  : create_embedded_batch_artifact(
-                        options, media_path, file_result.artifact_path,
-                        staging_dir, create_err, blake3_state, item_sink,
-                        true);
-          if (replaced) {
+          const CreateOutcome made = create(media_path, file_result.artifact_path, staging_dir,
+                                            true, create_err, blake3_state, item_sink);
+          if (made.requeue) {
+            return made;
+          }
+          if (made.created) {
             file_result.status = BatchFileStatus::replaced;
             file_result.blake3_state = blake3_state;
           } else {
@@ -386,24 +423,12 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
     } else {
       std::string blake3_state;
       std::string create_err;
-      const bool created =
-          options.output_format == BatchOutputFormat::svpi
-              ? create_single_svpi(
-                    media_path, file_result.artifact_path,
-                    options.ffprobe_path, options.ffmpeg_path,
-                    !options.no_blake3, staging_dir,
-                    options.model_cache_dir, options.sherpa_lib_path,
-                    options.performance, options.visual_tracking_quality,
-                    options.core_only_diagnostic,
-                    options.allow_fallback_diarization,
-                    options.force_single_speaker,
-                    options.serial_pipeline, create_err, blake3_state,
-                    item_sink, options.make_distributed)
-              : create_embedded_batch_artifact(
-                    options, media_path, file_result.artifact_path,
-                    staging_dir, create_err, blake3_state, item_sink,
-                    false);
-      if (created) {
+      const CreateOutcome made = create(media_path, file_result.artifact_path, staging_dir,
+                                        false, create_err, blake3_state, item_sink);
+      if (made.requeue) {
+        return made;
+      }
+      if (made.created) {
         file_result.status = BatchFileStatus::created;
         file_result.blake3_state = blake3_state;
       } else {
@@ -415,18 +440,94 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
     item_sink->emit(make_stage_completed(ProgressStageId::batch_item,
         media_path.filename().string()));
     result.results[index] = std::move(file_result);
+    return std::nullopt;
   };
+
+  if (!options.coordinators.empty()) {
+    // --coordinators (M6): this Mac's --jobs slots and every other Mac named
+    // each take one item at a time; another Mac builds the artifact itself
+    // as a whole-video job, and the checks and placement around it stay
+    // here, as for an item built on this Mac.
+    std::mutex dropped_mutex;
+    batch::dispatch_batch(batch::BatchDispatchOptions{
+        .item_count = media_files.size(),
+        .local_slots = std::max<std::size_t>(1, worker_count),
+        .run_local = [&](std::size_t index) { (void)process_item(index, local_create); },
+        .on_local_error =
+            [&](std::size_t index, const std::string& error) {
+              BatchFileResult failed;
+              failed.source_filename = media_files[index].filename().string();
+              failed.source_relative_path =
+                  media_files[index].lexically_normal().lexically_relative(
+                      source_dir.lexically_normal()).string();
+              failed.status = BatchFileStatus::failed;
+              failed.error_message = error;
+              result.results[index] = std::move(failed);
+            },
+        .remote_macs = options.coordinators,
+        .run_remote =
+            [&](std::size_t index, batch::RemoteVideoBuilder& mac) {
+              bool built_there = false;
+              const Creator remote_create =
+                  [&](const std::filesystem::path& media_path,
+                      const std::filesystem::path& artifact_path, const std::string&, bool,
+                      std::string& error_message, std::string& blake3_state,
+                      const std::shared_ptr<BuildProgressSink>&) {
+                    batch::VideoBuildParameters parameters = options.remote_parameters;
+                    parameters.source_name = media_path.filename().string();
+                    CreateOutcome made;
+                    made.remote = mac.build(batch::RemoteVideoRequest{
+                        .item_id = "item_" + std::to_string(index),
+                        .parameters = parameters,
+                        .source_path = media_path,
+                        .output_path = artifact_path,
+                        .run_report_path = {}});
+                    switch (made.remote.status) {
+                      case batch::RemoteVideoStatus::built:
+                        made.created = true;
+                        built_there = true;
+                        blake3_state = options.output_format == BatchOutputFormat::svpi
+                                           ? svpi_blake3_state(artifact_path)
+                                           : std::string(kEmbeddedBatchBlake3State);
+                        break;
+                      case batch::RemoteVideoStatus::failed:
+                        error_message = made.remote.message;
+                        break;
+                      case batch::RemoteVideoStatus::busy:
+                      case batch::RemoteVideoStatus::unavailable:
+                        made.requeue = true;
+                        break;
+                    }
+                    return made;
+                  };
+              const std::optional<CreateOutcome> made = process_item(index, remote_create);
+              if (made && made->requeue) {
+                if (made->remote.status == batch::RemoteVideoStatus::unavailable) {
+                  const std::lock_guard lock(dropped_mutex);
+                  result.dropped_coordinators.push_back(mac.name() + ": " +
+                                                        made->remote.message);
+                }
+                return made->remote;
+              }
+              if (built_there) {
+                result.results[index].built_on = mac.name();
+              }
+              return batch::RemoteVideoOutcome{.status = batch::RemoteVideoStatus::built,
+                                               .message = {}};
+            },
+        .busy_backoff = batch::kRemoteVideoBusyBackoff});
+  }
 
   std::vector<std::thread> workers;
   workers.reserve(worker_count);
-  for (std::size_t worker = 0; worker < worker_count; ++worker) {
+  for (std::size_t worker = 0; worker < worker_count && options.coordinators.empty(); ++worker) {
     workers.emplace_back([&]() {
       while (true) {
         const std::size_t index = next_index.fetch_add(1);
         if (index >= media_files.size()) {
           return;
         }
-        process_item(index);
+        (void)process_item(index, local_create);
       }
     });
   }

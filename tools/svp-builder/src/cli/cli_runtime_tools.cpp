@@ -96,5 +96,6 @@ void apply_cli_runtime_tools(CliContext& context) {
   const svp::builder::RuntimeToolSelection selection =
       resolve_selected_command_tools(context.runtime_tool_bindings);
   context.build_opts.runtime_tools = selection;
+  context.build_batch_opts.runtime_tools = selection;
   context.interlace_opts.ic_runtime_tools = selection;
 }

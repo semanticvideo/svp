@@ -53,6 +53,9 @@ struct VisionDispatchSetup {
   // Frees the models this Mac's slots keep loaded between tasks; called once
   // each stage's tasks are done. May be empty.
   std::function<void()> release_idle_models;
+  // Where this Mac's slots report the tasks they run (M6); null when nothing
+  // reads them.
+  std::shared_ptr<LocalTaskLoad> local_load;
 };
 
 }  // namespace svp::builder::engine

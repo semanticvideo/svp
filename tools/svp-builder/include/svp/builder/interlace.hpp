@@ -38,6 +38,10 @@ struct InterlaceCreateOptions {
   // (distributed_execution.hpp), exactly as for an .svp build. Null builds
   // on this Mac alone.
   std::shared_ptr<DistributedExecution> distributed;
+  // Runtime thread counts to use as given (BuildPipelineOptions::thread_plan:
+  // a whole-video job builds with the batch Mac's plan). Empty: resolved from
+  // this host, as always.
+  std::optional<svp::models::ThreadPlan> thread_plan;
 };
 
 struct InterlaceCreateResult {

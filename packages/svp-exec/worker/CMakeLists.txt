@@ -14,6 +14,7 @@ add_library(svp-exec-worker
   src/hello_messages.cpp
   src/host_facts.cpp
   src/launchd_job.cpp
+  src/local_load.cpp
   src/message_fields.cpp
   src/model_bundles.cpp
   src/pairing_store.cpp
@@ -21,6 +22,7 @@ add_library(svp-exec-worker
   src/runtime_source.cpp
   src/runtime_store.cpp
   src/session_process.cpp
+  src/slot_sharing.cpp
   src/transfer_messages.cpp
   src/worker_agent.cpp
   src/worker_connection.cpp
@@ -56,6 +58,7 @@ if(BUILD_TESTING)
     launchd_job
     worker_protocol
     admission
+    slot_sharing
     agent_session
   )
   foreach(SVP_EXEC_TEST IN LISTS SVP_EXEC_WORKER_TESTS)

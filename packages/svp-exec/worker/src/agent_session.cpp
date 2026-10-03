@@ -8,7 +8,9 @@
 #include "svp/exec/worker/transfer_messages.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 
+#include <algorithm>
 #include <condition_variable>
+#include <fstream>
 #include <csignal>
 #include <map>
 #include <mutex>
@@ -31,10 +33,11 @@ Frame error_frame(std::string_view code, std::string_view message) {
 class AgentSession {
  public:
   AgentSession(AgentCore& core, FrameWriter& output, std::string session_id,
-               std::function<void()> close_input)
+               std::function<void()> close_input, std::string coordinator_id)
       : core_(core),
         output_(output),
         session_id_(std::move(session_id)),
+        coordinator_id_(coordinator_id.empty() ? session_id_ : std::move(coordinator_id)),
         close_input_(std::move(close_input)),
         scratch_(core.layout().sessions() / session_id_),
         cas_(core.cas()) {}
@@ -123,6 +126,7 @@ class AgentSession {
       process_.reset();
     }
     core_.ledger().release_session(session_id_);
+    core_.slots().release_session(session_id_);
     receiver_.reset();
     std::error_code error;
     std::filesystem::remove_all(scratch_, error);
@@ -176,6 +180,9 @@ class AgentSession {
       case MessageType::assign:
         assign(frame);
         return;
+      case MessageType::blob_get:
+        send_blob(blob_get_from_frame(frame));
+        return;
       case MessageType::cancel: {
         const std::string lease_id = lease_id_from_cancel_frame(frame);
         release(lease_id);
@@ -201,10 +208,24 @@ class AgentSession {
   void assign(const Frame& frame) {
     const LeasedAssignment assignment = leased_assignment_from_frame(frame);
     ensure_session_process();
+    const auto declared = hello_.capacity.find(assignment.spec.task_type);
+    const AdmissionDecision slots = core_.slots().try_take(SlotRequest{
+        .coordinator = coordinator_id_,
+        .session = session_id_,
+        .lease_id = assignment.lease.lease_id,
+        .task_type = assignment.spec.task_type,
+        .declared_slots = declared == hello_.capacity.end() ? 0 : declared->second});
+    if (!slots.admitted) {
+      output_.write(make_reject_frame(LeaseRejection{.lease_id = assignment.lease.lease_id,
+                                                     .code = slots.code,
+                                                     .message = slots.message}));
+      return;
+    }
     const std::uint64_t required = assignment.spec.resources.est_peak_rss_mb * kBytesPerMiB;
     const AdmissionDecision decision = core_.ledger().try_admit(
         session_id_, assignment.lease.lease_id, required, core_.memory());
     if (!decision.admitted) {
+      core_.slots().release(session_id_, assignment.lease.lease_id);
       output_.write(make_reject_frame(LeaseRejection{.lease_id = assignment.lease.lease_id,
                                                      .code = decision.code,
                                                      .message = decision.message}));
@@ -217,8 +238,35 @@ class AgentSession {
     write_to_child(frame);
   }
 
+  // BLOB_GET: the blobs answer, then the blob in BLOB_PUT chunks.
+  void send_blob(const BlobRef& blob) {
+    CacheResult<std::ifstream> opened =
+        cas_.has(blob.blake3) ? cas_.open(blob.blake3) : CacheResult<std::ifstream>(CacheError{});
+    output_.write(make_blob_answer_frame(BlobQuery{
+        .blobs = opened ? std::vector<BlobRef>{} : std::vector<BlobRef>{blob}}));
+    if (!opened) {
+      return;
+    }
+    std::ifstream& file = opened.value();
+    const std::uint64_t chunk_limit = core_.options().frame_limits.max_payload_bytes;
+    std::uint64_t offset = 0;
+    while (offset < blob.bytes) {
+      const std::uint64_t size = std::min(chunk_limit, blob.bytes - offset);
+      std::vector<std::byte> chunk(size);
+      file.read(reinterpret_cast<char*>(chunk.data()), static_cast<std::streamsize>(size));
+      if (static_cast<std::uint64_t>(file.gcount()) != size) {
+        throw WorkerError(WorkerErrorCode::io, "blob " + blake3_hex(blob.blake3) +
+                                                   " is shorter than the length asked for");
+      }
+      output_.write(make_blob_chunk_frame(BlobChunk{.blob = blob, .offset = offset},
+                                          std::move(chunk)));
+      offset += size;
+    }
+  }
+
   void release(const std::string& lease_id) {
     core_.ledger().release(session_id_, lease_id);
+    core_.slots().release(session_id_, lease_id);
     const std::lock_guard lock(mutex_);
     std::erase_if(leases_, [&](const auto& entry) { return entry.second == lease_id; });
   }
@@ -282,6 +330,7 @@ class AgentSession {
           }
           if (!lease_id.empty()) {
             core_.ledger().release(session_id_, lease_id);
+            core_.slots().release(session_id_, lease_id);
           }
         }
         output_.write(*frame);
@@ -318,6 +367,7 @@ class AgentSession {
   AgentCore& core_;
   FrameWriter& output_;
   std::string session_id_;
+  std::string coordinator_id_;
   std::function<void()> close_input_;
   std::filesystem::path scratch_;
   CasStore cas_;
@@ -341,6 +391,7 @@ class AgentSession {
 AgentCore::AgentCore(AgentCoreOptions options)
     : options_(std::move(options)),
       ledger_(options_.admission, options_.host.physical_memory_bytes),
+      slots_(options_.slot_contention_window, options_.local_load),
       runtimes_(options_.layout.runtimes()),
       models_(options_.layout.models()),
       cas_([&] {
@@ -409,11 +460,13 @@ std::string_view agent_session_end_name(AgentSessionEnd end) noexcept {
 
 AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWriter& output,
                                     const std::string& worker_session_id,
-                                    const std::function<void()>& close_input) {
+                                    const std::function<void()>& close_input,
+                                    std::string_view coordinator_id) {
   ++core.active_sessions;
   AgentSessionEnd end = AgentSessionEnd::input_closed;
   {
-    AgentSession session(core, output, worker_session_id, close_input);
+    AgentSession session(core, output, worker_session_id, close_input,
+                         std::string(coordinator_id));
     end = session.run(input);
     session.finish();
   }

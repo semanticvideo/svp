@@ -35,6 +35,7 @@
 #include "svp/exec/worker/model_bundles.hpp"
 #include "svp/exec/worker/runtime_store.hpp"
 #include "svp/exec/worker/session_process.hpp"
+#include "svp/exec/worker/slot_sharing.hpp"
 #include "svp/exec/worker/worker_layout.hpp"
 
 #include <atomic>
@@ -58,6 +59,11 @@ struct AgentCoreOptions {
   std::function<MemorySnapshot()> sample_memory;
   // Injectable for tests; default spawn_session_process().
   SessionLauncher launcher;
+  // This Mac's own build's running tasks per type (local_load.hpp); empty
+  // when nothing local is counted (tests). run_worker_agent reads the
+  // LocalLoad directory.
+  SlotSharing::LocalLoad local_load;
+  std::chrono::milliseconds slot_contention_window = kDefaultSlotContentionWindow;
 };
 
 // State shared by every session of one agent. Thread-safe.
@@ -69,6 +75,7 @@ class AgentCore {
   [[nodiscard]] const AgentCoreOptions& options() const noexcept { return options_; }
   [[nodiscard]] const WorkerLayout& layout() const noexcept { return options_.layout; }
   [[nodiscard]] AdmissionLedger& ledger() noexcept { return ledger_; }
+  [[nodiscard]] SlotSharing& slots() noexcept { return slots_; }
   [[nodiscard]] const WorkerRuntimeStore& runtimes() const noexcept { return runtimes_; }
   [[nodiscard]] const WorkerModelStore& models() const noexcept { return models_; }
   [[nodiscard]] CasStore cas() const { return cas_; }
@@ -84,6 +91,7 @@ class AgentCore {
  private:
   AgentCoreOptions options_;
   AdmissionLedger ledger_;
+  SlotSharing slots_;
   WorkerRuntimeStore runtimes_;
   WorkerModelStore models_;
   CasStore cas_;
@@ -104,9 +112,12 @@ enum class AgentSessionEnd {
 // identifier unique on this worker (it names the scratch directory and is
 // stamped into results). `close_input` must make a blocked input.read()
 // return (the transport's cancel); it is called when the session process
-// is lost so the coordinator sees the session end.
+// is lost so the coordinator sees the session end. `coordinator_id` names
+// who the session serves (the pairing it came in on) for slot sharing; empty
+// counts the session as a coordinator of its own.
 AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWriter& output,
                                     const std::string& worker_session_id,
-                                    const std::function<void()>& close_input);
+                                    const std::function<void()>& close_input,
+                                    std::string_view coordinator_id = {});
 
 }  // namespace svp::exec::worker

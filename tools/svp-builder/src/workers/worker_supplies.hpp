@@ -14,7 +14,9 @@
 #include "svp/exec/worker/model_bundles.hpp"
 #include "svp/exec/worker/runtime_source.hpp"
 
+#include <cstddef>
 #include <memory>
+#include <string_view>
 #include <vector>
 
 namespace svp::builder::workers {
@@ -36,6 +38,14 @@ struct SuppliedSession {
 SuppliedSession supply_worker_session(svp::exec::FrameReader& reader,
                                       svp::exec::FrameWriter& writer,
                                       const WorkerSupplies& supplies);
+
+// `supplies` whose HELLO declares `slots` of `task_type` (M6 slot sharing,
+// slot_sharing.hpp): what a session restricted to that type tells the worker
+// it measured, so a worker serving several coordinators shares that type's
+// slots among them.
+[[nodiscard]] std::shared_ptr<const WorkerSupplies> declaring_capacity(
+    const std::shared_ptr<const WorkerSupplies>& supplies, std::string_view task_type,
+    std::size_t slots);
 
 // The same as a RemoteExecutor session preamble, so every session (and every
 // reconnect) is checked and supplied before its leases are sent.

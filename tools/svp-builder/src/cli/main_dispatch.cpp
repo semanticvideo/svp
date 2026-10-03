@@ -38,6 +38,11 @@ int run_selected_command(const CliContext& context) {
     return run_build_command(context.build_opts, context.build_subcommand);
   }
 
+  // build-batch
+  if (*context.build_batch_subcommand) {
+    return run_build_batch_command(context.build_batch_opts, context.build_batch_subcommand);
+  }
+
   // diarize (diagnostic)
   if (*context.diarize_subcommand) {
     return run_diarize_command(context.diarize_opts);

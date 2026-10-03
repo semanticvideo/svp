@@ -9,7 +9,8 @@
 //    "protocol":{"major":M,"minor":m},
 //    "runtime_id":"b3:<hex>",
 //    "runtime_kind":"bundle"|"builder_only",
-//    "thread_plan":{"host_independent":bool,"plan":{ThreadPlan JSON}}}
+//    "thread_plan":{"host_independent":bool,"plan":{ThreadPlan JSON}},
+//    "capacity":{"<task_type>":slots, ...}}                         optional
 //
 // HELLO_ACK (worker -> coordinator), no payloads:
 //   {"accepted":bool,
@@ -44,6 +45,7 @@
 #include "svp/exec/worker/host_facts.hpp"
 
 #include <cstdint>
+#include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -61,7 +63,11 @@ struct ProtocolVersion {
 
 // 1.0: HELLO / HELLO_ACK, RUNTIME_HAVE / RUNTIME_PUT, BLOB_HAVE / BLOB_PUT,
 // REJECT, and the lease messages of svp-exec (lease_frames.hpp).
-inline constexpr ProtocolVersion kWorkerProtocolVersion{1, 0};
+// 1.1: HELLO `capacity` (slot sharing across coordinators, slot_sharing.hpp)
+// and BLOB_GET (a coordinator fetching a blob a task stored on the worker,
+// transfer_messages.hpp). A 1.0 peer ignores the one and never sends the
+// other.
+inline constexpr ProtocolVersion kWorkerProtocolVersion{1, 1};
 
 [[nodiscard]] bool protocol_compatible(ProtocolVersion local, ProtocolVersion peer) noexcept;
 
@@ -94,6 +100,12 @@ struct CoordinatorHello {
   nlohmann::json thread_plan = nlohmann::json::object();
   bool thread_plan_host_independent = false;
   std::optional<ModelSetSummary> model_set;
+  // The slots this session's coordinator measured for this worker, per task
+  // type it will send (its RemoteExecutor's `slots`). The worker shares each
+  // type's slots among the coordinators using it (slot_sharing.hpp). Empty
+  // for sessions that declare none (pairing, calibration, 1.0
+  // coordinators): their leases are admitted by memory alone, as before.
+  std::map<std::string, std::uint64_t, std::less<>> capacity;
 
   bool operator==(const CoordinatorHello&) const = default;
 };

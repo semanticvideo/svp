@@ -2,6 +2,7 @@
 
 #include "svp/exec/frame_stream.hpp"
 #include "svp/exec/remote/remote_listener.hpp"
+#include "svp/exec/worker/local_load.hpp"
 #include "svp/exec/worker/pairing_store.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 
@@ -56,7 +57,13 @@ int run_worker_agent(const WorkerAgentOptions& options) {
                                   .shutdown_grace = options.shutdown_grace,
                                   .frame_limits = {},
                                   .sample_memory = {},
-                                  .launcher = {}});
+                                  .launcher = {},
+                                  // This Mac's own --distributed build, if
+                                  // any (local_load.hpp).
+                                  .local_load = [directory = default_local_load_dir()] {
+                                    return read_local_load(directory);
+                                  },
+                                  .slot_contention_window = kDefaultSlotContentionWindow});
   const HostFacts& host = core.options().host;
   log_line("starting pid=" + std::to_string(::getpid()) + " macOS " + host.os.product_version +
            " (" + host.os.build + ") " + host.arch + " cpus=" + std::to_string(host.logical_cpus) +
@@ -85,7 +92,7 @@ int run_worker_agent(const WorkerAgentOptions& options) {
           AgentSessionEnd end = AgentSessionEnd::protocol_error;
           try {
             end = serve_agent_session(core, reader, writer, session_id,
-                                      [&stream] { stream.cancel(); });
+                                      [&stream] { stream.cancel(); }, pairing_id);
           } catch (const std::exception& error) {
             log_line("session " + session_id + " failed: " + error.what());
           }

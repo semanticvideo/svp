@@ -153,6 +153,19 @@ class DispatchedWorkerExecutors {
   [[nodiscard]] virtual bool takes(std::string_view /*task_type*/) const { return true; }
 };
 
+// What this Mac's own build runs right now, for the worker agent on the same
+// Mac (M6): a Mac can coordinate its build and serve other coordinators at
+// once, and its agent must leave the slots this build uses to it. The build
+// reports each task its own in-process executors start and end, by type;
+// the implementation keeps the per-user record the agent reads
+// (svp/exec/worker/local_load.hpp). Thread-safe.
+class LocalTaskLoad {
+ public:
+  virtual ~LocalTaskLoad() = default;
+  virtual void started(std::string_view task_type) = 0;
+  virtual void finished(std::string_view task_type) = 0;
+};
+
 struct DistributedFleet {
   // One per ready worker; owned by the DistributedExecution and valid until
   // it is destroyed. Each accepts only ocr.frame_batch tasks.
@@ -190,6 +203,10 @@ struct DistributedFleet {
   // takes such a type.
   std::function<std::optional<DispatchedTypeCapacity>(std::string_view task_type)>
       measure_in_stage;
+  // Where this build reports its in-process tasks (LocalTaskLoad); null
+  // when nothing reads them. Held for as long as the build runs: while it
+  // lives, this Mac also counts as coordinating a video.
+  std::shared_ptr<LocalTaskLoad> local_load;
 };
 
 class DistributedExecution {

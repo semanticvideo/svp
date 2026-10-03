@@ -1,4 +1,5 @@
 #include "cli_context.hpp"
+#include "batch_coordinators_cli.hpp"
 #include "distributed_cli.hpp"
 
 namespace {
@@ -106,6 +107,60 @@ void register_cli(CLI::App& app, CliContext& context) {
   build->add_flag("--verbose", build_opts.verbose,
                   "Include detailed diagnostics and full validation findings");
   context.build_subcommand = build;
+
+  // --- build-batch subcommand (M6) ---
+  auto& batch_opts = context.build_batch_opts;
+  auto* build_batch = app.add_subcommand(
+      "build-batch",
+      "Build many videos, each as `build` would, spread over this Mac and --coordinators");
+  build_batch->add_option("sources", batch_opts.sources, "Source media paths")->required();
+  build_batch->add_option("--out-dir", batch_opts.out_dir,
+                          "Directory for the outputs: <stem>.svp, <stem>.svpi, or (embedded "
+                          "SVPI) the source's file name")
+      ->required();
+  build_batch->add_option("--output-format", batch_opts.output_format,
+                          "Output representation: svp, svpi, or embedded-svpi")
+      ->check(CLI::IsMember({"svp", "svpi", "embedded-svpi"}));
+  tool_option(*build_batch, "--ffprobe", batch_opts.ffprobe_path, RuntimeTool::ffprobe);
+  tool_option(*build_batch, "--ffmpeg", batch_opts.ffmpeg_path, RuntimeTool::ffmpeg);
+  build_batch->add_option("--staging-dir", batch_opts.staging_dir,
+                          "Directory for staged builder outputs (one subdirectory per video)");
+  build_batch->add_option("--model-cache", batch_opts.model_cache_dir,
+                          "Path to SVP model cache directory containing model bundles");
+  add_pipeline_performance_options(*build_batch, batch_opts.performance);
+  add_visual_tracking_quality_option(*build_batch, batch_opts.visual_tracking_quality);
+  tool_option(*build_batch, "--sherpa-lib", batch_opts.sherpa_lib_path,
+              RuntimeTool::sherpa_onnx);
+  build_batch->add_flag("--allow-fallback-diarization", batch_opts.allow_fallback_diarization,
+                        "Proceed without diarization if sherpa-onnx is not available. "
+                        "Speaker data will be fabricated fallback, not real. NOT RECOMMENDED.");
+  build_batch->add_flag("--force-single-speaker", batch_opts.force_single_speaker,
+                        "Skip Sherpa diarization entirely and emit one speaker segment");
+  build_batch->add_flag("--serial", batch_opts.serial_pipeline,
+                        "Run each video's semantic pipeline stages serially");
+  auto* batch_resume = build_batch->add_flag(
+      "--resume", batch_opts.resume,
+      "Keep outputs that are already complete and verified for their source; build the rest");
+  auto* batch_fresh = build_batch->add_flag("--fresh", batch_opts.fresh,
+                                            "Build every video again, replacing its output");
+  batch_resume->excludes(batch_fresh);
+  auto* batch_overwrite = build_batch->add_flag(
+      "--overwrite", batch_opts.overwrite,
+      "Replace existing outputs (every video is built again, as with --fresh)");
+  batch_resume->excludes(batch_overwrite);
+  add_distributed_flags(*build_batch, batch_opts.distributed, batch_opts.require_workers);
+  add_coordinators_option(*build_batch, batch_opts.coordinators);
+  build_batch->add_flag("--run-report", batch_opts.run_report,
+                        "Write each video's JSON per-stage timing and resource report beside "
+                        "its output (<output>.run-report.json)");
+  build_batch->add_option("--progress", batch_opts.progress_mode,
+                          "Progress output mode: auto, plain, json, none")
+      ->check(CLI::IsMember({"auto", "plain", "json", "none"}));
+  build_batch->add_flag("--quiet", batch_opts.quiet,
+                        "Suppress progress output; print only the batch summary");
+  build_batch->add_flag("--verbose", batch_opts.verbose,
+                        "Include detailed diagnostics and full validation findings");
+  context.build_batch_subcommand = build_batch;
 
   // --- diarize subcommand (diagnostic) ---
   auto* diarize = app.add_subcommand(
@@ -281,6 +336,7 @@ void register_cli(CLI::App& app, CliContext& context) {
   cb_create_batch->add_flag("--serial", opts.cb_serial_pipeline,
       "Run each media item's semantic pipeline stages serially; --jobs still controls batch item concurrency");
   add_distributed_flags(*cb_create_batch, opts.cb_distributed, opts.cb_require_workers);
+  add_coordinators_option(*cb_create_batch, opts.cb_coordinators);
   cb_create_batch->add_option("--progress", opts.cb_progress_mode,
       "Progress output mode: auto, plain, json, none")
       ->check(CLI::IsMember({"auto", "plain", "json", "none"}));

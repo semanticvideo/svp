@@ -15,6 +15,7 @@
 #include "svp/models/thread_plan.hpp"
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -58,6 +59,14 @@ class WorkerSessionClient {
   // Sends the blobs the worker lacks, in chunks of at most the frame
   // payload limit, and confirms it now holds all of them.
   void send_blobs(const std::vector<BlobSource>& blobs, TransferStats& stats);
+
+  // BLOB_GET (protocol 1.1): fetches a blob the worker holds into
+  // `destination` (created or replaced). Each chunk is verified by the frame
+  // decoder, the whole file against the blob's length and BLAKE3, and only
+  // then renamed into place. Throws WorkerError(configuration) when the
+  // worker does not hold the blob, (verification) when the bytes do not
+  // match, (protocol, io) otherwise.
+  void fetch_blob(const BlobRef& blob, const std::filesystem::path& destination);
 
   // SHUTDOWN; the worker ends the session.
   void shutdown();
