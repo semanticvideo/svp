@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -98,5 +99,31 @@ struct RestartWaitHooks {
 [[nodiscard]] RestartWaitOutcome wait_for_worker_restart(const RuntimeRelease& runtime,
                                                          std::chrono::milliseconds deadline,
                                                          const RestartWaitHooks& hooks);
+
+// For a coordinator that opens one session after another to the same worker
+// (a batch's whole-video jobs, paired_video_builder.hpp): remembers that a
+// session's HELLO_ACK showed the worker will switch to `runtime` once that
+// session ends, so the next session first waits for the restart instead of
+// finding the worker gone and reporting it unavailable. Thread-safe.
+class RuntimeSwitchWatch {
+ public:
+  explicit RuntimeSwitchWatch(RuntimeRelease runtime) : runtime_(std::move(runtime)) {}
+
+  [[nodiscard]] const RuntimeRelease& runtime() const noexcept { return runtime_; }
+
+  // A session was answered with `ack`; it is due to switch the worker when
+  // worker_will_switch_to(ack, runtime) (a later ack replaces an earlier one).
+  void observed(const WorkerHelloAck& ack);
+
+  // Before the next session: the ACK that showed the switch, when one is
+  // due, and forgets it (the caller waits once, with
+  // wait_for_worker_restart); nullopt when no switch is due.
+  [[nodiscard]] std::optional<WorkerHelloAck> take_due();
+
+ private:
+  RuntimeRelease runtime_;
+  std::mutex mutex_;
+  std::optional<WorkerHelloAck> due_;
+};
 
 }  // namespace svp::exec::worker

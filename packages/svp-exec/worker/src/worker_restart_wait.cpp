@@ -94,4 +94,20 @@ RestartWaitOutcome wait_for_worker_restart(const RuntimeRelease& runtime,
   }
 }
 
+void RuntimeSwitchWatch::observed(const WorkerHelloAck& ack) {
+  const std::lock_guard lock(mutex_);
+  if (worker_will_switch_to(ack, runtime_)) {
+    due_ = ack;
+  } else {
+    due_.reset();
+  }
+}
+
+std::optional<WorkerHelloAck> RuntimeSwitchWatch::take_due() {
+  const std::lock_guard lock(mutex_);
+  std::optional<WorkerHelloAck> due = std::move(due_);
+  due_.reset();
+  return due;
+}
+
 }  // namespace svp::exec::worker

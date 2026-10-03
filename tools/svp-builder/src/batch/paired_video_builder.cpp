@@ -2,6 +2,7 @@
 
 #include "../workers/coordinator_context.hpp"
 #include "../workers/worker_reach.hpp"
+#include "../workers/worker_restart.hpp"
 
 #include "svp/exec/exec_error.hpp"
 #include "svp/exec/lease_frames.hpp"
@@ -169,7 +170,11 @@ std::shared_ptr<const VideoBuildSupplies> prepare_video_build_supplies(
 
 PairedVideoBuilder::PairedVideoBuilder(CoordinatorPairingRecord record,
                                        std::shared_ptr<const VideoBuildSupplies> supplies)
-    : record_(std::move(record)), supplies_(std::move(supplies)) {}
+    : record_(std::move(record)),
+      supplies_(std::move(supplies)),
+      switch_watch_(svp::exec::RuntimeRelease{
+          .runtime_id = supplies_->base->runtime.runtime_id,
+          .release_stamp = supplies_->base->runtime.release_stamp}) {}
 
 std::string PairedVideoBuilder::name() const {
   return record_.key.pairing_id + " (" +
@@ -192,6 +197,12 @@ RemoteVideoOutcome PairedVideoBuilder::build(const RemoteVideoRequest& request) 
     supplies.blobs = {supplies_->model_lock,
                       BlobSource{.ref = source, .file = request.source_path}};
 
+    // The previous job's session left a runtime this Mac's service moves to:
+    // it restarts once that session ended, so wait for it to come back.
+    if (const std::optional<WorkerHelloAck> due = switch_watch_.take_due()) {
+      (void)svp::builder::workers::await_worker_runtime_switch(
+          record_.key, supplies.hello, supplies.runtime, *due, nullptr, {});
+    }
     std::unique_ptr<WorkerConnection> connection;
     try {
       connection = connect_to_worker(record_.key);
@@ -206,6 +217,7 @@ RemoteVideoOutcome PairedVideoBuilder::build(const RemoteVideoRequest& request) 
     } catch (const std::exception& error) {
       return unavailable(std::string("cannot prepare it: ") + error.what());
     }
+    switch_watch_.observed(ack);
 
     const svp::exec::Lease lease{
         .lease_id = "lease." + request.item_id + "." + std::to_string(++attempts_),

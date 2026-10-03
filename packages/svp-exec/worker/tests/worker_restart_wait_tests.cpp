@@ -166,6 +166,33 @@ void test_cancellation_ends_the_wait() {
   expect(outcome.attempts == 1 && script.sleeps == 0, "a cancelled build stops waiting");
 }
 
+void test_switch_watch_between_sessions() {
+  RuntimeSwitchWatch watch(kPushed);
+  expect(!watch.take_due(), "nothing is due before any session");
+  watch.observed(ack_on(kOld, 30));
+  expect(!watch.take_due(), "an older runtime does not switch the worker");
+  watch.observed(ack_on(kOld, 10));
+  const std::optional<WorkerHelloAck> due = watch.take_due();
+  expect(due && due->agent_runtime_id == kOld,
+         "a session that left a newer runtime makes the next one wait");
+  expect(!watch.take_due(), "the next session waits once");
+  watch.observed(ack_on(kOld, 10));
+  watch.observed(ack_on(kNew, 20));
+  expect(!watch.take_due(), "a later session on the new runtime clears it");
+
+  // The batch sequence: job 1 pushes the runtime, the worker restarts between
+  // jobs, job 2 waits for it instead of finding it gone.
+  watch.observed(ack_on(kOld, 10));
+  Script script;
+  script.answers = {unreachable(), answers(ack_on(kNew, 20))};
+  const std::optional<WorkerHelloAck> before_job_two = watch.take_due();
+  expect(before_job_two.has_value(), "job 2 sees the switch is due");
+  const RestartWaitOutcome outcome =
+      wait_for_worker_restart(watch.runtime(), std::chrono::seconds(30), script.hooks());
+  expect(outcome.end == RestartWaitEnd::settled && outcome.ack->agent_runtime_id == kNew,
+         "job 2 starts once the worker answers on the new runtime");
+}
+
 }  // namespace
 
 int main() {
@@ -182,5 +209,6 @@ int main() {
           {"gives up at the deadline", test_gives_up_at_the_deadline},
           {"permanent failures end the wait", test_permanent_failures_end_the_wait},
           {"cancellation ends the wait", test_cancellation_ends_the_wait},
+          {"switch watch between sessions", test_switch_watch_between_sessions},
       });
 }

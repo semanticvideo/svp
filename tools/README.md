@@ -238,7 +238,9 @@ and the reason is logged in `<root>/logs/agent.log`; the service never moves
 to an older or unstamped runtime, and old runtimes are not deleted.
 Coordinators on older runtimes keep working with an updated worker while
 their protocol major version matches. A coordinator that leaves a newer runtime on a
-worker (`workers sync`, `workers fleet pair`, `build --distributed`) sees
+worker (`workers sync`, `workers fleet pair`, `build --distributed`, and the
+whole-video jobs of `build-batch` and `interlace create-batch` with
+`--coordinators`) sees
 from the worker's HELLO_ACK that its service will switch, and waits for it to
 answer on the new runtime before its next session (bounded by the time the
 switch can take for that runtime's size), so the worker is not dropped from
