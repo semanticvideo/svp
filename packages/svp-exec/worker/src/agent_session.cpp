@@ -23,6 +23,11 @@ namespace {
 
 constexpr std::uint64_t kBytesPerMiB = 1024ULL * 1024ULL;
 
+// Appended to the worker session id to name the agent's own pin holder: the
+// session process pins under the bare session id (CasTaskArtifactAccess),
+// and a holder id is live in one place only.
+constexpr std::string_view kAgentPinHolderSuffix = ".agent";
+
 Frame error_frame(std::string_view code, std::string_view message) {
   return Frame{.type = MessageType::error,
                .body = nlohmann::json{{"code", std::string(code)},
@@ -37,6 +42,7 @@ class AgentSession {
       : core_(core),
         output_(output),
         session_id_(std::move(session_id)),
+        named_coordinator_(!coordinator_id.empty()),
         coordinator_id_(coordinator_id.empty() ? session_id_ : std::move(coordinator_id)),
         close_input_(std::move(close_input)),
         scratch_(core.layout().sessions() / session_id_),
@@ -130,6 +136,10 @@ class AgentSession {
     receiver_.reset();
     std::error_code error;
     std::filesystem::remove_all(scratch_, error);
+    // This session's process has exited and its pins with it: what was
+    // released (by this session or another) may be deletable now.
+    pins_.reset();
+    (void)core_.released().sweep(cas_);
   }
 
  private:
@@ -151,6 +161,7 @@ class AgentSession {
         if (const auto* blobs = std::get_if<BlobQuery>(&query)) {
           BlobQuery missing;
           for (const BlobRef& blob : blobs->blobs) {
+            pin(blob.blake3);
             if (!cas_.has(blob.blake3)) {
               missing.blobs.push_back(blob);
             }
@@ -183,6 +194,15 @@ class AgentSession {
       case MessageType::blob_get:
         send_blob(blob_get_from_frame(frame));
         return;
+      case MessageType::blob_release: {
+        std::vector<Blake3Digest> digests;
+        for (const BlobRef& blob : blob_release_from_frame(frame)) {
+          digests.push_back(blob.blake3);
+        }
+        core_.released().release(coordinator_id_, digests);
+        (void)core_.released().sweep(cas_);
+        return;
+      }
       case MessageType::cancel: {
         const std::string lease_id = lease_id_from_cancel_frame(frame);
         release(lease_id);
@@ -195,6 +215,31 @@ class AgentSession {
         throw WorkerError(WorkerErrorCode::protocol,
                           "unexpected " + std::string(message_type_name(frame.type)) +
                               " frame from the coordinator");
+    }
+  }
+
+  // Pins `digest` for this session, before its presence is answered, so a
+  // concurrent release either sees the pin or has already deleted the blob
+  // (which is then reported missing), and claims it for this session's
+  // coordinator (released_blobs.hpp). Pinning is best effort, like every
+  // cache pin (RC2 §20.5.2): without a pin set the session runs unpinned.
+  void pin(const Blake3Digest& digest) {
+    if (!pins_ && !pins_failed_) {
+      CacheResult<CasPinSet> pins =
+          cas_.pin_set(session_id_ + std::string(kAgentPinHolderSuffix));
+      if (pins) {
+        pins_.emplace(std::move(pins).value());
+      } else {
+        pins_failed_ = true;
+      }
+    }
+    if (pins_) {
+      (void)pins_->add(digest);
+    }
+    // A session that names no coordinator could never give its claim back
+    // from another session; its pins alone protect what it uses.
+    if (named_coordinator_) {
+      core_.released().claim(coordinator_id_, digest);
     }
   }
 
@@ -367,12 +412,16 @@ class AgentSession {
   AgentCore& core_;
   FrameWriter& output_;
   std::string session_id_;
+  bool named_coordinator_ = false;
   std::string coordinator_id_;
   std::function<void()> close_input_;
   std::filesystem::path scratch_;
   CasStore cas_;
   CoordinatorHello hello_;
   std::unique_ptr<BlobReceiver> receiver_;
+  // The blobs this session declared (pin()); released in finish().
+  std::optional<CasPinSet> pins_;
+  bool pins_failed_ = false;
   std::optional<SessionProcess> process_;
   std::unique_ptr<FdFrameWriter> child_writer_;
   std::thread relay_;

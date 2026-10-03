@@ -1,6 +1,7 @@
 #include "distributed_fleet.hpp"
 
 #include "audio_calibration_runs.hpp"
+#include "build_blob_release.hpp"
 #include "coordinator_context.hpp"
 #include "dispatched_calibration_runs.hpp"
 #include "track_window_calibration_runs.hpp"
@@ -82,8 +83,11 @@ class FleetDispatchedExecutors final : public DispatchedWorkerExecutors {
   };
 
   FleetDispatchedExecutors(std::vector<Worker> workers,
-                           std::shared_ptr<const WorkerSupplies> supplies)
-      : workers_(std::move(workers)), supplies_(std::move(supplies)) {}
+                           std::shared_ptr<const WorkerSupplies> supplies,
+                           std::shared_ptr<BuildBlobRelease> release)
+      : workers_(std::move(workers)),
+        supplies_(std::move(supplies)),
+        release_(std::move(release)) {}
 
   std::vector<std::unique_ptr<svp::exec::Executor>> make(std::string_view task_type) override {
     return make(task_type, {});
@@ -101,6 +105,8 @@ class FleetDispatchedExecutors final : public DispatchedWorkerExecutors {
         with_inputs->blobs.push_back(BlobSource{
             .ref = BlobRef{.blake3 = input.ref.blake3, .bytes = input.ref.bytes},
             .file = input.file});
+        // Made for this build only: released with its source.
+        release_->add_blob(with_inputs->blobs.back().ref);
       }
       supplies = std::move(with_inputs);
     }
@@ -134,6 +140,7 @@ class FleetDispatchedExecutors final : public DispatchedWorkerExecutors {
 
   std::vector<Worker> workers_;
   std::shared_ptr<const WorkerSupplies> supplies_;
+  std::shared_ptr<BuildBlobRelease> release_;
 };
 
 std::string seconds_since(std::chrono::steady_clock::time_point start) {
@@ -174,7 +181,8 @@ WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSuppli
                              const calibration::DispatchedCalibrationSetup& dispatched,
                              const TrackingCalibration* tracking, const AudioCalibration& audio,
                              CalibrationClipFile& clip, const CalibrationStore& store,
-                             const svp::exec::CancellationToken& cancellation) {
+                             const svp::exec::CancellationToken& cancellation,
+                             BuildBlobRelease& release) {
   WorkerOutcome outcome{.record = std::move(record)};
   const auto start = std::chrono::steady_clock::now();
   try {
@@ -188,8 +196,21 @@ WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSuppli
               std::string(remote::route_medium_name(connection->connection.route.route.medium)) +
               ")";
       WorkerSessionClient client(*connection->reader, *connection->writer);
-      const SuppliedSession session =
-          supply_worker_session(*connection->reader, *connection->writer, supplies);
+      // A worker that accepted HELLO may hold this build's source, also
+      // when a transfer failed part way; one that refused holds nothing.
+      SuppliedSession session;
+      try {
+        session = supply_worker_session(*connection->reader, *connection->writer, supplies);
+      } catch (const WorkerError& error) {
+        if (error.code() != WorkerErrorCode::refused) {
+          release.add_worker(outcome.record);
+        }
+        throw;
+      } catch (...) {
+        release.add_worker(outcome.record);
+        throw;
+      }
+      release.add_worker(outcome.record);
       ack = session.ack;
       stats = session.stats;
       client.shutdown();
@@ -285,9 +306,20 @@ std::string worker_name(const CoordinatorPairingRecord& record) {
 }  // namespace
 
 PairedWorkerFleet::PairedWorkerFleet(DistributedFleetOptions options)
-    : options_(std::move(options)) {}
+    : options_(std::move(options)), release_(std::make_shared<BuildBlobRelease>()) {}
 
-PairedWorkerFleet::~PairedWorkerFleet() = default;
+// The build has ended (succeeded, failed, or cancelled) when its fleet is
+// destroyed. Its worker sessions are closed first, so each worker's session
+// processes let go of the source before it is released.
+PairedWorkerFleet::~PairedWorkerFleet() {
+  restricted_.clear();
+  remotes_.clear();
+  release_->release([quiet = options_.quiet](const std::string& line) {
+    if (!quiet) {
+      std::cerr << "svp-builder: " << line << "\n";
+    }
+  });
+}
 
 DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
   const auto log = [this](const std::string& line) {
@@ -347,6 +379,8 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
     supplies->blobs = {BlobSource{.ref = BlobRef{.blake3 = work.source.blake3,
                                                  .bytes = work.source.bytes},
                                   .file = work.source_path}};
+    release_->set_hello(supplies->hello);
+    release_->add_blob(supplies->blobs.front().ref);
   } catch (const std::exception& error) {
     if (options_.require_workers > 0) {
       throw DistributedPreparationError("--require-workers " +
@@ -415,7 +449,8 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
   for (CoordinatorPairingRecord& record : records) {
     pending.push_back(std::async(std::launch::async, [&, record = std::move(record)]() mutable {
       return prepare_worker(std::move(record), *supplies, setup, dispatched,
-                            tracking ? &*tracking : nullptr, audio, clip, store, cancellation);
+                            tracking ? &*tracking : nullptr, audio, clip, store, cancellation,
+                            *release_);
     }));
   }
   const auto coordinator_start = std::chrono::steady_clock::now();
@@ -669,7 +704,8 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
   }
   if (!dispatched_workers.empty()) {
     fleet.dispatched_workers =
-        std::make_shared<FleetDispatchedExecutors>(std::move(dispatched_workers), supplies);
+        std::make_shared<FleetDispatchedExecutors>(std::move(dispatched_workers), supplies,
+                                                   release_);
   }
   return fleet;
 }

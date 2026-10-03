@@ -159,6 +159,7 @@ if(APPLE)
     src/batch/paired_video_builder.cpp
     src/batch/video_build_task.cpp
     src/workers/audio_calibration_runs.cpp
+    src/workers/build_blob_release.cpp
     src/workers/builder_worker_tasks.cpp
     src/workers/calibration_store.cpp
     src/workers/capacity_record_support.cpp

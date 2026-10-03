@@ -237,4 +237,16 @@ BlobRef blob_get_from_frame(const Frame& frame) {
   return blob_ref_from_json(required_field(frame.body, "blob", path), child_path(path, "blob"));
 }
 
+Frame make_blob_release_frame(const std::vector<BlobRef>& blobs) {
+  return Frame{.type = MessageType::blob_release,
+               .body = nlohmann::json{{"blobs", blob_refs_to_json(blobs)}},
+               .payloads = {}};
+}
+
+std::vector<BlobRef> blob_release_from_frame(const Frame& frame) {
+  const std::string path = require_frame(frame, MessageType::blob_release, 0);
+  reject_unknown_fields(frame.body, {"blobs"}, path);
+  return blob_refs_from_json(frame.body, "blobs", path);
+}
+
 }  // namespace svp::exec::worker

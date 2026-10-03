@@ -68,6 +68,12 @@ class WorkerSessionClient {
   // match, (protocol, io) otherwise.
   void fetch_blob(const BlobRef& blob, const std::filesystem::path& destination);
 
+  // BLOB_RELEASE (protocol 1.2): this coordinator no longer needs `blobs`
+  // on the worker, which deletes each once nothing else claims or pins it
+  // (released_blobs.hpp). Not answered. Only for a worker whose HELLO_ACK
+  // passes worker_accepts_blob_release; an older one ends the session.
+  void release_blobs(const std::vector<BlobRef>& blobs);
+
   // SHUTDOWN; the worker ends the session.
   void shutdown();
 

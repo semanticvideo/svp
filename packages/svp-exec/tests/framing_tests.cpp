@@ -43,8 +43,9 @@ std::vector<std::byte> raw_frame(std::string_view header, std::string_view paylo
 }
 
 void test_message_type_names() {
-  expect(kAllMessageTypes.size() == 18,
-         "plan §4.3 defines 17 message types; worker protocol 1.1 adds BLOB_GET");
+  expect(kAllMessageTypes.size() == 19,
+         "plan §4.3 defines 17 message types; worker protocol 1.1 adds BLOB_GET and 1.2 "
+         "BLOB_RELEASE");
   for (const MessageType type : kAllMessageTypes) {
     expect(parse_message_type(message_type_name(type)) == type,
            "message type name round trip");

@@ -41,6 +41,15 @@ struct EvictionReport {
   std::uint64_t remaining_bytes = 0;
 };
 
+// What CasStore::remove_unpinned did with one blob.
+enum class BlobRemoval {
+  removed,
+  // A live holder pins it; it stays.
+  pinned,
+  // Not stored (never was, or already removed).
+  absent,
+};
+
 // Global content-addressable cache (RC2 §20.3, plan §4.6).
 //
 // Layout under the root:
@@ -88,6 +97,12 @@ class CasStore {
   // until usage is at or below policy.max_bytes. `busy` when another process
   // is evicting.
   CacheResult<EvictionReport> evict();
+  // Deletes one blob now, unless a live holder pins it (the same rule
+  // evict() follows, regardless of policy.max_bytes). Serialized against
+  // evict() and CasPinSet::add like eviction is: it waits for a running
+  // eviction, and a pin added concurrently either lands first (the blob
+  // stays) or finds the blob gone (add() reports not_found).
+  CacheResult<BlobRemoval> remove_unpinned(const Blake3Digest& digest);
 
   // `holder_id` must be [A-Za-z0-9._-]+ (a build or worker session ID).
   // `busy` when a live holder already uses that ID.

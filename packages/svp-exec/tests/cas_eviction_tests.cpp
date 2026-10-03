@@ -180,6 +180,31 @@ void test_stale_pending_removed() {
   expect(fs::exists(fresh), "a live writer's pending file is kept");
 }
 
+// remove_unpinned deletes one blob at once, whatever the size limit, and
+// keeps it while any live holder pins it.
+void test_remove_unpinned() {
+  TemporaryDirectory scratch(kSuite);
+  SteppingClock clock;
+  // A limit eviction would never reach: removal does not depend on it.
+  CasStore store = store_with_limit(scratch.path / "cache", 4, clock);
+  const Blake3Digest a = put_blob(store, 'a');
+  const Blake3Digest b = put_blob(store, 'b');
+  {
+    CasPinSet pins = expect_ok(store.pin_set("ws_0001"), "pin set");
+    expect(pins.add(a).ok(), "pin a");
+    expect(expect_ok(store.remove_unpinned(a), "remove pinned") == BlobRemoval::pinned,
+           "a pinned blob is kept");
+    expect(store.has(a), "pinned blob still stored");
+    expect(expect_ok(store.remove_unpinned(b), "remove unpinned") == BlobRemoval::removed,
+           "an unpinned blob is removed");
+    expect(!store.has(b) && store.has(a), "only the unpinned blob is gone");
+  }
+  expect(expect_ok(store.remove_unpinned(a), "remove after release") == BlobRemoval::removed,
+         "the blob is removed once its holder is gone");
+  expect(expect_ok(store.remove_unpinned(a), "remove again") == BlobRemoval::absent,
+         "removing an absent blob reports absent");
+}
+
 }  // namespace
 
 int main() {
@@ -194,5 +219,6 @@ int main() {
                                {"pin_holder_ids", test_pin_holder_ids},
                                {"eviction_lock_busy", test_eviction_lock_busy},
                                {"stale_pending_removed", test_stale_pending_removed},
+                               {"remove_unpinned", test_remove_unpinned},
                            });
 }

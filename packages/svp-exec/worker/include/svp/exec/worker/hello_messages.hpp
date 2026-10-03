@@ -67,9 +67,21 @@ struct ProtocolVersion {
 // and BLOB_GET (a coordinator fetching a blob a task stored on the worker,
 // transfer_messages.hpp). A 1.0 peer ignores the one and never sends the
 // other.
-inline constexpr ProtocolVersion kWorkerProtocolVersion{1, 1};
+// 1.2: BLOB_RELEASE (a coordinator releasing a finished build's source on
+// the worker, transfer_messages.hpp). Sent only to a worker whose HELLO_ACK
+// says it understands it (worker_accepts_blob_release); an older worker
+// would end the session on an unknown message, and keeps its blobs until
+// its cache budget evicts them.
+inline constexpr ProtocolVersion kWorkerProtocolVersion{1, 2};
+
+// The first minor of major 1 whose workers understand BLOB_RELEASE.
+inline constexpr std::uint32_t kBlobReleaseMinorVersion = 2;
 
 [[nodiscard]] bool protocol_compatible(ProtocolVersion local, ProtocolVersion peer) noexcept;
+
+// Whether a worker that answered HELLO with `worker` understands
+// BLOB_RELEASE.
+[[nodiscard]] bool worker_accepts_blob_release(ProtocolVersion worker) noexcept;
 
 // How the coordinator's runtime was assembled (plan §3.2): a full bundle
 // (svp-builder plus the pinned ffmpeg, ffprobe, and sherpa-onnx), or only

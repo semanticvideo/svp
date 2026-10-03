@@ -31,6 +31,14 @@
 //               the blob, followed by the blob as BLOB_PUT chunks in order,
 //               or `missing` [BlobRef] and nothing else when it does not.
 //
+// BLOB_RELEASE  {"blobs":[BlobRef...]}                         (protocol 1.2)
+//               The coordinator no longer needs these blobs on the worker
+//               (a finished build's source). Not answered. The worker
+//               deletes each one from its CAS once no live holder pins it
+//               (another session or build still reading the same bytes),
+//               re-checking whenever a session ends; a session that
+//               declares the blob again (BLOB_HAVE) before then keeps it.
+//
 // BlobRef = {"blake3":"<hex>","bytes":n}. All bodies are strict: unknown
 // members are rejected.
 
@@ -127,5 +135,9 @@ using BlobPut = std::variant<BlobChunk, ModelBundlePut>;
 // BLOB_GET
 [[nodiscard]] Frame make_blob_get_frame(const BlobRef& blob);
 [[nodiscard]] BlobRef blob_get_from_frame(const Frame& frame);
+
+// BLOB_RELEASE
+[[nodiscard]] Frame make_blob_release_frame(const std::vector<BlobRef>& blobs);
+[[nodiscard]] std::vector<BlobRef> blob_release_from_frame(const Frame& frame);
 
 }  // namespace svp::exec::worker

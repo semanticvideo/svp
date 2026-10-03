@@ -87,6 +87,7 @@ target_sources(svp-exec
     src/cas_eviction.cpp
     src/cas_layout.cpp
     src/cas_pin.cpp
+    src/cas_release.cpp
     src/cas_store.cpp
     src/durable_io.cpp
     src/file_lock.cpp

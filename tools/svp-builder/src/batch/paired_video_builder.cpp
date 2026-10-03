@@ -196,9 +196,11 @@ RemoteVideoOutcome PairedVideoBuilder::build(const RemoteVideoRequest& request) 
     } catch (const std::exception& error) {
       return unavailable(std::string("cannot reach it: ") + error.what());
     }
+    WorkerHelloAck ack;
     try {
-      (void)svp::builder::workers::supply_worker_session(*connection->reader,
-                                                         *connection->writer, supplies);
+      ack = svp::builder::workers::supply_worker_session(*connection->reader,
+                                                         *connection->writer, supplies)
+                .ack;
     } catch (const std::exception& error) {
       return unavailable(std::string("cannot prepare it: ") + error.what());
     }
@@ -245,12 +247,26 @@ RemoteVideoOutcome PairedVideoBuilder::build(const RemoteVideoRequest& request) 
                          (answer->type == svp::exec::MessageType::error ? ": " + answer->body.dump()
                                                                         : std::string()));
     }
+    // Once the job has ended on that Mac for good, what it was sent or made
+    // for the job (the source, and the package once fetched) is released
+    // there (worker protocol 1.2): it deletes them when the job's session
+    // ends, unless another coordinator still claims them. The model lock is
+    // shared by every job and stays. A Mac that turned the job away, or may
+    // be asked again, keeps everything.
+    WorkerSessionClient client(*connection->reader, *connection->writer);
+    const auto release = [&](const std::vector<BlobRef>& blobs) {
+      if (worker_accepts_blob_release(ack.protocol)) {
+        client.release_blobs(blobs);
+      }
+    };
     const svp::exec::TaskResult result = svp::exec::task_result_from_result_frame(*answer);
     if (result.status == svp::exec::TaskStatus::failed) {
       const std::string message = result.error ? result.error->message : "failed";
       if (result.error && result.error->retryable) {
         return unavailable(message);
       }
+      release({source});
+      client.shutdown();
       return RemoteVideoOutcome{.status = RemoteVideoStatus::failed, .message = message};
     }
     std::optional<VideoBuildPackageRecord> record;
@@ -267,9 +283,9 @@ RemoteVideoOutcome PairedVideoBuilder::build(const RemoteVideoRequest& request) 
     if (!record) {
       return unavailable("its result names no package");
     }
-    WorkerSessionClient client(*connection->reader, *connection->writer);
-    client.fetch_blob(BlobRef{.blake3 = record->blake3, .bytes = record->bytes},
-                      request.output_path);
+    const BlobRef package{.blake3 = record->blake3, .bytes = record->bytes};
+    client.fetch_blob(package, request.output_path);
+    release({source, package});
     client.shutdown();
     return RemoteVideoOutcome{.status = RemoteVideoStatus::built, .message = {}};
   } catch (const std::exception& error) {

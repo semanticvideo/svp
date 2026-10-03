@@ -1,7 +1,8 @@
 // The worker agent's session (plan §4.3, §4.4) end to end over a socket
 // pair: HELLO refusal on an OS mismatch, runtime push and verification, a
 // toy task run by a session process spawned from the pushed runtime, memory
-// admission, model bundle push with lock verification, and cleanup.
+// admission, model bundle push with lock verification, cleanup, and
+// BLOB_RELEASE (released blobs deleted once no coordinator claims them).
 //
 //   svp-exec-worker-agent-session-tests <svp-exec-test-worker>
 
@@ -32,7 +33,7 @@ fs::path g_test_worker;
 
 class AgentHarness {
  public:
-  explicit AgentHarness(SlotSharing::LocalLoad local_load = {})
+  explicit AgentHarness(SlotSharing::LocalLoad local_load = {}, std::string coordinator_id = {})
       : scratch_("svp-agent-session") {
     core_ = std::make_unique<AgentCore>(AgentCoreOptions{
         .layout = WorkerLayout{.root = scratch_.path / "Worker"},
@@ -48,10 +49,11 @@ class AgentHarness {
             },
         .launcher = {},
         .local_load = std::move(local_load)});
-    agent_ = std::thread([this] {
+    agent_ = std::thread([this, coordinator_id = std::move(coordinator_id)] {
       end_ = serve_agent_session(*core_, *channel_.right_reader, *channel_.right_writer,
                                  "ws-test-" + std::to_string(++sessions_),
-                                 [this] { ::shutdown(channel_.fds[1], SHUT_RDWR); });
+                                 [this] { ::shutdown(channel_.fds[1], SHUT_RDWR); },
+                                 coordinator_id);
     });
   }
 
@@ -89,6 +91,40 @@ class AgentHarness {
   std::thread agent_;
   AgentSessionEnd end_ = AgentSessionEnd::protocol_error;
   inline static std::atomic<int> sessions_{0};
+};
+
+// Another session on an existing agent's core, from `coordinator`.
+class CoreSession {
+ public:
+  CoreSession(AgentCore& core, std::string coordinator) {
+    static std::atomic<int> sessions{0};
+    agent_ = std::thread([this, &core, coordinator = std::move(coordinator)] {
+      end_ = serve_agent_session(core, *channel_.right_reader, *channel_.right_writer,
+                                 "ws-extra-" + std::to_string(++sessions),
+                                 [this] { ::shutdown(channel_.fds[1], SHUT_RDWR); }, coordinator);
+    });
+  }
+  ~CoreSession() {
+    if (agent_.joinable()) {
+      channel_.close_left();
+      agent_.join();
+    }
+  }
+  WorkerSessionClient client() {
+    return WorkerSessionClient(*channel_.left_reader, *channel_.left_writer);
+  }
+  // Waits for the agent to end the session on its own (after SHUTDOWN).
+  AgentSessionEnd wait() {
+    if (agent_.joinable()) {
+      agent_.join();
+    }
+    return end_;
+  }
+
+ private:
+  FrameChannel channel_;
+  std::thread agent_;
+  AgentSessionEnd end_ = AgentSessionEnd::protocol_error;
 };
 
 CoordinatorRuntime toy_runtime() {
@@ -253,6 +289,93 @@ void test_blob_get_returns_a_verified_blob() {
   expect(read_file(fetched) == content, "a failed fetch leaves the destination alone");
 }
 
+// A blob file the tests send: `lines` numbered lines of `label`.
+BlobSource blob_file(const fs::path& directory, const std::string& label, int lines) {
+  std::string content;
+  for (int index = 0; index < lines; ++index) {
+    content += label + " " + std::to_string(index) + "\n";
+  }
+  const fs::path file = directory / (label + ".bin");
+  write_file(file, content);
+  return BlobSource{.ref = blob_ref_for(svp::exec::test::to_bytes(content)), .file = file};
+}
+
+// What the releasing session itself declared is deleted when the session
+// ends (its own pin lasts until then); what it did not release stays.
+void test_release_deletes_the_blob_when_the_session_ends() {
+  AgentHarness agent({}, "coordinator-a");
+  WorkerSessionClient client = agent.client();
+  (void)client.hello(hello_for(toy_runtime()));
+  const BlobSource source = blob_file(agent.scratch(), "source", 500);
+  const BlobSource kept = blob_file(agent.scratch(), "model", 400);
+  TransferStats stats;
+  client.send_blobs({source, kept}, stats);
+  client.release_blobs({source.ref});
+  // Frames are handled in order: once BLOB_GET is answered, the release ran.
+  client.fetch_blob(kept.ref, agent.scratch() / "fetched.bin");
+  CasStore cas = agent.core().cas();
+  expect(cas.has(source.ref.blake3), "the session's own pin keeps the blob while it runs");
+  client.shutdown();
+  expect(agent.wait() == AgentSessionEnd::shutdown, "session ends on SHUTDOWN");
+  expect(!cas.has(source.ref.blake3), "the released blob is deleted when the session ends");
+  expect(cas.has(kept.ref.blake3), "a blob that was not released stays");
+  expect(agent.core().released().pending() == 0, "nothing left to delete");
+}
+
+// Another coordinator that declared the same blob keeps it, also after its
+// own session ended, until it releases the blob too.
+void test_release_keeps_a_blob_another_coordinator_claims() {
+  AgentHarness agent({}, "coordinator-a");
+  const BlobSource source = blob_file(agent.scratch(), "shared-source", 500);
+  TransferStats stats;
+  {
+    CoreSession other(agent.core(), "coordinator-b");
+    WorkerSessionClient client = other.client();
+    (void)client.hello(hello_for(toy_runtime()));
+    client.send_blobs({source}, stats);
+    client.shutdown();
+    expect(other.wait() == AgentSessionEnd::shutdown, "coordinator B's session ended");
+  }
+  WorkerSessionClient client = agent.client();
+  (void)client.hello(hello_for(toy_runtime()));
+  client.send_blobs({source}, stats);
+  client.release_blobs({source.ref});
+  client.shutdown();
+  expect(agent.wait() == AgentSessionEnd::shutdown, "coordinator A's session ended");
+  CasStore cas = agent.core().cas();
+  expect(cas.has(source.ref.blake3), "coordinator B still claims the blob");
+  {
+    CoreSession other(agent.core(), "coordinator-b");
+    WorkerSessionClient release = other.client();
+    (void)release.hello(hello_for(toy_runtime()));
+    release.release_blobs({source.ref});
+    release.shutdown();
+    expect(other.wait() == AgentSessionEnd::shutdown, "coordinator B's release session ended");
+  }
+  expect(!cas.has(source.ref.blake3), "deleted once every coordinator released it");
+}
+
+// ReleasedBlobs on its own: a claim made after a release keeps the blob
+// until that coordinator releases it too, and a released blob that is gone
+// already is forgotten.
+void test_released_blobs_honour_later_claims() {
+  TemporaryDirectory scratch("svp-released-blobs");
+  CasStore cas = CasStore::at(scratch.path / "cache").value();
+  const Blake3Digest blob = cas.put(svp::exec::test::to_bytes("released source")).value();
+  const Blake3Digest absent = blob_ref_for(svp::exec::test::to_bytes("never stored")).blake3;
+  ReleasedBlobs released;
+  released.claim("coordinator-a", blob);
+  released.release("coordinator-a", {blob, absent});
+  released.claim("coordinator-b", blob);
+  ReleaseSweep sweep = released.sweep(cas);
+  expect(sweep.removed_blobs == 0 && cas.has(blob), "a later claim keeps the blob");
+  expect(released.pending() == 0, "the claimed blob and the absent one are not pending");
+  released.release("coordinator-b", {blob});
+  sweep = released.sweep(cas);
+  expect(sweep.removed_blobs == 1 && !cas.has(blob), "deleted once the last claim is released");
+  expect(released.pending() == 0, "nothing left to delete");
+}
+
 void test_tampered_runtime_is_never_run() {
   AgentHarness agent;
   const CoordinatorRuntime runtime = toy_runtime();
@@ -360,6 +483,11 @@ int main(int argc, char** argv) {
           {"declared slots are shared with the local build",
            test_declared_slots_are_shared_with_the_local_build},
           {"BLOB_GET returns a verified blob", test_blob_get_returns_a_verified_blob},
+          {"release deletes the blob when the session ends",
+           test_release_deletes_the_blob_when_the_session_ends},
+          {"release keeps a blob another coordinator claims",
+           test_release_keeps_a_blob_another_coordinator_claims},
+          {"released blobs honour later claims", test_released_blobs_honour_later_claims},
           {"tampered runtime is never run", test_tampered_runtime_is_never_run},
           {"bad blob is refused", test_bad_blob_is_refused},
           {"model bundle push is lock-verified", test_model_bundle_push_is_lock_verified},

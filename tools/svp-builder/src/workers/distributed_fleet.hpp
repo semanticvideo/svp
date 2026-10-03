@@ -24,7 +24,12 @@
 // that stage's task type (ocr.frame_batch, track.window) and sized by its
 // measured slots, whose sessions repeat the HELLO and supply checks (cheap
 // once everything is there) before their leases are sent.
+//
+// When the fleet is destroyed (the build has ended, however it ended), every
+// worker it reached is told to release the build's source and the staged
+// files its dispatched tasks read (build_blob_release.hpp).
 
+#include "build_blob_release.hpp"
 #include "ocr_calibration_runs.hpp"
 
 #include "svp/builder/distributed_execution.hpp"
@@ -56,6 +61,9 @@ class PairedWorkerFleet final : public DistributedExecution {
   DistributedFleetOptions options_;
   std::vector<std::unique_ptr<svp::exec::remote::RemoteExecutor>> remotes_;
   std::vector<std::unique_ptr<svp::exec::TaskTypeRestrictedExecutor>> restricted_;
+  // Shared with the dispatched executors, which add the staged files they
+  // send.
+  std::shared_ptr<BuildBlobRelease> release_;
 };
 
 }  // namespace svp::builder::workers

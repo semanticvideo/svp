@@ -12,7 +12,10 @@
 //      heartbeat; a Mac that stops heartbeating for a lease period is given
 //      up as unavailable;
 //   3. fetches the package from that Mac's cache (BLOB_GET, verified by
-//      BLAKE3) into place, and writes the run report when one was asked for.
+//      BLAKE3) into place, and writes the run report when one was asked for;
+//   4. releases the source and the package on that Mac (BLOB_RELEASE,
+//      worker protocol 1.2) once the package is fetched, or the source when
+//      the job failed for good there.
 // A Mac whose agent turns the job away (busy: it coordinates another video)
 // is asked again later; one that cannot be reached, refuses the session, or
 // cannot build this runtime's videos is unavailable for the batch.
