@@ -81,8 +81,9 @@ class PackagePins {
 
 // The worker's model view links each bundle directory into its store. A
 // build's model-cache verification scans the cache without following
-// directory links, so it would find no bundles there. The job's cache
-// mirrors the view as real directories whose files link into the store.
+// directory links and accepts only regular files, so it would find no
+// bundles there. The job's cache mirrors the view as real directories whose
+// files are hard links to the store's files.
 std::filesystem::path mirror_model_view(const std::filesystem::path& view,
                                         const std::filesystem::path& mirror) {
   std::filesystem::remove_all(mirror);
@@ -99,7 +100,13 @@ std::filesystem::path mirror_model_view(const std::filesystem::path& view,
       if (it->is_directory()) {
         std::filesystem::create_directories(target);
       } else {
-        std::filesystem::create_symlink(std::filesystem::canonical(it->path()), target);
+        // Verification accepts only regular files, so link the store's
+        // file itself (no copy); copy only across file systems.
+        std::error_code linked;
+        std::filesystem::create_hard_link(std::filesystem::canonical(it->path()), target, linked);
+        if (linked) {
+          std::filesystem::copy_file(std::filesystem::canonical(it->path()), target);
+        }
       }
     }
   }
