@@ -27,6 +27,9 @@ struct BatchDispatchOptions {
   // Videos this Mac builds at once (>= 1).
   std::size_t local_slots = 1;
   std::function<void(std::size_t index)> run_local;
+  // An exception from run_local fails that item (reported here with its
+  // message) instead of ending the batch.
+  std::function<void(std::size_t index, const std::string& error)> on_local_error;
   std::vector<std::shared_ptr<RemoteVideoBuilder>> remote_macs;
   // Item `index` on another Mac: whatever the batch does around the build,
   // with `mac.build()` for the build itself.

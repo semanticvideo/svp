@@ -231,6 +231,15 @@ BuildBatchResult build_batch(const BuildBatchOptions& options) {
                                             : BuildBatchStatus::failed;
             item.error_message = built.error_message;
           },
+      .on_local_error =
+          [&](std::size_t position, const std::string& error) {
+            BuildBatchItemResult& item = result.items[pending[position]];
+            report(item.source, std::string(kThisMac), "failed: " + error);
+            const std::lock_guard lock(mutex);
+            item.built_on = std::string(kThisMac);
+            item.status = BuildBatchStatus::failed;
+            item.error_message = error;
+          },
       .remote_macs = options.coordinators,
       .run_remote =
           [&](std::size_t position, RemoteVideoBuilder& mac) {

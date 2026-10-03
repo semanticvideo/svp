@@ -141,6 +141,17 @@ void WorkerSessionClient::fetch_blob(const BlobRef& blob,
                       "the worker does not hold blob " + blake3_hex(blob.blake3));
   }
   const std::filesystem::path partial = destination.string() + ".partial";
+  // Whatever ends the transfer early leaves no .partial file behind.
+  struct RemovePartialUnlessKept {
+    const std::filesystem::path& path;
+    bool keep = false;
+    ~RemovePartialUnlessKept() {
+      if (!keep) {
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+      }
+    }
+  } cleanup{partial};
   {
     std::ofstream out(partial, std::ios::binary | std::ios::trunc);
     if (!out) {
@@ -173,10 +184,10 @@ void WorkerSessionClient::fetch_blob(const BlobRef& blob,
   }
   std::filesystem::rename(partial, destination, error);
   if (error) {
-    std::filesystem::remove(partial, error);
     throw WorkerError(WorkerErrorCode::io, "cannot move the fetched blob to " +
                                                destination.string());
   }
+  cleanup.keep = true;
 }
 
 void WorkerSessionClient::ensure_runtime(const CoordinatorRuntime& runtime, TransferStats& stats) {

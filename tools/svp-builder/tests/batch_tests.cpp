@@ -78,8 +78,17 @@ batch::VideoBuildParameters sample_parameters() {
   parameters.require_workers = 2;
   parameters.run_report = true;
   parameters.ffmpeg_build = exec::blake3_prefixed(exec::blake3_digest(std::string_view("ffmpeg")));
-  parameters.thread_plan =
-      svp::models::thread_plan_to_json(svp::models::resolve_local_thread_plan({6}, 4));
+  // Every count fixed, as a batch Mac sends it: a local plan on other
+  // platforms leaves some counts to the runtime.
+  svp::models::ThreadPlan plan = svp::models::resolve_local_thread_plan({6}, 4);
+  for (svp::models::OrtThreadCounts* counts :
+       {&plan.ocr_detection, &plan.ocr_recognition, &plan.depth, &plan.visual_entity_detection,
+        &plan.visual_entity_embedding, &plan.text_embedding, &plan.speech_activity,
+        &plan.forced_alignment}) {
+    if (counts->intra_op == svp::models::kRuntimeChoosesThreadCount) counts->intra_op = 1;
+    if (counts->inter_op == svp::models::kRuntimeChoosesThreadCount) counts->inter_op = 1;
+  }
+  parameters.thread_plan = svp::models::thread_plan_to_json(plan);
   return parameters;
 }
 

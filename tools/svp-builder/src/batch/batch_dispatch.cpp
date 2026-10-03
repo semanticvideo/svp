@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <deque>
 #include <mutex>
+#include <exception>
 #include <thread>
 
 namespace svp::builder::batch {
@@ -71,7 +72,13 @@ void dispatch_batch(const BatchDispatchOptions& options) {
     threads.emplace_back([&] {
       std::size_t index = 0;
       while (queue.take(index)) {
-        options.run_local(index);
+        try {
+          options.run_local(index);
+        } catch (const std::exception& error) {
+          if (options.on_local_error) options.on_local_error(index, error.what());
+        } catch (...) {
+          if (options.on_local_error) options.on_local_error(index, "unknown error");
+        }
         queue.done();
       }
     });

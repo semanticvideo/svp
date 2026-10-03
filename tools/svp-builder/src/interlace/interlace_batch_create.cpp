@@ -453,6 +453,17 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
         .item_count = media_files.size(),
         .local_slots = std::max<std::size_t>(1, worker_count),
         .run_local = [&](std::size_t index) { (void)process_item(index, local_create); },
+        .on_local_error =
+            [&](std::size_t index, const std::string& error) {
+              BatchFileResult failed;
+              failed.source_filename = media_files[index].filename().string();
+              failed.source_relative_path =
+                  media_files[index].lexically_normal().lexically_relative(
+                      source_dir.lexically_normal()).string();
+              failed.status = BatchFileStatus::failed;
+              failed.error_message = error;
+              result.results[index] = std::move(failed);
+            },
         .remote_macs = options.coordinators,
         .run_remote =
             [&](std::size_t index, batch::RemoteVideoBuilder& mac) {
