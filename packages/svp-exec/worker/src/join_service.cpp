@@ -4,6 +4,7 @@
 #include "svp/exec/worker/fleet_store.hpp"
 #include "svp/exec/worker/host_facts.hpp"
 #include "svp/exec/worker/worker_error.hpp"
+#include "svp/exec/worker/worker_identity.hpp"
 
 #include <cstdlib>
 #include <pwd.h>
@@ -28,6 +29,7 @@ WorkerEndpoint describe_this_worker(const WorkerLayout& layout) {
           : WorkerServiceMode::user_agent;
   endpoint.label = std::string(kWorkerJobLabel);
   endpoint.plist = launchd_plist_path(endpoint.service_mode, endpoint.home).string();
+  endpoint.worker_id = load_or_create_worker_id(layout);
   return endpoint;
 }
 

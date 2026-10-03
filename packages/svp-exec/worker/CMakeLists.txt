@@ -23,7 +23,9 @@ add_library(svp-exec-worker
   src/local_load.cpp
   src/message_fields.cpp
   src/model_bundles.cpp
+  src/pairing_proof.cpp
   src/pairing_store.cpp
+  src/pairings_server.cpp
   src/released_blobs.cpp
   src/runtime_files.cpp
   src/runtime_source.cpp
@@ -37,6 +39,8 @@ add_library(svp-exec-worker
   src/worker_agent.cpp
   src/worker_connection.cpp
   src/worker_error.cpp
+  src/worker_id_book.cpp
+  src/worker_identity.cpp
   src/worker_layout.cpp
   src/worker_restart_wait.cpp
   src/worker_scripts.cpp
@@ -78,6 +82,7 @@ if(BUILD_TESTING)
     service_updater
     worker_restart_wait
     fleet_join
+    pairings_server
   )
   foreach(SVP_EXEC_TEST IN LISTS SVP_EXEC_WORKER_TESTS)
     string(REPLACE "_" "-" SVP_EXEC_TEST_NAME "${SVP_EXEC_TEST}")
@@ -98,6 +103,9 @@ if(BUILD_TESTING)
     set_tests_properties(svp-exec-worker-${SVP_EXEC_TEST_NAME}-tests PROPERTIES TIMEOUT 120)
   endforeach()
   add_dependencies(svp-exec-worker-agent-session-tests svp-exec-test-worker)
+  # Opens TLS listeners and registers Bonjour instances on this Mac, like the
+  # remote transport tests.
+  set_tests_properties(svp-exec-worker-pairings-server-tests PROPERTIES LABELS network)
 
   # Coordinator driver for a real paired worker (not a ctest: it needs a
   # worker paired with `svp-builder workers pair`). Pushes a stand-in

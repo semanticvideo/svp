@@ -1,15 +1,18 @@
 #pragma once
 
-// The worker agent (plan §3.3): what the launchd job runs. It loads every
-// pairing record under <root>/pairings, opens one RemoteListener per
-// pairing (TLS 1.2 PSK with that pairing's secret, Bonjour
-// _svp-worker._tcp with its pairing id in TXT), and serves each
-// authenticated connection with serve_agent_session. With a fleet join
-// credential (<root>/join.json, `worker install --join`) it also runs the
-// join listener (fleet_join.hpp) and starts a listener for every pairing a
-// join adds. It only accepts connections and never dials out, so macOS
-// Local Network privacy does not apply to it in either launchd mode (Apple
-// TN3179).
+// The worker agent (plan §3.3): what the launchd job runs. It serves every
+// pairing record under <root>/pairings on ONE TLS-PSK listener with ONE
+// Bonjour instance of its own plus one small instance per pairing for older
+// coordinators (pairings_server.hpp), and serves each authenticated
+// connection with serve_agent_session, the session's pairing proven in HELLO
+// (pairing_proof.hpp). A pairing written or removed while it runs (fleet
+// join, `workers pair`, `workers unpair`) is served at once (the pairings
+// directory is watched). With a fleet join credential (<root>/join.json,
+// `worker install --join`) it also runs the join listener (fleet_join.hpp)
+// with its own instance. Advertising is retried in the background and never
+// stops it (service_advertiser.hpp). It only accepts connections and never
+// dials out, so macOS Local Network privacy does not apply to it in either
+// launchd mode (Apple TN3179).
 //
 // It moves itself to a newer runtime when one arrives (service_updater.hpp)
 // and then exits with kWorkerRestartExitCode for launchd to restart it.

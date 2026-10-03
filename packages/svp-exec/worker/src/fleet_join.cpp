@@ -125,13 +125,17 @@ std::string confirmation(const std::vector<std::byte>& secret,
 }
 
 nlohmann::json endpoint_to_json(const WorkerEndpoint& endpoint) {
-  return nlohmann::json{{"home", endpoint.home},
+  nlohmann::json body{{"home", endpoint.home},
                         {"label", endpoint.label},
                         {"plist", endpoint.plist},
                         {"root", endpoint.root},
                         {"service_mode", std::string(worker_service_mode_name(endpoint.service_mode))},
                         {"uid", endpoint.uid},
                         {"user", endpoint.user}};
+  if (!endpoint.worker_id.empty()) {
+    body["worker_id"] = endpoint.worker_id;
+  }
+  return body;
 }
 
 WorkerEndpoint endpoint_from_json(const nlohmann::json& body, std::string_view path) {
@@ -149,6 +153,9 @@ WorkerEndpoint endpoint_from_json(const nlohmann::json& body, std::string_view p
     throw WorkerError(WorkerErrorCode::protocol, std::string(path) + ".service_mode is unknown");
   }
   endpoint.service_mode = *parsed;
+  if (body.contains("worker_id")) {
+    endpoint.worker_id = required_string(body, "worker_id", path);
+  }
   return endpoint;
 }
 

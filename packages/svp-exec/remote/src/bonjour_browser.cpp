@@ -6,6 +6,8 @@
 
 #include <chrono>
 #include <cstring>
+#include <algorithm>
+#include <functional>
 #include <map>
 
 namespace svp::exec::remote::detail {
@@ -13,9 +15,8 @@ namespace {
 
 struct BrowseState {
   std::shared_ptr<WaitSignal> signal;
-  // The TXT entry a matching service carries.
-  std::string key;
-  std::string value;
+  // Whether a service's TXT entries make it a match.
+  std::function<bool(const std::map<std::string, std::string>&)> matches_txt;
   // Settle after the last match (browse every service) instead of the first.
   bool settle_from_last_match = false;
   // Guarded by signal->mutex.
@@ -61,8 +62,7 @@ void on_results_changed(const std::shared_ptr<BrowseState>& state, nw_browse_res
     }
     std::map<std::string, std::string> txt =
         new_result != nullptr ? txt_entries(new_result) : std::map<std::string, std::string>{};
-    const auto wanted = txt.find(state->key);
-    if (new_result != nullptr && wanted != txt.end() && wanted->second == state->value) {
+    if (new_result != nullptr && state->matches_txt(txt)) {
       DiscoveredService service;
       service.txt = std::move(txt);
       const auto endpoint =
@@ -105,9 +105,11 @@ RouteMedium route_medium_of(nw_interface_t interface) {
 
 namespace {
 
-std::vector<DiscoveredService> browse(const std::shared_ptr<BrowseState>& state,
+std::vector<DiscoveredService> browse(std::shared_ptr<BrowseState> state,
                                       const RoutePolicy& policy,
                                       const std::shared_ptr<WaitSignal>& signal) {
+  // `state` is held by value: the browser's blocks capture it, and a block
+  // captures a C++ reference as a reference.
   const std::string type(kWorkerServiceType);
   const std::string domain(kWorkerServiceDomain);
   auto descriptor = NwRef<nw_browse_descriptor_t>::adopt(
@@ -183,8 +185,10 @@ std::vector<DiscoveredService> browse_for_pairing(std::string_view pairing_id,
                                                   const std::shared_ptr<WaitSignal>& signal) {
   const auto state = std::make_shared<BrowseState>();
   state->signal = signal;
-  state->key = std::string(kPairingTxtKey);
-  state->value = std::string(pairing_id);
+  state->matches_txt = [wanted = std::string(pairing_id)](const auto& txt) {
+    const auto found = txt.find(std::string(kPairingTxtKey));
+    return found != txt.end() && found->second == wanted;
+  };
   return browse(state, policy, signal);
 }
 
@@ -193,10 +197,46 @@ std::vector<DiscoveredService> browse_for_txt(std::string_view key, std::string_
                                               const std::shared_ptr<WaitSignal>& signal) {
   const auto state = std::make_shared<BrowseState>();
   state->signal = signal;
-  state->key = std::string(key);
-  state->value = std::string(value);
+  state->matches_txt = [wanted_key = std::string(key), wanted = std::string(value)](
+                           const auto& txt) {
+    const auto found = txt.find(wanted_key);
+    return found != txt.end() && found->second == wanted;
+  };
   state->settle_from_last_match = true;
   return browse(state, policy, signal);
+}
+
+std::vector<DiscoveredService> browse_for_worker(std::string_view worker_id,
+                                                 std::string_view pairing_id,
+                                                 const RoutePolicy& policy,
+                                                 const std::shared_ptr<WaitSignal>& signal) {
+  const auto state = std::make_shared<BrowseState>();
+  state->signal = signal;
+  state->matches_txt = [worker = std::string(worker_id),
+                        pairing = std::string(pairing_id)](const auto& txt) {
+    const auto by_worker = txt.find(std::string(kWorkerTxtKey));
+    const auto by_pairing = txt.find(std::string(kPairingTxtKey));
+    return (by_worker != txt.end() && by_worker->second == worker) ||
+           (by_pairing != txt.end() && by_pairing->second == pairing);
+  };
+  std::vector<DiscoveredService> found = browse(state, policy, signal);
+  // One worker may advertise itself and, for older coordinators, one
+  // instance per pairing, all on the same port: keep one instance, its
+  // own advertisement when it is there.
+  const auto is_worker = [&](const DiscoveredService& service) {
+    const auto entry = service.txt.find(std::string(kWorkerTxtKey));
+    return entry != service.txt.end() && entry->second == worker_id;
+  };
+  const auto own = std::find_if(found.begin(), found.end(), [&](const DiscoveredService& service) {
+    return is_worker(service) && !service.txt.contains(std::string(kPairingTxtKey));
+  });
+  const auto any = own != found.end() ? own : std::find_if(found.begin(), found.end(), is_worker);
+  if (any != found.end()) {
+    DiscoveredService chosen = std::move(*any);
+    found.clear();
+    found.push_back(std::move(chosen));
+  }
+  return found;
 }
 
 }  // namespace svp::exec::remote::detail

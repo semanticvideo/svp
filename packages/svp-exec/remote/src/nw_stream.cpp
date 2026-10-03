@@ -1,5 +1,7 @@
 #include "nw_stream.hpp"
 
+#include <Security/SecProtocolMetadata.h>
+
 #include "svp/exec/exec_error.hpp"
 #include "tls_psk_parameters.hpp"
 
@@ -231,6 +233,44 @@ void NwStream::start() {
     shared_->started_at = std::chrono::steady_clock::now();
   }
   nw_connection_start(connection_.get());
+}
+
+std::optional<std::vector<std::byte>> NwStream::export_keying_material(std::string_view label,
+                                                                      std::size_t bytes) const {
+  if (phase() != StreamPhase::ready) {
+    return std::nullopt;
+  }
+  nw_protocol_definition_t definition = nw_protocol_copy_tls_definition();
+  nw_protocol_metadata_t metadata =
+      nw_connection_copy_protocol_metadata(connection_.get(), definition);
+  nw_release(definition);
+  if (metadata == nullptr) {
+    return std::nullopt;
+  }
+  std::optional<std::vector<std::byte>> material;
+  sec_protocol_metadata_t security = nw_tls_copy_sec_protocol_metadata(metadata);
+  if (security != nullptr) {
+    const std::string text(label);
+    dispatch_data_t secret =
+        sec_protocol_metadata_create_secret(security, text.size(), text.c_str(), bytes);
+    if (secret != nullptr) {
+      std::vector<std::byte> out;
+      out.reserve(bytes);
+      std::vector<std::byte>* sink = &out;
+      dispatch_data_apply(secret, ^bool(dispatch_data_t, size_t, const void* buffer, size_t size) {
+        const auto* begin = static_cast<const std::byte*>(buffer);
+        sink->insert(sink->end(), begin, begin + size);
+        return true;
+      });
+      dispatch_release(secret);
+      if (out.size() == bytes) {
+        material = std::move(out);
+      }
+    }
+    sec_release(security);
+  }
+  nw_release(metadata);
+  return material;
 }
 
 StreamPhase NwStream::phase() const {

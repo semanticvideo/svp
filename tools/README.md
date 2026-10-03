@@ -219,7 +219,17 @@ job that only accepts connections. The default is a LaunchAgent for the
 worker's user (`~/Library/Application Support/SVP/Worker`); with
 `--system-service` it is a LaunchDaemon that runs as that user without anyone
 logged in (`/Library/Application Support/SVP/Worker`, installed with `sudo`).
-Workers are found by pairing id over Bonjour, never by address. `unpair`
+A worker serves all of its pairings on one TLS listener with one Bonjour
+instance of its own (named after the Mac, advertising its worker id), however
+many coordinators it is paired with; each session proves its pairing in HELLO,
+bound to its TLS connection. Coordinators find a worker by that worker id
+(learned from the worker's first answer and kept with the pairing), never by
+address; for coordinators that predate worker ids the worker also advertises
+one small instance per pairing, named after the pairing id, on the same port.
+A pairing added or removed while the worker runs (fleet join, `pair`,
+`unpair`) is served at once, without a restart, and a Bonjour registration
+that is slow or fails is retried in the background (1 s, doubling up to once
+a minute) while the worker keeps serving. `unpair`
 removes the job, runtimes, models, cache, and the secret on both Macs.
 `--dry-run` writes the plist and scripts locally, lints them, and changes
 nothing on the worker.

@@ -2,8 +2,12 @@
 
 #include "svp/exec/byte_stream.hpp"
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace svp::exec::remote {
 
@@ -42,6 +46,18 @@ class RemoteStream : public ByteStream {
   // The peer's address as the system reports it, for logs only; nothing may
   // select or trust a peer by it.
   [[nodiscard]] virtual std::string peer_description() const = 0;
+
+  // TLS keying material exporter (RFC 5705) of this connection: `bytes`
+  // bytes, the same on both ends, unique to this connection and derived from
+  // its PSK. Lets a peer prove in-band which pairing secret it holds, bound
+  // to this connection (the worker cannot read the negotiated PSK identity).
+  // nullopt when the connection is not ready or offers no exporter.
+  [[nodiscard]] virtual std::optional<std::vector<std::byte>> export_keying_material(
+      std::string_view label, std::size_t bytes) const {
+    (void)label;
+    (void)bytes;
+    return std::nullopt;
+  }
 };
 
 }  // namespace svp::exec::remote

@@ -18,7 +18,8 @@
 // Inside that connection, frames (frame.hpp):
 //   C -> W  JOIN_OFFER     {"coordinator_ephemeral":"<130 hex>",
 //                           "coordinator_id","fleet_id"}
-//   W -> C  JOIN_CHALLENGE {"host":{HostFacts},"worker":{endpoint},
+//   W -> C  JOIN_CHALLENGE {"host":{HostFacts},"worker":{endpoint, with its
+//                           worker_id (worker_identity.hpp)},
 //                           "worker_ephemeral":"<130 hex>","worker_join_id"}
 //   C -> W  JOIN_ACCEPT    {"member_key_wrapped":"<64 hex>","pairing_id",
 //                           "signature":"<hex DER>"}

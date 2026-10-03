@@ -54,6 +54,8 @@ class NwStream final : public RemoteStream {
   void cancel() override;
   [[nodiscard]] TlsSession tls_session() const override;
   [[nodiscard]] std::string peer_description() const override;
+  [[nodiscard]] std::optional<std::vector<std::byte>> export_keying_material(
+      std::string_view label, std::size_t bytes) const override;
 
   struct Shared;
 

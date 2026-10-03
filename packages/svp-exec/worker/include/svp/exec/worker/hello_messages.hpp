@@ -10,7 +10,14 @@
 //    "runtime_id":"b3:<hex>",
 //    "runtime_kind":"bundle"|"builder_only",
 //    "thread_plan":{"host_independent":bool,"plan":{ThreadPlan JSON}},
-//    "capacity":{"<task_type>":slots, ...}}                         optional
+//    "capacity":{"<task_type>":slots, ...},                        optional
+//    "pairing":{"id":"<pairing id>","proof":"<64 hex>"}}           optional
+//
+// `pairing` (pairing_proof.hpp) proves which pairing secret the coordinator
+// holds, bound to this TLS connection: one worker listener serves every
+// pairing, and the TLS stack does not tell the worker which PSK a peer used.
+// Coordinators that predate it omit it; their sessions count as a
+// coordinator of their own (slot_sharing.hpp, released_blobs.hpp).
 //
 // HELLO_ACK (worker -> coordinator), no payloads:
 //   {"accepted":bool,
@@ -30,7 +37,12 @@
 //                          "runtime_id":"b3:<hex>"},             optional
 //               "release_stamp":n,                               optional
 //               "self_update":bool},
-//    "sessions":{"active":n}}
+//    "sessions":{"active":n},
+//    "worker_id":"svpn-<24 hex>"}                                   optional
+//
+// `worker_id` (worker_identity.hpp) is what the worker's own Bonjour
+// instance advertises; coordinators store it with the pairing and find the
+// worker by it from then on.
 //
 // `service` (sent by workers that move themselves to newer runtimes,
 // service_updater.hpp; older workers omit it) lets a coordinator tell when a
@@ -118,6 +130,15 @@ struct ModelSetSummary {
   bool operator==(const ModelSetSummary&) const = default;
 };
 
+// HELLO `pairing`: the pairing a coordinator speaks for, and its proof.
+struct PairingProof {
+  std::string pairing_id;
+  // 64 lowercase hex: keyed BLAKE3 over this connection's TLS exporter.
+  std::string proof;
+
+  bool operator==(const PairingProof&) const = default;
+};
+
 struct CoordinatorHello {
   ProtocolVersion protocol = kWorkerProtocolVersion;
   Blake3Digest runtime_id{};
@@ -134,6 +155,8 @@ struct CoordinatorHello {
   // for sessions that declare none (pairing, calibration, 1.0
   // coordinators): their leases are admitted by memory alone, as before.
   std::map<std::string, std::uint64_t, std::less<>> capacity;
+  // Set by the coordinator's connection (pairing_proof.hpp), never by hand.
+  std::optional<PairingProof> pairing;
 
   bool operator==(const CoordinatorHello&) const = default;
 };
@@ -204,6 +227,8 @@ struct WorkerHelloAck {
   std::optional<Blake3Digest> agent_runtime_id;
   // Absent from workers that predate self-update.
   std::optional<ServiceUpdateState> service;
+  // Absent from workers that predate worker ids.
+  std::string worker_id;
 
   [[nodiscard]] bool accepted() const noexcept { return !refusal.has_value(); }
   bool operator==(const WorkerHelloAck&) const = default;
@@ -211,6 +236,8 @@ struct WorkerHelloAck {
 
 [[nodiscard]] nlohmann::json host_facts_to_json(const HostFacts& facts);
 [[nodiscard]] HostFacts host_facts_from_json(const nlohmann::json& value, std::string_view path);
+
+[[nodiscard]] nlohmann::json pairing_proof_to_json(const PairingProof& proof);
 
 [[nodiscard]] Frame make_hello_frame(const CoordinatorHello& hello);
 // Throws ExecError (frame_malformed, missing_field, wrong_type,

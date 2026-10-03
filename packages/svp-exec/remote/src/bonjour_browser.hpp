@@ -42,6 +42,14 @@ struct DiscoveredService {
     std::string_view key, std::string_view value, const RoutePolicy& policy,
     const std::shared_ptr<WaitSignal>& signal);
 
+// Browses for the worker advertising `worker_id` (TXT kWorkerTxtKey), or,
+// for a worker that predates worker ids, an instance advertising
+// `pairing_id`. When the worker's own instance is among them, returns just
+// that one (its per-pairing instances share its port).
+[[nodiscard]] std::vector<DiscoveredService> browse_for_worker(
+    std::string_view worker_id, std::string_view pairing_id, const RoutePolicy& policy,
+    const std::shared_ptr<WaitSignal>& signal);
+
 [[nodiscard]] RouteMedium route_medium_of(nw_interface_t interface);
 
 }  // namespace svp::exec::remote::detail

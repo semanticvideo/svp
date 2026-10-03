@@ -143,6 +143,9 @@ std::string encode_coordinator_pairing(const CoordinatorPairingRecord& record) {
   if (!worker.join_id.empty()) {
     body["worker"]["join_id"] = worker.join_id;
   }
+  if (!worker.worker_id.empty()) {
+    body["worker"]["worker_id"] = worker.worker_id;
+  }
   return encode_canonical_json(body);
 }
 
@@ -171,7 +174,7 @@ CoordinatorPairingRecord decode_coordinator_pairing(std::string_view bytes) {
   const nlohmann::json& worker = required_object(body, "worker", kPath);
   reject_unknown_fields(worker,
                         {"arch", "home", "join_id", "label", "os", "plist", "root",
-                         "service_mode", "ssh_target", "uid", "user"},
+                         "service_mode", "ssh_target", "uid", "user", "worker_id"},
                         worker_path);
   WorkerEndpoint& endpoint = record.worker;
   endpoint.arch = required_string(worker, "arch", worker_path);
@@ -184,6 +187,9 @@ CoordinatorPairingRecord decode_coordinator_pairing(std::string_view bytes) {
   endpoint.user = required_string(worker, "user", worker_path);
   if (worker.contains("join_id")) {
     endpoint.join_id = required_string(worker, "join_id", worker_path);
+  }
+  if (worker.contains("worker_id")) {
+    endpoint.worker_id = required_string(worker, "worker_id", worker_path);
   }
   const std::string mode = required_string(worker, "service_mode", worker_path);
   const std::optional<WorkerServiceMode> service_mode = parse_worker_service_mode(mode);

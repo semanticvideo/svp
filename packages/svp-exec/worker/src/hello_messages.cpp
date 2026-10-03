@@ -37,6 +37,10 @@ constexpr std::array kRefusalCodes = {
 
 }  // namespace
 
+nlohmann::json pairing_proof_to_json(const PairingProof& proof) {
+  return nlohmann::json{{"id", proof.pairing_id}, {"proof", proof.proof}};
+}
+
 bool protocol_compatible(ProtocolVersion local, ProtocolVersion peer) noexcept {
   return local.major == peer.major;
 }
@@ -142,6 +146,9 @@ Frame make_hello_frame(const CoordinatorHello& hello) {
     }
     body["capacity"] = std::move(capacity);
   }
+  if (hello.pairing) {
+    body["pairing"] = pairing_proof_to_json(*hello.pairing);
+  }
   return Frame{.type = MessageType::hello, .body = std::move(body), .payloads = {}};
 }
 
@@ -182,6 +189,12 @@ CoordinatorHello hello_from_frame(const Frame& frame) {
       hello.capacity.emplace(task_type, value);
     }
   }
+  if (const auto pairing = body.find("pairing"); pairing != body.end()) {
+    const std::string pairing_path = child_path(path, "pairing");
+    require_object(*pairing, pairing_path);
+    hello.pairing = PairingProof{.pairing_id = required_string(*pairing, "id", pairing_path),
+                                 .proof = required_string(*pairing, "proof", pairing_path)};
+  }
   return hello;
 }
 
@@ -206,6 +219,9 @@ Frame make_hello_ack_frame(const WorkerHelloAck& ack) {
   }
   if (ack.agent_runtime_id) {
     body["agent_runtime_id"] = blake3_prefixed(*ack.agent_runtime_id);
+  }
+  if (!ack.worker_id.empty()) {
+    body["worker_id"] = ack.worker_id;
   }
   if (ack.service) {
     nlohmann::json service{{"declined_runtimes", digests_to_json(ack.service->declined_runtimes, true)},
@@ -271,6 +287,9 @@ WorkerHelloAck hello_ack_from_frame(const Frame& frame) {
                                           child_path(path, "sessions"));
   if (body.contains("agent_runtime_id")) {
     ack.agent_runtime_id = required_blake3_prefixed(body, "agent_runtime_id", path);
+  }
+  if (body.contains("worker_id")) {
+    ack.worker_id = required_string(body, "worker_id", path);
   }
   if (const auto service = body.find("service"); service != body.end()) {
     const std::string service_path = child_path(path, "service");

@@ -78,6 +78,9 @@ struct AgentCoreOptions {
   // The service's self-update state for HELLO_ACK (hello_messages.hpp
   // `service`). Empty: not reported.
   std::function<ServiceUpdateState()> service_state;
+  // This worker's id, reported in HELLO_ACK (worker_identity.hpp); empty:
+  // not reported.
+  std::string worker_id;
 };
 
 // State shared by every session of one agent. Thread-safe.
@@ -135,5 +138,18 @@ AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWr
                                     const std::string& worker_session_id,
                                     const std::function<void()>& close_input,
                                     std::string_view coordinator_id = {});
+
+// Which coordinator a session serves, decided from its HELLO: the pairing id
+// whose proof verified (pairing_proof.hpp), or "" for a coordinator that
+// sent none (it counts as a coordinator of its own). Throws WorkerError
+// (refused) for a proof that does not verify; the session then ends with
+// ERROR before HELLO_ACK.
+using CoordinatorResolver = std::function<std::string(const CoordinatorHello& hello)>;
+
+// As above, with the coordinator decided by `resolve` after HELLO.
+AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWriter& output,
+                                    const std::string& worker_session_id,
+                                    const std::function<void()>& close_input,
+                                    const CoordinatorResolver& resolve);
 
 }  // namespace svp::exec::worker

@@ -15,6 +15,11 @@ namespace svp::exec::remote {
 
 struct RemoteConnectorOptions {
   PairingKey pairing;
+  // The worker's id when known (learned from HELLO_ACK): discovery then
+  // looks for its own instance (TXT kWorkerTxtKey), and still accepts an
+  // instance advertising the pairing id (a worker that predates worker ids).
+  // Empty: by pairing id only.
+  std::string worker_id;
   RoutePolicy routes{};
   TransportPolicy transport{};
 };

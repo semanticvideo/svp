@@ -1,5 +1,7 @@
 #include "tls_psk_parameters.hpp"
 
+#include "svp/exec/remote/remote_error.hpp"
+
 #include <CoreFoundation/CoreFoundation.h>
 #include <Security/SecProtocolMetadata.h>
 #include <Security/SecProtocolOptions.h>
@@ -42,11 +44,22 @@ std::string_view domain_name(nw_error_domain_t domain) {
 NwRef<nw_parameters_t> make_tls_psk_parameters(
     const PairingKey& key, const TransportPolicy& policy,
     const std::vector<std::string>& application_protocols) {
-  validate_pairing_key(key);
+  return make_tls_psk_parameters(std::vector<PairingKey>{key}, policy, application_protocols);
+}
+
+NwRef<nw_parameters_t> make_tls_psk_parameters(
+    const std::vector<PairingKey>& keys, const TransportPolicy& policy,
+    const std::vector<std::string>& application_protocols) {
+  if (keys.empty()) {
+    throw RemoteTransportError(RemoteErrorCode::invalid_configuration,
+                               "a TLS-PSK endpoint needs at least one key");
+  }
+  for (const PairingKey& key : keys) {
+    validate_pairing_key(key);
+  }
   validate_transport_policy(policy);
   // Captured by value: the blocks own copies whenever the framework runs them.
-  const std::vector<std::byte> secret = key.secret;
-  const std::string pairing_id = key.pairing_id;
+  const std::vector<PairingKey> psks = keys;
   const std::vector<std::string> protocols = application_protocols;
   const int keepalive_idle = static_cast<int>(policy.keepalive_idle.count());
   const int keepalive_interval = static_cast<int>(policy.keepalive_interval.count());
@@ -55,13 +68,16 @@ NwRef<nw_parameters_t> make_tls_psk_parameters(
   nw_parameters_t parameters = nw_parameters_create_secure_tcp(
       ^(nw_protocol_options_t tls_options) {
         sec_protocol_options_t options = nw_tls_copy_sec_protocol_options(tls_options);
-        dispatch_data_t psk = dispatch_data_create(secret.data(), secret.size(), nullptr,
-                                                   DISPATCH_DATA_DESTRUCTOR_DEFAULT);
-        dispatch_data_t identity = dispatch_data_create(
-            pairing_id.data(), pairing_id.size(), nullptr, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
-        sec_protocol_options_add_pre_shared_key(options, psk, identity);
-        dispatch_release(psk);
-        dispatch_release(identity);
+        for (const PairingKey& key : psks) {
+          dispatch_data_t psk = dispatch_data_create(key.secret.data(), key.secret.size(),
+                                                     nullptr, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+          dispatch_data_t identity =
+              dispatch_data_create(key.pairing_id.data(), key.pairing_id.size(), nullptr,
+                                   DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+          sec_protocol_options_add_pre_shared_key(options, psk, identity);
+          dispatch_release(psk);
+          dispatch_release(identity);
+        }
         sec_protocol_options_append_tls_ciphersuite(
             options, static_cast<tls_ciphersuite_t>(kTlsPskWithAes128GcmSha256));
         sec_protocol_options_set_min_tls_protocol_version(options, tls_protocol_version_TLSv12);

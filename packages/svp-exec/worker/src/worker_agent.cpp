@@ -7,9 +7,15 @@
 #include "svp/exec/worker/join_service.hpp"
 #include "svp/exec/worker/local_load.hpp"
 #include "svp/exec/worker/pairing_store.hpp"
+#include "svp/exec/worker/pairings_server.hpp"
+#include "svp/exec/worker/worker_identity.hpp"
+#include "svp/exec/remote/service_advertiser.hpp"
+#include "svp/exec/remote/transport_policy.hpp"
 #include "svp/exec/worker/service_updater.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 
+#include <dispatch/dispatch.h>
+#include <fcntl.h>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -24,53 +30,54 @@ namespace {
 
 std::mutex log_mutex;
 
-// Session ids carry the tail of the pairing id so a log line shows which
-// coordinator a session belongs to without printing the whole id.
-constexpr std::size_t kSessionIdPairingChars = 6;
-
 void log_line(const std::string& line) {
   const std::lock_guard lock(log_mutex);
   std::cerr << utc_timestamp_now() << " svp-worker-agent: " << line << std::endl;
 }
 
-std::string pairing_tail(const std::string& pairing_id) {
-  return pairing_id.substr(pairing_id.size() > kSessionIdPairingChars
-                               ? pairing_id.size() - kSessionIdPairingChars
-                               : 0);
-}
-
 void wake_main_thread() { ::kill(::getpid(), kAgentWakeSignal); }
 
-// Listeners of one agent. Started and stopped on the main thread only; join
-// handlers ask for changes through request_*() and wake it.
+// What one agent serves. Changed on the main thread only (start, rescan);
+// join handlers and the pairings directory watcher ask for a rescan and
+// wake it.
 class AgentListeners {
  public:
-  AgentListeners(AgentCore& core, ServiceUpdater& updater, const WorkerLayout& layout)
-      : core_(core), updater_(updater), layout_(layout) {}
+  AgentListeners(AgentCore& core, ServiceUpdater& updater, const WorkerLayout& layout,
+                 std::string worker_id)
+      : core_(core),
+        updater_(updater),
+        layout_(layout),
+        pairings_(PairingsServerOptions{
+            .worker_id = std::move(worker_id),
+            .serve =
+                [this](remote::RemoteStream& stream, const remote::RemoteSessionInfo& info,
+                       const CoordinatorResolver& resolve) { serve_session(stream, info, resolve); },
+            .log = log_line,
+            .advertise_each_pairing = true,
+            .service_name = {},
+            .transport = {}}) {}
 
   ~AgentListeners() { stop_all(); }
 
-  void start_pairing(const WorkerPairingRecord& pairing) {
-    const std::string pairing_id = pairing.key.pairing_id;
-    if (const auto found = pairings_.find(pairing_id); found != pairings_.end()) {
-      found->second->stop();
-      pairings_.erase(found);
+  // Serves exactly the pairings under <root>/pairings: one listener and one
+  // advertisement for all of them (pairings_server.hpp).
+  void rescan_pairings() {
+    std::vector<remote::PairingKey> keys;
+    for (const WorkerPairingRecord& record :
+         load_worker_pairings(PairingDirectory(layout_.pairings()))) {
+      keys.push_back(record.key);
     }
-    remote::RemoteListenerOptions listener_options;
-    listener_options.pairing = pairing.key;
-    auto listener = std::make_unique<remote::RemoteListener>(
-        listener_options,
-        [this, pairing_id](remote::RemoteStream& stream, const remote::RemoteSessionInfo& info) {
-          serve_session(stream, info, pairing_id);
-        });
-    listener->start();
-    log_line("listening pairing=" + pairing_id + " service=" + listener->advertised_name() +
-             " port=" + std::to_string(listener->port()));
-    pairings_.emplace(pairing_id, std::move(listener));
+    const std::size_t before = pairings_.pairing_count();
+    pairings_.set_pairings(keys);
+    if (pairings_.pairing_count() != before || keys.size() != before) {
+      log_line("serving " + std::to_string(keys.size()) + " pairing(s) on port " +
+               std::to_string(pairings_.port()));
+    }
   }
 
   // (Re)starts the join listener from <root>/join.json; none without one.
   void start_join() {
+    join_advertisement_.reset();
     if (join_) {
       join_->stop();
       join_.reset();
@@ -85,38 +92,39 @@ class AgentListeners {
     }
     remote::RemoteListenerOptions listener_options;
     listener_options.pairing = join_listener_key(*credential);
-    listener_options.txt = {{std::string(kFleetTxtKey), credential->token.fleet_id},
-                           {std::string(kJoinTxtKey), join_txt_value(*credential)}};
+    listener_options.advertise = false;
     join_ = std::make_unique<remote::RemoteListener>(
         listener_options, [this](remote::RemoteStream& stream,
                                  const remote::RemoteSessionInfo& info) { serve_join(stream, info); });
     join_->start();
+    // Its own instance, named after its join id, so it never collides with
+    // the worker's instance or another worker's.
+    join_advertisement_ = std::make_unique<remote::ServiceAdvertiser>(
+        remote::ServiceAdvertisement{
+            .name = credential->worker_join_id,
+            .port = join_->port(),
+            .txt = {{std::string(remote::kPairingTxtKey), credential->worker_join_id},
+                    {std::string(kFleetTxtKey), credential->token.fleet_id},
+                    {std::string(kJoinTxtKey), join_txt_value(*credential)}}},
+        log_line);
     log_line("joinable fleet=" + credential->token.fleet_id + " join=" +
              join_txt_value(*credential) + " id=" + credential->worker_join_id +
              " port=" + std::to_string(join_->port()));
   }
 
-  // Main thread: applies what join handlers asked for since the last call.
+  // Main thread: applies what was asked for since the last call.
   void apply_requests() {
-    std::vector<std::string> pairing_ids;
     bool restart_join = false;
     {
       const std::lock_guard lock(requests_mutex_);
-      pairing_ids.assign(requested_pairings_.begin(), requested_pairings_.end());
-      requested_pairings_.clear();
       restart_join = join_restart_requested_;
       join_restart_requested_ = false;
     }
-    for (const std::string& pairing_id : pairing_ids) {
-      try {
-        const std::optional<std::string> bytes =
-            PairingDirectory(layout_.pairings()).read(pairing_id);
-        if (bytes) {
-          start_pairing(decode_worker_pairing(*bytes));
-        }
-      } catch (const std::exception& error) {
-        log_line("cannot start the listener of pairing " + pairing_id + ": " + error.what());
-      }
+    try {
+      rescan_pairings();
+    } catch (const std::exception& error) {
+      log_line("cannot serve the pairings under " + layout_.pairings().string() + ": " +
+               error.what());
     }
     if (restart_join) {
       try {
@@ -128,20 +136,18 @@ class AgentListeners {
   }
 
   void stop_all() {
+    join_advertisement_.reset();
     if (join_) {
       join_->stop();
     }
-    for (auto& [id, listener] : pairings_) {
-      listener->stop();
-    }
+    pairings_.stop();
   }
 
  private:
   void serve_session(remote::RemoteStream& stream, const remote::RemoteSessionInfo& info,
-                     const std::string& pairing_id) {
-    const std::string session_id = "ws-" + std::to_string(::getpid()) + "-" +
-                                   pairing_tail(pairing_id) + "-" +
-                                   std::to_string(info.session_number);
+                     const CoordinatorResolver& resolve) {
+    const std::string session_id =
+        "ws-" + std::to_string(::getpid()) + "-" + std::to_string(info.session_number);
     if (!updater_.try_enter_session()) {
       log_line("session " + session_id + " from " + info.peer +
                " not served: the agent is switching to a newer runtime");
@@ -151,14 +157,22 @@ class AgentListeners {
     StreamFrameReader reader(stream, core_.options().frame_limits);
     StreamFrameWriter writer(stream, core_.options().frame_limits);
     AgentSessionEnd end = AgentSessionEnd::protocol_error;
+    std::string coordinator = "(unproven: an older coordinator)";
+    const CoordinatorResolver logging_resolve = [&](const CoordinatorHello& hello) {
+      const std::string id = resolve(hello);
+      if (!id.empty()) {
+        coordinator = "pairing=" + id;
+      }
+      return id;
+    };
     try {
       end = serve_agent_session(core_, reader, writer, session_id, [&stream] { stream.cancel(); },
-                                pairing_id);
+                                logging_resolve);
     } catch (const std::exception& error) {
       log_line("session " + session_id + " failed: " + error.what());
     }
-    log_line("session " + session_id + " ended (" + std::string(agent_session_end_name(end)) +
-             ")");
+    log_line("session " + session_id + " " + coordinator + " ended (" +
+             std::string(agent_session_end_name(end)) + ")");
     updater_.leave_session();
   }
 
@@ -171,7 +185,6 @@ class AgentListeners {
       log_line("fleet join from " + info.peer + " paired " + outcome.pairing_id);
       {
         const std::lock_guard lock(requests_mutex_);
-        requested_pairings_.insert(outcome.pairing_id);
         join_restart_requested_ = join_restart_requested_ || outcome.listener_key_changed;
       }
       wake_main_thread();
@@ -183,12 +196,55 @@ class AgentListeners {
   AgentCore& core_;
   ServiceUpdater& updater_;
   WorkerLayout layout_;
-  std::map<std::string, std::unique_ptr<remote::RemoteListener>> pairings_;
+  PairingsServer pairings_;
   std::unique_ptr<remote::RemoteListener> join_;
+  std::unique_ptr<remote::ServiceAdvertiser> join_advertisement_;
   std::mutex credential_mutex_;
   std::mutex requests_mutex_;
-  std::set<std::string> requested_pairings_;
   bool join_restart_requested_ = false;
+};
+
+// Wakes the main thread whenever <root>/pairings changes (a record written
+// by a fleet join, `workers pair`, or removed by `workers unpair`), so the
+// change is served at once without a restart.
+class PairingsWatch {
+ public:
+  explicit PairingsWatch(const std::filesystem::path& directory)
+      : queue_(dispatch_queue_create("org.svp.worker.pairings-watch", DISPATCH_QUEUE_SERIAL)) {
+    fd_ = ::open(directory.c_str(), O_EVTONLY);
+    if (fd_ < 0) {
+      log_line("cannot watch " + directory.string() + "; pairing changes need a restart");
+      return;
+    }
+    source_ = dispatch_source_create(DISPATCH_SOURCE_TYPE_VNODE, static_cast<uintptr_t>(fd_),
+                                     DISPATCH_VNODE_WRITE | DISPATCH_VNODE_EXTEND |
+                                         DISPATCH_VNODE_ATTRIB | DISPATCH_VNODE_LINK,
+                                     queue_);
+    dispatch_source_set_event_handler(source_, ^{
+      wake_main_thread();
+    });
+    const int fd = fd_;
+    dispatch_source_set_cancel_handler(source_, ^{
+      ::close(fd);
+    });
+    dispatch_resume(source_);
+  }
+  ~PairingsWatch() {
+    if (source_ != nullptr) {
+      dispatch_source_cancel(source_);
+      dispatch_release(source_);
+    } else if (fd_ >= 0) {
+      ::close(fd_);
+    }
+    dispatch_release(queue_);
+  }
+  PairingsWatch(const PairingsWatch&) = delete;
+  PairingsWatch& operator=(const PairingsWatch&) = delete;
+
+ private:
+  dispatch_queue_t queue_;
+  dispatch_source_t source_ = nullptr;
+  int fd_ = -1;
 };
 
 }  // namespace
@@ -216,6 +272,7 @@ int run_worker_agent(const WorkerAgentOptions& options) {
     return 0;
   }
 
+  const std::string worker_id = load_or_create_worker_id(layout);
   ServiceUpdater updater(ServiceUpdaterOptions{
       .layout = layout,
       .own_runtime = options.agent_runtime_id,
@@ -238,12 +295,13 @@ int run_worker_agent(const WorkerAgentOptions& options) {
                                   },
                                   .slot_contention_window = kDefaultSlotContentionWindow,
                                   .runtime_installed = [&updater] { updater.runtime_installed(); },
-                                  .service_state = [&updater] { return updater.state(); }});
+                                  .service_state = [&updater] { return updater.state(); },
+                                  .worker_id = worker_id});
   const HostFacts& host = core.options().host;
   log_line("starting pid=" + std::to_string(::getpid()) + " macOS " + host.os.product_version +
            " (" + host.os.build + ") " + host.arch + " cpus=" + std::to_string(host.logical_cpus) +
            " memory=" + std::to_string(host.physical_memory_bytes) +
-           " reserve=" + std::to_string(core.ledger().reserve_bytes()) +
+           " reserve=" + std::to_string(core.ledger().reserve_bytes()) + " worker=" + worker_id +
            (options.agent_runtime_id ? " runtime=" + blake3_prefixed(*options.agent_runtime_id)
                                      : std::string()));
   if (!updater.enabled()) {
@@ -253,13 +311,14 @@ int run_worker_agent(const WorkerAgentOptions& options) {
     return kWorkerRestartExitCode;
   }
 
-  AgentListeners listeners(core, updater, layout);
-  for (const WorkerPairingRecord& pairing : pairings) {
-    listeners.start_pairing(pairing);
-  }
+  AgentListeners listeners(core, updater, layout, worker_id);
+  // Only a listener that cannot open ends the agent (launchd restarts it);
+  // advertising never does (pairings_server.hpp).
+  listeners.rescan_pairings();
   if (joinable) {
     listeners.start_join();
   }
+  const PairingsWatch watch(layout.pairings());
 
   int exit_code = 0;
   while (true) {

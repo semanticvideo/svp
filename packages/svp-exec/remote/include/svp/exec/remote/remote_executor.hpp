@@ -40,7 +40,9 @@ inline constexpr std::chrono::milliseconds kDefaultReconnectPause{500};
 // from `reader` and writes requests to `writer`; frames it leaves unread stay
 // in `reader` for the lease pump. Throwing ends the session: its queued
 // leases fail with executor_lost and the exception text as the reason.
-using RemoteSessionPreamble = std::function<void(FrameReader& reader, FrameWriter& writer)>;
+// `stream` is the session's connection (its TLS exporter, for example).
+using RemoteSessionPreamble =
+    std::function<void(FrameReader& reader, FrameWriter& writer, RemoteStream& stream)>;
 
 // Runs on a session's own thread before it starts connecting (so the
 // scheduler thread never waits on it), and may block: a worker whose service

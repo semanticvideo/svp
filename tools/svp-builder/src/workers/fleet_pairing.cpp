@@ -5,6 +5,7 @@
 #include "svp/exec/worker/fleet_join.hpp"
 #include "svp/exec/worker/worker_connection.hpp"
 #include "svp/exec/worker/worker_error.hpp"
+#include "svp/exec/worker/worker_id_book.hpp"
 
 #include <set>
 
@@ -63,6 +64,7 @@ FleetPairingReport pair_joinable_fleet_workers(const FleetMembership& membership
       record.runtime_kind = runtime_kind;
       record.worker = joined.worker;
       store.write(record.key.pairing_id, encode_coordinator_pairing(record));
+      default_worker_id_book().learn(record.key.pairing_id, record.worker.worker_id);
       if (progress != nullptr) {
         *progress << "paired " << name << " as " << record.key.pairing_id << " ("
                   << record.worker.user << ", macOS " << record.worker.os.product_version

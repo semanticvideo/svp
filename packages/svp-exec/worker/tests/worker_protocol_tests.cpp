@@ -61,6 +61,10 @@ void test_hello_round_trips() {
   declaring.capacity = {{"ocr.frame_batch", 2}, {"track.window", 1}};
   expect(hello_from_frame(wire(make_hello_frame(declaring))) == declaring,
          "HELLO with declared capacity");
+  CoordinatorHello proving = hello;
+  proving.pairing = PairingProof{.pairing_id = "svpw-0123", .proof = std::string(64, 'a')};
+  expect(hello_from_frame(wire(make_hello_frame(proving))) == proving,
+         "HELLO with a pairing proof");
   Frame zero = make_hello_frame(declaring);
   zero.body["capacity"]["ocr.frame_batch"] = 0;
   svp::exec::test::expect_exec_error(
@@ -104,6 +108,9 @@ void test_hello_ack_round_trips() {
   expect(hello_ack_from_frame(wire(make_hello_ack_frame(ack))) == ack,
          "an ack with a pending switch");
   ack.service->pending.reset();
+  ack.worker_id = "svpn-0123456789abcdef01234567";
+  expect(hello_ack_from_frame(wire(make_hello_ack_frame(ack))) == ack, "an ack with a worker id");
+  ack.worker_id.clear();
   ack.service->release_stamp.reset();
   ack.service->self_update = false;
   expect(hello_ack_from_frame(wire(make_hello_ack_frame(ack))) == ack,

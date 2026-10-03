@@ -38,8 +38,10 @@ Frame error_frame(std::string_view code, std::string_view message) {
 class AgentSession {
  public:
   AgentSession(AgentCore& core, FrameWriter& output, std::string session_id,
-               std::function<void()> close_input, std::string coordinator_id)
-      : core_(core),
+               std::function<void()> close_input, std::string coordinator_id,
+               CoordinatorResolver resolve = {})
+      : resolve_(std::move(resolve)),
+        core_(core),
         output_(output),
         session_id_(std::move(session_id)),
         named_coordinator_(!coordinator_id.empty()),
@@ -74,6 +76,17 @@ class AgentSession {
     } catch (const ExecError& error) {
       send_error("protocol_error", error.what());
       return AgentSessionEnd::protocol_error;
+    }
+    if (resolve_) {
+      std::string coordinator_id;
+      try {
+        coordinator_id = resolve_(hello_);
+      } catch (const WorkerError& error) {
+        send_error(worker_error_code_name(error.code()), error.what());
+        return AgentSessionEnd::protocol_error;
+      }
+      named_coordinator_ = !coordinator_id.empty();
+      coordinator_id_ = named_coordinator_ ? coordinator_id : session_id_;
     }
     const std::optional<SessionRefusal> refusal = evaluate_hello(hello_, core_.options().host);
     output_.write(make_hello_ack_frame(core_.describe(hello_.runtime_id, refusal)));
@@ -412,6 +425,7 @@ class AgentSession {
     }
   }
 
+  CoordinatorResolver resolve_;
   AgentCore& core_;
   FrameWriter& output_;
   std::string session_id_;
@@ -494,6 +508,7 @@ WorkerHelloAck AgentCore::describe(const Blake3Digest& requested_runtime,
   if (options_.service_state) {
     ack.service = options_.service_state();
   }
+  ack.worker_id = options_.worker_id;
   return ack;
 }
 
@@ -522,6 +537,21 @@ AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWr
   {
     AgentSession session(core, output, worker_session_id, close_input,
                          std::string(coordinator_id));
+    end = session.run(input);
+    session.finish();
+  }
+  --core.active_sessions;
+  return end;
+}
+
+AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWriter& output,
+                                    const std::string& worker_session_id,
+                                    const std::function<void()>& close_input,
+                                    const CoordinatorResolver& resolve) {
+  ++core.active_sessions;
+  AgentSessionEnd end = AgentSessionEnd::input_closed;
+  {
+    AgentSession session(core, output, worker_session_id, close_input, {}, resolve);
     end = session.run(input);
     session.finish();
   }

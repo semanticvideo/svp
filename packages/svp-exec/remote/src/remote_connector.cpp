@@ -86,8 +86,12 @@ std::vector<detail::DiscoveredService> browse(RemoteConnector::State& state) {
       throw RemoteTransportError(RemoteErrorCode::cancelled, "connector was cancelled");
     }
   }
-  std::vector<detail::DiscoveredService> services = detail::browse_for_pairing(
-      state.options.pairing.pairing_id, state.options.routes, state.signal);
+  std::vector<detail::DiscoveredService> services =
+      state.options.worker_id.empty()
+          ? detail::browse_for_pairing(state.options.pairing.pairing_id, state.options.routes,
+                                       state.signal)
+          : detail::browse_for_worker(state.options.worker_id, state.options.pairing.pairing_id,
+                                      state.options.routes, state.signal);
   if (services.empty()) {
     throw RemoteTransportError(RemoteErrorCode::worker_not_found,
                                "no worker advertised pairing `" +

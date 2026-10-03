@@ -141,7 +141,7 @@ struct RemoteExecutor::State {
       bool ready = true;
       if (options.session_preamble) {
         try {
-          options.session_preamble(reader, *session.writer);
+          options.session_preamble(reader, *session.writer, *session.stream);
         } catch (const std::exception& error) {
           ready = false;
           end.reason = std::string("worker session setup failed: ") + error.what();
