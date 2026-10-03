@@ -135,7 +135,7 @@ int run_workers_fleet_pair(const WorkersCliOptions& options) {
       client.ensure_runtime(context.runtime, stats);
       client.ensure_model_bundles(models, stats);
       client.shutdown();
-      (void)await_worker_runtime_switch(record.key, context.hello(), context.runtime, ack, nullptr,
+      (void)await_worker_runtime_switch(record.key, context.hello(), context.runtime, ack, {},
                                         [](const std::string& line) { std::cout << line << "\n" << std::flush; });
       std::cout << record.key.pairing_id << ": runtime "
                 << (stats.runtime_pushed ? "pushed and verified" : "already present") << ", "

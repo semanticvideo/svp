@@ -98,6 +98,12 @@ void test_hello_ack_round_trips() {
                                    .declined_runtimes = {blake3_digest(std::string_view("d"))}};
   expect(hello_ack_from_frame(wire(make_hello_ack_frame(ack))) == ack,
          "an ack with the service's self-update state");
+  ack.service->pending = PendingServiceSwitch{
+      .runtime_id = blake3_digest(std::string_view("p")), .release_stamp = 1'790'000'100,
+      .bytes = 123};
+  expect(hello_ack_from_frame(wire(make_hello_ack_frame(ack))) == ack,
+         "an ack with a pending switch");
+  ack.service->pending.reset();
   ack.service->release_stamp.reset();
   ack.service->self_update = false;
   expect(hello_ack_from_frame(wire(make_hello_ack_frame(ack))) == ack,

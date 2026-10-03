@@ -33,6 +33,19 @@ WorkerHelloAck ack_on(const Blake3Digest& agent, std::optional<std::uint64_t> st
 }
 
 const RuntimeRelease kPushed{.runtime_id = kNew, .release_stamp = 20};
+const std::optional<RuntimeOffer> kOffer = RuntimeOffer{.release = kPushed, .bytes = 1000};
+const Blake3Digest kOther = svp::exec::blake3_digest(std::string_view("other"));
+
+// An ACK from a worker that committed to `pending`, installed by another
+// coordinator.
+WorkerHelloAck pending_on(const Blake3Digest& agent, std::uint64_t own_stamp,
+                          const Blake3Digest& pending, std::uint64_t pending_stamp,
+                          std::uint64_t sessions = 1) {
+  WorkerHelloAck ack = ack_on(agent, own_stamp, true, sessions);
+  ack.service->pending =
+      PendingServiceSwitch{.runtime_id = pending, .release_stamp = pending_stamp, .bytes = 77};
+  return ack;
+}
 
 void test_predicts_the_switch() {
   expect(worker_will_switch_to(ack_on(kOld, 10), kPushed), "a newer stamped runtime switches it");
@@ -105,7 +118,7 @@ void test_waits_until_the_worker_answers_on_the_new_runtime() {
   script.answers = {answers(ack_on(kOld, 10)), unreachable(), unreachable("not advertised"),
                     answers(ack_on(kNew, 20))};
   const RestartWaitOutcome outcome =
-      wait_for_worker_restart(kPushed, std::chrono::seconds(30), script.hooks());
+      wait_for_worker_restart(kOffer, std::chrono::seconds(30), script.hooks());
   expect(outcome.end == RestartWaitEnd::settled, "settled");
   expect(outcome.ack && outcome.ack->agent_runtime_id == kNew, "on the new runtime");
   expect(outcome.attempts == 4 && script.sleeps == 3, "probed until it came back");
@@ -117,7 +130,7 @@ void test_does_not_wait_when_the_switch_was_declined() {
   declined.service->declined_runtimes = {kNew};
   script.answers = {unreachable(), answers(declined)};
   const RestartWaitOutcome outcome =
-      wait_for_worker_restart(kPushed, std::chrono::seconds(30), script.hooks());
+      wait_for_worker_restart(kOffer, std::chrono::seconds(30), script.hooks());
   expect(outcome.end == RestartWaitEnd::settled && outcome.attempts == 2,
          "a failed test-start ends the wait as soon as the worker says so");
 }
@@ -126,7 +139,7 @@ void test_other_sessions_defer_the_switch() {
   Script script;
   script.answers = {answers(ack_on(kOld, 10, true, 3))};
   const RestartWaitOutcome outcome =
-      wait_for_worker_restart(kPushed, std::chrono::seconds(30), script.hooks());
+      wait_for_worker_restart(kOffer, std::chrono::seconds(30), script.hooks());
   expect(outcome.end == RestartWaitEnd::deferred && outcome.attempts == 1,
          "with other coordinators' sessions live, waiting does not help");
 }
@@ -134,7 +147,7 @@ void test_other_sessions_defer_the_switch() {
 void test_gives_up_at_the_deadline() {
   Script script;
   const RestartWaitOutcome outcome =
-      wait_for_worker_restart(kPushed, std::chrono::seconds(5), script.hooks());
+      wait_for_worker_restart(kOffer, std::chrono::seconds(5), script.hooks());
   expect(outcome.end == RestartWaitEnd::timed_out, "timed out");
   expect(script.clock - std::chrono::steady_clock::time_point{} <= std::chrono::seconds(5),
          "never past the deadline");
@@ -146,14 +159,14 @@ void test_gives_up_at_the_deadline() {
 void test_permanent_failures_end_the_wait() {
   Script script;
   script.answers = {WorkerProbeResult{.ack = {}, .error = "authentication", .permanent = true}};
-  expect(wait_for_worker_restart(kPushed, std::chrono::seconds(30), script.hooks()).end ==
+  expect(wait_for_worker_restart(kOffer, std::chrono::seconds(30), script.hooks()).end ==
              RestartWaitEnd::refused,
          "an authentication failure does not wait");
   Script refusing;
   WorkerHelloAck refusal = ack_on(kNew, 20);
   refusal.refusal = SessionRefusal{.code = SessionRefusalCode::os_mismatch, .message = "macOS"};
   refusing.answers = {answers(refusal)};
-  expect(wait_for_worker_restart(kPushed, std::chrono::seconds(30), refusing.hooks()).end ==
+  expect(wait_for_worker_restart(kOffer, std::chrono::seconds(30), refusing.hooks()).end ==
              RestartWaitEnd::refused,
          "a refused HELLO does not wait");
 }
@@ -162,12 +175,12 @@ void test_cancellation_ends_the_wait() {
   Script script;
   RestartWaitHooks hooks = script.hooks();
   hooks.cancelled = [] { return true; };
-  const RestartWaitOutcome outcome = wait_for_worker_restart(kPushed, std::chrono::seconds(30), hooks);
+  const RestartWaitOutcome outcome = wait_for_worker_restart(kOffer, std::chrono::seconds(30), hooks);
   expect(outcome.attempts == 1 && script.sleeps == 0, "a cancelled build stops waiting");
 }
 
 void test_switch_watch_between_sessions() {
-  RuntimeSwitchWatch watch(kPushed);
+  RuntimeSwitchWatch watch(kOffer);
   expect(!watch.take_due(), "nothing is due before any session");
   watch.observed(ack_on(kOld, 30));
   expect(!watch.take_due(), "an older runtime does not switch the worker");
@@ -188,9 +201,49 @@ void test_switch_watch_between_sessions() {
   const std::optional<WorkerHelloAck> before_job_two = watch.take_due();
   expect(before_job_two.has_value(), "job 2 sees the switch is due");
   const RestartWaitOutcome outcome =
-      wait_for_worker_restart(watch.runtime(), std::chrono::seconds(30), script.hooks());
+      wait_for_worker_restart(watch.offered(), std::chrono::seconds(30), script.hooks());
   expect(outcome.end == RestartWaitEnd::settled && outcome.ack->agent_runtime_id == kNew,
          "job 2 starts once the worker answers on the new runtime");
+}
+
+void test_expected_switch_includes_other_coordinators_runtimes() {
+  // This coordinator's runtime is not newer; another coordinator's is pending.
+  const WorkerHelloAck ack = pending_on(kOld, 30, kOther, 40);
+  expect(!worker_will_switch_to(ack, kPushed), "this coordinator's runtime is older");
+  const std::optional<RuntimeOffer> target = expected_switch(ack, kOffer);
+  expect(target && target->release.runtime_id == kOther && target->bytes == 77,
+         "the reported pending switch is due, whoever installed it");
+  expect(expected_switch(ack, std::nullopt).has_value(),
+         "a coordinator that offered nothing sees it too");
+
+  const std::optional<RuntimeOffer> newer_offer =
+      expected_switch(pending_on(kOld, 10, kOther, 15), kOffer);
+  expect(newer_offer && newer_offer->release.runtime_id == kNew,
+         "an offered runtime newer than the pending one is the one the worker moves to");
+  expect(!expected_switch(pending_on(kOther, 40, kOther, 40), kOffer),
+         "no switch once the service runs the pending runtime");
+  WorkerHelloAck off = pending_on(kOld, 10, kOther, 40);
+  off.service->self_update = false;
+  expect(!expected_switch(off, kOffer), "a service that does not update itself never switches");
+  WorkerHelloAck old_worker = ack_on(kOld, 10);
+  old_worker.service.reset();
+  expect(!expected_switch(old_worker, kOffer), "a worker without `service` never switches");
+}
+
+void test_waits_for_another_coordinators_runtime() {
+  Script script;
+  script.answers = {answers(pending_on(kOld, 30, kOther, 40)), unreachable(),
+                    answers(ack_on(kOther, 40))};
+  const RestartWaitOutcome outcome =
+      wait_for_worker_restart(kOffer, std::chrono::seconds(30), script.hooks());
+  expect(outcome.end == RestartWaitEnd::settled && outcome.attempts == 3,
+         "waited until the worker came back with nothing pending");
+  expect(outcome.ack->agent_runtime_id == kOther, "on the other coordinator's runtime");
+
+  RuntimeSwitchWatch watch(std::nullopt);
+  watch.observed(pending_on(kOld, 30, kOther, 40));
+  expect(watch.take_due().has_value(),
+         "a repeated session waits for a pending switch it did not cause");
 }
 
 }  // namespace
@@ -210,5 +263,8 @@ int main() {
           {"permanent failures end the wait", test_permanent_failures_end_the_wait},
           {"cancellation ends the wait", test_cancellation_ends_the_wait},
           {"switch watch between sessions", test_switch_watch_between_sessions},
+          {"expected switch includes other coordinators' runtimes",
+           test_expected_switch_includes_other_coordinators_runtimes},
+          {"waits for another coordinator's runtime", test_waits_for_another_coordinators_runtime},
       });
 }

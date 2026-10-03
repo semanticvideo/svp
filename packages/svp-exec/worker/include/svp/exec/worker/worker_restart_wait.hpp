@@ -1,14 +1,16 @@
 #pragma once
 
 // The coordinator's side of worker self-update (service_updater.hpp): a
-// runtime this coordinator pushes, or finds already installed, that is newer
-// than the one the worker's service runs makes the service switch to it
-// and restart once its sessions end. A coordinator that opened its next
-// session right then would find the worker gone (connection refused, or not
-// advertised for a few seconds) and drop it from the command or build that
-// delivered the update. So after such a session it waits, within
-// worker_restart_deadline, until the worker answers HELLO on the new runtime
-// (or shows it will not switch now), and only then opens its next session.
+// runtime newer than the one the worker's service runs, installed there by
+// this coordinator or any other, makes the service switch to it and restart
+// once its sessions end. A coordinator that opened its next session right
+// then would find the worker gone (connection refused, or not advertised for
+// a few seconds) and drop it from the command, build, or batch at hand. So
+// when a session's HELLO_ACK shows a switch is due (the worker's reported
+// pending switch, or the runtime this coordinator just installed there), the
+// coordinator waits after that session, within worker_restart_deadline,
+// until the worker answers HELLO with no switch due (on the new runtime, or
+// having declined it), and only then opens its next session.
 
 #include "svp/exec/blake3_digest.hpp"
 #include "svp/exec/runtime_release.hpp"
@@ -44,12 +46,28 @@ inline constexpr std::chrono::milliseconds kWorkerRestartPollPause{500};
 // a few seconds.
 [[nodiscard]] std::chrono::milliseconds worker_restart_deadline(std::uint64_t runtime_bytes);
 
+// A runtime and its total file bytes (which size the wait).
+struct RuntimeOffer {
+  RuntimeRelease release;
+  std::uint64_t bytes = 0;
+
+  bool operator==(const RuntimeOffer&) const = default;
+};
+
 // Whether the worker that answered `ack` will move its service to `runtime`
 // (installed there, now or earlier): its service updates itself, does not
 // run `runtime` already, has not declined it, and `runtime` is newer under
 // the release order (runtime_release.hpp). False for a worker that does not
 // report its service (it predates self-update and never switches).
 [[nodiscard]] bool worker_will_switch_to(const WorkerHelloAck& ack, const RuntimeRelease& runtime);
+
+// The runtime the worker that answered `ack` will restart on once its
+// sessions end, when any: the pending switch it reports (hello_messages.hpp,
+// whoever installed that runtime), and `offered` (a runtime this coordinator
+// has installed there) when worker_will_switch_to it; the newer of the two
+// under the release order. nullopt: no switch is due.
+[[nodiscard]] std::optional<RuntimeOffer> expected_switch(const WorkerHelloAck& ack,
+                                                          const std::optional<RuntimeOffer>& offered);
 
 enum class RestartWaitEnd {
   // The worker answered on the runtime, or showed it will not switch to it
@@ -93,26 +111,28 @@ struct RestartWaitHooks {
   std::function<bool()> cancelled;
 };
 
-// Probes until the worker answers on `runtime`, or the ACK shows it will not
-// switch (settled) or that other sessions hold the switch (deferred), or
+// Probes until an ACK shows no switch due (expected_switch with `offered` is
+// nullopt: settled) or that other sessions hold the switch (deferred), or
 // `deadline` passes.
-[[nodiscard]] RestartWaitOutcome wait_for_worker_restart(const RuntimeRelease& runtime,
+[[nodiscard]] RestartWaitOutcome wait_for_worker_restart(const std::optional<RuntimeOffer>& offered,
                                                          std::chrono::milliseconds deadline,
                                                          const RestartWaitHooks& hooks);
 
 // For a coordinator that opens one session after another to the same worker
-// (a batch's whole-video jobs, paired_video_builder.hpp): remembers that a
-// session's HELLO_ACK showed the worker will switch to `runtime` once that
-// session ends, so the next session first waits for the restart instead of
-// finding the worker gone and reporting it unavailable. Thread-safe.
+// (a batch's whole-video jobs, paired_video_builder.hpp; a build's task
+// sessions, worker_supplies.hpp): remembers that a session's HELLO_ACK
+// showed a switch is due (expected_switch with `offered`, this
+// coordinator's runtime, installed by the session), so the next session
+// first waits for the restart instead of finding the worker gone.
+// Thread-safe.
 class RuntimeSwitchWatch {
  public:
-  explicit RuntimeSwitchWatch(RuntimeRelease runtime) : runtime_(std::move(runtime)) {}
+  explicit RuntimeSwitchWatch(std::optional<RuntimeOffer> offered)
+      : offered_(std::move(offered)) {}
 
-  [[nodiscard]] const RuntimeRelease& runtime() const noexcept { return runtime_; }
+  [[nodiscard]] const std::optional<RuntimeOffer>& offered() const noexcept { return offered_; }
 
-  // A session was answered with `ack`; it is due to switch the worker when
-  // worker_will_switch_to(ack, runtime) (a later ack replaces an earlier one).
+  // A session was answered with `ack` (a later ack replaces an earlier one).
   void observed(const WorkerHelloAck& ack);
 
   // Before the next session: the ACK that showed the switch, when one is
@@ -121,7 +141,7 @@ class RuntimeSwitchWatch {
   [[nodiscard]] std::optional<WorkerHelloAck> take_due();
 
  private:
-  RuntimeRelease runtime_;
+  std::optional<RuntimeOffer> offered_;
   std::mutex mutex_;
   std::optional<WorkerHelloAck> due_;
 };

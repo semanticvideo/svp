@@ -213,6 +213,12 @@ Frame make_hello_ack_frame(const WorkerHelloAck& ack) {
     if (ack.service->release_stamp) {
       service["release_stamp"] = *ack.service->release_stamp;
     }
+    if (ack.service->pending) {
+      service["pending"] =
+          nlohmann::json{{"bytes", ack.service->pending->bytes},
+                         {"release_stamp", ack.service->pending->release_stamp},
+                         {"runtime_id", blake3_prefixed(ack.service->pending->runtime_id)}};
+    }
     body["service"] = std::move(service);
   }
   return Frame{.type = MessageType::hello_ack, .body = std::move(body), .payloads = {}};
@@ -276,6 +282,14 @@ WorkerHelloAck hello_ack_from_frame(const Frame& frame) {
     }
     state.declined_runtimes =
         required_digest_array(*service, "declined_runtimes", service_path, true);
+    if (const auto pending = service->find("pending"); pending != service->end()) {
+      const std::string pending_path = child_path(service_path, "pending");
+      require_object(*pending, pending_path);
+      state.pending = PendingServiceSwitch{
+          .runtime_id = required_blake3_prefixed(*pending, "runtime_id", pending_path),
+          .release_stamp = required_unsigned(*pending, "release_stamp", pending_path),
+          .bytes = required_unsigned(*pending, "bytes", pending_path)};
+    }
     ack.service = std::move(state);
   }
   return ack;

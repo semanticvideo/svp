@@ -146,11 +146,11 @@ CapacityOutcome ensure_worker_audio_capacity(const svp::exec::remote::PairingKey
         const std::size_t max_slots = calibration::capacity_max_slots(
             ack.memory.available_bytes, ack.memory_reserve_bytes, ack.host.logical_cpus,
             calibration::audio_task_peak_rss_mb(task_type));
-        svp::exec::remote::RemoteExecutor executor(svp::exec::remote::RemoteExecutorOptions{
-            .executor_id = "calibration." + pairing.pairing_id,
-            .connector = {.pairing = pairing},
-            .slots = max_slots,
-            .session_preamble = make_supplying_preamble(with_clip)});
+        svp::exec::remote::RemoteExecutor executor(with_supplied_sessions(
+            svp::exec::remote::RemoteExecutorOptions{.executor_id = "calibration." + pairing.pairing_id,
+                                                     .connector = {.pairing = pairing},
+                                                     .slots = max_slots},
+            with_clip));
         return calibration::calibrate_capacity(
             executor, max_slots,
             calibration::audio_capacity_workload(task_type, setup, ref, source.file),

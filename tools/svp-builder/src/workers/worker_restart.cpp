@@ -4,39 +4,38 @@
 #include "svp/exec/worker/coordinator_session.hpp"
 #include "svp/exec/worker/worker_connection.hpp"
 #include "svp/exec/worker/worker_error.hpp"
-#include "svp/exec/worker/worker_restart_wait.hpp"
+
+#include <map>
+#include <mutex>
 
 namespace svp::builder::workers {
 
 using namespace svp::exec::worker;
 namespace remote = svp::exec::remote;
 
-namespace {
-
-std::uint64_t runtime_bytes(const CoordinatorRuntime& runtime) {
-  std::uint64_t total = 0;
+RuntimeOffer runtime_offer(const CoordinatorRuntime& runtime) {
+  std::uint64_t bytes = 0;
   for (const svp::exec::RuntimeManifestFile& file : runtime.manifest.files) {
-    total += file.size_bytes;
+    bytes += file.size_bytes;
   }
-  return total;
+  return RuntimeOffer{.release = {.runtime_id = runtime.runtime_id,
+                                  .release_stamp = runtime.release_stamp},
+                      .bytes = bytes};
 }
-
-}  // namespace
 
 std::optional<WorkerHelloAck> await_worker_runtime_switch(
     const remote::PairingKey& key, const CoordinatorHello& hello,
     const CoordinatorRuntime& runtime, const WorkerHelloAck& ack,
-    const svp::exec::CancellationToken* cancellation,
-    const std::function<void(const std::string&)>& log) {
-  const svp::exec::RuntimeRelease release{.runtime_id = runtime.runtime_id,
-                                          .release_stamp = runtime.release_stamp};
-  if (!worker_will_switch_to(ack, release)) {
+    const std::function<bool()>& cancelled, const std::function<void(const std::string&)>& log) {
+  const RuntimeOffer offer = runtime_offer(runtime);
+  const std::optional<RuntimeOffer> target = expected_switch(ack, offer);
+  if (!target) {
     return std::nullopt;
   }
-  const std::chrono::milliseconds deadline = worker_restart_deadline(runtime_bytes(runtime));
+  const std::chrono::milliseconds deadline = worker_restart_deadline(target->bytes);
   if (log) {
     log(key.pairing_id + ": its service moves to runtime " +
-        svp::exec::blake3_prefixed(runtime.runtime_id) + "; waiting up to " +
+        svp::exec::blake3_prefixed(target->release.runtime_id) + "; waiting up to " +
         std::to_string(deadline.count() / 1000) + " s for it to restart on it");
   }
   RestartWaitHooks hooks;
@@ -59,12 +58,12 @@ std::optional<WorkerHelloAck> await_worker_runtime_switch(
     }
     return result;
   };
-  if (cancellation != nullptr) {
-    hooks.cancelled = [cancellation] { return cancellation->requested(); };
-  }
-  const RestartWaitOutcome outcome = wait_for_worker_restart(release, deadline, hooks);
+  hooks.cancelled = cancelled;
+  const RestartWaitOutcome outcome =
+      wait_for_worker_restart(std::optional<RuntimeOffer>(offer), deadline, hooks);
   if (log) {
-    const bool switched = outcome.ack && outcome.ack->agent_runtime_id == runtime.runtime_id;
+    const bool switched =
+        outcome.ack && outcome.ack->agent_runtime_id == target->release.runtime_id;
     log(key.pairing_id + ": " +
         (switched ? std::string("restarted on the new runtime")
                   : std::string(restart_wait_end_name(outcome.end)) +
@@ -75,6 +74,20 @@ std::optional<WorkerHelloAck> await_worker_runtime_switch(
     return std::nullopt;
   }
   return outcome.ack;
+}
+
+std::shared_ptr<RuntimeSwitchWatch> runtime_switch_watch(const std::string& pairing_id,
+                                                         const CoordinatorRuntime& runtime) {
+  static std::mutex mutex;
+  static std::map<std::pair<std::string, svp::exec::Blake3Digest>,
+                  std::shared_ptr<RuntimeSwitchWatch>>
+      watches;
+  const std::lock_guard lock(mutex);
+  std::shared_ptr<RuntimeSwitchWatch>& watch = watches[{pairing_id, runtime.runtime_id}];
+  if (!watch) {
+    watch = std::make_shared<RuntimeSwitchWatch>(runtime_offer(runtime));
+  }
+  return watch;
 }
 
 }  // namespace svp::builder::workers

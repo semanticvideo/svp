@@ -94,9 +94,20 @@ void ServiceUpdater::runtime_installed() { (void)consider(); }
 
 ServiceUpdateState ServiceUpdater::state() const {
   const std::lock_guard lock(mutex_);
-  return ServiceUpdateState{.self_update = enabled(),
-                            .release_stamp = own_.release_stamp,
-                            .declined_runtimes = {failed_.begin(), failed_.end()}};
+  ServiceUpdateState state{.self_update = enabled(),
+                           .release_stamp = own_.release_stamp,
+                           .declined_runtimes = {failed_.begin(), failed_.end()},
+                           .pending = std::nullopt};
+  if (!enabled()) {
+    return state;
+  }
+  const std::optional<Candidate> next = switching_ ? switching_ : newest_candidate();
+  if (next && next->release.release_stamp) {
+    state.pending = PendingServiceSwitch{.runtime_id = next->release.runtime_id,
+                                         .release_stamp = *next->release.release_stamp,
+                                         .bytes = next->bytes};
+  }
+  return state;
 }
 
 bool ServiceUpdater::restart_requested() const {
@@ -158,6 +169,7 @@ UpdateStep ServiceUpdater::consider() {
       }
       testing_ = true;
       candidate = *found;
+      switching_ = candidate;
     }
 
     const std::filesystem::path directory =
@@ -180,6 +192,7 @@ UpdateStep ServiceUpdater::consider() {
       const std::lock_guard lock(mutex_);
       testing_ = false;
       if (!failure.empty()) {
+        switching_.reset();
         failed_.insert(candidate.release.runtime_id);
         any_failed = true;
         log("self-update: staying on " + describe(own_) + "; runtime " +

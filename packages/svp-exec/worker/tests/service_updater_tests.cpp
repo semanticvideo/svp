@@ -248,10 +248,22 @@ void test_reports_its_state_for_hello_ack() {
   expect(state.self_update && state.release_stamp == std::optional<std::uint64_t>(10) &&
              state.declined_runtimes.empty(),
          "a self-updating service reports its release");
+  expect(state.pending && state.pending->runtime_id == broken &&
+             state.pending->release_stamp == 20 && state.pending->bytes > 0,
+         "the runtime it will try next is reported pending");
   expect(updater.consider() == UpdateStep::failed, "the candidate fails");
   state = updater.state();
   expect(state.declined_runtimes == std::vector<Blake3Digest>{broken},
          "a runtime whose test-start failed is reported as declined");
+  expect(!state.pending, "nothing is pending after it was declined");
+
+  const Blake3Digest good = install_runtime(fixture.layout, 15, "good");
+  expect(updater.try_enter_session(), "a session holds the switch");
+  expect(updater.state().pending && updater.state().pending->runtime_id == good,
+         "a committed switch is reported while sessions are live");
+  updater.leave_session();
+  expect(updater.state().pending && updater.state().pending->runtime_id == good,
+         "and while switching to it");
   ServiceUpdater off = fixture.updater(/*launched_through_current=*/false);
   expect(!off.state().self_update, "a service not started through current does not update");
 }

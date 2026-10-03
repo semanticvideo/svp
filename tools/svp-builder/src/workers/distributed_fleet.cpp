@@ -120,12 +120,12 @@ class FleetDispatchedExecutors final : public DispatchedWorkerExecutors {
       }
       const std::size_t slots = worker.slots.find(task_type)->second;
       executors.push_back(std::make_unique<svp::exec::remote::RemoteExecutor>(
-          svp::exec::remote::RemoteExecutorOptions{
-              .executor_id = "worker." + worker.key.pairing_id,
-              .connector = {.pairing = worker.key},
-              .slots = slots,
-              .session_preamble =
-                  make_supplying_preamble(declaring_capacity(supplies, task_type, slots))}));
+          with_supplied_sessions(
+              svp::exec::remote::RemoteExecutorOptions{
+                  .executor_id = "worker." + worker.key.pairing_id,
+                  .connector = {.pairing = worker.key},
+                  .slots = slots},
+              declaring_capacity(supplies, task_type, slots))));
     }
     return executors;
   }
@@ -223,7 +223,7 @@ WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSuppli
     // it, so the build that delivered the update keeps the worker.
     std::string restart_note;
     if (const std::optional<WorkerHelloAck> restarted = await_worker_runtime_switch(
-            outcome.record.key, supplies.hello, supplies.runtime, ack, &cancellation,
+            outcome.record.key, supplies.hello, supplies.runtime, ack, [&cancellation] { return cancellation.requested(); },
             [&restart_note](const std::string& line) { restart_note = line; })) {
       ack = *restarted;
     }
@@ -704,13 +704,12 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
                                               const std::string& suffix, std::size_t slots,
                                               std::string_view task_type,
                                               std::vector<svp::exec::Executor*>& into) {
-    auto executor = std::make_unique<svp::exec::remote::RemoteExecutor>(
+    auto executor = std::make_unique<svp::exec::remote::RemoteExecutor>(with_supplied_sessions(
         svp::exec::remote::RemoteExecutorOptions{
             .executor_id = "worker." + outcome.record.key.pairing_id + suffix,
             .connector = {.pairing = outcome.record.key},
-            .slots = slots,
-            .session_preamble =
-                make_supplying_preamble(declaring_capacity(supplies, task_type, slots))});
+            .slots = slots},
+        declaring_capacity(supplies, task_type, slots)));
     auto restricted = std::make_unique<svp::exec::TaskTypeRestrictedExecutor>(
         *executor, std::set<std::string, std::less<>>{std::string(task_type)});
     into.push_back(restricted.get());

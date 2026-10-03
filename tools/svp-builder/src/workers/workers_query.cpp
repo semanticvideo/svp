@@ -194,7 +194,7 @@ int run_workers_sync(const WorkersCliOptions& options) {
   client.shutdown();
   // A runtime the worker's service will move to restarts it right after this
   // session; calibration's sessions must not find it gone.
-  (void)await_worker_runtime_switch(record.key, context.hello(), context.runtime, ack, nullptr,
+  (void)await_worker_runtime_switch(record.key, context.hello(), context.runtime, ack, {},
                                     [](const std::string& line) { std::cout << line << "\n" << std::flush; });
   for (const std::string& bundle : stats.model_bundles_pushed) {
     std::cout << "model bundle " << bundle << ": pushed and verified against model-lock\n";

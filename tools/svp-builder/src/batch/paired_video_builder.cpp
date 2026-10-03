@@ -172,9 +172,7 @@ PairedVideoBuilder::PairedVideoBuilder(CoordinatorPairingRecord record,
                                        std::shared_ptr<const VideoBuildSupplies> supplies)
     : record_(std::move(record)),
       supplies_(std::move(supplies)),
-      switch_watch_(svp::exec::RuntimeRelease{
-          .runtime_id = supplies_->base->runtime.runtime_id,
-          .release_stamp = supplies_->base->runtime.release_stamp}) {}
+      switch_watch_(svp::builder::workers::runtime_offer(supplies_->base->runtime)) {}
 
 std::string PairedVideoBuilder::name() const {
   return record_.key.pairing_id + " (" +
@@ -201,7 +199,7 @@ RemoteVideoOutcome PairedVideoBuilder::build(const RemoteVideoRequest& request) 
     // it restarts once that session ended, so wait for it to come back.
     if (const std::optional<WorkerHelloAck> due = switch_watch_.take_due()) {
       (void)svp::builder::workers::await_worker_runtime_switch(
-          record_.key, supplies.hello, supplies.runtime, *due, nullptr, {});
+          record_.key, supplies.hello, supplies.runtime, *due, {}, {});
     }
     std::unique_ptr<WorkerConnection> connection;
     try {

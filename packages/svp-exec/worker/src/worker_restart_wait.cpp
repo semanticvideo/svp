@@ -37,6 +37,22 @@ bool worker_will_switch_to(const WorkerHelloAck& ack, const RuntimeRelease& runt
                                                   .release_stamp = ack.service->release_stamp});
 }
 
+std::optional<RuntimeOffer> expected_switch(const WorkerHelloAck& ack,
+                                            const std::optional<RuntimeOffer>& offered) {
+  std::optional<RuntimeOffer> target;
+  if (ack.service && ack.service->self_update && ack.service->pending &&
+      ack.agent_runtime_id != ack.service->pending->runtime_id) {
+    target = RuntimeOffer{.release = {.runtime_id = ack.service->pending->runtime_id,
+                                      .release_stamp = ack.service->pending->release_stamp},
+                          .bytes = ack.service->pending->bytes};
+  }
+  if (offered && worker_will_switch_to(ack, offered->release) &&
+      (!target || is_newer_release(offered->release, target->release))) {
+    target = offered;
+  }
+  return target;
+}
+
 std::string_view restart_wait_end_name(RestartWaitEnd end) noexcept {
   switch (end) {
     case RestartWaitEnd::settled:
@@ -51,7 +67,7 @@ std::string_view restart_wait_end_name(RestartWaitEnd end) noexcept {
   return "unknown";
 }
 
-RestartWaitOutcome wait_for_worker_restart(const RuntimeRelease& runtime,
+RestartWaitOutcome wait_for_worker_restart(const std::optional<RuntimeOffer>& offered,
                                            std::chrono::milliseconds deadline,
                                            const RestartWaitHooks& hooks) {
   const std::function<std::chrono::steady_clock::time_point()> now =
@@ -71,7 +87,7 @@ RestartWaitOutcome wait_for_worker_restart(const RuntimeRelease& runtime,
         outcome.last_error = result.ack->refusal->message;
         return outcome;
       }
-      if (!worker_will_switch_to(*result.ack, runtime)) {
+      if (!expected_switch(*result.ack, offered)) {
         outcome.end = RestartWaitEnd::settled;
         return outcome;
       }
@@ -96,7 +112,7 @@ RestartWaitOutcome wait_for_worker_restart(const RuntimeRelease& runtime,
 
 void RuntimeSwitchWatch::observed(const WorkerHelloAck& ack) {
   const std::lock_guard lock(mutex_);
-  if (worker_will_switch_to(ack, runtime_)) {
+  if (expected_switch(ack, offered_)) {
     due_ = ack;
   } else {
     due_.reset();

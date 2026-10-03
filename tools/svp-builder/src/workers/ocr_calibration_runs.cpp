@@ -254,11 +254,11 @@ CalibrationOutcome ensure_worker_calibration(const svp::exec::remote::PairingKey
         with_clip->blobs = {source};
         const std::size_t max_slots = calibration::ocr_calibration_max_slots(
             ack.memory.available_bytes, ack.memory_reserve_bytes, ack.host.logical_cpus);
-        svp::exec::remote::RemoteExecutor executor(svp::exec::remote::RemoteExecutorOptions{
-            .executor_id = "calibration." + pairing.pairing_id,
-            .connector = {.pairing = pairing},
-            .slots = max_slots,
-            .session_preamble = make_supplying_preamble(with_clip)});
+        svp::exec::remote::RemoteExecutor executor(with_supplied_sessions(
+            svp::exec::remote::RemoteExecutorOptions{.executor_id = "calibration." + pairing.pairing_id,
+                                                     .connector = {.pairing = pairing},
+                                                     .slots = max_slots},
+            with_clip));
         return calibration::calibrate_ocr_capacity(executor, max_slots,
                                                    calibration_inputs(setup, source.ref),
                                                    svp::vision::tasks::ocr_calibration_timestamps_us(),
@@ -323,7 +323,7 @@ bool calibrate_for_workers_command(const svp::exec::worker::CoordinatorPairingRe
       client.shutdown();
     }
     if (const std::optional<svp::exec::worker::WorkerHelloAck> restarted =
-            await_worker_runtime_switch(record.key, supplies.hello, supplies.runtime, ack, nullptr,
+            await_worker_runtime_switch(record.key, supplies.hello, supplies.runtime, ack, {},
                                         [](const std::string& line) { std::cout << line << "\n"; })) {
       ack = *restarted;
     }

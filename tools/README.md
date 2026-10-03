@@ -237,14 +237,13 @@ again on the new runtime. A runtime that fails its test-start is not adopted
 and the reason is logged in `<root>/logs/agent.log`; the service never moves
 to an older or unstamped runtime, and old runtimes are not deleted.
 Coordinators on older runtimes keep working with an updated worker while
-their protocol major version matches. A coordinator that leaves a newer runtime on a
-worker (`workers sync`, `workers fleet pair`, `build --distributed`, and the
-whole-video jobs of `build-batch` and `interlace create-batch` with
-`--coordinators`) sees
-from the worker's HELLO_ACK that its service will switch, and waits for it to
-answer on the new runtime before its next session (bounded by the time the
-switch can take for that runtime's size), so the worker is not dropped from
-the command or build that updated it.
+their protocol major version matches. A worker's HELLO_ACK reports the runtime its service has
+committed to switch to, whoever installed it, so every coordinator (`workers
+sync`, `workers fleet pair`, calibration, `build --distributed` preparation
+and task sessions, and the whole-video jobs of `build-batch` and `interlace
+create-batch` with `--coordinators`) waits for that worker to answer on the
+new runtime before its next session (bounded by the time the switch can take
+for that runtime's size), instead of dropping a worker that is restarting.
 
 Fleets pair new Macs without SSH and without a coordinator key on them:
 

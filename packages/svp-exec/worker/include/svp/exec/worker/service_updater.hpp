@@ -109,8 +109,10 @@ class ServiceUpdater {
   UpdateStep consider();
 
   // What HELLO_ACK reports (hello_messages.hpp `service`): whether this
-  // service updates itself, its own release stamp, and the runtimes whose
-  // test-start failed.
+  // service updates itself, its own release stamp, the runtimes whose
+  // test-start failed, and the runtime it has committed to switch to: the
+  // one it is switching to now, else the one consider() would try next (it
+  // switches once no session is live).
   [[nodiscard]] ServiceUpdateState state() const;
 
   [[nodiscard]] bool restart_requested() const;
@@ -133,6 +135,8 @@ class ServiceUpdater {
   bool testing_ = false;
   bool restarting_ = false;
   std::set<Blake3Digest> failed_;
+  // The runtime being tested or switched to.
+  std::optional<Candidate> switching_;
   std::optional<Blake3Digest> waiting_logged_;
 };
 
