@@ -11,6 +11,8 @@
 #include "svp/exec/cas_store.hpp"
 #include "svp/exec/output_digest.hpp"
 #include "svp/exec/worker/local_load.hpp"
+#include "svp/validation/svpi_validator.hpp"
+#include "svp/validation/validator.hpp"
 #include "svp/vision/tasks/ffmpeg_build_identity.hpp"
 
 #include <fstream>
@@ -78,6 +80,40 @@ class PackagePins {
   std::optional<svp::exec::CasStore> store_;
   std::optional<svp::exec::CasPinSet> pins_;
 };
+
+// A job's package and staging go away with its session, so a package that
+// failed strict validation reports why in the job's error: the first
+// kReportedValidationErrors error findings.
+constexpr std::size_t kReportedValidationErrors = 10;
+
+std::string validation_errors_of(const std::filesystem::path& package,
+                                 VideoOutputFormat format) {
+  std::error_code error;
+  if (!std::filesystem::is_regular_file(package, error)) {
+    return {};
+  }
+  try {
+    const svp::validation::ValidationReport report =
+        format == VideoOutputFormat::svp
+            ? svp::validation::validate_package(package, svp::validation::ValidatorOptions{})
+            : svp::validation::validate_svpi_package(
+                  package, svp::validation::SvpiValidatorOptions{
+                               .allow_embedded_transport =
+                                   format == VideoOutputFormat::embedded_svpi});
+    std::string text;
+    for (std::size_t i = 0; i < report.errors.size() && i < kReportedValidationErrors; ++i) {
+      const svp::validation::ValidationFinding& finding = report.errors[i];
+      text += "\n  " + finding.code + " " + finding.path + ": " + finding.message;
+    }
+    if (report.errors.size() > kReportedValidationErrors) {
+      text += "\n  (" + std::to_string(report.errors.size() - kReportedValidationErrors) +
+              " more)";
+    }
+    return text;
+  } catch (const std::exception& validation_error) {
+    return std::string("\n  (could not validate the package: ") + validation_error.what() + ")";
+  }
+}
 
 // The worker's model view links each bundle directory into its store. A
 // build's model-cache verification scans the cache without following
@@ -229,7 +265,9 @@ svp::exec::TaskResult execute(const svp::exec::TaskSpec& spec,
     (void)telemetry.finish(run.success ? 0 : 1);
   }
   if (!run.success) {
-    return failed(spec, kVideoBuildFailedCode, run.error_message, false);
+    return failed(spec, kVideoBuildFailedCode,
+                  run.error_message + validation_errors_of(output, parameters.output_format),
+                  false);
   }
 
   svp::exec::TaskResult result;
