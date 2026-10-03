@@ -274,9 +274,14 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
                                    const std::string& staging_dir, bool overwrite_output,
                                    std::string& error_message, std::string& blake3_state,
                                    const std::shared_ptr<BuildProgressSink>& item_sink) {
+    // Spread over other Macs (--coordinators): an absolute source path, as
+    // build-batch does, so the package does not depend on which Mac built it.
+    // Without --coordinators the path is used as given, as always.
+    const std::filesystem::path source =
+        options.coordinators.empty() ? media_path : std::filesystem::absolute(media_path);
     const bool created =
         options.output_format == BatchOutputFormat::svpi
-            ? create_single_svpi(media_path, artifact_path, options.ffprobe_path,
+            ? create_single_svpi(source, artifact_path, options.ffprobe_path,
                                  options.ffmpeg_path, !options.no_blake3, staging_dir,
                                  options.model_cache_dir, options.sherpa_lib_path,
                                  options.performance, options.visual_tracking_quality,
@@ -285,7 +290,7 @@ BatchCreateResult interlace_create_batch(const BatchCreateOptions& options) {
                                  options.force_single_speaker, options.serial_pipeline,
                                  error_message, blake3_state, item_sink,
                                  options.make_distributed)
-            : create_embedded_batch_artifact(options, media_path, artifact_path, staging_dir,
+            : create_embedded_batch_artifact(options, source, artifact_path, staging_dir,
                                              error_message, blake3_state, item_sink,
                                              overwrite_output);
     return CreateOutcome{.created = created, .requeue = false, .remote = {}};

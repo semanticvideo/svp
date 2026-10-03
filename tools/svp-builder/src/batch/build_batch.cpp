@@ -141,7 +141,10 @@ BuildBatchResult build_batch(const BuildBatchOptions& options) {
   std::vector<bool> settled(options.sources.size(), false);
   for (std::size_t index = 0; index < options.sources.size(); ++index) {
     BuildBatchItemResult item;
-    item.source = options.sources[index];
+    // An absolute path for every Mac: a build records its source path as
+    // given, and another Mac builds from its own copy, so a relative path
+    // would make the package depend on which Mac coordinated it.
+    item.source = std::filesystem::absolute(options.sources[index]);
     item.artifact_path = build_batch_artifact_path(item.source, options.out_dir,
                                                    options.parameters.output_format);
     if (options.parameters.run_report) {
