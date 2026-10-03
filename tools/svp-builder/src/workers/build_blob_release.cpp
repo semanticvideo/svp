@@ -1,10 +1,14 @@
 #include "build_blob_release.hpp"
 
+#include "stream_deadline.hpp"
+#include "svp/exec/remote/remote_executor.hpp"
 #include "svp/exec/worker/coordinator_session.hpp"
 #include "svp/exec/worker/worker_connection.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <future>
+#include <stdexcept>
 #include <utility>
 
 namespace svp::builder::workers {
@@ -12,15 +16,27 @@ namespace {
 
 using namespace svp::exec::worker;
 
+// How long a release session may run once its connection is authenticated
+// (HELLO, HELLO_ACK, BLOB_RELEASE, SHUTDOWN). Finding the worker and the TLS
+// handshake are bounded already (route_policy.hpp, transport_policy.hpp);
+// this bounds a worker that accepts the connection but never answers, which
+// would otherwise keep the build from exiting (the fleet waits for its
+// release). It is the reconnect window, the time a build already gives a
+// worker that is slow to reach (remote_executor.hpp, distributed_fleet.cpp):
+// a healthy HELLO_ACK is one round trip plus the worker summarising its
+// cache, far inside it, and every worker is told at once, so a silent worker
+// delays the build's exit by at most this long.
+constexpr std::chrono::milliseconds kReleaseSessionDeadline =
+    svp::exec::remote::kDefaultReconnectWindow;
+
 std::string worker_name(const CoordinatorPairingRecord& record) {
   return record.key.pairing_id + " (" + record.worker.ssh_target + ")";
 }
 
-// One short session: HELLO, BLOB_RELEASE, SHUTDOWN. Returns what to report.
-std::string release_on(const CoordinatorPairingRecord& record, const CoordinatorHello& hello,
-                       const std::vector<BlobRef>& blobs) {
-  const std::unique_ptr<WorkerConnection> connection = connect_to_worker(record.key);
-  WorkerSessionClient client(*connection->reader, *connection->writer);
+// HELLO, BLOB_RELEASE, SHUTDOWN over `connection`. Returns what to report.
+std::string release_over(WorkerConnection& connection, const CoordinatorPairingRecord& record,
+                         const CoordinatorHello& hello, const std::vector<BlobRef>& blobs) {
+  WorkerSessionClient client(*connection.reader, *connection.writer);
   const WorkerHelloAck ack = client.hello(hello);
   if (!worker_accepts_blob_release(ack.protocol)) {
     client.shutdown();
@@ -33,6 +49,25 @@ std::string release_on(const CoordinatorPairingRecord& record, const Coordinator
   client.shutdown();
   return "worker " + worker_name(record) + ": released this build's source (" +
          std::to_string(blobs.size()) + " blob(s))";
+}
+
+// One short session, cancelled if it outlasts kReleaseSessionDeadline.
+std::string release_on(const CoordinatorPairingRecord& record, const CoordinatorHello& hello,
+                       const std::vector<BlobRef>& blobs) {
+  const std::unique_ptr<WorkerConnection> connection = connect_to_worker(record.key);
+  const StreamDeadline deadline(*connection->connection.stream, kReleaseSessionDeadline);
+  try {
+    return release_over(*connection, record, hello, blobs);
+  } catch (const std::exception&) {
+    if (deadline.expired()) {
+      throw std::runtime_error(
+          "no answer within " +
+          std::to_string(
+              std::chrono::duration_cast<std::chrono::seconds>(kReleaseSessionDeadline).count()) +
+          " s");
+    }
+    throw;
+  }
 }
 
 }  // namespace

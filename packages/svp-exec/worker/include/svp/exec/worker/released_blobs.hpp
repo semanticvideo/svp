@@ -26,6 +26,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <set>
@@ -43,6 +44,9 @@ struct ReleaseSweep {
 
 class ReleasedBlobs {
  public:
+  // Deletes one blob unless a live holder pins it (CasStore::remove_unpinned).
+  using BlobRemover = std::function<CacheResult<BlobRemoval>(const Blake3Digest&)>;
+
   // `coordinator` declared it needs `digest`; an earlier release of it no
   // longer deletes it while this claim stands.
   void claim(std::string_view coordinator, const Blake3Digest& digest);
@@ -52,14 +56,23 @@ class ReleasedBlobs {
   // Deletes every released, unclaimed blob no live holder pins. A blob that
   // is gone (deleted now, or already absent) is forgotten; one that is
   // pinned, or whose removal failed, stays released for the next sweep.
+  //
+  // Removal runs without the lock, so sessions claim and release while a
+  // sweep runs. A blob released again during the sweep (a session found it
+  // gone, sent it again, and released it) stays released for the next one.
   ReleaseSweep sweep(CasStore& cas);
+  // The same sweep with `remove` in place of the CAS.
+  ReleaseSweep sweep(const BlobRemover& remove);
   // Released blobs not deleted yet.
   [[nodiscard]] std::size_t pending() const;
 
  private:
   mutable std::mutex mutex_;
   std::map<Blake3Digest, std::set<std::string, std::less<>>> claims_;
-  std::set<Blake3Digest> released_;
+  // Each released blob with the release that marked it: a sweep forgets a
+  // blob only when the release it saw is still the latest one.
+  std::map<Blake3Digest, std::uint64_t> released_;
+  std::uint64_t last_release_ = 0;
 };
 
 }  // namespace svp::exec::worker

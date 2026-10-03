@@ -9,9 +9,9 @@
 // Every worker the build reached is told, whether the build succeeded,
 // failed, or was cancelled. Each deletes the blobs once no other
 // coordinator still claims them and no live session pins them
-// (svp/exec/worker/released_blobs.hpp). A worker that cannot be reached, or
-// speaks protocol 1.1, keeps them until its cache budget evicts them, as
-// before. Thread-safe.
+// (svp/exec/worker/released_blobs.hpp). A worker that cannot be reached,
+// does not answer within a time limit, or speaks protocol 1.1 keeps them
+// until its cache budget evicts them, as before. Thread-safe.
 
 #include "svp/exec/worker/hello_messages.hpp"
 #include "svp/exec/worker/pairing_store.hpp"

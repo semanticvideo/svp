@@ -169,6 +169,7 @@ if(APPLE)
     src/workers/ocr_calibration_runs.cpp
     src/workers/track_window_calibration_runs.cpp
     src/workers/ssh_session.cpp
+    src/workers/stream_deadline.cpp
     src/workers/worker_commands.cpp
     src/workers/worker_model_view.cpp
     src/workers/worker_reach.cpp
@@ -509,6 +510,19 @@ if(BUILD_TESTING)
   add_test(NAME svp-builder-probe-help-without-model-cache
            COMMAND svp-builder probe --help)
   if(APPLE)
+    add_executable(svp-builder-stream-deadline-tests
+      tests/stream_deadline_tests.cpp
+      src/workers/stream_deadline.cpp
+    )
+    target_include_directories(svp-builder-stream-deadline-tests PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_compile_features(svp-builder-stream-deadline-tests PRIVATE cxx_std_20)
+    target_compile_options(svp-builder-stream-deadline-tests PRIVATE -UNDEBUG)
+    target_link_libraries(svp-builder-stream-deadline-tests PRIVATE svp::exec_remote)
+    add_test(NAME svp-builder-stream-deadline-tests
+             COMMAND svp-builder-stream-deadline-tests)
+
     # The worker commands parse without a model cache, a pairing, or a
     # network; `worker verify-runtime` fails cleanly on a missing runtime.
     add_test(NAME svp-builder-workers-help COMMAND svp-builder workers pair --help)

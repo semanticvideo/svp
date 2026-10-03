@@ -376,6 +376,33 @@ void test_released_blobs_honour_later_claims() {
   expect(released.pending() == 0, "nothing left to delete");
 }
 
+// A blob released again while a sweep is removing it (another session found
+// it gone, sent it again, and released it) stays released: the sweep that
+// removed the earlier copy does not forget the newer release, and the next
+// sweep deletes the resent blob.
+void test_release_during_a_sweep_is_kept() {
+  const Blake3Digest blob = blob_ref_for(svp::exec::test::to_bytes("resent source")).blake3;
+  ReleasedBlobs released;
+  released.claim("coordinator-a", blob);
+  released.release("coordinator-a", {blob});
+  ReleaseSweep sweep = released.sweep([&](const Blake3Digest& digest) -> CacheResult<BlobRemoval> {
+    // Runs outside the sweep's lock: coordinator B resends and releases.
+    released.claim("coordinator-b", digest);
+    released.release("coordinator-b", {digest});
+    return BlobRemoval::removed;
+  });
+  expect(sweep.removed_blobs == 1, "the earlier copy was removed");
+  expect(released.pending() == 1, "the release made during the sweep is kept");
+  std::vector<Blake3Digest> removed;
+  sweep = released.sweep([&](const Blake3Digest& digest) -> CacheResult<BlobRemoval> {
+    removed.push_back(digest);
+    return BlobRemoval::removed;
+  });
+  expect(sweep.removed_blobs == 1 && removed == std::vector<Blake3Digest>{blob},
+         "the next sweep deletes the resent blob");
+  expect(released.pending() == 0, "nothing left to delete");
+}
+
 void test_tampered_runtime_is_never_run() {
   AgentHarness agent;
   const CoordinatorRuntime runtime = toy_runtime();
@@ -488,6 +515,7 @@ int main(int argc, char** argv) {
           {"release keeps a blob another coordinator claims",
            test_release_keeps_a_blob_another_coordinator_claims},
           {"released blobs honour later claims", test_released_blobs_honour_later_claims},
+          {"release during a sweep is kept", test_release_during_a_sweep_is_kept},
           {"tampered runtime is never run", test_tampered_runtime_is_never_run},
           {"bad blob is refused", test_bad_blob_is_refused},
           {"model bundle push is lock-verified", test_model_bundle_push_is_lock_verified},
