@@ -190,12 +190,34 @@ void test_transfer_messages_round_trip() {
   expect(std::get<BlobChunk>(chunk) == (BlobChunk{.blob = blob, .offset = 4}), "BLOB_PUT chunk");
   expect(chunk_frame.payloads.front().size() == 6, "chunk payload");
   expect(blob_get_from_frame(wire(make_blob_get_frame(blob))) == blob, "BLOB_GET");
+  expect(blob_release_from_frame(wire(make_blob_release_frame({blob, manifest}))) ==
+             (std::vector<BlobRef>{blob, manifest}),
+         "BLOB_RELEASE");
 
   const ModelBundlePut model{.lock = nlohmann::json{{"models", nlohmann::json::array()}},
                              .manifest = manifest};
   expect(std::get<ModelBundlePut>(blob_put_from_frame(wire(make_model_bundle_put_frame(model)))) ==
              model,
          "BLOB_PUT model bundle");
+}
+
+// BLOB_RELEASE goes only to workers of minor 1.2 or later, of this major.
+void test_blob_release_needs_protocol_1_2() {
+  expect(worker_accepts_blob_release(kWorkerProtocolVersion), "this protocol releases");
+  expect(!worker_accepts_blob_release(ProtocolVersion{.major = kWorkerProtocolVersion.major,
+                                                      .minor = kBlobReleaseMinorVersion - 1}),
+         "an older minor does not");
+  expect(worker_accepts_blob_release(ProtocolVersion{.major = kWorkerProtocolVersion.major,
+                                                     .minor = kBlobReleaseMinorVersion + 1}),
+         "a newer minor does");
+  expect(!worker_accepts_blob_release(ProtocolVersion{.major = kWorkerProtocolVersion.major + 1,
+                                                      .minor = kBlobReleaseMinorVersion}),
+         "another major does not");
+  Frame release = make_blob_release_frame({});
+  release.body["path"] = "/tmp";
+  svp::exec::test::expect_exec_error(ExecErrorCode::unknown_field,
+                                     [&] { (void)blob_release_from_frame(wire(release)); },
+                                     "BLOB_RELEASE rejects unknown members");
 }
 
 void test_transfer_messages_are_strict() {
@@ -297,6 +319,7 @@ int main() {
                        {"other refusals", test_other_refusals},
                        {"transfer messages round trip", test_transfer_messages_round_trip},
                        {"transfer messages are strict", test_transfer_messages_are_strict},
+                       {"BLOB_RELEASE needs protocol 1.2", test_blob_release_needs_protocol_1_2},
                        {"REJECT is reported as a rejection, not a failure", test_reject_is_a_rejection_not_a_failure},
                    });
 }

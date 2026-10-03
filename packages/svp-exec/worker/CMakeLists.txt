@@ -18,6 +18,7 @@ add_library(svp-exec-worker
   src/message_fields.cpp
   src/model_bundles.cpp
   src/pairing_store.cpp
+  src/released_blobs.cpp
   src/runtime_files.cpp
   src/runtime_source.cpp
   src/runtime_store.cpp

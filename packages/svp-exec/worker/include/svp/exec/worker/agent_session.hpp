@@ -21,6 +21,13 @@
 //   4. On SHUTDOWN, end of input, or a protocol error, the session process
 //      gets the grace period to exit and is then killed, and the session's
 //      scratch directory (and any partial blob) is deleted.
+//   5. Every blob a BLOB_HAVE query names is pinned in the worker CAS for
+//      the session's lifetime (holder `<session id>.agent`), so no other
+//      coordinator's release deletes what this session still declares.
+//      BLOB_RELEASE (protocol 1.2) hands blobs to the agent's ReleasedBlobs
+//      (released_blobs.hpp), which deletes them once nothing pins them; the
+//      agent tries again when each session ends, after its session process
+//      has exited and its pins are gone.
 //
 // A put or query the worker cannot honour is answered with ERROR
 // {"code","message"} and ends the session, as plan §4.3 defines ERROR.
@@ -33,6 +40,7 @@
 #include "svp/exec/worker/hello_messages.hpp"
 #include "svp/exec/worker/host_facts.hpp"
 #include "svp/exec/worker/model_bundles.hpp"
+#include "svp/exec/worker/released_blobs.hpp"
 #include "svp/exec/worker/runtime_store.hpp"
 #include "svp/exec/worker/session_process.hpp"
 #include "svp/exec/worker/slot_sharing.hpp"
@@ -76,6 +84,7 @@ class AgentCore {
   [[nodiscard]] const WorkerLayout& layout() const noexcept { return options_.layout; }
   [[nodiscard]] AdmissionLedger& ledger() noexcept { return ledger_; }
   [[nodiscard]] SlotSharing& slots() noexcept { return slots_; }
+  [[nodiscard]] ReleasedBlobs& released() noexcept { return released_; }
   [[nodiscard]] const WorkerRuntimeStore& runtimes() const noexcept { return runtimes_; }
   [[nodiscard]] const WorkerModelStore& models() const noexcept { return models_; }
   [[nodiscard]] CasStore cas() const { return cas_; }
@@ -92,6 +101,7 @@ class AgentCore {
   AgentCoreOptions options_;
   AdmissionLedger ledger_;
   SlotSharing slots_;
+  ReleasedBlobs released_;
   WorkerRuntimeStore runtimes_;
   WorkerModelStore models_;
   CasStore cas_;

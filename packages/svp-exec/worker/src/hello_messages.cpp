@@ -41,6 +41,11 @@ bool protocol_compatible(ProtocolVersion local, ProtocolVersion peer) noexcept {
   return local.major == peer.major;
 }
 
+bool worker_accepts_blob_release(ProtocolVersion worker) noexcept {
+  return worker.major == kWorkerProtocolVersion.major &&
+         worker.minor >= kBlobReleaseMinorVersion;
+}
+
 std::string_view runtime_kind_name(RuntimeKind kind) noexcept {
   switch (kind) {
     case RuntimeKind::bundle:

@@ -259,6 +259,10 @@ void WorkerSessionClient::ensure_model_bundles(const std::vector<ModelBundleSour
   }
 }
 
+void WorkerSessionClient::release_blobs(const std::vector<BlobRef>& blobs) {
+  writer_.write(make_blob_release_frame(blobs));
+}
+
 void WorkerSessionClient::shutdown() { writer_.write(make_shutdown_frame()); }
 
 }  // namespace svp::exec::worker

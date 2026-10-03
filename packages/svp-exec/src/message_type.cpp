@@ -40,6 +40,8 @@ std::string_view message_type_name(MessageType type) noexcept {
       return "ERROR";
     case MessageType::blob_get:
       return "BLOB_GET";
+    case MessageType::blob_release:
+      return "BLOB_RELEASE";
   }
   return "UNKNOWN";
 }
