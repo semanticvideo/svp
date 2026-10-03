@@ -42,6 +42,16 @@ inline constexpr std::chrono::milliseconds kDefaultReconnectPause{500};
 // leases fail with executor_lost and the exception text as the reason.
 using RemoteSessionPreamble = std::function<void(FrameReader& reader, FrameWriter& writer)>;
 
+// Runs on a session's own thread before it starts connecting (so the
+// scheduler thread never waits on it), and may block: a worker whose service
+// is restarting on a newer runtime is waited for here (worker
+// worker_restart_wait.hpp), and the reconnect window starts only after it
+// returns. `stop_requested` turns true when the session is retired or the
+// executor stops; the hook should return soon after. Leases queued meanwhile
+// can reach their lease period and be expired by the scheduler, like leases
+// on a worker that is gone.
+using RemoteBeforeConnect = std::function<void(const std::function<bool()>& stop_requested)>;
+
 struct RemoteExecutorOptions {
   // Stable and unique within a scheduler run. Required.
   std::string executor_id;
@@ -59,6 +69,8 @@ struct RemoteExecutorOptions {
   // Empty: leases are sent as soon as the connection opens (a bare worker
   // loop, such as svp-exec-test-worker --listen).
   RemoteSessionPreamble session_preamble;
+  // Empty: connect at once.
+  RemoteBeforeConnect before_connect;
 };
 
 // Runs tasks on a paired worker over the remote transport, speaking the same

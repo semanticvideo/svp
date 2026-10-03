@@ -66,6 +66,13 @@ struct WorkerProbe {
 // Creates the layout directories under `root` (0700).
 [[nodiscard]] std::string render_prepare_root_script(const std::filesystem::path& root);
 
+// Points <root>/current at runtimes/<hex> (relative link, swapped by rename)
+// unless it already names a runtime whose svp-builder is there: a worker
+// that has already moved itself to a newer runtime keeps it (the service
+// only ever moves forward, service_updater.hpp).
+[[nodiscard]] std::string render_point_current_script(const std::filesystem::path& root,
+                                                      const Blake3Digest& runtime_id);
+
 // Creates the per-user LaunchAgents directory when it is missing (0755, as
 // macOS creates it) and then leaves kCreatedLaunchAgentsMarker in `root` so
 // removal can take the directory away again. Runs before the plist is
@@ -81,7 +88,8 @@ struct WorkerProbe {
 struct DaemonInstall {
   std::string user;
   // The worker user's staging directory holding runtimes/<hex>/,
-  // pairings/<id>.json, and <label>.plist.
+  // pairings/<id>.json (none for `worker install`), join.json (only for
+  // `worker install --join`), and <label>.plist.
   std::filesystem::path staging;
   std::filesystem::path root;
   std::filesystem::path plist;
@@ -89,9 +97,11 @@ struct DaemonInstall {
   std::string label = std::string(kWorkerJobLabel);
 };
 
-// Run with sudo: moves the staged runtime and pairing into the system root
-// (owned by the worker's user), installs the plist root:wheel 0644, and
-// bootstraps the daemon into the system domain.
+// Run with sudo: moves the staged runtime, pairings, and join credential into
+// the system root (owned by the worker's user), points <root>/current at the
+// runtime as render_point_current_script does (the link owned by the
+// worker's user too), installs the plist root:wheel 0644, and bootstraps the
+// daemon into the system domain.
 [[nodiscard]] std::string render_daemon_install_script(const DaemonInstall& install);
 
 struct WorkerRemoval {

@@ -24,6 +24,14 @@ using Blake3Digest = std::array<std::uint8_t, kBlake3DigestBytes>;
 [[nodiscard]] Blake3Digest blake3_digest(std::span<const std::byte> bytes);
 [[nodiscard]] Blake3Digest blake3_digest(std::string_view bytes);
 
+// BLAKE3 key derivation (derive_key mode): a 32-byte key for `context`, a
+// fixed, versioned, application-specific string, from `material`.
+[[nodiscard]] Blake3Digest blake3_derive_key(std::string_view context,
+                                             std::span<const std::byte> material);
+// BLAKE3 keyed hash (MAC) of `bytes` under a 32-byte `key`.
+[[nodiscard]] Blake3Digest blake3_keyed_hash(const Blake3Digest& key,
+                                             std::span<const std::byte> bytes);
+
 // 64 lowercase hex characters.
 [[nodiscard]] std::string blake3_hex(const Blake3Digest& digest);
 // Accepts exactly 64 lowercase hex characters; anything else is nullopt.

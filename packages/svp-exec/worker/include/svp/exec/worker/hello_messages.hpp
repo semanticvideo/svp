@@ -25,7 +25,23 @@
 //    "refusal":{"code":"...","message":"..."},      only when accepted=false
 //    "runtime_present":bool,
 //    "runtimes":["b3:<hex>", ...],
+//    "service":{"declined_runtimes":["b3:<hex>", ...],             optional
+//               "pending":{"bytes":n,"release_stamp":n,
+//                          "runtime_id":"b3:<hex>"},             optional
+//               "release_stamp":n,                               optional
+//               "self_update":bool},
 //    "sessions":{"active":n}}
+//
+// `service` (sent by workers that move themselves to newer runtimes,
+// service_updater.hpp; older workers omit it) lets a coordinator tell when a
+// runtime it pushes will make the worker's service restart
+// (worker_restart_wait.hpp): whether the service updates itself, the release
+// stamp of the runtime it runs (runtime_release.hpp; absent when unstamped),
+// the runtimes it already refused to switch to (failed test-start), and
+// `pending`: the runtime it has committed to switch to once no session is
+// live (or is switching to now), whoever installed it, with its release stamp
+// and size, so every coordinator, not only the one that pushed it, waits for
+// the restart before its next session.
 //
 // HostFacts JSON:
 //   {"arch","cpu_brand","efficiency_cpus","logical_cpus",
@@ -147,6 +163,26 @@ struct SessionRefusal {
   bool operator==(const SessionRefusal&) const = default;
 };
 
+// A runtime the worker's service has committed to switch to.
+struct PendingServiceSwitch {
+  Blake3Digest runtime_id{};
+  std::uint64_t release_stamp = 0;
+  // Total bytes of the runtime's files (sizes the coordinator's wait).
+  std::uint64_t bytes = 0;
+
+  bool operator==(const PendingServiceSwitch&) const = default;
+};
+
+// The worker service's self-update state, as HELLO_ACK reports it.
+struct ServiceUpdateState {
+  bool self_update = false;
+  std::optional<std::uint64_t> release_stamp;
+  std::vector<Blake3Digest> declined_runtimes;
+  std::optional<PendingServiceSwitch> pending;
+
+  bool operator==(const ServiceUpdateState&) const = default;
+};
+
 struct WorkerHelloAck {
   ProtocolVersion protocol = kWorkerProtocolVersion;
   // Set exactly when the worker refused the session.
@@ -166,6 +202,8 @@ struct WorkerHelloAck {
   std::uint64_t active_sessions = 0;
   // The runtime the worker agent itself runs from, when it knows it.
   std::optional<Blake3Digest> agent_runtime_id;
+  // Absent from workers that predate self-update.
+  std::optional<ServiceUpdateState> service;
 
   [[nodiscard]] bool accepted() const noexcept { return !refusal.has_value(); }
   bool operator==(const WorkerHelloAck&) const = default;

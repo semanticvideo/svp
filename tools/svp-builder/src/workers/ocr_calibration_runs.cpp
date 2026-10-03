@@ -1,4 +1,5 @@
 #include "ocr_calibration_runs.hpp"
+#include "worker_restart.hpp"
 
 #include "coordinator_context.hpp"
 #include "dispatched_calibration_runs.hpp"
@@ -253,11 +254,11 @@ CalibrationOutcome ensure_worker_calibration(const svp::exec::remote::PairingKey
         with_clip->blobs = {source};
         const std::size_t max_slots = calibration::ocr_calibration_max_slots(
             ack.memory.available_bytes, ack.memory_reserve_bytes, ack.host.logical_cpus);
-        svp::exec::remote::RemoteExecutor executor(svp::exec::remote::RemoteExecutorOptions{
-            .executor_id = "calibration." + pairing.pairing_id,
-            .connector = {.pairing = pairing},
-            .slots = max_slots,
-            .session_preamble = make_supplying_preamble(with_clip)});
+        svp::exec::remote::RemoteExecutor executor(with_supplied_sessions(
+            svp::exec::remote::RemoteExecutorOptions{.executor_id = "calibration." + pairing.pairing_id,
+                                                     .connector = {.pairing = pairing},
+                                                     .slots = max_slots},
+            with_clip));
         return calibration::calibrate_ocr_capacity(executor, max_slots,
                                                    calibration_inputs(setup, source.ref),
                                                    svp::vision::tasks::ocr_calibration_timestamps_us(),
@@ -320,6 +321,11 @@ bool calibrate_for_workers_command(const svp::exec::worker::CoordinatorPairingRe
       svp::exec::worker::WorkerSessionClient client(*connection->reader, *connection->writer);
       ack = supply_worker_session(*connection->reader, *connection->writer, supplies).ack;
       client.shutdown();
+    }
+    if (const std::optional<svp::exec::worker::WorkerHelloAck> restarted =
+            await_worker_runtime_switch(record.key, supplies.hello, supplies.runtime, ack, {},
+                                        [](const std::string& line) { std::cout << line << "\n"; })) {
+      ack = *restarted;
     }
     const CalibrationOutcome worker = ensure_worker_calibration(
         record.key, supplies, ack, setup, clip, store, never_cancelled);

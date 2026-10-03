@@ -125,6 +125,16 @@ struct RemoteExecutor::State {
   void run_session(Session& session) {
     WorkerSessionEnd end{.failure = AttemptFailureKind::executor_lost,
                          .reason = "worker session closed while connecting"};
+    if (options.before_connect) {
+      try {
+        options.before_connect([this, &session] {
+          const std::lock_guard lock(mutex);
+          return session.retiring || stopping;
+        });
+      } catch (const std::exception&) {
+        // A wait that fails leaves connecting to decide.
+      }
+    }
     std::optional<RemoteConnection> connection = connect_within_window(session, end.reason);
     if (connection && adopt_connection(session, std::move(*connection))) {
       StreamFrameReader reader(*session.stream, options.frame_limits);

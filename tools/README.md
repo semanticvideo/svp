@@ -224,6 +224,54 @@ removes the job, runtimes, models, cache, and the secret on both Macs.
 `--dry-run` writes the plist and scripts locally, lints them, and changes
 nothing on the worker.
 
+The job always runs `<root>/current/bin/svp-builder worker serve --root
+<root>`, where `<root>/current` is a symlink owned by the worker's user with
+the relative target `runtimes/<runtime-id-hex>`. Workers update themselves:
+when a coordinator pushes a runtime that is newer than the one the service
+runs (by its release stamp, the UTC second `cmake --install` wrote into the
+runtime's `libexec/svp/runtime/release.json`; ties go to the larger runtime
+id), the service waits until no
+session is live, verifies it, test-starts it (`worker verify-runtime`),
+swaps `current`, and exits with status 75 (`EX_TEMPFAIL`) so launchd starts it
+again on the new runtime. A runtime that fails its test-start is not adopted
+and the reason is logged in `<root>/logs/agent.log`; the service never moves
+to an older or unstamped runtime, and old runtimes are not deleted.
+Coordinators on older runtimes keep working with an updated worker while
+their protocol major version matches. A worker's HELLO_ACK reports the runtime its service has
+committed to switch to, whoever installed it, so every coordinator (`workers
+sync`, `workers fleet pair`, calibration, `build --distributed` preparation
+and task sessions, and the whole-video jobs of `build-batch` and `interlace
+create-batch` with `--coordinators`) waits for that worker to answer on the
+new runtime before its next session (bounded by the time the switch can take
+for that runtime's size), instead of dropping a worker that is restarting.
+
+Fleets pair new Macs without SSH and without a coordinator key on them:
+
+```
+svp-builder workers fleet init                    # first coordinator: create the fleet secret
+svp-builder workers fleet token                   # a worker token (valid 7 days; --valid-days <n>, at most 90)
+svp-builder workers fleet token --coordinator     # the fleet secret, for another coordinator
+svp-builder workers fleet join -                  # on another coordinator: paste that token
+svp-builder workers fleet pair [--models ...]     # pair, supply, and calibrate every joinable worker
+svp-builder worker install --join -               # on a new worker Mac: paste a worker token
+```
+
+`worker install --join` runs on the new Mac itself; its administrator
+password is asked once, by `sudo`, to install the LaunchDaemon with the
+runtime that svp-builder belongs to (`/Library/Application Support/SVP/Worker`,
+owned by that user). The Mac then advertises itself to its fleet over
+Bonjour. Every coordinator holding the fleet secret pairs it on
+`workers fleet pair` or before its next `build --distributed`. The pairing
+runs over the SVP transport: P-256 ECDH and a transcript signed with the
+fleet's key, so only a coordinator that holds the fleet secret can pair a
+worker, and nobody who watches the network learns the resulting key. A
+worker token cannot pair Macs or pose as a coordinator. After a worker's
+first pairing it stays pairable by every coordinator of the fleet, even
+once its token has expired. Fleet secrets live in
+`~/Library/Application Support/SVP/Fleet/fleet.json` (0600). Tokens read
+from stdin with `-` stay out of shell history. `workers unpair` cannot reach
+a worker paired through its fleet; `--forget` removes this Mac's record.
+
 `pair` and `sync` also measure capacity on this Mac and on the worker, for
 OCR and for each kind of vision work a distributed build sends (evidence
 crops, text and keyframe embeddings, depth): a short synthetic slice runs at

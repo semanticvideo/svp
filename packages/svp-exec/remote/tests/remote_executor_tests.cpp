@@ -10,6 +10,7 @@
 #include "svp/exec/remote/remote_executor.hpp"
 #include "svp/exec/scheduler.hpp"
 
+#include <atomic>
 #include <future>
 #include <iostream>
 #include <set>
@@ -376,6 +377,45 @@ void test_idle_session_closes_and_reopens() {
                toy_expected_output(second.task_id, second.seed), "the fresh session's result");
 }
 
+void test_before_connect_runs_before_each_session() {
+  Workers workers;
+  const auto worker = workers.start("svp-remote-before");
+  const ToyTask first{.task_id = "task.toy.first",
+                      .seed = 1,
+                      .order_key = {.lane = "alpha", .ordinals = {0}}};
+  const ToyTask second{.task_id = "task.toy.second",
+                       .depends_on = {first.task_id},
+                       .seed = 2,
+                       .order_key = {.lane = "alpha", .ordinals = {1}}};
+  const TaskGraph graph = make_toy_graph({first, second});
+  std::atomic<int> calls{0};
+  std::atomic<bool> connected_before_hook{false};
+  std::atomic<bool> stop_seen{false};
+  RemoteExecutorOptions options = remote_options("remote", worker->key(), 1);
+  RemoteExecutor* executor = nullptr;
+  options.before_connect = [&](const std::function<bool()>& stop_requested) {
+    if (executor != nullptr && executor->connections_opened() != static_cast<std::size_t>(calls)) {
+      connected_before_hook = true;
+    }
+    ++calls;
+    stop_seen = stop_seen || stop_requested();
+  };
+  RemoteExecutor remote(options);
+  executor = &remote;
+  const AttemptObserver observer = [&](const AttemptEvent& event) {
+    if (event.task_id == first.task_id && event.kind == AttemptEventKind::committed) {
+      (void)remote.close_idle_session();
+    }
+  };
+  InMemoryResultCommitSink sink;
+  expect_succeeded(run(graph, {&remote}, sink, test_policy(), observer),
+                   "tasks run after the hook");
+  expect(calls == 2 && remote.connections_opened() == 2,
+         "the hook ran once before each of the two sessions");
+  expect(!connected_before_hook, "each session connected only after its hook returned");
+  expect(!stop_seen, "no session was being stopped while its hook ran");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -398,5 +438,6 @@ int main(int argc, char** argv) {
           {"wrong secret never runs tasks", test_wrong_secret_never_runs_tasks},
           {"unadvertised pairing is lost", test_unadvertised_pairing_is_lost},
           {"idle session closes and reopens", test_idle_session_closes_and_reopens},
+          {"before-connect runs before each session", test_before_connect_runs_before_each_session},
       });
 }

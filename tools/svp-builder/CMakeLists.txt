@@ -166,15 +166,19 @@ if(APPLE)
     src/workers/coordinator_context.cpp
     src/workers/dispatched_calibration_runs.cpp
     src/workers/distributed_fleet.cpp
+    src/workers/fleet_pairing.cpp
     src/workers/ocr_calibration_runs.cpp
     src/workers/track_window_calibration_runs.cpp
     src/workers/ssh_session.cpp
     src/workers/stream_deadline.cpp
     src/workers/worker_commands.cpp
+    src/workers/worker_install.cpp
     src/workers/worker_model_view.cpp
     src/workers/worker_reach.cpp
+    src/workers/worker_restart.cpp
     src/workers/worker_supplies.cpp
     src/workers/workers_cli.cpp
+    src/workers/workers_fleet.cpp
     src/workers/workers_pair.cpp
     src/workers/workers_query.cpp
     src/workers/workers_unpair.cpp

@@ -171,6 +171,13 @@ void RemoteListener::start() {
                                "listener needs a session handler");
   }
   const RemoteListenerOptions& options = core->options;
+  for (const auto& [txt_key, txt_value] : options.txt) {
+    if (txt_key.empty() || txt_key == kPairingTxtKey || txt_key.find('=') != std::string::npos ||
+        txt_key.size() + 1 + txt_value.size() > kMaxTxtEntryBytes) {
+      throw RemoteTransportError(RemoteErrorCode::invalid_configuration,
+                                 "TXT entry `" + txt_key + "` is not a valid extra entry");
+    }
+  }
   if (options.advertise_timeout.count() <= 0) {
     throw RemoteTransportError(RemoteErrorCode::invalid_configuration,
                                "advertise_timeout must be positive");
@@ -202,6 +209,11 @@ void RemoteListener::start() {
   nw_txt_record_set_key(txt.get(), key.c_str(),
                         reinterpret_cast<const std::uint8_t*>(options.pairing.pairing_id.data()),
                         options.pairing.pairing_id.size());
+  for (const auto& [txt_key, txt_value] : options.txt) {
+    nw_txt_record_set_key(txt.get(), txt_key.c_str(),
+                          reinterpret_cast<const std::uint8_t*>(txt_value.data()),
+                          txt_value.size());
+  }
   nw_advertise_descriptor_set_txt_record_object(advertise.get(), txt.get());
   nw_listener_set_advertise_descriptor(listener.get(), advertise.get());
 

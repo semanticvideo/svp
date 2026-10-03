@@ -154,6 +154,9 @@ class AgentSession {
       case MessageType::runtime_put: {
         const RuntimePut put = runtime_put_from_frame(frame);
         core_.runtimes().install_from_cas(put.runtime_id, put.manifest, put.components, cas_);
+        if (core_.options().runtime_installed) {
+          core_.options().runtime_installed();
+        }
         return;
       }
       case MessageType::blob_have: {
@@ -488,6 +491,9 @@ WorkerHelloAck AgentCore::describe(const Blake3Digest& requested_runtime,
   ack.model_bundles = models_.list();
   ack.active_sessions = active_sessions.load();
   ack.agent_runtime_id = options_.agent_runtime_id;
+  if (options_.service_state) {
+    ack.service = options_.service_state();
+  }
   return ack;
 }
 

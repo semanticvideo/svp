@@ -299,9 +299,10 @@ list(LENGTH expected_registry_files registry_count)
 list(LENGTH expected_schema_files schema_count)
 math(EXPR expected_manifest_count "4 + ${registry_count} + ${schema_count}")
 if(NOT runtime_install_directory STREQUAL "")
-  # The bundle files plus the manifest.json written at install time.
+  # The bundle files plus the release.json and manifest.json written at
+  # install time.
   list(LENGTH expected_runtime_files runtime_count)
-  math(EXPR expected_manifest_count "${expected_manifest_count} + ${runtime_count} + 1")
+  math(EXPR expected_manifest_count "${expected_manifest_count} + ${runtime_count} + 2")
 endif()
 if(NOT manifest_entry_count EQUAL expected_manifest_count)
   fail_verification(

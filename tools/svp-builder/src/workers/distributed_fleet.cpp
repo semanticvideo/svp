@@ -4,14 +4,17 @@
 #include "build_blob_release.hpp"
 #include "coordinator_context.hpp"
 #include "dispatched_calibration_runs.hpp"
+#include "fleet_pairing.hpp"
 #include "track_window_calibration_runs.hpp"
 #include "worker_reach.hpp"
+#include "worker_restart.hpp"
 
 #include "calibration/audio_capacity_workloads.hpp"
 #include "calibration/ocr_capacity_calibration.hpp"
 #include "svp/audio/tasks/diarize_window.hpp"
 #include "svp/exec/remote/remote_error.hpp"
 #include "svp/exec/worker/admission.hpp"
+#include "svp/exec/worker/fleet_store.hpp"
 #include "svp/exec/worker/host_facts.hpp"
 #include "svp/exec/worker/local_load.hpp"
 #include "svp/exec/worker/pairing_store.hpp"
@@ -117,12 +120,12 @@ class FleetDispatchedExecutors final : public DispatchedWorkerExecutors {
       }
       const std::size_t slots = worker.slots.find(task_type)->second;
       executors.push_back(std::make_unique<svp::exec::remote::RemoteExecutor>(
-          svp::exec::remote::RemoteExecutorOptions{
-              .executor_id = "worker." + worker.key.pairing_id,
-              .connector = {.pairing = worker.key},
-              .slots = slots,
-              .session_preamble =
-                  make_supplying_preamble(declaring_capacity(supplies, task_type, slots))}));
+          with_supplied_sessions(
+              svp::exec::remote::RemoteExecutorOptions{
+                  .executor_id = "worker." + worker.key.pairing_id,
+                  .connector = {.pairing = worker.key},
+                  .slots = slots},
+              declaring_capacity(supplies, task_type, slots))));
     }
     return executors;
   }
@@ -215,10 +218,22 @@ WorkerOutcome prepare_worker(CoordinatorPairingRecord record, const WorkerSuppli
       stats = session.stats;
       client.shutdown();
     }
+    // A runtime this worker's service will move to (pushed now, or by
+    // another coordinator) restarts it once this session has ended; wait for
+    // it, so the build that delivered the update keeps the worker.
+    std::string restart_note;
+    if (const std::optional<WorkerHelloAck> restarted = await_worker_runtime_switch(
+            outcome.record.key, supplies.hello, supplies.runtime, ack, [&cancellation] { return cancellation.requested(); },
+            [&restart_note](const std::string& line) { restart_note = line; })) {
+      ack = *restarted;
+    }
     std::ostringstream detail;
     detail << "via " << route << ", sent " << format_bytes(stats.bytes_sent) << " ("
            << (stats.runtime_pushed ? "runtime, " : "") << stats.model_bundles_pushed.size()
            << " model bundle(s), " << stats.blobs_sent << " blob(s))";
+    if (!restart_note.empty()) {
+      detail << ", " << restart_note;
+    }
     std::string problems;
     try {
       const CalibrationOutcome calibration = ensure_worker_calibration(
@@ -300,7 +315,9 @@ class RecordedLocalLoad final : public LocalTaskLoad {
 };
 
 std::string worker_name(const CoordinatorPairingRecord& record) {
-  return record.key.pairing_id + " (" + record.worker.ssh_target + ")";
+  return record.key.pairing_id + " (" +
+         (record.worker.ssh_target.empty() ? record.worker.join_id : record.worker.ssh_target) +
+         ")";
 }
 
 }  // namespace
@@ -337,12 +354,39 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
   // store, no runtime manifest, a model bundle missing), no worker can be
   // used: the build runs on this Mac alone, unless --require-workers asks
   // for workers it cannot have.
+  // A fleet coordinator first pairs the fleet's joinable workers it has not
+  // paired yet (fleet_pairing.hpp), so a Mac installed with `worker install
+  // --join` takes part in this build. A fleet problem is reported and never
+  // keeps the build from the workers already paired.
+  const auto pair_fleet_workers = [&](const PairingDirectory& pairings,
+                                      const CoordinatorRuntime& runtime) {
+    try {
+      const std::optional<FleetMembership> membership = load_fleet_membership(default_fleet_dir());
+      if (!membership) {
+        return;
+      }
+      std::ostringstream progress;
+      const FleetPairingReport report = pair_joinable_fleet_workers(
+          *membership, pairings, runtime.runtime_id, runtime.kind, &progress);
+      std::istringstream lines(progress.str());
+      for (std::string line; std::getline(lines, line);) {
+        log("--distributed: " + line);
+      }
+      for (const std::string& problem : report.problems) {
+        log("warning: --distributed: fleet: " + problem);
+      }
+    } catch (const std::exception& error) {
+      log(std::string("warning: --distributed: fleet pairing skipped: ") + error.what());
+    }
+  };
+
   std::vector<CoordinatorPairingRecord> records;
   auto supplies = std::make_shared<WorkerSupplies>();
   try {
     const PairingDirectory pairings(default_coordinator_pairings_dir());
-    records = load_coordinator_pairings(pairings);
     supplies->runtime = locate_coordinator_runtime(current_executable());
+    pair_fleet_workers(pairings, supplies->runtime);
+    records = load_coordinator_pairings(pairings);
     supplies->hello = make_coordinator_hello(supplies->runtime, work.thread_plan,
                                              model_set_summary(work.model_cache_root));
     std::vector<std::string> model_ids;
@@ -660,13 +704,12 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
                                               const std::string& suffix, std::size_t slots,
                                               std::string_view task_type,
                                               std::vector<svp::exec::Executor*>& into) {
-    auto executor = std::make_unique<svp::exec::remote::RemoteExecutor>(
+    auto executor = std::make_unique<svp::exec::remote::RemoteExecutor>(with_supplied_sessions(
         svp::exec::remote::RemoteExecutorOptions{
             .executor_id = "worker." + outcome.record.key.pairing_id + suffix,
             .connector = {.pairing = outcome.record.key},
-            .slots = slots,
-            .session_preamble =
-                make_supplying_preamble(declaring_capacity(supplies, task_type, slots))});
+            .slots = slots},
+        declaring_capacity(supplies, task_type, slots)));
     auto restricted = std::make_unique<svp::exec::TaskTypeRestrictedExecutor>(
         *executor, std::set<std::string, std::less<>>{std::string(task_type)});
     into.push_back(restricted.get());
