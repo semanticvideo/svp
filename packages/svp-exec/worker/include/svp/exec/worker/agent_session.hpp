@@ -72,6 +72,9 @@ struct AgentCoreOptions {
   // LocalLoad directory.
   SlotSharing::LocalLoad local_load;
   std::chrono::milliseconds slot_contention_window = kDefaultSlotContentionWindow;
+  // Called after a session installed a runtime (RUNTIME_PUT), so the service
+  // can consider moving to it (service_updater.hpp). Empty: nothing.
+  std::function<void()> runtime_installed;
 };
 
 // State shared by every session of one agent. Thread-safe.

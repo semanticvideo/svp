@@ -6,6 +6,7 @@
 #include "svp/exec/cas_task_artifact_access.hpp"
 #include "svp/exec/runtime_manifest.hpp"
 #include "svp/exec/worker/runtime_store.hpp"
+#include "svp/exec/worker/service_link.hpp"
 #include "svp/exec/worker/worker_agent.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 #include "svp/exec/worker/worker_layout.hpp"
@@ -14,10 +15,28 @@
 
 #include <csignal>
 #include <iostream>
+#include <mach-o/dyld.h>
+#include <vector>
 
 namespace svp::builder::workers {
 
 using namespace svp::exec::worker;
+
+namespace {
+
+// The program path this process was started with, symlinks NOT resolved
+// (launchd passes ProgramArguments[0]); empty when unknown.
+std::filesystem::path launched_program_path() {
+  std::uint32_t size = 0;
+  (void)::_NSGetExecutablePath(nullptr, &size);
+  std::vector<char> buffer(size + 1, '\0');
+  if (::_NSGetExecutablePath(buffer.data(), &size) != 0) {
+    return {};
+  }
+  return std::filesystem::path(buffer.data());
+}
+
+}  // namespace
 
 int run_worker_serve(const WorkerCliOptions& options) {
   WorkerAgentOptions agent;
@@ -25,11 +44,13 @@ int run_worker_serve(const WorkerCliOptions& options) {
   if (options.memory_reserve_floor_mb != 0) {
     agent.admission.reserve_floor_bytes = options.memory_reserve_floor_mb * 1024ULL * 1024ULL;
   }
-  // The agent runs from a runtime directory (<root>/runtimes/<id>/bin/...);
-  // name that runtime in HELLO_ACK and the log. Its files were verified when
-  // the runtime was installed; every session's runtime is verified again
-  // before it starts.
+  // The agent runs from a runtime directory (<root>/runtimes/<id>/bin/...,
+  // reached through <root>/current); name that runtime in HELLO_ACK and the
+  // log. Its files were verified when the runtime was installed; every
+  // session's runtime is verified again before it starts.
   const std::filesystem::path runtime_dir = current_executable().parent_path().parent_path();
+  agent.launched_through_current =
+      launched_through_current(WorkerLayout{.root = agent.root}, launched_program_path());
   try {
     agent.agent_runtime_id = svp::exec::compute_runtime_id(
         svp::exec::load_runtime_manifest(runtime_manifest_path(runtime_dir)));

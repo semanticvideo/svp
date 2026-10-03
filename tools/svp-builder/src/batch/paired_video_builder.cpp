@@ -172,7 +172,9 @@ PairedVideoBuilder::PairedVideoBuilder(CoordinatorPairingRecord record,
     : record_(std::move(record)), supplies_(std::move(supplies)) {}
 
 std::string PairedVideoBuilder::name() const {
-  return record_.key.pairing_id + " (" + record_.worker.ssh_target + ")";
+  return record_.key.pairing_id + " (" +
+         (record_.worker.ssh_target.empty() ? record_.worker.join_id : record_.worker.ssh_target) +
+         ")";
 }
 
 RemoteVideoOutcome PairedVideoBuilder::build(const RemoteVideoRequest& request) {

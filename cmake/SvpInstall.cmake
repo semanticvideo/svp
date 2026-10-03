@@ -152,7 +152,9 @@ if(NOT SVP_RUNTIME_BUNDLE_DIR STREQUAL "")
 
   # The runtime identity covers the installed svp-builder as well as the
   # bundle, so it is written after both are in place. svp-runtime-manifest
-  # also checks every bundled file against its components.json digest.
+  # also checks every bundled file against its components.json digest, and
+  # first writes release.json, the install's release stamp that orders
+  # runtimes for worker self-update (runtime_release.hpp).
   install(CODE "
     set(svp_runtime_data_arguments \"${svp_runtime_data_arguments}\")
     set(svp_runtime_root \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}\")
@@ -171,6 +173,7 @@ if(NOT SVP_RUNTIME_BUNDLE_DIR STREQUAL "")
       message(FATAL_ERROR \"Writing the runtime manifest failed: \${svp_runtime_manifest_error}\")
     endif()
     list(APPEND CMAKE_INSTALL_MANIFEST_FILES
+      \"\${CMAKE_INSTALL_PREFIX}/${SVP_RUNTIME_INSTALL_DIR}/release.json\"
       \"\${CMAKE_INSTALL_PREFIX}/${SVP_RUNTIME_INSTALL_DIR}/manifest.json\")
     message(STATUS \"Installed runtime manifest (runtime_id \${svp_runtime_id})\")
   ")

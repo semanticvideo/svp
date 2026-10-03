@@ -1,12 +1,16 @@
 #pragma once
 
 // The launchd job that runs the worker agent (plan §3.3). One job per worker
-// Mac serves every pairing in its root; its program is the svp-builder of a
-// verified runtime under that root, so nothing outside the root is executed.
+// Mac serves every pairing in its root; its program is
+// <root>/current/bin/svp-builder, the svp-builder of the verified runtime
+// the `current` link names (service_link.hpp), so nothing outside the root
+// is executed and the service can move itself to a newer runtime without
+// changing this plist (service_updater.hpp).
 //
 //   RunAtLoad true, KeepAlive {SuccessfulExit: false}: started at load and
-//     restarted after a crash, but an agent that exits cleanly (no pairings
-//     left) stays down.
+//     restarted after a crash or a self-update exit
+//     (kWorkerRestartExitCode), but an agent that exits cleanly (nothing
+//     left to serve) stays down.
 //   ThrottleInterval kWorkerJobThrottleSeconds: launchd's own default (10 s),
 //     stated explicitly because RemoteExecutor's reconnect window
 //     (remote_executor.hpp) is sized from it.
@@ -45,11 +49,10 @@ struct WorkerServiceSpec {
   std::string path;
 };
 
-// The job for a worker whose agent runs from the runtime `runtime_dir`:
-// `<runtime_dir>/bin/svp-builder worker serve --root <root>`.
+// The job for the worker at `layout`:
+// `<root>/current/bin/svp-builder worker serve --root <root>`.
 [[nodiscard]] WorkerServiceSpec make_worker_service_spec(WorkerServiceMode mode,
                                                          const WorkerLayout& layout,
-                                                         const std::filesystem::path& runtime_dir,
                                                          const std::string& user_name,
                                                          const std::filesystem::path& home,
                                                          std::string path = {});

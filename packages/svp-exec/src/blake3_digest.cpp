@@ -34,6 +34,25 @@ Blake3Digest blake3_digest(std::string_view bytes) {
   return blake3_digest(std::as_bytes(std::span(bytes.data(), bytes.size())));
 }
 
+Blake3Digest blake3_derive_key(std::string_view context, std::span<const std::byte> material) {
+  const std::string context_text(context);
+  blake3_hasher hasher;
+  blake3_hasher_init_derive_key(&hasher, context_text.c_str());
+  blake3_hasher_update(&hasher, material.data(), material.size());
+  Blake3Digest digest{};
+  blake3_hasher_finalize(&hasher, digest.data(), digest.size());
+  return digest;
+}
+
+Blake3Digest blake3_keyed_hash(const Blake3Digest& key, std::span<const std::byte> bytes) {
+  blake3_hasher hasher;
+  blake3_hasher_init_keyed(&hasher, key.data());
+  blake3_hasher_update(&hasher, bytes.data(), bytes.size());
+  Blake3Digest digest{};
+  blake3_hasher_finalize(&hasher, digest.data(), digest.size());
+  return digest;
+}
+
 std::string blake3_hex(const Blake3Digest& digest) {
   std::string hex;
   hex.reserve(kBlake3HexChars);

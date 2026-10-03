@@ -154,6 +154,9 @@ class AgentSession {
       case MessageType::runtime_put: {
         const RuntimePut put = runtime_put_from_frame(frame);
         core_.runtimes().install_from_cas(put.runtime_id, put.manifest, put.components, cas_);
+        if (core_.options().runtime_installed) {
+          core_.options().runtime_installed();
+        }
         return;
       }
       case MessageType::blob_have: {

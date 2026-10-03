@@ -42,13 +42,12 @@ void key_string(std::ostringstream& out, std::string_view indent, std::string_vi
 }  // namespace
 
 WorkerServiceSpec make_worker_service_spec(WorkerServiceMode mode, const WorkerLayout& layout,
-                                           const std::filesystem::path& runtime_dir,
                                            const std::string& user_name,
                                            const std::filesystem::path& home, std::string path) {
   WorkerServiceSpec spec;
   spec.mode = mode;
-  spec.program_arguments = {(runtime_dir / std::string(kSessionProgram)).string(), "worker",
-                            "serve", "--root", layout.root.string()};
+  spec.program_arguments = {layout.service_program().string(), "worker", "serve", "--root",
+                            layout.root.string()};
   spec.working_directory = layout.root;
   spec.log_path = layout.agent_log();
   spec.user_name = user_name;

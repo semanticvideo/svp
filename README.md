@@ -349,6 +349,7 @@ This adds:
 ~/.local/libexec/svp/runtime/licenses/*
 ~/.local/libexec/svp/runtime/components.json
 ~/.local/libexec/svp/runtime/manifest.json
+~/.local/libexec/svp/runtime/release.json
 ```
 
 The installed `svp-builder` finds the bundle at `../libexec/svp/runtime`
@@ -372,7 +373,10 @@ written into packages.
 `manifest.json` identifies the installed runtime: `svp-builder`, `ffmpeg`,
 `ffprobe`, the sherpa-onnx library, and ONNX Runtime, each with its BLAKE3
 digest and size, and a `runtime_id` that is the BLAKE3 of the manifest's
-canonical JSON without that field. The install writes it with
+canonical JSON without that field. The install also writes
+`release.json` (listed in the manifest like the other files): the UTC second
+of the install, which orders runtimes so worker Macs move to newer ones by
+themselves. The install writes it with
 `svp-runtime-manifest` (a build-tree tool, not installed), which also checks
 every bundled file against `components.json`. To check an installation later:
 

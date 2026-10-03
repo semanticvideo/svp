@@ -15,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <set>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
@@ -222,6 +223,54 @@ void test_discovery_by_pairing_id() {
                       "unknown pairing");
 }
 
+void test_browse_by_txt_entry() {
+  const PairingKey first = pairing::random_pairing("svp-transport-txt-a");
+  const PairingKey second = pairing::random_pairing("svp-transport-txt-b");
+  const PairingKey outsider = pairing::random_pairing("svp-transport-txt-c");
+  // A value unique to this run, so parallel runs never see each other.
+  const std::string group = first.pairing_id;
+  RemoteListenerOptions a = listener_options(first);
+  a.txt = {{"group", group}, {"extra", "1"}};
+  RemoteListenerOptions b = listener_options(second);
+  b.txt = {{"group", group}};
+  RemoteListenerOptions c = listener_options(outsider);
+  c.txt = {{"group", group + "-other"}};
+  RemoteListener listener_a(a, echo_frames);
+  RemoteListener listener_b(b, echo_frames);
+  RemoteListener listener_c(c, echo_frames);
+  listener_a.start();
+  listener_b.start();
+  listener_c.start();
+  const std::vector<AdvertisedService> services = browse_advertised_services("group", group);
+  std::set<std::string> pairing_ids;
+  for (const AdvertisedService& service : services) {
+    pairing_ids.insert(service.txt.at(std::string(kPairingTxtKey)));
+    if (service.txt.at(std::string(kPairingTxtKey)) == first.pairing_id) {
+      expect(service.txt.count("extra") == 1 && service.txt.at("extra") == "1",
+             "every TXT entry is reported");
+    }
+  }
+  expect(pairing_ids == std::set<std::string>{first.pairing_id, second.pairing_id},
+         "both services with the entry, and only those, are found");
+
+  RemoteListenerOptions bad = listener_options(outsider);
+  bad.txt = {{std::string(kPairingTxtKey), "spoof"}};
+  expect_remote_error(RemoteErrorCode::invalid_configuration,
+                      [&] {
+                        RemoteListener listener(bad, echo_frames);
+                        listener.start();
+                      },
+                      "the pairing entry cannot be overridden");
+  RemoteListenerOptions long_entry = listener_options(outsider);
+  long_entry.txt = {{"k", std::string(kMaxTxtEntryBytes, 'x')}};
+  expect_remote_error(RemoteErrorCode::invalid_configuration,
+                      [&] {
+                        RemoteListener listener(long_entry, echo_frames);
+                        listener.start();
+                      },
+                      "an entry over 255 bytes");
+}
+
 void test_cancelled_connector() {
   const PairingKey key = pairing::random_pairing("svp-transport");
   RemoteConnector connector(RemoteConnectorOptions{.pairing = key});
@@ -283,6 +332,7 @@ int main() {
                         test_peer_reset_fails_a_write_in_flight},
                        {"wrong secret is rejected", test_wrong_secret_is_rejected},
                        {"discovery by pairing id", test_discovery_by_pairing_id},
+                       {"browse by TXT entry", test_browse_by_txt_entry},
                        {"cancelled connector", test_cancelled_connector},
                        {"cancel interrupts discovery", test_cancel_interrupts_discovery},
                        {"listener stop ends sessions", test_listener_stop_ends_sessions},

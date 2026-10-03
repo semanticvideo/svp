@@ -31,6 +31,21 @@ std::string bootstrap_with_retry(std::string_view domain, std::string_view plist
   return out.str();
 }
 
+// Shell lines that point "$root/current" at runtimes/<hex> unless it
+// already reaches a runtime's svp-builder. `ln -s` under a temporary name
+// and `mv -fh` (rename(2), never following the old link) swap it atomically.
+std::string point_current_lines(const Blake3Digest& runtime_id) {
+  std::ostringstream out;
+  out << "if [ ! -L \"$root/current\" ] || [ ! -x \"$root/current/" << kSessionProgram
+      << "\" ]; then\n"
+      << "  rm -f \"$root/.current-$$\"\n"
+      << "  ln -s " << shell_quote("runtimes/" + blake3_hex(runtime_id))
+      << " \"$root/.current-$$\"\n"
+      << "  mv -fh \"$root/.current-$$\" \"$root/current\"\n"
+      << "fi\n";
+  return out.str();
+}
+
 std::uint64_t parse_unsigned(const std::string& value, std::string_view key) {
   std::uint64_t number = 0;
   const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), number);
@@ -185,6 +200,15 @@ std::string render_prepare_root_script(const std::filesystem::path& root) {
   return out.str();
 }
 
+std::string render_point_current_script(const std::filesystem::path& root,
+                                        const Blake3Digest& runtime_id) {
+  std::ostringstream out;
+  out << "set -eu\n"
+      << "root=" << q(root) << "\n"
+      << point_current_lines(runtime_id);
+  return out.str();
+}
+
 std::string render_prepare_launch_agents_script(const std::filesystem::path& plist,
                                                const std::filesystem::path& root) {
   std::ostringstream out;
@@ -232,9 +256,12 @@ std::string render_daemon_install_script(const DaemonInstall& install) {
       << "  mv \"$staging/runtimes/" << hex << "\" \"$root/runtimes/" << hex << "\"\n"
       << "fi\n"
       << "for record in \"$staging\"/pairings/*.json; do\n"
-      << "  [ -f \"$record\" ] && mv -f \"$record\" \"$root/pairings/\"\n"
+      << "  if [ -f \"$record\" ]; then mv -f \"$record\" \"$root/pairings/\"; fi\n"
       << "done\n"
+      << "if [ -f \"$staging/join.json\" ]; then mv -f \"$staging/join.json\" \"$root/join.json\"; fi\n"
+      << point_current_lines(install.runtime_id)
       << "chown -R \"$user:$group\" \"$root\"\n"
+      << "chown -h \"$user:$group\" \"$root/current\"\n"
       << "install -m 0644 -o root -g wheel \"$staging/$label.plist\" \"$plist\"\n"
       << "launchctl bootout \"system/$label\" >/dev/null 2>&1 || true\n"
       << bootstrap_with_retry("system", "$plist")

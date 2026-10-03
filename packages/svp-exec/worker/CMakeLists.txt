@@ -11,8 +11,14 @@ add_library(svp-exec-worker
   src/blob_receiver.cpp
   src/blob_source.cpp
   src/coordinator_session.cpp
+  src/fleet_crypto.cpp
+  src/fleet_join.cpp
+  src/fleet_keys.cpp
+  src/fleet_store.cpp
+  src/hex_bytes.cpp
   src/hello_messages.cpp
   src/host_facts.cpp
+  src/join_service.cpp
   src/launchd_job.cpp
   src/local_load.cpp
   src/message_fields.cpp
@@ -22,6 +28,9 @@ add_library(svp-exec-worker
   src/runtime_files.cpp
   src/runtime_source.cpp
   src/runtime_store.cpp
+  src/runtime_test_start.cpp
+  src/service_link.cpp
+  src/service_updater.cpp
   src/session_process.cpp
   src/slot_sharing.cpp
   src/transfer_messages.cpp
@@ -51,6 +60,10 @@ target_link_libraries(svp-exec-worker
     svp::exec
     svp::exec_remote
     svp::models
+  PRIVATE
+    # P-256 signing and ECDH for fleet join (fleet_crypto.hpp).
+    "-framework Security"
+    "-framework CoreFoundation"
 )
 
 if(BUILD_TESTING)
@@ -61,6 +74,8 @@ if(BUILD_TESTING)
     admission
     slot_sharing
     agent_session
+    service_updater
+    fleet_join
   )
   foreach(SVP_EXEC_TEST IN LISTS SVP_EXEC_WORKER_TESTS)
     string(REPLACE "_" "-" SVP_EXEC_TEST_NAME "${SVP_EXEC_TEST}")

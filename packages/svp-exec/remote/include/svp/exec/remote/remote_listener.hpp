@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -18,6 +19,9 @@ namespace svp::exec::remote {
 // is renamed; 5 s covers that with margin. A listener that cannot advertise
 // within it is reported as failed rather than left undiscoverable.
 inline constexpr std::chrono::milliseconds kDefaultAdvertiseTimeout{5'000};
+
+// One TXT entry ("key=value") must fit in 255 bytes (RFC 6763 §6.1).
+inline constexpr std::size_t kMaxTxtEntryBytes = 255;
 
 struct RemoteListenerOptions {
   PairingKey pairing;
@@ -30,6 +34,10 @@ struct RemoteListenerOptions {
   std::uint16_t port = 0;
   TransportPolicy transport{};
   std::chrono::milliseconds advertise_timeout = kDefaultAdvertiseTimeout;
+  // TXT entries advertised besides kPairingTxtKey (which is always the
+  // pairing id): non-empty keys other than kPairingTxtKey, each entry within
+  // kMaxTxtEntryBytes.
+  std::map<std::string, std::string> txt;
 };
 
 struct RemoteSessionInfo {

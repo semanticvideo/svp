@@ -100,6 +100,19 @@ std::vector<detail::DiscoveredService> browse(RemoteConnector::State& state) {
 
 }  // namespace
 
+std::vector<AdvertisedService> browse_advertised_services(std::string_view key,
+                                                          std::string_view value,
+                                                          const RoutePolicy& policy) {
+  validate_route_policy(policy);
+  const auto signal = std::make_shared<detail::WaitSignal>();
+  std::vector<AdvertisedService> services;
+  for (detail::DiscoveredService& service : detail::browse_for_txt(key, value, policy, signal)) {
+    services.push_back(AdvertisedService{.service_name = std::move(service.name),
+                                         .txt = std::move(service.txt)});
+  }
+  return services;
+}
+
 RemoteConnector::RemoteConnector(RemoteConnectorOptions options)
     : state_(std::make_shared<State>()) {
   validate_pairing_key(options.pairing);

@@ -9,7 +9,16 @@
 //   workers status [<pairing-id>|<user>@<host>] [--json]
 //   workers sync <pairing-id>|<user>@<host> [--models all|none|<ids>]
 //   workers unpair <pairing-id>|<user>@<host> [--ssh-option <opt>]... [--forget]
+//   workers fleet init [--force]
+//   workers fleet token [--coordinator] [--valid-days <n>]
+//   workers fleet join <coordinator token>|- [--force]
+//   workers fleet pair [--models all|none|<ids>]
+//       SSH-free pairing through a fleet (fleet_keys.hpp, fleet_join.hpp).
 //
+//   worker install --join <worker token>|- [--dry-run [--dry-run-dir <dir>]]
+//       Run ON a new worker Mac (asks for its administrator password once,
+//       through sudo): installs the LaunchDaemon with the runtime this
+//       svp-builder belongs to, and the join credential.
 //   worker serve --root <dir> [--memory-reserve-floor-mb <n>]
 //       The launchd entry point (worker_agent.hpp).
 //   worker --serve-fd <fd> --cas-root <dir> --session-dir <dir>
@@ -37,12 +46,21 @@ struct WorkersCliOptions {
   std::string worker;
   bool json = false;
   bool forget = false;
+  // workers fleet
+  bool force = false;
+  bool coordinator_token = false;
+  std::uint32_t valid_days = 0;
+  std::string fleet_token;
 
   CLI::App* pair = nullptr;
   CLI::App* list = nullptr;
   CLI::App* status = nullptr;
   CLI::App* sync = nullptr;
   CLI::App* unpair = nullptr;
+  CLI::App* fleet_init = nullptr;
+  CLI::App* fleet_token_command = nullptr;
+  CLI::App* fleet_join = nullptr;
+  CLI::App* fleet_pair = nullptr;
 };
 
 struct WorkerCliOptions {
@@ -56,10 +74,14 @@ struct WorkerCliOptions {
   std::uint64_t memory_reserve_floor_mb = 0;
   std::string runtime_dir;
   std::string expect;
+  std::string join_token;
+  bool dry_run = false;
+  std::string dry_run_dir;
 
   CLI::App* worker = nullptr;
   CLI::App* serve = nullptr;
   CLI::App* verify_runtime = nullptr;
+  CLI::App* install = nullptr;
 };
 
 void register_workers_cli(CLI::App& app, WorkersCliOptions& workers, WorkerCliOptions& worker);
@@ -74,9 +96,18 @@ int run_workers_list(const WorkersCliOptions& options);
 int run_workers_status(const WorkersCliOptions& options);
 int run_workers_sync(const WorkersCliOptions& options);
 int run_workers_unpair(const WorkersCliOptions& options);
+int run_workers_fleet_init(const WorkersCliOptions& options);
+int run_workers_fleet_token(const WorkersCliOptions& options);
+int run_workers_fleet_join(const WorkersCliOptions& options);
+int run_workers_fleet_pair(const WorkersCliOptions& options);
 
 int run_worker_serve(const WorkerCliOptions& options);
 int run_worker_session(const WorkerCliOptions& options);
 int run_worker_verify_runtime(const WorkerCliOptions& options);
+int run_worker_install(const WorkerCliOptions& options);
+
+// A token argument, or one line from stdin when it is "-" (keeps the token
+// out of the shell history and the process list).
+[[nodiscard]] std::string read_token_argument(const std::string& argument);
 
 }  // namespace svp::builder::workers

@@ -5,13 +5,20 @@
 //
 //   svp-runtime-manifest write  --root PREFIX --bundle-dir REL
 //                               [--add COMPONENT=REL ...]
+//                               [--release-stamp UTC_SECONDS]
 //   svp-runtime-manifest verify --root PREFIX --manifest FILE
 //
-// Both print the runtime_id on stdout.
+// Both print the runtime_id on stdout. `write` first writes the runtime's
+// release record, <bundle-dir>/release.json (runtime_release.hpp), with the
+// current UTC time in seconds or --release-stamp to reproduce a given
+// install, and lists it in the manifest like any other runtime file.
 
 #include "svp/exec/blake3_digest.hpp"
 #include "svp/exec/runtime_manifest.hpp"
 #include "svp/exec/runtime_manifest_assembly.hpp"
+#include "svp/exec/runtime_release.hpp"
+
+#include <charconv>
 
 #include <cstdio>
 #include <exception>
@@ -32,7 +39,7 @@ constexpr int kFailureExitCode = 1;
 int usage() {
   std::cerr << "usage:\n"
                "  svp-runtime-manifest write --root PREFIX --bundle-dir REL "
-               "[--add COMPONENT=REL ...]\n"
+               "[--add COMPONENT=REL ...] [--release-stamp UTC_SECONDS]\n"
                "  svp-runtime-manifest verify --root PREFIX --manifest FILE\n";
   return kUsageExitCode;
 }
@@ -43,6 +50,7 @@ struct Arguments {
   std::string bundle_dir;
   std::filesystem::path manifest;
   std::vector<svp::exec::RuntimeManifestExtraFile> extra_files;
+  std::optional<std::uint64_t> release_stamp;
 };
 
 std::optional<Arguments> parse_arguments(int argc, char** argv) {
@@ -59,6 +67,13 @@ std::optional<Arguments> parse_arguments(int argc, char** argv) {
       arguments.bundle_dir = value;
     } else if (flag == "--manifest") {
       arguments.manifest = value;
+    } else if (flag == "--release-stamp") {
+      std::uint64_t stamp = 0;
+      const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), stamp);
+      if (error != std::errc{} || end != value.data() + value.size() || value.empty()) {
+        return std::nullopt;
+      }
+      arguments.release_stamp = stamp;
     } else if (flag == "--add") {
       const std::size_t equals = value.find('=');
       if (equals == std::string::npos || equals == 0 || equals + 1 == value.size()) {
@@ -90,8 +105,22 @@ void write_file_atomically(const std::filesystem::path& path, const std::string&
 
 int run_write(const Arguments& arguments) {
   if (arguments.bundle_dir.empty()) return usage();
-  const svp::exec::RuntimeManifest manifest = svp::exec::assemble_runtime_manifest(
-      arguments.root, arguments.bundle_dir, arguments.extra_files);
+  const std::string release_path =
+      arguments.bundle_dir + "/" + std::string(svp::exec::kRuntimeReleaseFileName);
+  if (release_path != svp::exec::kRuntimeReleasePath) {
+    std::cerr << "svp-runtime-manifest: warning: the release record is at " << release_path
+              << ", not " << svp::exec::kRuntimeReleasePath
+              << "; worker Macs will not move to this runtime by themselves\n";
+  }
+  write_file_atomically(arguments.root / release_path,
+                        svp::exec::encode_runtime_release_record(
+                            arguments.release_stamp ? *arguments.release_stamp
+                                                    : svp::exec::release_stamp_now()));
+  std::vector<svp::exec::RuntimeManifestExtraFile> extra_files = arguments.extra_files;
+  extra_files.push_back({.component = std::string(svp::exec::kRuntimeReleaseComponent),
+                         .path = release_path});
+  const svp::exec::RuntimeManifest manifest =
+      svp::exec::assemble_runtime_manifest(arguments.root, arguments.bundle_dir, extra_files);
   const std::filesystem::path output = arguments.root / arguments.bundle_dir /
                                        std::string(svp::exec::kRuntimeManifestFileName);
   write_file_atomically(output, svp::exec::encode_runtime_manifest(manifest));

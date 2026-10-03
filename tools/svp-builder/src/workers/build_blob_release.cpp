@@ -30,7 +30,9 @@ constexpr std::chrono::milliseconds kReleaseSessionDeadline =
     svp::exec::remote::kDefaultReconnectWindow;
 
 std::string worker_name(const CoordinatorPairingRecord& record) {
-  return record.key.pairing_id + " (" + record.worker.ssh_target + ")";
+  return record.key.pairing_id + " (" +
+         (record.worker.ssh_target.empty() ? record.worker.join_id : record.worker.ssh_target) +
+         ")";
 }
 
 // HELLO, BLOB_RELEASE, SHUTDOWN over `connection`. Returns what to report.

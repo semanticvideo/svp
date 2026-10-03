@@ -5,6 +5,7 @@
 #include "calibration_store.hpp"
 #include "ssh_session.hpp"
 #include "svp/exec/worker/pairing_store.hpp"
+#include "svp/exec/worker/worker_error.hpp"
 #include "svp/exec/worker/worker_scripts.hpp"
 #include "worker_reach.hpp"
 #include "workers_cli.hpp"
@@ -18,6 +19,12 @@ using namespace svp::exec::worker;
 int run_workers_unpair(const WorkersCliOptions& options) {
   const PairingDirectory store(default_coordinator_pairings_dir());
   const CoordinatorPairingRecord record = find_pairing(store, options.worker);
+  if (!options.forget && record.worker.ssh_target.empty()) {
+    throw WorkerError(WorkerErrorCode::configuration,
+                      record.key.pairing_id + " was paired through its fleet join listener, not "
+                      "ssh, so this Mac cannot remove it from the worker; `--forget` deletes "
+                      "this Mac's pairing record");
+  }
   if (!options.forget) {
     const std::string script = render_removal_script(
         WorkerRemoval{.mode = record.worker.service_mode,

@@ -285,6 +285,7 @@ target_sources(svp-exec
     src/runtime_manifest.cpp
     src/runtime_manifest_assembly.cpp
     src/runtime_manifest_files.cpp
+    src/runtime_release.cpp
 )
 
 add_executable(svp-runtime-manifest tools/svp_runtime_manifest_main.cpp)
