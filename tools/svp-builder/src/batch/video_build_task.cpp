@@ -79,6 +79,33 @@ class PackagePins {
   std::optional<svp::exec::CasPinSet> pins_;
 };
 
+// The worker's model view links each bundle directory into its store. A
+// build's model-cache verification scans the cache without following
+// directory links, so it would find no bundles there. The job's cache
+// mirrors the view as real directories whose files link into the store.
+std::filesystem::path mirror_model_view(const std::filesystem::path& view,
+                                        const std::filesystem::path& mirror) {
+  std::filesystem::remove_all(mirror);
+  std::filesystem::create_directories(mirror);
+  for (const std::filesystem::directory_entry& bundle :
+       std::filesystem::directory_iterator(view)) {
+    const std::filesystem::path bundle_target = mirror / bundle.path().filename();
+    std::filesystem::create_directories(bundle_target);
+    for (auto it = std::filesystem::recursive_directory_iterator(
+             bundle.path(), std::filesystem::directory_options::follow_directory_symlink);
+         it != std::filesystem::recursive_directory_iterator(); ++it) {
+      const std::filesystem::path target =
+          bundle_target / std::filesystem::relative(it->path(), bundle.path());
+      if (it->is_directory()) {
+        std::filesystem::create_directories(target);
+      } else {
+        std::filesystem::create_symlink(std::filesystem::canonical(it->path()), target);
+      }
+    }
+  }
+  return mirror;
+}
+
 svp::exec::TaskResult failed(const svp::exec::TaskSpec& spec, std::string_view code,
                              std::string message, bool retryable) {
   svp::exec::TaskResult result;
@@ -151,7 +178,7 @@ svp::exec::TaskResult execute(const svp::exec::TaskSpec& spec,
     source = job / "source" / parameters.source_name;
     std::filesystem::remove(source);
     std::filesystem::create_symlink(inputs.at(std::string(kVideoBuildSourceInput)).path, source);
-    models = environment.models->cache_for(spec);
+    models = mirror_model_view(environment.models->cache_for(spec), job / "models");
     const std::filesystem::path lock = models / kModelLockFileName;
     std::filesystem::remove(lock);
     std::filesystem::copy_file(inputs.at(std::string(kVideoBuildModelLockInput)).path, lock);
