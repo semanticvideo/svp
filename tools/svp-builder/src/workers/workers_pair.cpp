@@ -24,7 +24,7 @@
 #include "svp/exec/worker/worker_connection.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 #include "svp/exec/worker/worker_scripts.hpp"
-#include "ocr_calibration_runs.hpp"
+#include "workers_calibration_command.hpp"
 #include "worker_reach.hpp"
 #include "workers_cli.hpp"
 

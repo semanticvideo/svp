@@ -289,14 +289,20 @@ once its token has expired. Fleet secrets live in
 from stdin with `-` stay out of shell history. `workers unpair` cannot reach
 a worker paired through its fleet; `--forget` removes this Mac's record.
 
-`pair` and `sync` also measure capacity on this Mac and on the worker, for
-OCR and for each kind of vision work a distributed build sends (evidence
-crops, text and keyframe embeddings, depth): a short synthetic slice runs at
+`pair`, `sync`, and `fleet pair` also measure capacity on this Mac and on the
+worker, for every kind of work a default distributed build sends: OCR, each
+kind of vision work (evidence crops, text and keyframe embeddings, depth),
+tracking windows at the default tracking quality, and ASR chunks and
+diarization windows (on a synthesized speech clip): a short synthetic slice runs at
 1, 2, ... concurrent tasks until another slot adds less than 10% throughput
 (or memory and CPUs admit no more). The results are kept beside the pairings
 (`.../SVP/Calibration/`) and measured again whenever the runtime, macOS,
 hardware, thread counts, decoder build, or model bundles change; a
-distributed build measures any that are missing before it starts.
+distributed build on the same runtime and conditions finds every record
+current and measures nothing (one at another tracking quality measures that
+quality once). A stage's summary on stderr names each worker that declined
+leases (for memory, memory pressure, or shared slots), how many, and the last
+reason, so work that stayed on this Mac is never unexplained.
 
 Distributed builds:
 

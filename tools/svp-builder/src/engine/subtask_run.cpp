@@ -1,5 +1,6 @@
 #include "engine/subtask_run.hpp"
 
+#include "engine/declined_lease_tally.hpp"
 #include "engine/local_load_executor.hpp"
 
 #include "svp/exec/attempt_event.hpp"
@@ -60,7 +61,9 @@ class OrderedSink final : public svp::exec::ResultCommitSink {
 };
 
 // Per-executor counts and one stderr line per lost or failed attempt, so a
-// worker dropping out is visible while the stage goes on.
+// worker dropping out is visible while the stage goes on, and the leases each
+// worker declined, so a stage its workers turned away is never silently a
+// stage of this Mac alone.
 class SubtaskReport {
  public:
   SubtaskReport(const SubtaskRunRequest& request, bool report)
@@ -68,6 +71,7 @@ class SubtaskReport {
 
   void observe(const svp::exec::AttemptEvent& event) {
     using Kind = svp::exec::AttemptEventKind;
+    declined_.observe(event);
     if (event.kind == Kind::committed) {
       ++tasks_by_executor_[event.executor_id];
       return;
@@ -97,12 +101,13 @@ class SubtaskReport {
     if (failed_attempts_ > 0) {
       line << ", " << failed_attempts_ << " attempt(s) retried";
     }
-    std::cerr << line.str() << "\n";
+    std::cerr << line.str() << "\n" << declined_.summary(request_.task_type);
   }
 
  private:
   const SubtaskRunRequest& request_;
   bool report_;
+  DeclinedLeaseTally declined_;
   std::map<std::string, std::size_t> tasks_by_executor_;
   std::size_t failed_attempts_ = 0;
 };

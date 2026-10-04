@@ -8,9 +8,11 @@
 //     batch has committed (batches restored by --resume count as done);
 //   * one stderr line per lost or failed batch attempt and per quarantined
 //     executor, so a worker dropping out is visible while the build goes on;
-//   * per-executor totals for the end-of-build summary.
+//   * per-executor totals for the end-of-build summary, with the leases each
+//     executor declined (declined_lease_tally.hpp).
 // Called on the scheduler thread only (svp::exec::AttemptObserver).
 
+#include "engine/declined_lease_tally.hpp"
 #include "engine/ocr_frame_batch_plan.hpp"
 
 #include "svp/builder/build_progress.hpp"
@@ -52,7 +54,8 @@ class OcrBatchObserver {
   [[nodiscard]] std::uint64_t retried_attempts() const { return retried_attempts_; }
   [[nodiscard]] const std::vector<std::string>& quarantined() const { return quarantined_; }
 
-  // One line per executor that ran batches, for stderr.
+  // One line per executor that ran batches, then one per executor that
+  // declined any, for stderr.
   [[nodiscard]] std::string summary() const;
 
  private:
@@ -70,6 +73,7 @@ class OcrBatchObserver {
   std::map<std::string, OcrExecutorTotals> totals_;
   std::uint64_t retried_attempts_ = 0;
   std::vector<std::string> quarantined_;
+  DeclinedLeaseTally declined_;
 };
 
 }  // namespace svp::builder::engine

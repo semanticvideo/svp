@@ -5,9 +5,9 @@
 #include "svp/exec/worker/coordinator_session.hpp"
 #include "svp/exec/worker/pairing_store.hpp"
 #include "svp/exec/worker/worker_connection.hpp"
-#include "ocr_calibration_runs.hpp"
 #include "worker_reach.hpp"
 #include "worker_restart.hpp"
+#include "workers_calibration_command.hpp"
 #include "workers_cli.hpp"
 
 #include <future>

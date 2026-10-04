@@ -1,9 +1,15 @@
 // The --distributed build's dispatched vision work (M4): running one stage's
 // tasks across this Mac and the workers (run_subtasks), the dispatchers'
-// hand-back rules, the capacity calibration graph of a dispatched type, and
-// which vision work a build dispatches.
+// hand-back rules, the leases workers declined, the capacity calibration
+// graph of a dispatched type, which measurements `workers sync` takes ahead
+// of builds, and which vision and audio work a build dispatches.
 
+#include "calibration/audio_capacity_workloads.hpp"
+#include "calibration/calibration_plan.hpp"
 #include "calibration/capacity_sweep.hpp"
+#include "calibration/dispatched_capacity_workloads.hpp"
+#include "engine/declined_lease_tally.hpp"
+#include "engine/distributed_audio_work.hpp"
 #include "engine/distributed_vision_work.hpp"
 #include "engine/stage_output_access.hpp"
 #include "engine/subtask_run.hpp"
@@ -13,10 +19,15 @@
 #include "svp/exec/output_digest.hpp"
 #include "svp/exec/parameters_digest.hpp"
 #include "svp/exec/task_registry.hpp"
+#include "svp/audio/tasks/asr_chunk_batch.hpp"
+#include "svp/audio/tasks/diarize_window.hpp"
 #include "svp/vision/dispatched_work.hpp"
 #include "svp/vision/tasks/embed_text_batch_parameters.hpp"
 #include "svp/vision/tasks/ocr_crop_batch_parameters.hpp"
+#include "svp/vision/tasks/ocr_frame_batch_parameters.hpp"
+#include "svp/vision/tasks/track_window_parameters.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <functional>
 #include <new>
@@ -27,6 +38,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -369,6 +381,221 @@ void test_planned_vision_work() {
           "host-chosen thread counts are not dispatched");
 }
 
+
+// A worker whose admission declines every lease it is offered (its memory
+// is spoken for).
+class DecliningWorker final : public exec::Executor {
+ public:
+  explicit DecliningWorker(std::string id) : id_(std::move(id)) {}
+  std::string_view id() const override { return id_; }
+  std::size_t slots() const override { return 2; }
+  void start(exec::ExecutorEvents& events) override { events_ = &events; }
+  void assign(const exec::TaskSpec&, const exec::Lease& lease) override {
+    events_->attempt_rejected(lease.lease_id, "insufficient_memory",
+                              "task needs 2304 MiB but the worker has 4000 MiB available");
+  }
+  void cancel(std::string_view) override {}
+  void lease_expired(std::string_view) override {}
+  void stop() override {}
+
+ private:
+  std::string id_;
+  exec::ExecutorEvents* events_ = nullptr;
+};
+
+class DecliningWorkers final : public svp::builder::DispatchedWorkerExecutors {
+ public:
+  std::vector<std::unique_ptr<exec::Executor>> make(std::string_view) override {
+    std::vector<std::unique_ptr<exec::Executor>> executors;
+    executors.push_back(std::make_unique<DecliningWorker>("worker.declining"));
+    return executors;
+  }
+};
+
+// Collects what a block writes to stderr.
+class CapturedStderr {
+ public:
+  CapturedStderr() : previous_(std::cerr.rdbuf(captured_.rdbuf())) {}
+  ~CapturedStderr() { std::cerr.rdbuf(previous_); }
+  std::string text() const { return captured_.str(); }
+
+ private:
+  std::ostringstream captured_;
+  std::streambuf* previous_;
+};
+
+// Leases a worker declined are counted per executor and code and reported
+// with the last reason; other attempt events are not declines.
+void test_declined_lease_tally() {
+  engine::DeclinedLeaseTally tally;
+  require(tally.summary("asr.chunk_batch").empty(), "nothing declined, nothing reported");
+  const auto event = [](exec::AttemptEventKind kind, std::string executor, std::string detail) {
+    return exec::AttemptEvent{.kind = kind,
+                              .task_id = "task.test",
+                              .attempt = 1,
+                              .executor_id = std::move(executor),
+                              .lease_id = "lease_1",
+                              .speculative = false,
+                              .detail = std::move(detail)};
+  };
+  tally.observe(event(exec::AttemptEventKind::rejected, "worker.a",
+                      "insufficient_memory: task needs 2304 MiB"));
+  tally.observe(event(exec::AttemptEventKind::rejected, "worker.a",
+                      "memory_pressure: the worker is under warning memory pressure"));
+  tally.observe(event(exec::AttemptEventKind::rejected, "worker.a",
+                      "insufficient_memory: task needs 2304 MiB, again"));
+  tally.observe(event(exec::AttemptEventKind::failed, "worker.b", "lost"));
+  tally.observe(event(exec::AttemptEventKind::committed, "worker.b", ""));
+  require(tally.declined("worker.a") == 3 && tally.declined("worker.b") == 0,
+          "only rejections count, per executor");
+  const std::string summary = tally.summary("asr.chunk_batch");
+  require(summary.find("svp-builder: asr.chunk_batch: worker.a declined 3 lease(s): "
+                       "insufficient_memory 2, memory_pressure 1; last: insufficient_memory: "
+                       "task needs 2304 MiB, again\n") == 0 &&
+              summary.find("worker.b") == std::string::npos,
+          "one line per declining executor, by code, with the last reason: " + summary);
+}
+
+// A stage whose worker declines every lease runs on this Mac, and says so:
+// the summary names the worker, how many leases it declined, and why.
+void test_declined_leases_are_reported() {
+  exec::TaskTypeRegistry registry;
+  engine::StageOutputAccess outputs;
+  register_echo(registry, outputs);
+  engine::VisionDispatchSetup setup = echo_setup(1);
+  setup.workers = std::make_shared<DecliningWorkers>();
+  setup.report = true;
+  std::vector<exec::CommittedResult> results;
+  std::string report;
+  {
+    const CapturedStderr captured;
+    results = engine::run_subtasks({.task_type = kEchoType, .nodes = echo_nodes(4), .on_committed = {}},
+                                   setup, registry, outputs);
+    report = captured.text();
+  }
+  require(results.size() == 4, "every task commits on this Mac");
+  for (const exec::CommittedResult& result : results) {
+    require(result.executor_id == std::string("in-process.") + kEchoType,
+            "the declining worker ran nothing");
+  }
+  require(report.find(std::string("svp-builder: ") + kEchoType +
+                      ": worker.declining declined ") != std::string::npos &&
+              report.find("insufficient_memory") != std::string::npos &&
+              report.find("task needs 2304 MiB") != std::string::npos,
+          "the stage reports the declined leases and their reason: " + report);
+}
+
+svp::exec::TaskModelRef test_model_ref(const std::string& id) {
+  exec::Blake3Digest digest{};
+  digest.fill(0x2a);
+  return {.model_id = id,
+          .model_bundle_id = id + "@test+blake3_" + exec::blake3_hex(digest).substr(0, 12),
+          .bundle_blake3 = digest};
+}
+
+// `workers sync` measures every type a build dispatches, on the build's own
+// terms: OCR, each vision type, tracking windows at the default quality, and
+// each audio type, with diarize.window (which loads sherpa-onnx in this
+// process) after every measurement that loads ONNX Runtime models.
+void test_calibration_steps_cover_every_dispatched_type() {
+  namespace calibration = svp::builder::calibration;
+  namespace audio_tasks = svp::audio::tasks;
+  require(calibration::calibrated_tracking_qualities() ==
+              std::vector<vision::VisualTrackingQuality>{vision::kDefaultVisualTrackingQuality},
+          "tracking is measured at the default build's quality");
+
+  svp::builder::DistributedVisionWork vision;
+  vision.evidence_crops = true;
+  const vision::DispatchedModel model{.model_id = "model",
+                                      .execution_provider = "cpu",
+                                      .threads = {.intra_op = 2, .inter_op = 1}};
+  vision.text_embeddings = svp::builder::DistributedOnnxWork{test_model_ref("text"), model};
+  vision.keyframe_embeddings = svp::builder::DistributedOnnxWork{test_model_ref("frame"), model};
+  vision.depth = svp::builder::DistributedOnnxWork{test_model_ref("depth"), model};
+  svp::builder::DistributedAudioWork audio;
+  audio.asr_model_refs = {test_model_ref("whisper"), test_model_ref("vad")};
+  audio.diarization_model_ref = test_model_ref("sherpa");
+
+  const std::vector<calibration::CalibrationStep> steps = calibration::calibration_steps(
+      vision, audio, calibration::calibrated_tracking_qualities());
+  std::vector<std::string> types;
+  for (const calibration::CalibrationStep& step : steps) {
+    types.push_back(step.task_type);
+  }
+  const auto covers = [&](const std::string& type) {
+    return std::find(types.begin(), types.end(), type) != types.end();
+  };
+  require(steps.front().kind == calibration::CalibrationKind::ocr &&
+              steps.front().task_type == tasks::kOcrFrameBatchTaskType,
+          "OCR first");
+  for (const std::string& type : calibration::dispatched_task_types(vision)) {
+    require(covers(type), "every dispatched vision type is measured: " + type);
+  }
+  for (const std::string& type : calibration::audio_task_types(audio)) {
+    require(covers(type), "every dispatched audio type is measured: " + type);
+  }
+  const auto tracking = std::find_if(steps.begin(), steps.end(), [](const auto& step) {
+    return step.kind == calibration::CalibrationKind::tracking;
+  });
+  require(tracking != steps.end() && tracking->task_type == tasks::kTrackWindowTaskType &&
+              tracking->tracking_quality == vision::kDefaultVisualTrackingQuality,
+          "tracking windows are measured");
+  require(types.size() == 1 + calibration::dispatched_task_types(vision).size() + 1 +
+                              calibration::audio_task_types(audio).size(),
+          "each type once");
+  require(steps.back().task_type == audio_tasks::kDiarizeWindowTaskType,
+          "diarize.window is measured last");
+
+  audio.diarization_model_ref.reset();
+  const std::vector<calibration::CalibrationStep> no_windows =
+      calibration::calibration_steps(vision, audio, {});
+  require(no_windows.back().task_type == audio_tasks::kAsrChunkBatchTaskType &&
+              std::none_of(no_windows.begin(), no_windows.end(),
+                           [](const auto& step) {
+                             return step.kind == calibration::CalibrationKind::tracking ||
+                                    step.task_type == audio_tasks::kDiarizeWindowTaskType;
+                           }),
+          "a type the build does not dispatch is not measured");
+}
+
+// The audio work `workers sync` measures is the audio work a build with
+// audio dispatches: it follows the model cache and the thread plan only.
+void test_planned_audio_models() {
+  const std::filesystem::path empty =
+      std::filesystem::temp_directory_path() / "svp-dispatch-empty-audio-model-cache";
+  std::filesystem::create_directories(empty);
+  svp::models::ThreadPlan plan;
+  plan.whisper.decode = 2;
+  plan.whisper.vad = 1;
+  plan.forced_alignment = {.intra_op = 2, .inter_op = 1};
+  plan.sherpa.segmentation = 1;
+  plan.sherpa.embedding = 1;
+  const svp::builder::DistributedAudioWork none = engine::plan_distributed_audio_models(empty, plan);
+  require(none.asr_model_refs.empty() && !none.diarization_model_ref,
+          "audio models missing from the cache are not dispatched");
+  std::filesystem::remove_all(empty);
+  require(engine::plan_distributed_audio_models({}, plan).asr_model_refs.empty(),
+          "no model cache, no audio dispatch");
+
+  // Needs a real model cache; CI points SVP_MODEL_CACHE_ROOT at a directory
+  // with no model assets.
+  const char* cache = std::getenv("SVP_MODEL_CACHE_ROOT");
+  std::error_code error;
+  if (cache == nullptr || *cache == '\0' || !std::filesystem::is_directory(cache, error) ||
+      std::filesystem::is_empty(cache, error)) {
+    return;
+  }
+  const svp::builder::DistributedAudioWork all = engine::plan_distributed_audio_models(cache, plan);
+  require(all.asr_model_refs.size() >= 2 && all.diarization_model_ref,
+          "every cached audio model is dispatched");
+  plan.whisper.decode = 0;  // left to each Mac
+  plan.sherpa.embedding = 0;
+  const svp::builder::DistributedAudioWork host_chosen =
+      engine::plan_distributed_audio_models(cache, plan);
+  require(host_chosen.asr_model_refs.empty() && !host_chosen.diarization_model_ref,
+          "host-chosen thread counts are not dispatched");
+}
+
 }  // namespace
 
 int main() {
@@ -377,6 +604,10 @@ int main() {
   test_dispatchers_hand_back_unplanned_work();
   test_dispatcher_failures_fail_the_build();
   test_dispatched_outputs_are_released();
+  test_declined_lease_tally();
+  test_declined_leases_are_reported();
+  test_calibration_steps_cover_every_dispatched_type();
+  test_planned_audio_models();
   test_dispatched_calibration_graph();
   test_planned_vision_work();
   std::cout << "dispatched work tests passed\n";

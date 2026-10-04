@@ -19,6 +19,14 @@
 
 namespace svp::builder::engine {
 
+// The audio work a build with audio dispatches from `model_cache_root` and
+// `thread_plan`, whatever its media: what `workers sync` measures ahead of
+// the builds that will dispatch it.
+[[nodiscard]] DistributedAudioWork plan_distributed_audio_models(
+    const std::filesystem::path& model_cache_root, const svp::models::ThreadPlan& thread_plan);
+
+// The same for one build: nothing when the build runs no audio stage, its
+// media has no audio stream, or it has no model cache.
 [[nodiscard]] DistributedAudioWork plan_distributed_audio_work(
     const BuildPipelineOptions& options, const BuildStageExecutionPlan& stage_plan,
     const svp::media::MediaIngestPlan& plan, const svp::models::ThreadPlan& thread_plan);

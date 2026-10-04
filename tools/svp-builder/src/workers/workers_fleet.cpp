@@ -4,7 +4,7 @@
 
 #include "coordinator_context.hpp"
 #include "fleet_pairing.hpp"
-#include "ocr_calibration_runs.hpp"
+#include "workers_calibration_command.hpp"
 #include "svp/exec/worker/coordinator_session.hpp"
 #include "svp/exec/worker/fleet_store.hpp"
 #include "svp/exec/worker/worker_connection.hpp"
