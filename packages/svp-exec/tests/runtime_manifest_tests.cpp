@@ -3,6 +3,7 @@
 #include "svp/exec/runtime_components.hpp"
 #include "svp/exec/runtime_manifest.hpp"
 #include "svp/exec/runtime_manifest_assembly.hpp"
+#include "svp/exec/runtime_release.hpp"
 
 #include <algorithm>
 #include <string>
@@ -155,6 +156,92 @@ void test_decode_rejects_invalid_manifests() {
   }
 }
 
+RuntimeRelease release(std::optional<std::uint64_t> stamp, std::uint8_t id_byte) {
+  return RuntimeRelease{.runtime_id = repeated_digest(id_byte), .release_stamp = stamp};
+}
+
+void test_release_order() {
+  expect(is_newer_release(release(20, 0x01), release(10, 0xff)),
+         "a later stamp is newer whatever the ids");
+  expect(!is_newer_release(release(10, 0xff), release(20, 0x01)),
+         "an earlier stamp is never newer (no downgrade)");
+  expect(is_newer_release(release(10, 0x02), release(10, 0x01)),
+         "equal stamps: the larger runtime_id is newer");
+  expect(!is_newer_release(release(10, 0x01), release(10, 0x02)),
+         "equal stamps: the smaller runtime_id is not newer");
+  expect(!is_newer_release(release(10, 0x01), release(10, 0x01)),
+         "a runtime is not newer than itself");
+  expect(is_newer_release(release(1, 0x00), release(std::nullopt, 0xff)),
+         "any stamped runtime is newer than an unstamped one");
+  expect(!is_newer_release(release(std::nullopt, 0xff), release(1, 0x00)),
+         "an unstamped runtime is never newer than a stamped one");
+  expect(!is_newer_release(release(std::nullopt, 0xff), release(std::nullopt, 0x00)),
+         "unstamped runtimes are never update targets");
+  // Total order over stamped runtimes: exactly one of a<b, b<a, a==b.
+  const std::vector<RuntimeRelease> releases = {release(5, 0x10), release(5, 0x20),
+                                                release(6, 0x00), release(4, 0xff)};
+  for (const RuntimeRelease& a : releases) {
+    for (const RuntimeRelease& b : releases) {
+      const int relations = (is_newer_release(a, b) ? 1 : 0) + (is_newer_release(b, a) ? 1 : 0) +
+                            (a == b ? 1 : 0);
+      expect(relations == 1, "exactly one relation between two stamped runtimes");
+    }
+  }
+}
+
+void test_release_record() {
+  const std::string record = encode_runtime_release_record(1'790'000'000);
+  expect_equal(record, std::string(R"({"release_stamp":1790000000,"schema":"svp.runtime.release/1"})"),
+               "canonical release record");
+  expect(decode_runtime_release_record(record) == 1'790'000'000, "release record round trip");
+  expect_exec_error(ExecErrorCode::invalid_value,
+                    [] {
+                      (void)decode_runtime_release_record(
+                          R"({"release_stamp":1,"schema":"svp.runtime.release/9"})");
+                    },
+                    "unknown release schema");
+  expect_exec_error(ExecErrorCode::unknown_field,
+                    [] {
+                      (void)decode_runtime_release_record(
+                          R"({"extra":1,"release_stamp":1,"schema":"svp.runtime.release/1"})");
+                    },
+                    "unknown release field");
+}
+
+void test_release_stamp_is_a_runtime_file() {
+  TemporaryDirectory root("svp-runtime-release");
+  write_file(root.path / "bin/svp-builder", "builder bytes");
+  write_file(root.path / std::string(kRuntimeReleasePath), encode_runtime_release_record(42));
+  RuntimeManifest manifest;
+  manifest.arch = "arm64";
+  manifest.macos_deployment_target = "15.0";
+  manifest.files = {describe_runtime_file(root.path, "bin/svp-builder", "svp-builder"),
+                    describe_runtime_file(root.path, std::string(kRuntimeReleasePath),
+                                          std::string(kRuntimeReleaseComponent))};
+  normalize_runtime_manifest(manifest);
+  const RuntimeRelease stamped = runtime_release_of(manifest, root.path);
+  expect(stamped.release_stamp == std::optional<std::uint64_t>(42), "the stamp is read");
+  expect(stamped.runtime_id == compute_runtime_id(manifest), "with the runtime's id");
+  expect(decode_runtime_manifest(encode_runtime_manifest(manifest)) == manifest,
+         "a stamped manifest is an ordinary schema /1 manifest");
+  expect(encode_runtime_manifest(manifest).find(R"("schema":"svp.runtime.manifest/1")") !=
+             std::string::npos,
+         "the manifest schema does not change");
+
+  RuntimeManifest other_stamp = manifest;
+  other_stamp.files[1].blake3 = blake3_digest(encode_runtime_release_record(43));
+  expect(compute_runtime_id(other_stamp) != compute_runtime_id(manifest),
+         "the stamp is part of runtime_id");
+
+  write_file(root.path / std::string(kRuntimeReleasePath), encode_runtime_release_record(99));
+  expect(!runtime_release_of(manifest, root.path).release_stamp,
+         "a release file that does not match the manifest orders nothing");
+  std::filesystem::remove(root.path / std::string(kRuntimeReleasePath));
+  expect(!runtime_release_of(manifest, root.path).release_stamp, "a missing release file");
+  expect(!runtime_release_of(sample_manifest(), root.path).release_stamp,
+         "a runtime without a release file is unstamped");
+}
+
 // --- files on disk --------------------------------------------------------------
 
 struct InstalledRuntime {
@@ -300,6 +387,9 @@ int main() {
                        {"runtime_id is stable and content sensitive",
                         test_runtime_id_is_stable_and_content_sensitive},
                        {"decode round trip", test_decode_round_trip},
+                       {"release order", test_release_order},
+                       {"release record", test_release_record},
+                       {"release stamp is a runtime file", test_release_stamp_is_a_runtime_file},
                        {"decode rejects invalid manifests",
                         test_decode_rejects_invalid_manifests},
                        {"load and verify installed runtime",

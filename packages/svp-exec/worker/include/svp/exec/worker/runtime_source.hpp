@@ -22,6 +22,7 @@
 #include "svp/exec/worker/blob_source.hpp"
 #include "svp/exec/worker/hello_messages.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -46,6 +47,9 @@ struct CoordinatorRuntime {
   std::vector<RuntimeFileSource> files;
   // Why the runtime is builder_only, for reports; empty for a bundle.
   std::string fallback_reason;
+  // The runtime's release stamp (runtime_release.hpp); absent when it has
+  // none (builder_only, or installed before stamps existed).
+  std::optional<std::uint64_t> release_stamp;
 };
 
 // The runtime of the svp-builder at `executable` (its real path). Throws

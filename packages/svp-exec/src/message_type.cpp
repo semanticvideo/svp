@@ -42,6 +42,16 @@ std::string_view message_type_name(MessageType type) noexcept {
       return "BLOB_GET";
     case MessageType::blob_release:
       return "BLOB_RELEASE";
+    case MessageType::join_offer:
+      return "JOIN_OFFER";
+    case MessageType::join_challenge:
+      return "JOIN_CHALLENGE";
+    case MessageType::join_accept:
+      return "JOIN_ACCEPT";
+    case MessageType::join_done:
+      return "JOIN_DONE";
+    case MessageType::fleet_member:
+      return "FLEET_MEMBER";
   }
   return "UNKNOWN";
 }

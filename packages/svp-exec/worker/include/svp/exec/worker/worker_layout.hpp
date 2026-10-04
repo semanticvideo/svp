@@ -5,7 +5,14 @@
 // launchd job's plist) removes every trace of SVP from the worker.
 //
 //   <root>/                       0700, owned by the worker's user
+//     current -> runtimes/<hex>   the runtime the launchd job runs: a
+//                                 symlink with that RELATIVE target, owned
+//                                 by the worker's user and swapped by the
+//                                 service itself (service_link.hpp)
 //     pairings/<pairing_id>.json  0600 pairing secrets (pairing_store.hpp)
+//     join.json                   0600 fleet join credential, when the Mac
+//                                 was installed with `worker install --join`
+//                                 (fleet_store.hpp)
 //     runtimes/<runtime hex>/     verified runtimes, one per runtime_id
 //       bin/svp-builder           the session program (kSessionProgram)
 //       libexec/svp/runtime/      manifest.json, and for a bundle runtime
@@ -71,7 +78,13 @@ inline constexpr std::string_view kSessionProgram = "bin/svp-builder";
 struct WorkerLayout {
   std::filesystem::path root;
 
+  [[nodiscard]] std::filesystem::path current() const { return root / "current"; }
+  // What the launchd job runs: <root>/current/bin/svp-builder.
+  [[nodiscard]] std::filesystem::path service_program() const {
+    return current() / std::string(kSessionProgram);
+  }
   [[nodiscard]] std::filesystem::path pairings() const { return root / "pairings"; }
+  [[nodiscard]] std::filesystem::path join_credential() const { return root / "join.json"; }
   [[nodiscard]] std::filesystem::path runtimes() const { return root / "runtimes"; }
   [[nodiscard]] std::filesystem::path runtime(const Blake3Digest& runtime_id) const {
     return runtimes() / blake3_hex(runtime_id);

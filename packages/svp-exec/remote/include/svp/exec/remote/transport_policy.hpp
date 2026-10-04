@@ -11,6 +11,9 @@ inline constexpr std::string_view kWorkerServiceType = "_svp-worker._tcp";
 inline constexpr std::string_view kWorkerServiceDomain = "local.";
 // TXT record key whose value is the worker's pairing id.
 inline constexpr std::string_view kPairingTxtKey = "pairing";
+// A worker's own Bonjour instance carries its worker id under this key; it
+// serves every pairing of that worker on one port (plan §3.4).
+inline constexpr std::string_view kWorkerTxtKey = "worker";
 
 // TLS application protocols (ALPN) that keep the two kinds of connection to
 // a worker apart: worker sessions run the framed protocol (plan §4.3); route

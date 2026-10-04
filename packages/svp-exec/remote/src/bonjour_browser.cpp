@@ -6,6 +6,8 @@
 
 #include <chrono>
 #include <cstring>
+#include <algorithm>
+#include <functional>
 #include <map>
 
 namespace svp::exec::remote::detail {
@@ -13,31 +15,33 @@ namespace {
 
 struct BrowseState {
   std::shared_ptr<WaitSignal> signal;
-  std::string pairing_id;
+  // Whether a service's TXT entries make it a match.
+  std::function<bool(const std::map<std::string, std::string>&)> matches_txt;
+  // Settle after the last match (browse every service) instead of the first.
+  bool settle_from_last_match = false;
   // Guarded by signal->mutex.
   std::map<std::string, DiscoveredService> matches;
   std::chrono::steady_clock::time_point first_match{};
+  std::chrono::steady_clock::time_point last_match{};
   std::string failure;
 };
 
-bool advertises_pairing(nw_browse_result_t result, const std::string& pairing_id) {
+std::map<std::string, std::string> txt_entries(nw_browse_result_t result) {
+  std::map<std::string, std::string> entries;
   nw_txt_record_t txt = nw_browse_result_copy_txt_record_object(result);
   if (txt == nullptr) {
-    return false;
+    return entries;
   }
-  bool matches = false;
-  bool* out = &matches;
-  const std::string key(kPairingTxtKey);
-  nw_txt_record_access_key(txt, key.c_str(),
-                           ^bool(const char*, const nw_txt_record_find_key_t found,
+  std::map<std::string, std::string>* out = &entries;
+  nw_txt_record_apply(txt, ^bool(const char* key, const nw_txt_record_find_key_t found,
                                  const uint8_t* value, const size_t value_length) {
-                             *out = found == nw_txt_record_find_key_non_empty_value &&
-                                    value_length == pairing_id.size() &&
-                                    std::memcmp(value, pairing_id.data(), value_length) == 0;
-                             return true;
-                           });
+    if (key != nullptr && found == nw_txt_record_find_key_non_empty_value) {
+      out->insert_or_assign(key, std::string(reinterpret_cast<const char*>(value), value_length));
+    }
+    return true;
+  });
   nw_release(txt);
-  return matches;
+  return entries;
 }
 
 std::string text_or_empty(const char* text) { return text != nullptr ? text : ""; }
@@ -56,8 +60,11 @@ void on_results_changed(const std::shared_ptr<BrowseState>& state, nw_browse_res
     if (old_result != nullptr) {
       state->matches.erase(service_name(old_result));
     }
-    if (new_result != nullptr && advertises_pairing(new_result, state->pairing_id)) {
+    std::map<std::string, std::string> txt =
+        new_result != nullptr ? txt_entries(new_result) : std::map<std::string, std::string>{};
+    if (new_result != nullptr && state->matches_txt(txt)) {
       DiscoveredService service;
+      service.txt = std::move(txt);
       const auto endpoint =
           NwRef<nw_endpoint_t>::adopt(nw_browse_result_copy_endpoint(new_result));
       service.name = text_or_empty(nw_endpoint_get_bonjour_service_name(endpoint.get()));
@@ -72,6 +79,7 @@ void on_results_changed(const std::shared_ptr<BrowseState>& state, nw_browse_res
           state->first_match == std::chrono::steady_clock::time_point{}) {
         state->first_match = std::chrono::steady_clock::now();
       }
+      state->last_match = std::chrono::steady_clock::now();
       state->matches.insert_or_assign(service.name, std::move(service));
     }
   }
@@ -95,13 +103,13 @@ RouteMedium route_medium_of(nw_interface_t interface) {
   }
 }
 
-std::vector<DiscoveredService> browse_for_pairing(std::string_view pairing_id,
-                                                  const RoutePolicy& policy,
-                                                  const std::shared_ptr<WaitSignal>& signal) {
-  const auto state = std::make_shared<BrowseState>();
-  state->signal = signal;
-  state->pairing_id = std::string(pairing_id);
+namespace {
 
+std::vector<DiscoveredService> browse(std::shared_ptr<BrowseState> state,
+                                      const RoutePolicy& policy,
+                                      const std::shared_ptr<WaitSignal>& signal) {
+  // `state` is held by value: the browser's blocks capture it, and a block
+  // captures a C++ reference as a reference.
   const std::string type(kWorkerServiceType);
   const std::string domain(kWorkerServiceDomain);
   auto descriptor = NwRef<nw_browse_descriptor_t>::adopt(
@@ -146,7 +154,9 @@ std::vector<DiscoveredService> browse_for_pairing(std::string_view pairing_id,
         break;
       }
       const bool have_match = !state->matches.empty();
-      const auto settle_end = state->first_match + policy.discovery_settle;
+      const auto settle_end =
+          (state->settle_from_last_match ? state->last_match : state->first_match) +
+          policy.discovery_settle;
       if ((have_match && now >= settle_end) || now >= deadline) {
         break;
       }
@@ -165,6 +175,56 @@ std::vector<DiscoveredService> browse_for_pairing(std::string_view pairing_id,
     throw RemoteTransportError(RemoteErrorCode::worker_not_found,
                                "Bonjour browsing failed: " + failure);
   }
+  return found;
+}
+
+}  // namespace
+
+std::vector<DiscoveredService> browse_for_pairing(std::string_view pairing_id,
+                                                  const RoutePolicy& policy,
+                                                  const std::shared_ptr<WaitSignal>& signal) {
+  const auto state = std::make_shared<BrowseState>();
+  state->signal = signal;
+  state->matches_txt = [wanted = std::string(pairing_id)](const auto& txt) {
+    const auto found = txt.find(std::string(kPairingTxtKey));
+    return found != txt.end() && found->second == wanted;
+  };
+  return browse(state, policy, signal);
+}
+
+std::vector<DiscoveredService> browse_for_txt(std::string_view key, std::string_view value,
+                                              const RoutePolicy& policy,
+                                              const std::shared_ptr<WaitSignal>& signal) {
+  const auto state = std::make_shared<BrowseState>();
+  state->signal = signal;
+  state->matches_txt = [wanted_key = std::string(key), wanted = std::string(value)](
+                           const auto& txt) {
+    const auto found = txt.find(wanted_key);
+    return found != txt.end() && found->second == wanted;
+  };
+  state->settle_from_last_match = true;
+  return browse(state, policy, signal);
+}
+
+std::vector<DiscoveredService> browse_for_worker(std::string_view worker_id,
+                                                 std::string_view pairing_id,
+                                                 const RoutePolicy& policy,
+                                                 const std::shared_ptr<WaitSignal>& signal) {
+  const auto state = std::make_shared<BrowseState>();
+  state->signal = signal;
+  state->matches_txt = [worker = std::string(worker_id),
+                        pairing = std::string(pairing_id)](const auto& txt) {
+    const auto by_worker = txt.find(std::string(kWorkerTxtKey));
+    const auto by_pairing = txt.find(std::string(kPairingTxtKey));
+    return (by_worker != txt.end() && by_worker->second == worker) ||
+           (by_pairing != txt.end() && by_pairing->second == pairing);
+  };
+  // Every match is kept until route measurement authenticates it: a host
+  // on the LAN can advertise any worker id, and must not displace the
+  // genuine instances (it cannot complete TLS without the pairing's secret).
+  // The same worker's instances share one port, so their routes coincide;
+  // the connector measures each distinct route once.
+  std::vector<DiscoveredService> found = browse(state, policy, signal);
   return found;
 }
 

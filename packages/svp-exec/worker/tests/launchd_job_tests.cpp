@@ -52,15 +52,15 @@ std::string plutil_extract(const fs::path& directory, const std::string& plist,
 void test_agent_plist_lints_and_runs_the_runtime() {
   TemporaryDirectory scratch("svp-launchd");
   const WorkerLayout layout{.root = "/Users/w/Library/Application Support/SVP/Worker"};
-  const WorkerServiceSpec spec = make_worker_service_spec(
-      WorkerServiceMode::user_agent, layout, layout.runtime(kRuntime), "w", "/Users/w");
+  const WorkerServiceSpec spec =
+      make_worker_service_spec(WorkerServiceMode::user_agent, layout, "w", "/Users/w");
   const std::string plist = render_launchd_plist(spec);
   expect_plutil_lint(scratch.path, plist);
   expect_equal(plutil_extract(scratch.path, plist, "Label"), std::string(kWorkerJobLabel),
                "label");
   expect_equal(plutil_extract(scratch.path, plist, "ProgramArguments.0"),
-               (layout.runtime(kRuntime) / "bin/svp-builder").string(),
-               "program is the runtime's svp-builder");
+               (layout.root / "current/bin/svp-builder").string(),
+               "program is the svp-builder of the runtime <root>/current names");
   expect_equal(plutil_extract(scratch.path, plist, "ProgramArguments.4"), layout.root.string(),
                "root passed to the agent");
   expect_equal(plutil_extract(scratch.path, plist, "KeepAlive.SuccessfulExit"), "false",
@@ -72,8 +72,8 @@ void test_agent_plist_lints_and_runs_the_runtime() {
                "without a recorded PATH the agent keeps launchd's environment");
 
   const WorkerServiceSpec with_path =
-      make_worker_service_spec(WorkerServiceMode::user_agent, layout, layout.runtime(kRuntime),
-                               "w", "/Users/w", "/opt/tools/bin:/usr/bin:/bin");
+      make_worker_service_spec(WorkerServiceMode::user_agent, layout, "w", "/Users/w",
+                               "/opt/tools/bin:/usr/bin:/bin");
   const std::string path_plist = render_launchd_plist(with_path);
   expect_plutil_lint(scratch.path, path_plist);
   expect_equal(plutil_extract(scratch.path, path_plist, "EnvironmentVariables.PATH"),
@@ -85,10 +85,22 @@ void test_agent_plist_lints_and_runs_the_runtime() {
 void test_daemon_plist_runs_as_the_worker_user() {
   TemporaryDirectory scratch("svp-launchd");
   const WorkerLayout layout{.root = default_worker_root(WorkerServiceMode::system_daemon, "/")};
-  const WorkerServiceSpec spec = make_worker_service_spec(
-      WorkerServiceMode::system_daemon, layout, layout.runtime(kRuntime), "w & co", "/Users/w");
+  const WorkerServiceSpec spec =
+      make_worker_service_spec(WorkerServiceMode::system_daemon, layout, "w & co", "/Users/w");
   const std::string plist = render_launchd_plist(spec);
   expect_plutil_lint(scratch.path, plist);
+  // The layout every worker Mac's LaunchDaemon uses (migrated Macs included).
+  const std::vector<std::string> expected_arguments = {
+      "/Library/Application Support/SVP/Worker/current/bin/svp-builder", "worker", "serve",
+      "--root", "/Library/Application Support/SVP/Worker"};
+  for (std::size_t index = 0; index < expected_arguments.size(); ++index) {
+    expect_equal(plutil_extract(scratch.path, plist, "ProgramArguments." + std::to_string(index)),
+                 expected_arguments[index], "daemon ProgramArguments " + std::to_string(index));
+  }
+  expect_equal(plutil_extract(scratch.path, plist, "ProgramArguments.5"), "<missing>",
+               "no further arguments");
+  expect_equal(plutil_extract(scratch.path, plist, "KeepAlive.SuccessfulExit"), "false",
+               "a self-update exit (nonzero) restarts the daemon");
   expect_equal(plutil_extract(scratch.path, plist, "UserName"), "w & co",
                "UserName is the worker user, XML-escaped");
   expect_equal(plutil_extract(scratch.path, plist, "EnvironmentVariables.HOME"), "/Users/w",
@@ -111,6 +123,7 @@ void test_scripts_parse() {
   expect_sh_parses(scratch.path, render_receive_runtime_script(layout.runtimes(), kRuntime));
   expect_sh_parses(scratch.path, render_write_file_script(layout.pairings() / "x.json", 0600));
   expect_sh_parses(scratch.path, render_prepare_root_script(layout.root));
+  expect_sh_parses(scratch.path, render_point_current_script(layout.root, kRuntime));
   expect_sh_parses(scratch.path, render_agent_start_script(scratch.path / "a.plist"));
   expect_sh_parses(scratch.path,
                    render_prepare_launch_agents_script(scratch.path / "a.plist", layout.root));

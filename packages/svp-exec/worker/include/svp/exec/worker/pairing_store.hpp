@@ -70,6 +70,13 @@ struct WorkerEndpoint {
   std::string plist;
   std::string arch;
   OsIdentity os;
+  // The worker's fleet join id when it was paired through its fleet join
+  // listener (fleet_join.hpp) instead of SSH; ssh_target is then empty.
+  // Stored only when set ("join_id" in the record's "worker" object).
+  std::string join_id;
+  // The worker's id (worker_identity.hpp), learned from HELLO_ACK or the
+  // fleet join; empty until known. Stored only when set ("worker_id").
+  std::string worker_id;
 
   bool operator==(const WorkerEndpoint&) const = default;
 };

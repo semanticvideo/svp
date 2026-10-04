@@ -16,6 +16,11 @@
 //   4. releases the source and the package on that Mac (BLOB_RELEASE,
 //      worker protocol 1.2) once the package is fetched, or the source when
 //      the job failed for good there.
+// When a job's session leaves a runtime that Mac's service will move to
+// (service_updater.hpp), the service restarts once that session ends; the
+// next job first waits for it to answer on the new runtime
+// (worker_restart_wait.hpp RuntimeSwitchWatch) instead of reporting the Mac
+// unavailable.
 // A Mac whose agent turns the job away (busy: it coordinates another video)
 // is asked again later; one that cannot be reached, refuses the session, or
 // cannot build this runtime's videos is unavailable for the batch.
@@ -26,6 +31,7 @@
 
 #include "svp/exec/task_spec.hpp"
 #include "svp/exec/worker/pairing_store.hpp"
+#include "svp/exec/worker/worker_restart_wait.hpp"
 #include "svp/models/thread_plan.hpp"
 
 #include <filesystem>
@@ -63,6 +69,7 @@ class PairedVideoBuilder final : public RemoteVideoBuilder {
   svp::exec::worker::CoordinatorPairingRecord record_;
   std::shared_ptr<const VideoBuildSupplies> supplies_;
   std::uint64_t attempts_ = 0;
+  svp::exec::worker::RuntimeSwitchWatch switch_watch_;
 };
 
 // The builders for `coordinators` (pairing ids or user@host targets of this

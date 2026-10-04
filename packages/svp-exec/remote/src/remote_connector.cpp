@@ -10,6 +10,8 @@
 #include "wait_signal.hpp"
 
 #include <chrono>
+#include <set>
+#include <utility>
 
 namespace svp::exec::remote {
 
@@ -66,8 +68,17 @@ std::vector<Candidate> resolve_candidates(const std::vector<detail::DiscoveredSe
   const std::vector<std::vector<detail::ResolvedAddress>> resolved = detail::resolve_services(
       requests, policy.discovery_timeout, policy.discovery_settle, signal);
   std::vector<Candidate> candidates;
+  // One endpoint (interface, address, port) is measured once, however many
+  // instances resolve to it (a worker's own and its per-pairing instances
+  // share one port).
+  std::set<std::pair<std::string, std::string>> seen;
   for (std::size_t index = 0; index < slots.size(); ++index) {
     for (const detail::ResolvedAddress& address : resolved[index]) {
+      // "?" is an address getnameinfo could not print: never merged.
+      if (address.text != "?" &&
+          !seen.insert({slots[index].route.interface_name, address.text}).second) {
+        continue;
+      }
       Candidate candidate{.service_name = slots[index].service->name,
                           .target = {.interface = slots[index].interface,
                                      .address = address.address,
@@ -86,8 +97,12 @@ std::vector<detail::DiscoveredService> browse(RemoteConnector::State& state) {
       throw RemoteTransportError(RemoteErrorCode::cancelled, "connector was cancelled");
     }
   }
-  std::vector<detail::DiscoveredService> services = detail::browse_for_pairing(
-      state.options.pairing.pairing_id, state.options.routes, state.signal);
+  std::vector<detail::DiscoveredService> services =
+      state.options.worker_id.empty()
+          ? detail::browse_for_pairing(state.options.pairing.pairing_id, state.options.routes,
+                                       state.signal)
+          : detail::browse_for_worker(state.options.worker_id, state.options.pairing.pairing_id,
+                                      state.options.routes, state.signal);
   if (services.empty()) {
     throw RemoteTransportError(RemoteErrorCode::worker_not_found,
                                "no worker advertised pairing `" +
@@ -99,6 +114,19 @@ std::vector<detail::DiscoveredService> browse(RemoteConnector::State& state) {
 }
 
 }  // namespace
+
+std::vector<AdvertisedService> browse_advertised_services(std::string_view key,
+                                                          std::string_view value,
+                                                          const RoutePolicy& policy) {
+  validate_route_policy(policy);
+  const auto signal = std::make_shared<detail::WaitSignal>();
+  std::vector<AdvertisedService> services;
+  for (detail::DiscoveredService& service : detail::browse_for_txt(key, value, policy, signal)) {
+    services.push_back(AdvertisedService{.service_name = std::move(service.name),
+                                         .txt = std::move(service.txt)});
+  }
+  return services;
+}
 
 RemoteConnector::RemoteConnector(RemoteConnectorOptions options)
     : state_(std::make_shared<State>()) {

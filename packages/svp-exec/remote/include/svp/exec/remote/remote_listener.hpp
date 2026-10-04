@@ -8,8 +8,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace svp::exec::remote {
 
@@ -18,6 +20,9 @@ namespace svp::exec::remote {
 // is renamed; 5 s covers that with margin. A listener that cannot advertise
 // within it is reported as failed rather than left undiscoverable.
 inline constexpr std::chrono::milliseconds kDefaultAdvertiseTimeout{5'000};
+
+// One TXT entry ("key=value") must fit in 255 bytes (RFC 6763 §6.1).
+inline constexpr std::size_t kMaxTxtEntryBytes = 255;
 
 struct RemoteListenerOptions {
   PairingKey pairing;
@@ -30,6 +35,21 @@ struct RemoteListenerOptions {
   std::uint16_t port = 0;
   TransportPolicy transport{};
   std::chrono::milliseconds advertise_timeout = kDefaultAdvertiseTimeout;
+  // TXT entries advertised besides kPairingTxtKey (which is always the
+  // pairing id): non-empty keys other than kPairingTxtKey, each entry within
+  // kMaxTxtEntryBytes.
+  std::map<std::string, std::string> txt;
+  // Further keys this listener accepts besides `pairing` (unique ids). The
+  // TLS stack picks the PSK by the identity the client sends; the handler is
+  // not told which one (Security exposes no negotiated PSK identity), so a
+  // session that must know proves it in-band (export_keying_material).
+  std::vector<PairingKey> accepted_keys;
+  // False: no Bonjour advertisement (service_name, txt, and advertise_timeout
+  // are unused); start() waits only for the listener, within
+  // advertise_timeout, and replace_keys() is available. The owner advertises
+  // the port itself (service_advertiser.hpp), so a slow or failed
+  // registration never stops it from serving.
+  bool advertise = true;
 };
 
 struct RemoteSessionInfo {
@@ -62,6 +82,14 @@ class RemoteListener {
   // registered. Throws RemoteTransportError(invalid_configuration or
   // listener_failed).
   void start();
+
+  // A listener without advertisement (options.advertise false): starts
+  // accepting exactly `pairing` and `accepted` instead, on the same port when
+  // it can be bound again (else on a new one; port() tells), while the
+  // sessions already open go on. Connections arriving during the switch are
+  // refused for a moment, which connectors retry. Throws
+  // RemoteTransportError(invalid_configuration, listener_failed).
+  void replace_keys(PairingKey pairing, std::vector<PairingKey> accepted);
 
   [[nodiscard]] std::uint16_t port() const;
   [[nodiscard]] std::string advertised_name() const;

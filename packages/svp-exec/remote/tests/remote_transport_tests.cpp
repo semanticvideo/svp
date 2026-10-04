@@ -9,12 +9,14 @@
 #include "svp/exec/remote/remote_connector.hpp"
 #include "svp/exec/remote/remote_error.hpp"
 #include "svp/exec/remote/remote_listener.hpp"
+#include "svp/exec/remote/service_advertiser.hpp"
 
 #include <sys/sysctl.h>
 
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <set>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
@@ -222,6 +224,248 @@ void test_discovery_by_pairing_id() {
                       "unknown pairing");
 }
 
+void test_browse_by_txt_entry() {
+  const PairingKey first = pairing::random_pairing("svp-transport-txt-a");
+  const PairingKey second = pairing::random_pairing("svp-transport-txt-b");
+  const PairingKey outsider = pairing::random_pairing("svp-transport-txt-c");
+  // A value unique to this run, so parallel runs never see each other.
+  const std::string group = first.pairing_id;
+  RemoteListenerOptions a = listener_options(first);
+  a.txt = {{"group", group}, {"extra", "1"}};
+  RemoteListenerOptions b = listener_options(second);
+  b.txt = {{"group", group}};
+  RemoteListenerOptions c = listener_options(outsider);
+  c.txt = {{"group", group + "-other"}};
+  RemoteListener listener_a(a, echo_frames);
+  RemoteListener listener_b(b, echo_frames);
+  RemoteListener listener_c(c, echo_frames);
+  listener_a.start();
+  listener_b.start();
+  listener_c.start();
+  const std::vector<AdvertisedService> services = browse_advertised_services("group", group);
+  std::set<std::string> pairing_ids;
+  for (const AdvertisedService& service : services) {
+    pairing_ids.insert(service.txt.at(std::string(kPairingTxtKey)));
+    if (service.txt.at(std::string(kPairingTxtKey)) == first.pairing_id) {
+      expect(service.txt.count("extra") == 1 && service.txt.at("extra") == "1",
+             "every TXT entry is reported");
+    }
+  }
+  expect(pairing_ids == std::set<std::string>{first.pairing_id, second.pairing_id},
+         "both services with the entry, and only those, are found");
+
+  RemoteListenerOptions bad = listener_options(outsider);
+  bad.txt = {{std::string(kPairingTxtKey), "spoof"}};
+  expect_remote_error(RemoteErrorCode::invalid_configuration,
+                      [&] {
+                        RemoteListener listener(bad, echo_frames);
+                        listener.start();
+                      },
+                      "the pairing entry cannot be overridden");
+  RemoteListenerOptions long_entry = listener_options(outsider);
+  long_entry.txt = {{"k", std::string(kMaxTxtEntryBytes, 'x')}};
+  expect_remote_error(RemoteErrorCode::invalid_configuration,
+                      [&] {
+                        RemoteListener listener(long_entry, echo_frames);
+                        listener.start();
+                      },
+                      "an entry over 255 bytes");
+}
+
+void test_one_listener_accepts_many_keys() {
+  // The advertised key is the last of nine the listener holds, so a TLS
+  // stack that did not pick the PSK by the client's identity would fail.
+  const PairingKey advertised = pairing::random_pairing("svp-transport-many");
+  RemoteListenerOptions options = listener_options(advertised);
+  for (int index = 0; index < 8; ++index) {
+    options.accepted_keys.push_back(
+        pairing::random_pairing("svp-transport-many-" + std::to_string(index)));
+  }
+  const PairingKey other = options.accepted_keys[3];
+  RemoteListener listener(options, echo_frames);
+  listener.start();
+
+  RemoteConnector connector(RemoteConnectorOptions{.pairing = advertised});
+  RemoteConnection connection = connector.connect();
+  StreamFrameReader reader(*connection.stream);
+  StreamFrameWriter writer(*connection.stream);
+  writer.write(Frame{.type = MessageType::hello, .body = nlohmann::json::object(), .payloads = {}});
+  expect(reader.read().has_value(), "a session over a key that is not the first");
+
+  PairingKey wrong = advertised;
+  wrong.secret = other.secret;
+  RemoteConnector impostor(RemoteConnectorOptions{.pairing = wrong});
+  expect_remote_error(RemoteErrorCode::authentication_failed, [&] { (void)impostor.connect(); },
+                      "another accepted key's secret under this identity is refused");
+  expect(listener.sessions_started() == 1, "only the right key opened a session");
+}
+
+std::string hex_of(const std::vector<std::byte>& bytes) {
+  static constexpr char kDigits[] = "0123456789abcdef";
+  std::string hex;
+  for (const std::byte byte : bytes) {
+    hex += kDigits[static_cast<unsigned>(byte) >> 4U];
+    hex += kDigits[static_cast<unsigned>(byte) & 0xFU];
+  }
+  return hex;
+}
+
+// Echoes frames, then reports this connection's TLS exporter as a final
+// frame so the client can compare it with its own.
+void echo_with_exporter(RemoteStream& stream, const RemoteSessionInfo&) {
+  StreamFrameReader reader(stream);
+  StreamFrameWriter writer(stream);
+  if (auto frame = reader.read()) {
+    const auto exporter = stream.export_keying_material("EXPORTER-svp-test", 32);
+    const std::string hex = exporter ? hex_of(*exporter) : std::string();
+    writer.write(Frame{.type = MessageType::hello, .body = {{"exporter", hex}}, .payloads = {}});
+  }
+}
+
+void test_exporter_is_shared_and_per_connection() {
+  const PairingKey key = pairing::random_pairing("svp-transport-exporter");
+  RemoteListener listener(listener_options(key), echo_with_exporter);
+  listener.start();
+  std::set<std::string> seen;
+  for (int round = 0; round < 2; ++round) {
+    RemoteConnector connector(RemoteConnectorOptions{.pairing = key});
+    RemoteConnection connection = connector.connect();
+    const auto mine = connection.stream->export_keying_material("EXPORTER-svp-test", 32);
+    expect(mine.has_value() && mine->size() == 32, "the client has an exporter");
+    StreamFrameReader reader(*connection.stream);
+    StreamFrameWriter writer(*connection.stream);
+    writer.write(Frame{.type = MessageType::hello, .body = nlohmann::json::object(), .payloads = {}});
+    const auto answer = reader.read();
+    expect(answer.has_value(), "the server answered");
+    expect_equal(answer->body["exporter"].get<std::string>(), hex_of(*mine),
+                 "both ends derive the same exporter");
+    seen.insert(hex_of(*mine));
+  }
+  expect(seen.size() == 2, "every connection has its own exporter");
+}
+
+void test_unadvertised_listener_replaces_its_keys() {
+  const PairingKey first = pairing::random_pairing("svp-transport-replace-a");
+  const PairingKey second = pairing::random_pairing("svp-transport-replace-b");
+  RemoteListenerOptions options;
+  options.pairing = first;
+  options.advertise = false;
+  RemoteListener listener(options, echo_frames);
+  listener.start();
+  const std::uint16_t port = listener.port();
+  expect(port != 0, "listening");
+  // Advertised under both pairing ids, as a worker does for older
+  // coordinators, on the one port.
+  ServiceAdvertiser ad_first(ServiceAdvertisement{
+      .name = first.pairing_id, .port = port, .txt = {{"pairing", first.pairing_id}}});
+  ServiceAdvertiser ad_second(ServiceAdvertisement{
+      .name = second.pairing_id, .port = port, .txt = {{"pairing", second.pairing_id}}});
+  expect(ad_first.wait_registered(std::chrono::seconds(10)) &&
+             ad_second.wait_registered(std::chrono::seconds(10)),
+         "both instances registered");
+
+  const auto session_with = [](const PairingKey& key) {
+    RemoteConnector connector(RemoteConnectorOptions{.pairing = key});
+    RemoteConnection connection = connector.connect();
+    StreamFrameReader reader(*connection.stream);
+    StreamFrameWriter writer(*connection.stream);
+    writer.write(Frame{.type = MessageType::hello, .body = nlohmann::json::object(), .payloads = {}});
+    return reader.read().has_value();
+  };
+  expect(session_with(first), "the first key works");
+  expect_remote_error(RemoteErrorCode::authentication_failed, [&] { (void)session_with(second); },
+                      "the second key is not accepted yet");
+
+  // A session open across the replacement keeps working.
+  RemoteConnector open_connector(RemoteConnectorOptions{.pairing = first});
+  RemoteConnection open = open_connector.connect();
+  StreamFrameReader open_reader(*open.stream);
+  StreamFrameWriter open_writer(*open.stream);
+
+  listener.replace_keys(second, {first});
+  expect(listener.port() == port, "the replacement listens on the same port");
+  expect(session_with(second), "an added key works at once");
+  expect(session_with(first), "a kept key still works");
+  open_writer.write(Frame{.type = MessageType::hello, .body = nlohmann::json::object(), .payloads = {}});
+  expect(open_reader.read().has_value(), "a session opened before the replacement goes on");
+
+  listener.replace_keys(second, {});
+  expect_remote_error(RemoteErrorCode::authentication_failed, [&] { (void)session_with(first); },
+                      "a removed key is refused");
+  expect(session_with(second), "the remaining key works");
+
+  RemoteListener advertising(listener_options(first), echo_frames);
+  expect_remote_error(RemoteErrorCode::invalid_configuration,
+                      [&] { advertising.replace_keys(first, {}); },
+                      "an advertising listener cannot change its keys");
+}
+
+void test_a_spoofed_advertisement_does_not_displace_the_worker() {
+  const PairingKey genuine_key = pairing::random_pairing("svp-transport-genuine");
+  const PairingKey spoof_key = pairing::random_pairing("svp-transport-spoof");
+  const std::string worker_id = "svpn-" + genuine_key.pairing_id;
+  RemoteListenerOptions genuine_options;
+  genuine_options.pairing = genuine_key;
+  genuine_options.advertise = false;
+  RemoteListener genuine(genuine_options, echo_frames);
+  genuine.start();
+  RemoteListenerOptions spoof_options;
+  spoof_options.pairing = spoof_key;
+  spoof_options.advertise = false;
+  RemoteListener spoof(spoof_options, echo_frames);
+  spoof.start();
+  // The spoof advertises the worker's id under a name that sorts first and
+  // without a pairing entry, as a worker's own instance looks.
+  ServiceAdvertiser spoof_ad(ServiceAdvertisement{
+      .name = "0-" + genuine_key.pairing_id, .port = spoof.port(), .txt = {{"worker", worker_id}}});
+  ServiceAdvertiser genuine_ad(ServiceAdvertisement{
+      .name = "1-" + genuine_key.pairing_id, .port = genuine.port(), .txt = {{"worker", worker_id}}});
+  expect(spoof_ad.wait_registered(std::chrono::seconds(10)) &&
+             genuine_ad.wait_registered(std::chrono::seconds(10)),
+         "both registered");
+  RemoteConnector connector(RemoteConnectorOptions{.pairing = genuine_key, .worker_id = worker_id});
+  RemoteConnection connection = connector.connect();
+  StreamFrameReader reader(*connection.stream);
+  StreamFrameWriter writer(*connection.stream);
+  writer.write(Frame{.type = MessageType::hello, .body = nlohmann::json::object(), .payloads = {}});
+  expect(reader.read().has_value(), "the coordinator reaches the genuine worker");
+  expect(genuine.sessions_started() == 1 && spoof.sessions_started() == 0,
+         "the spoofed instance is never served a session");
+}
+
+void test_advertiser_registers_and_withdraws() {
+  const std::string id = pairing::random_pairing("svp-transport-ad").pairing_id;
+  {
+    ServiceAdvertiser advertiser(
+        ServiceAdvertisement{.name = id, .port = 9, .txt = {{"group", id}, {"extra", "x"}}});
+    expect(advertiser.wait_registered(std::chrono::seconds(10)), "registered");
+    expect_equal(advertiser.registered_name(), id, "under the chosen name");
+    const std::vector<AdvertisedService> found = browse_advertised_services("group", id);
+    expect(found.size() == 1 && found.front().txt.at("extra") == "x",
+           "browsing finds it with its TXT entries");
+  }
+  RoutePolicy quick;
+  quick.discovery_timeout = kShortDiscovery;
+  expect(browse_advertised_services("group", id, quick).empty(),
+         "destroying the advertiser withdraws it");
+  expect_remote_error(RemoteErrorCode::invalid_configuration,
+                      [] { ServiceAdvertiser bad(ServiceAdvertisement{.name = "x", .port = 0}); },
+                      "a port is required");
+}
+
+void test_advertise_retry_backoff() {
+  expect(advertise_retry_delay(1) == kAdvertiseRetryInitial, "the first retry");
+  expect(advertise_retry_delay(2) == 2 * kAdvertiseRetryInitial, "doubles");
+  expect(advertise_retry_delay(3) == 4 * kAdvertiseRetryInitial, "and doubles");
+  std::chrono::milliseconds previous{0};
+  for (std::uint32_t attempt = 1; attempt < 64; ++attempt) {
+    const std::chrono::milliseconds delay = advertise_retry_delay(attempt);
+    expect(delay >= previous && delay <= kAdvertiseRetryMax, "never shrinks, never past the cap");
+    previous = delay;
+  }
+  expect(advertise_retry_delay(1000) == kAdvertiseRetryMax, "capped");
+}
+
 void test_cancelled_connector() {
   const PairingKey key = pairing::random_pairing("svp-transport");
   RemoteConnector connector(RemoteConnectorOptions{.pairing = key});
@@ -283,6 +527,16 @@ int main() {
                         test_peer_reset_fails_a_write_in_flight},
                        {"wrong secret is rejected", test_wrong_secret_is_rejected},
                        {"discovery by pairing id", test_discovery_by_pairing_id},
+                       {"browse by TXT entry", test_browse_by_txt_entry},
+                       {"one listener accepts many keys", test_one_listener_accepts_many_keys},
+                       {"exporter is shared and per connection",
+                        test_exporter_is_shared_and_per_connection},
+                       {"unadvertised listener replaces its keys",
+                        test_unadvertised_listener_replaces_its_keys},
+                       {"advertiser registers and withdraws", test_advertiser_registers_and_withdraws},
+                       {"a spoofed advertisement does not displace the worker",
+                        test_a_spoofed_advertisement_does_not_displace_the_worker},
+                       {"advertise retry backoff", test_advertise_retry_backoff},
                        {"cancelled connector", test_cancelled_connector},
                        {"cancel interrupts discovery", test_cancel_interrupts_discovery},
                        {"listener stop ends sessions", test_listener_stop_ends_sessions},

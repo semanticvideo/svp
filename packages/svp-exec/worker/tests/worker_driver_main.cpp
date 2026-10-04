@@ -117,7 +117,7 @@ int run(const Arguments& arguments) {
   std::mutex mutex;
   std::size_t preambles = 0;
   TransferStats transfer;
-  const auto preamble = [&](FrameReader& reader, FrameWriter& writer) {
+  const auto preamble = [&](FrameReader& reader, FrameWriter& writer, remote::RemoteStream&) {
     WorkerSessionClient client(reader, writer);
     const auto started = Clock::now();
     const WorkerHelloAck ack = client.hello(hello);

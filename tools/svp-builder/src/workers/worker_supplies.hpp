@@ -47,9 +47,14 @@ SuppliedSession supply_worker_session(svp::exec::FrameReader& reader,
     const std::shared_ptr<const WorkerSupplies>& supplies, std::string_view task_type,
     std::size_t slots);
 
-// The same as a RemoteExecutor session preamble, so every session (and every
-// reconnect) is checked and supplied before its leases are sent.
-[[nodiscard]] svp::exec::remote::RemoteSessionPreamble make_supplying_preamble(
+// `options` whose sessions (and every reconnect) are checked and supplied
+// before their leases are sent (supply_worker_session as the session
+// preamble), and which wait for the worker to restart when a previous
+// session's HELLO_ACK showed its service will switch to another runtime once
+// that session ended (before_connect, worker_restart.hpp; the watch is shared
+// by every executor of this process to that worker).
+[[nodiscard]] svp::exec::remote::RemoteExecutorOptions with_supplied_sessions(
+    svp::exec::remote::RemoteExecutorOptions options,
     std::shared_ptr<const WorkerSupplies> supplies);
 
 }  // namespace svp::builder::workers

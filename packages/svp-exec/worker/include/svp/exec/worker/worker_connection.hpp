@@ -9,13 +9,18 @@
 
 namespace svp::exec::worker {
 
-// One authenticated session connection to a paired worker, found by pairing
-// id (plan §3.4), with frame reader and writer over it. The connection is
-// cancelled when this object is destroyed.
+// One authenticated session connection to a paired worker, found by its
+// worker id when known (worker_id_book.hpp), else by pairing id (plan §3.4),
+// with frame reader and writer over it. The writer adds this pairing's proof
+// to HELLO, and the reader learns the worker id HELLO_ACK reports
+// (pairing_proof.hpp). The connection is cancelled when this object is
+// destroyed.
 struct WorkerConnection {
   remote::RemoteConnection connection;
-  std::unique_ptr<StreamFrameReader> reader;
-  std::unique_ptr<StreamFrameWriter> writer;
+  std::unique_ptr<StreamFrameReader> stream_reader;
+  std::unique_ptr<StreamFrameWriter> stream_writer;
+  std::unique_ptr<FrameReader> reader;
+  std::unique_ptr<FrameWriter> writer;
 
   WorkerConnection() = default;
   WorkerConnection(const WorkerConnection&) = delete;

@@ -11,24 +11,39 @@ add_library(svp-exec-worker
   src/blob_receiver.cpp
   src/blob_source.cpp
   src/coordinator_session.cpp
+  src/fleet_crypto.cpp
+  src/fleet_join.cpp
+  src/fleet_keys.cpp
+  src/fleet_member_messages.cpp
+  src/fleet_store.cpp
+  src/hex_bytes.cpp
   src/hello_messages.cpp
   src/host_facts.cpp
+  src/join_service.cpp
   src/launchd_job.cpp
   src/local_load.cpp
   src/message_fields.cpp
   src/model_bundles.cpp
+  src/pairing_proof.cpp
   src/pairing_store.cpp
+  src/pairings_server.cpp
   src/released_blobs.cpp
   src/runtime_files.cpp
   src/runtime_source.cpp
   src/runtime_store.cpp
+  src/runtime_test_start.cpp
+  src/service_link.cpp
+  src/service_updater.cpp
   src/session_process.cpp
   src/slot_sharing.cpp
   src/transfer_messages.cpp
   src/worker_agent.cpp
   src/worker_connection.cpp
   src/worker_error.cpp
+  src/worker_id_book.cpp
+  src/worker_identity.cpp
   src/worker_layout.cpp
+  src/worker_restart_wait.cpp
   src/worker_scripts.cpp
 )
 
@@ -51,6 +66,10 @@ target_link_libraries(svp-exec-worker
     svp::exec
     svp::exec_remote
     svp::models
+  PRIVATE
+    # P-256 signing and ECDH for fleet join (fleet_crypto.hpp).
+    "-framework Security"
+    "-framework CoreFoundation"
 )
 
 if(BUILD_TESTING)
@@ -61,6 +80,10 @@ if(BUILD_TESTING)
     admission
     slot_sharing
     agent_session
+    service_updater
+    worker_restart_wait
+    fleet_join
+    pairings_server
   )
   foreach(SVP_EXEC_TEST IN LISTS SVP_EXEC_WORKER_TESTS)
     string(REPLACE "_" "-" SVP_EXEC_TEST_NAME "${SVP_EXEC_TEST}")
@@ -81,6 +104,9 @@ if(BUILD_TESTING)
     set_tests_properties(svp-exec-worker-${SVP_EXEC_TEST_NAME}-tests PROPERTIES TIMEOUT 120)
   endforeach()
   add_dependencies(svp-exec-worker-agent-session-tests svp-exec-test-worker)
+  # Opens TLS listeners and registers Bonjour instances on this Mac, like the
+  # remote transport tests.
+  set_tests_properties(svp-exec-worker-pairings-server-tests PROPERTIES LABELS network)
 
   # Coordinator driver for a real paired worker (not a ctest: it needs a
   # worker paired with `svp-builder workers pair`). Pushes a stand-in

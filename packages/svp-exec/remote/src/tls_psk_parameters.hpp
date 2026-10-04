@@ -21,6 +21,12 @@ namespace svp::exec::remote::detail {
     const PairingKey& key, const TransportPolicy& policy,
     const std::vector<std::string>& application_protocols);
 
+// A listener's parameters accepting every key of `keys` (non-empty, unique
+// ids): the TLS stack picks the PSK by the identity the client sends.
+[[nodiscard]] NwRef<nw_parameters_t> make_tls_psk_parameters(
+    const std::vector<PairingKey>& keys, const TransportPolicy& policy,
+    const std::vector<std::string>& application_protocols);
+
 // Reads the negotiated TLS version and suite from a ready connection.
 [[nodiscard]] TlsSession read_tls_session(nw_connection_t connection);
 

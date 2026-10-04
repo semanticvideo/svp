@@ -5,6 +5,7 @@
 #include "svp/exec/lease_frames.hpp"
 #include "svp/exec/task_frames.hpp"
 #include "svp/exec/worker/blob_receiver.hpp"
+#include "svp/exec/worker/fleet_member_messages.hpp"
 #include "svp/exec/worker/transfer_messages.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 
@@ -38,8 +39,10 @@ Frame error_frame(std::string_view code, std::string_view message) {
 class AgentSession {
  public:
   AgentSession(AgentCore& core, FrameWriter& output, std::string session_id,
-               std::function<void()> close_input, std::string coordinator_id)
-      : core_(core),
+               std::function<void()> close_input, std::string coordinator_id,
+               CoordinatorResolver resolve = {})
+      : resolve_(std::move(resolve)),
+        core_(core),
         output_(output),
         session_id_(std::move(session_id)),
         named_coordinator_(!coordinator_id.empty()),
@@ -74,6 +77,17 @@ class AgentSession {
     } catch (const ExecError& error) {
       send_error("protocol_error", error.what());
       return AgentSessionEnd::protocol_error;
+    }
+    if (resolve_) {
+      std::string coordinator_id;
+      try {
+        coordinator_id = resolve_(hello_);
+      } catch (const WorkerError& error) {
+        send_error(worker_error_code_name(error.code()), error.what());
+        return AgentSessionEnd::protocol_error;
+      }
+      named_coordinator_ = !coordinator_id.empty();
+      coordinator_id_ = named_coordinator_ ? coordinator_id : session_id_;
     }
     const std::optional<SessionRefusal> refusal = evaluate_hello(hello_, core_.options().host);
     output_.write(make_hello_ack_frame(core_.describe(hello_.runtime_id, refusal)));
@@ -154,6 +168,9 @@ class AgentSession {
       case MessageType::runtime_put: {
         const RuntimePut put = runtime_put_from_frame(frame);
         core_.runtimes().install_from_cas(put.runtime_id, put.manifest, put.components, cas_);
+        if (core_.options().runtime_installed) {
+          core_.options().runtime_installed();
+        }
         return;
       }
       case MessageType::blob_have: {
@@ -201,6 +218,20 @@ class AgentSession {
         }
         core_.released().release(coordinator_id_, digests);
         (void)core_.released().sweep(cas_);
+        return;
+      }
+      case MessageType::fleet_member: {
+        const MemberKeyIssue issue = member_key_issue_from_frame(frame);
+        MemberKeyAnswer answer;
+        if (!named_coordinator_) {
+          answer.message = "a member key is accepted only on a session whose pairing is proven";
+        } else if (!core_.options().store_member_key) {
+          answer.message = "this worker has no fleet join credential";
+        } else {
+          answer.message = core_.options().store_member_key(issue.join_id, issue.member_key);
+          answer.stored = answer.message.empty();
+        }
+        output_.write(make_member_key_answer_frame(answer));
         return;
       }
       case MessageType::cancel: {
@@ -409,6 +440,7 @@ class AgentSession {
     }
   }
 
+  CoordinatorResolver resolve_;
   AgentCore& core_;
   FrameWriter& output_;
   std::string session_id_;
@@ -488,6 +520,13 @@ WorkerHelloAck AgentCore::describe(const Blake3Digest& requested_runtime,
   ack.model_bundles = models_.list();
   ack.active_sessions = active_sessions.load();
   ack.agent_runtime_id = options_.agent_runtime_id;
+  if (options_.service_state) {
+    ack.service = options_.service_state();
+  }
+  ack.worker_id = options_.worker_id;
+  if (options_.fleet_state) {
+    ack.fleet = options_.fleet_state();
+  }
   return ack;
 }
 
@@ -516,6 +555,21 @@ AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWr
   {
     AgentSession session(core, output, worker_session_id, close_input,
                          std::string(coordinator_id));
+    end = session.run(input);
+    session.finish();
+  }
+  --core.active_sessions;
+  return end;
+}
+
+AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWriter& output,
+                                    const std::string& worker_session_id,
+                                    const std::function<void()>& close_input,
+                                    const CoordinatorResolver& resolve) {
+  ++core.active_sessions;
+  AgentSessionEnd end = AgentSessionEnd::input_closed;
+  {
+    AgentSession session(core, output, worker_session_id, close_input, {}, resolve);
     end = session.run(input);
     session.finish();
   }

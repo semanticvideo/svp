@@ -208,11 +208,11 @@ CapacityOutcome ensure_worker_track_window_calibration(
             calibration_inputs(setup, source.ref);
         const std::size_t max_slots = calibration::track_window_calibration_max_slots(
             inputs, ack.memory.available_bytes, ack.memory_reserve_bytes, ack.host.logical_cpus);
-        svp::exec::remote::RemoteExecutor executor(svp::exec::remote::RemoteExecutorOptions{
-            .executor_id = "track-window-calibration." + pairing.pairing_id,
-            .connector = {.pairing = pairing},
-            .slots = max_slots,
-            .session_preamble = make_supplying_preamble(with_clip)});
+        svp::exec::remote::RemoteExecutor executor(with_supplied_sessions(
+            svp::exec::remote::RemoteExecutorOptions{.executor_id = "track-window-calibration." + pairing.pairing_id,
+                                                     .connector = {.pairing = pairing},
+                                                     .slots = max_slots},
+            with_clip));
         return calibration::calibrate_track_window_capacity(executor, max_slots, inputs,
                                                             cancellation);
       });

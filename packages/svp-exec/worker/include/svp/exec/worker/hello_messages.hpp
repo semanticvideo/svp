@@ -10,7 +10,14 @@
 //    "runtime_id":"b3:<hex>",
 //    "runtime_kind":"bundle"|"builder_only",
 //    "thread_plan":{"host_independent":bool,"plan":{ThreadPlan JSON}},
-//    "capacity":{"<task_type>":slots, ...}}                         optional
+//    "capacity":{"<task_type>":slots, ...},                        optional
+//    "pairing":{"id":"<pairing id>","proof":"<64 hex>"}}           optional
+//
+// `pairing` (pairing_proof.hpp) proves which pairing secret the coordinator
+// holds, bound to this TLS connection: one worker listener serves every
+// pairing, and the TLS stack does not tell the worker which PSK a peer used.
+// Coordinators that predate it omit it; their sessions count as a
+// coordinator of their own (slot_sharing.hpp, released_blobs.hpp).
 //
 // HELLO_ACK (worker -> coordinator), no payloads:
 //   {"accepted":bool,
@@ -25,7 +32,34 @@
 //    "refusal":{"code":"...","message":"..."},      only when accepted=false
 //    "runtime_present":bool,
 //    "runtimes":["b3:<hex>", ...],
-//    "sessions":{"active":n}}
+//    "service":{"declined_runtimes":["b3:<hex>", ...],             optional
+//               "pending":{"bytes":n,"release_stamp":n,
+//                          "runtime_id":"b3:<hex>"},             optional
+//               "release_stamp":n,                               optional
+//               "self_update":bool},
+//    "sessions":{"active":n},
+//    "fleet":{"fleet_id","join_id","member":bool},                 optional
+//    "worker_id":"svpn-<24 hex>"}                                   optional
+//
+// `fleet` (workers installed with `worker install --join`): the fleet the
+// worker belongs to, its key-bound join id, and whether it holds its member
+// key; a coordinator of that fleet issues a missing one over its proven
+// pairing session (fleet_join.hpp FLEET_MEMBER).
+//
+// `worker_id` (worker_identity.hpp) is what the worker's own Bonjour
+// instance advertises; coordinators store it with the pairing and find the
+// worker by it from then on.
+//
+// `service` (sent by workers that move themselves to newer runtimes,
+// service_updater.hpp; older workers omit it) lets a coordinator tell when a
+// runtime it pushes will make the worker's service restart
+// (worker_restart_wait.hpp): whether the service updates itself, the release
+// stamp of the runtime it runs (runtime_release.hpp; absent when unstamped),
+// the runtimes it already refused to switch to (failed test-start), and
+// `pending`: the runtime it has committed to switch to once no session is
+// live (or is switching to now), whoever installed it, with its release stamp
+// and size, so every coordinator, not only the one that pushed it, waits for
+// the restart before its next session.
 //
 // HostFacts JSON:
 //   {"arch","cpu_brand","efficiency_cpus","logical_cpus",
@@ -102,6 +136,15 @@ struct ModelSetSummary {
   bool operator==(const ModelSetSummary&) const = default;
 };
 
+// HELLO `pairing`: the pairing a coordinator speaks for, and its proof.
+struct PairingProof {
+  std::string pairing_id;
+  // 64 lowercase hex: keyed BLAKE3 over this connection's TLS exporter.
+  std::string proof;
+
+  bool operator==(const PairingProof&) const = default;
+};
+
 struct CoordinatorHello {
   ProtocolVersion protocol = kWorkerProtocolVersion;
   Blake3Digest runtime_id{};
@@ -118,6 +161,8 @@ struct CoordinatorHello {
   // for sessions that declare none (pairing, calibration, 1.0
   // coordinators): their leases are admitted by memory alone, as before.
   std::map<std::string, std::uint64_t, std::less<>> capacity;
+  // Set by the coordinator's connection (pairing_proof.hpp), never by hand.
+  std::optional<PairingProof> pairing;
 
   bool operator==(const CoordinatorHello&) const = default;
 };
@@ -147,6 +192,35 @@ struct SessionRefusal {
   bool operator==(const SessionRefusal&) const = default;
 };
 
+// A runtime the worker's service has committed to switch to.
+struct PendingServiceSwitch {
+  Blake3Digest runtime_id{};
+  std::uint64_t release_stamp = 0;
+  // Total bytes of the runtime's files (sizes the coordinator's wait).
+  std::uint64_t bytes = 0;
+
+  bool operator==(const PendingServiceSwitch&) const = default;
+};
+
+// The worker service's self-update state, as HELLO_ACK reports it.
+struct ServiceUpdateState {
+  bool self_update = false;
+  std::optional<std::uint64_t> release_stamp;
+  std::vector<Blake3Digest> declined_runtimes;
+  std::optional<PendingServiceSwitch> pending;
+
+  bool operator==(const ServiceUpdateState&) const = default;
+};
+
+// HELLO_ACK `fleet`.
+struct FleetJoinState {
+  std::string fleet_id;
+  std::string join_id;
+  bool member = false;
+
+  bool operator==(const FleetJoinState&) const = default;
+};
+
 struct WorkerHelloAck {
   ProtocolVersion protocol = kWorkerProtocolVersion;
   // Set exactly when the worker refused the session.
@@ -166,6 +240,12 @@ struct WorkerHelloAck {
   std::uint64_t active_sessions = 0;
   // The runtime the worker agent itself runs from, when it knows it.
   std::optional<Blake3Digest> agent_runtime_id;
+  // Absent from workers that predate self-update.
+  std::optional<ServiceUpdateState> service;
+  // Absent from workers that predate worker ids.
+  std::string worker_id;
+  // Absent from workers without a join credential (or predating it).
+  std::optional<FleetJoinState> fleet;
 
   [[nodiscard]] bool accepted() const noexcept { return !refusal.has_value(); }
   bool operator==(const WorkerHelloAck&) const = default;
@@ -173,6 +253,8 @@ struct WorkerHelloAck {
 
 [[nodiscard]] nlohmann::json host_facts_to_json(const HostFacts& facts);
 [[nodiscard]] HostFacts host_facts_from_json(const nlohmann::json& value, std::string_view path);
+
+[[nodiscard]] nlohmann::json pairing_proof_to_json(const PairingProof& proof);
 
 [[nodiscard]] Frame make_hello_frame(const CoordinatorHello& hello);
 // Throws ExecError (frame_malformed, missing_field, wrong_type,

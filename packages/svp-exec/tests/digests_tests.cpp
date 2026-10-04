@@ -179,6 +179,24 @@ void test_output_digest_vectors() {
          "output order is part of the digest");
 }
 
+// The BLAKE3 reference test vectors (test_vectors.json of the BLAKE3
+// repository) for the empty input: its key and context strings, and the
+// first 32 bytes of the keyed_hash and derive_key outputs.
+void test_keyed_and_derive_key_reference_vectors() {
+  constexpr std::string_view kKey = "whats the Elvish word for friend";
+  constexpr std::string_view kContext = "BLAKE3 2019-12-27 16:29:52 test vectors context";
+  Blake3Digest key{};
+  for (std::size_t index = 0; index < key.size(); ++index) {
+    key[index] = static_cast<std::uint8_t>(kKey[index]);
+  }
+  expect_equal(blake3_hex(blake3_keyed_hash(key, {})),
+               std::string("92b2b75604ed3c761f9d6f62392c8a9227ad0ea3f09573e783f1498a4ed60d26"),
+               "keyed_hash of the empty input");
+  expect_equal(blake3_hex(blake3_derive_key(kContext, {})),
+               std::string("2cc39783c223154fea8dfb7c1b1660f2ac2dcbd1c1de8277b0b0dd39b7e50d7d"),
+               "derive_key of the empty input");
+}
+
 }  // namespace
 
 int main() {
@@ -188,5 +206,6 @@ int main() {
        {"generic_cache_key_vector", test_generic_cache_key_vector},
        {"visual_cache_key_vector", test_visual_cache_key_vector},
        {"audio_cache_key_vector", test_audio_cache_key_vector},
-       {"output_digest_vectors", test_output_digest_vectors}});
+       {"output_digest_vectors", test_output_digest_vectors},
+       {"keyed_and_derive_key_reference_vectors", test_keyed_and_derive_key_reference_vectors}});
 }

@@ -5,14 +5,21 @@
 #include "svp/exec/remote/route_policy.hpp"
 #include "svp/exec/remote/transport_policy.hpp"
 
+#include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace svp::exec::remote {
 
 struct RemoteConnectorOptions {
   PairingKey pairing;
+  // The worker's id when known (learned from HELLO_ACK): discovery then
+  // looks for its own instance (TXT kWorkerTxtKey), and still accepts an
+  // instance advertising the pairing id (a worker that predates worker ids).
+  // Empty: by pairing id only.
+  std::string worker_id;
   RoutePolicy routes{};
   TransportPolicy transport{};
 };
@@ -22,6 +29,20 @@ struct DiscoveredWorker {
   std::string service_name;
   std::vector<RouteCandidate> candidates;
 };
+
+// A worker service and its TXT entries (browse_advertised_services).
+struct AdvertisedService {
+  std::string service_name;
+  std::map<std::string, std::string> txt;
+};
+
+// Every kWorkerServiceType service whose TXT record has `key`=`value`, however
+// many: browsing ends once policy.discovery_settle passes without a new one,
+// or at policy.discovery_timeout. Unlike RemoteConnector, nothing is resolved
+// or connected. Throws RemoteTransportError(worker_not_found) when browsing
+// fails.
+[[nodiscard]] std::vector<AdvertisedService> browse_advertised_services(
+    std::string_view key, std::string_view value, const RoutePolicy& policy = {});
 
 struct RemoteConnection {
   std::unique_ptr<RemoteStream> stream;

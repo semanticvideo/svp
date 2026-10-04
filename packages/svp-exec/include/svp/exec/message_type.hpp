@@ -34,6 +34,15 @@ enum class MessageType {
   // Worker protocol 1.2: a coordinator releasing blobs it no longer needs on
   // the worker (worker/transfer_messages.hpp).
   blob_release,
+  // Fleet join (worker/fleet_join.hpp), spoken only on a worker's join
+  // listener, never in a coordinator session.
+  join_offer,
+  join_challenge,
+  join_accept,
+  join_done,
+  // Fleet membership over a proven pairing session (worker/fleet_join.hpp):
+  // a coordinator issuing a worker's member key, and the worker's answer.
+  fleet_member,
 };
 
 inline constexpr std::array kAllMessageTypes = {
@@ -43,7 +52,8 @@ inline constexpr std::array kAllMessageTypes = {
     MessageType::reject,    MessageType::heartbeat, MessageType::result,
     MessageType::cancel,    MessageType::drain,     MessageType::shutdown,
     MessageType::unpair,    MessageType::error,     MessageType::blob_get,
-    MessageType::blob_release,
+    MessageType::blob_release, MessageType::join_offer, MessageType::join_challenge,
+    MessageType::join_accept, MessageType::join_done, MessageType::fleet_member,
 };
 
 [[nodiscard]] std::string_view message_type_name(MessageType type) noexcept;

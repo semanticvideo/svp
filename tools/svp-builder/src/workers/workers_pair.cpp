@@ -7,9 +7,12 @@
 //      BLAKE3 against the manifest before the runtime is moved into place.
 //   3. Write a fresh 256-bit pairing secret on the worker (0600, over ssh's
 //      stdin, never on a command line).
-//   4. Install the launchd job: a LaunchAgent in the user's domain, or with
-//      --system-service a LaunchDaemon with UserName set, installed by a
-//      staged script run under sudo in a terminal session.
+//   4. Point <root>/current at the runtime (unless it already names one,
+//      service_link.hpp) and install the launchd job, which runs
+//      <root>/current/bin/svp-builder: a LaunchAgent in the user's domain, or
+//      with --system-service a LaunchDaemon with UserName set, installed by a
+//      staged script run under sudo in a terminal session. From then on the
+//      service moves itself to newer runtimes (service_updater.hpp).
 //   5. Record the pairing on this Mac (0600), wait until the worker answers
 //      HELLO by pairing id, then push the selected model bundles.
 
@@ -145,10 +148,12 @@ int dry_run(const Plan& plan, const CoordinatorRuntime& runtime,
                             render_write_file_script(plan.layout.pairings() /
                                                          (plan.key.pairing_id + ".json"),
                                                      0600)));
-    scripts.push_back(write("4-prepare-launch-agents.sh",
+    scripts.push_back(write("4-point-current.sh",
+                            render_point_current_script(plan.layout.root, runtime.runtime_id)));
+    scripts.push_back(write("5-prepare-launch-agents.sh",
                             render_prepare_launch_agents_script(plan.plist_path, plan.layout.root)));
-    scripts.push_back(write("5-write-plist.sh", render_write_file_script(plan.plist_path, 0644)));
-    scripts.push_back(write("6-start-agent.sh",
+    scripts.push_back(write("6-write-plist.sh", render_write_file_script(plan.plist_path, 0644)));
+    scripts.push_back(write("7-start-agent.sh",
                             render_agent_start_script(plan.plist_path)));
   } else {
     const WorkerLayout staging{.root = plan.staging};
@@ -216,6 +221,7 @@ void install_user_agent(SshSession& ssh, const Plan& plan, const CoordinatorRunt
   (void)ssh.run_script(
       render_write_file_script(plan.layout.pairings() / (plan.key.pairing_id + ".json"), 0600),
       plan.worker_record);
+  (void)ssh.run_script(render_point_current_script(plan.layout.root, runtime.runtime_id));
   (void)ssh.run_script(render_prepare_launch_agents_script(plan.plist_path, plan.layout.root));
   (void)ssh.run_script(render_write_file_script(plan.plist_path, 0644), plan.plist);
   std::cout << "loading LaunchAgent " << plan.plist_path.string() << "\n";
@@ -305,8 +311,7 @@ int run_workers_pair(const WorkersCliOptions& options) {
   plan.layout = WorkerLayout{.root = default_worker_root(plan.mode, plan.probe.home)};
   plan.plist_path = launchd_plist_path(plan.mode, plan.probe.home);
   plan.plist = render_launchd_plist(make_worker_service_spec(
-      plan.mode, plan.layout, plan.layout.runtime(runtime.runtime_id), plan.probe.user,
-      plan.probe.home, plan.probe.login_path));
+      plan.mode, plan.layout, plan.probe.user, plan.probe.home, plan.probe.login_path));
   plan.worker_record = encode_worker_pairing(
       WorkerPairingRecord{.key = plan.key, .created_at = utc_timestamp_now()});
   plan.staging = std::filesystem::path(plan.probe.home) / "Library" / "Caches" / "org.svp" /
