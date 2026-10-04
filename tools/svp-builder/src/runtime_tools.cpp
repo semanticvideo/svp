@@ -1,5 +1,6 @@
 #include "svp/builder/runtime_tools.hpp"
 
+#include "svp/audio/sherpa_diarization.hpp"
 #include "svp/exec/blake3_digest.hpp"
 #include "svp/exec/runtime_components.hpp"
 #include "svp/exec/runtime_manifest.hpp"
@@ -117,6 +118,15 @@ std::optional<RuntimeToolChoice> bundled_runtime_tool(
   return RuntimeToolChoice{.path = path.string(),
                            .source = RuntimeToolSource::bundled,
                            .blake3 = declared->second};
+}
+
+std::optional<RuntimeToolChoice> offer_bundled_sherpa_library(
+    const std::optional<RuntimeBundle>& bundle) {
+  std::optional<RuntimeToolChoice> sherpa = bundled_runtime_tool(RuntimeTool::sherpa_onnx, bundle);
+  if (sherpa) {
+    svp::audio::set_sherpa_bundled_lib_path(sherpa->path);
+  }
+  return sherpa;
 }
 
 RuntimeToolChoice resolve_runtime_tool(RuntimeTool tool,

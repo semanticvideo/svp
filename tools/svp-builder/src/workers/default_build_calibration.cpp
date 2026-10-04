@@ -1,9 +1,11 @@
 #include "default_build_calibration.hpp"
 
+#include "coordinator_context.hpp"
 #include "engine/distributed_audio_work.hpp"
 #include "engine/distributed_vision_work.hpp"
 
 #include "svp/audio/tasks/diarize_window.hpp"
+#include "svp/builder/runtime_tools.hpp"
 #include "svp/package/vision_lane_stages.hpp"
 #include "svp/vision/tasks/track_window_spec.hpp"
 
@@ -78,7 +80,11 @@ DefaultBuildCalibration default_build_calibration(const std::filesystem::path& m
       .thread_plan = thread_plan,
       .sherpa_library = {}};
   if (work.audio.audio.diarization_model_ref) {
-    // Named without loading it, as a build names it before its stages run.
+    // Found exactly as a build of this runtime without --sherpa-lib finds
+    // it (SHERPA_ONNX_LIB_PATH, then the installed runtime bundle's pinned
+    // library, then the unpinned locations), and named without loading it,
+    // as a build names it before its stages run.
+    (void)offer_bundled_sherpa_library(locate_runtime_bundle(current_executable()));
     if (const std::optional<std::string> library =
             svp::audio::tasks::expected_sherpa_library_identity()) {
       work.audio.sherpa_library = *library;

@@ -384,6 +384,7 @@ if(BUILD_TESTING)
   target_link_libraries(svp-builder-runtime-tools-tests
     PRIVATE
       svp::builder
+      svp::audio
       svp::exec
       nlohmann_json::nlohmann_json
   )
