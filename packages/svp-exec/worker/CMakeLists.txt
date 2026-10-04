@@ -22,6 +22,7 @@ add_library(svp-exec-worker
   src/join_service.cpp
   src/launchd_job.cpp
   src/local_load.cpp
+  src/memory_turns.cpp
   src/message_fields.cpp
   src/model_bundles.cpp
   src/pairing_proof.cpp
@@ -34,6 +35,7 @@ add_library(svp-exec-worker
   src/runtime_test_start.cpp
   src/service_link.cpp
   src/service_updater.cpp
+  src/session_memory.cpp
   src/session_process.cpp
   src/slot_sharing.cpp
   src/transfer_messages.cpp
@@ -78,6 +80,7 @@ if(BUILD_TESTING)
     launchd_job
     worker_protocol
     admission
+    memory_turns
     slot_sharing
     agent_session
     service_updater

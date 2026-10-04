@@ -15,7 +15,8 @@
 //      model_bundles.hpp).
 //   3. The first ASSIGN starts the session process (session_process.hpp)
 //      from HELLO's runtime_id, after verifying every file of that runtime
-//      against its manifest. ASSIGN passes memory admission (admission.hpp)
+//      against its manifest. ASSIGN passes memory admission (admission.hpp,
+//      which reads each session process's memory through session_memory.hpp)
 //      or is answered with REJECT; CANCEL and SHUTDOWN are forwarded; the
 //      session process's HEARTBEAT / RESULT / ERROR frames are relayed back.
 //   4. On SHUTDOWN, end of input, or a protocol error, the session process
@@ -42,6 +43,7 @@
 #include "svp/exec/worker/model_bundles.hpp"
 #include "svp/exec/worker/released_blobs.hpp"
 #include "svp/exec/worker/runtime_store.hpp"
+#include "svp/exec/worker/session_memory.hpp"
 #include "svp/exec/worker/session_process.hpp"
 #include "svp/exec/worker/slot_sharing.hpp"
 #include "svp/exec/worker/worker_layout.hpp"
@@ -65,6 +67,9 @@ struct AgentCoreOptions {
   FrameLimits frame_limits{};
   // Injectable for tests; default sample_memory().
   std::function<MemorySnapshot()> sample_memory;
+  // Injectable for tests: a session process's memory in use
+  // (session_memory.hpp); default process_resident_bytes().
+  SessionMemory::Probe sample_process_memory;
   // Injectable for tests; default spawn_session_process().
   SessionLauncher launcher;
   // This Mac's own build's running tasks per type (local_load.hpp); empty
@@ -100,6 +105,7 @@ class AgentCore {
   [[nodiscard]] const WorkerLayout& layout() const noexcept { return options_.layout; }
   [[nodiscard]] AdmissionLedger& ledger() noexcept { return ledger_; }
   [[nodiscard]] SlotSharing& slots() noexcept { return slots_; }
+  [[nodiscard]] SessionMemory& session_memory() noexcept { return session_memory_; }
   [[nodiscard]] ReleasedBlobs& released() noexcept { return released_; }
   [[nodiscard]] const WorkerRuntimeStore& runtimes() const noexcept { return runtimes_; }
   [[nodiscard]] const WorkerModelStore& models() const noexcept { return models_; }
@@ -117,6 +123,7 @@ class AgentCore {
   AgentCoreOptions options_;
   AdmissionLedger ledger_;
   SlotSharing slots_;
+  SessionMemory session_memory_;
   ReleasedBlobs released_;
   WorkerRuntimeStore runtimes_;
   WorkerModelStore models_;

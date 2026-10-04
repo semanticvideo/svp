@@ -142,6 +142,8 @@ class AgentSession {
       if (relay_.joinable()) {
         relay_.join();
       }
+      // Before the process is reaped, so its pid cannot name another process.
+      core_.session_memory().detach(session_id_);
       (void)finish_session_process(*process_, std::chrono::milliseconds{0});
       process_.reset();
     }
@@ -299,7 +301,12 @@ class AgentSession {
     }
     const std::uint64_t required = assignment.spec.resources.est_peak_rss_mb * kBytesPerMiB;
     const AdmissionDecision decision = core_.ledger().try_admit(
-        session_id_, assignment.lease.lease_id, required, core_.memory());
+        LeaseAdmission{.session = session_id_,
+                       .lease_id = assignment.lease.lease_id,
+                       .task_type = assignment.spec.task_type,
+                       .required_bytes = required},
+        core_.memory(),
+        [this](std::string_view session) { return core_.session_memory().in_use(session); });
     if (!decision.admitted) {
       core_.slots().release(session_id_, assignment.lease.lease_id);
       output_.write(make_reject_frame(LeaseRejection{.lease_id = assignment.lease.lease_id,
@@ -385,6 +392,7 @@ class AgentSession {
                                                 core_.layout().cas(), scratch_,
                                                 core_.layout().models(), session_id_,
                                                 hello_.runtime_id));
+    core_.session_memory().attach(session_id_, process_->pid);
     child_writer_ = std::make_unique<FdFrameWriter>(process_->fd, core_.options().frame_limits);
     relay_ = std::thread([this, fd = process_->fd] { relay(fd); });
   }
@@ -473,6 +481,7 @@ AgentCore::AgentCore(AgentCoreOptions options)
     : options_(std::move(options)),
       ledger_(options_.admission, options_.host.physical_memory_bytes),
       slots_(options_.slot_contention_window, options_.local_load),
+      session_memory_(options_.sample_process_memory),
       runtimes_(options_.layout.runtimes()),
       models_(options_.layout.models()),
       cas_([&] {
