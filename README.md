@@ -27,6 +27,11 @@ support, and a real builder path that can produce validator-clean `.svp`
 packages from local sample media when the required native tools and model cache
 are available.
 
+Builds can also run across any number of Apple Silicon Macs: one Mac with no
+workers, or a fleet of coordinators and workers. Work is spread by each Mac's
+measured capacity, and the output does not depend on how many Macs ran it. See
+[Distributed Builds Across Macs](#distributed-builds-across-macs).
+
 The known current gap is no longer basic package validity. The active work is
 completion and hardening: semantic quality, query traversal, deterministic
 entity and relationship behavior, model-bundle checks, package hygiene, and
@@ -46,6 +51,7 @@ validator coverage.
 | `packages/svp-package/` | SVP/SVPI package writing, timeline artifacts, relationship/provenance writing, media binding, SVPI media policy, and validation output storage. |
 | `packages/svp-query/` | Read/query helpers used by inspector tooling. |
 | `packages/svp-validation/` | Validator library and validation-code handling. |
+| `packages/svp-exec/` | Task engine for builds: task graph, scheduler, recovery journal, content-addressed store, remote transport, and the worker service for distributed builds. |
 | `tools/svp-builder/` | Reference CLI for building SVP packages and SVPI sidecars from source media. |
 | `tools/svp-validator/` | CLI for validating `.svp` packages. |
 | `tools/svp-inspector/` | CLI for inspecting and querying package contents. |
@@ -154,6 +160,8 @@ flowchart TD
     Builder --> Audio["svp-audio"]
     Builder --> Vision["svp-vision"]
     Builder --> Package["svp-package"]
+    Builder --> Exec["svp-exec"]
+    Exec --> Workers["Worker Macs (optional)"]
     Audio --> Models["svp-models"]
     Vision --> Models
     Package --> SVP[".svp package"]
@@ -508,6 +516,74 @@ output fails to publish, the journal stays:
 Ctrl-C or SIGTERM stops the build within a few seconds and keeps the journal;
 pressing Ctrl-C a second time stops it immediately, which is equally safe to
 resume.
+
+## Distributed Builds Across Macs
+
+Every package-building command can spread its work over paired worker Macs:
+`build` (SVP, SVPI, or Embedded SVPI output), `build-batch`,
+`interlace create`, and `interlace create-batch`. Add `--distributed`:
+
+```bash
+svp-builder build "$SVP_VIDEO_PATH" \
+  --out build/local-intro/intro.svp \
+  --model-cache "$SVP_MODEL_CACHE" \
+  --distributed
+```
+
+- `--require-workers <n>` fails before any work unless at least `n` paired
+  workers are ready. Without it, unreachable workers are skipped with a
+  warning, and one Mac with no workers is a fully supported configuration.
+- Spread work: OCR frame batches, OCR evidence crops, text and keyframe
+  embeddings, depth, visual tracking windows, ASR chunks, and diarization
+  windows. Workers receive the source media and models they need and verify
+  them by BLAKE3 before use.
+- Output does not depend on how many Macs ran a build or which ones. Compare
+  two outputs with `svp-validator validate --equivalent <a> <b>`.
+- `--run-report <path>` writes per-stage wall time and resource use.
+
+### Capacity calibration
+
+Each Mac's capacity for each kind of work (slots and seconds per item) is
+measured once and saved. It is measured again only when something it depends
+on changes: the SVP runtime, macOS version, chip, CPU count, memory, or model
+bundles. The first build after installing a new SVP build therefore measures
+every Mac once; later builds reuse the saved numbers.
+
+### Batches of videos
+
+`build-batch` and `interlace create-batch` build many videos. With
+`--coordinators <pairings>`, other paired Macs each build whole videos of the
+batch, sharing their workers with each other; with `--distributed`, each
+video's work is also spread over workers. A Mac that becomes unavailable gives
+its video back to the queue for another Mac.
+
+### Worker cleanup
+
+When a distributed build or a batch job ends, each worker deletes what it
+received or produced for it: the source media, the staged audio, and (for
+batch jobs) the package once the batch Mac has fetched it. Models, runtimes,
+and calibration clips stay. Blobs another live build still uses are kept.
+
+### Setting up workers
+
+Set up workers once with the fleet commands; see
+[Worker Fleet Setup](docs/macos/Worker_Fleet_Setup.md). In short:
+
+1. `svp-builder workers fleet init` on the first coordinator.
+2. `svp-builder workers fleet token` prints a worker token.
+3. On each new Mac: `svp-builder worker install --join -` with the token on
+   stdin. This asks for that Mac's administrator password once.
+4. Coordinators pair new workers automatically
+   (`svp-builder workers fleet pair`, or the next `--distributed` build).
+
+After that, workers update themselves: when a coordinator on a newer SVP build
+talks to a worker, the worker verifies the new runtime, switches to it once no
+job is running, and restarts. No password, SSH key, or script is needed for
+updates. `svp-builder workers list` shows every paired worker and whether it
+is reachable.
+
+`svp-builder workers pair <user>@<host> --system-service` still pairs a worker
+over SSH.
 
 ## Create and Use SVPI Sidecars
 
