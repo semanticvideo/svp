@@ -1,11 +1,10 @@
 #include "default_build_calibration.hpp"
 
 #include "coordinator_context.hpp"
+#include "calibration/sherpa_library_naming.hpp"
 #include "engine/distributed_audio_work.hpp"
 #include "engine/distributed_vision_work.hpp"
 
-#include "svp/audio/tasks/diarize_window.hpp"
-#include "svp/builder/runtime_tools.hpp"
 #include "svp/package/vision_lane_stages.hpp"
 #include "svp/vision/tasks/track_window_spec.hpp"
 
@@ -79,19 +78,11 @@ DefaultBuildCalibration default_build_calibration(const std::filesystem::path& m
       .audio = engine::plan_distributed_audio_models(model_cache, thread_plan),
       .thread_plan = thread_plan,
       .sherpa_library = {}};
-  if (work.audio.audio.diarization_model_ref) {
-    // Found exactly as a build of this runtime without --sherpa-lib finds
-    // it (SHERPA_ONNX_LIB_PATH, then the installed runtime bundle's pinned
-    // library, then the unpinned locations), and named without loading it,
-    // as a build names it before its stages run.
-    (void)offer_bundled_sherpa_library(locate_runtime_bundle(current_executable()));
-    if (const std::optional<std::string> library =
-            svp::audio::tasks::expected_sherpa_library_identity()) {
-      work.audio.sherpa_library = *library;
-    } else {
-      work.audio.audio.diarization_model_ref.reset();
-      work.skipped.push_back("diarize.window: this Mac has no sherpa-onnx library to load");
-    }
+  // The library diarize.window is measured against, found as a build finds
+  // it; a library problem skips that type only.
+  if (const std::optional<std::string> skipped =
+          calibration::name_diarization_library(work.audio, current_executable())) {
+    work.skipped.push_back(*skipped);
   }
   for (const svp::exec::TaskModelRef& ref : work.audio.audio.asr_model_refs) {
     add_model(work.model_ids, ref.model_id);

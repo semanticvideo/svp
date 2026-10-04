@@ -27,6 +27,7 @@ add_library(svp-builder-lib
   src/calibration/capacity_sweep.cpp
   src/calibration/dispatched_capacity_workloads.cpp
   src/calibration/ocr_capacity_calibration.cpp
+  src/calibration/sherpa_library_naming.cpp
   src/calibration/track_window_capacity_calibration.cpp
   src/engine/audio_work_dispatch.cpp
   src/engine/build_assembly.cpp
@@ -275,6 +276,7 @@ if(BUILD_TESTING)
   target_link_libraries(svp-builder-dispatched-work-tests
     PRIVATE
       svp::builder
+      svp::audio
       svp::audio_tasks
       svp::exec
       svp::media

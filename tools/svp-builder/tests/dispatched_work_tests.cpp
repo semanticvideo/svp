@@ -8,6 +8,7 @@
 #include "calibration/calibration_plan.hpp"
 #include "calibration/capacity_sweep.hpp"
 #include "calibration/dispatched_capacity_workloads.hpp"
+#include "calibration/sherpa_library_naming.hpp"
 #include "engine/declined_lease_tally.hpp"
 #include "engine/distributed_audio_work.hpp"
 #include "engine/distributed_vision_work.hpp"
@@ -19,6 +20,8 @@
 #include "svp/exec/output_digest.hpp"
 #include "svp/exec/parameters_digest.hpp"
 #include "svp/exec/task_registry.hpp"
+#include "svp/audio/sherpa_diarization.hpp"
+#include "svp/exec/blake3_digest.hpp"
 #include "svp/audio/tasks/asr_chunk_batch.hpp"
 #include "svp/audio/tasks/diarize_window.hpp"
 #include "svp/vision/dispatched_work.hpp"
@@ -33,7 +36,11 @@
 #include <new>
 #include <system_error>
 #include <cstdlib>
+#include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <optional>
+#include <unistd.h>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -596,6 +603,125 @@ void test_planned_audio_models() {
           "host-chosen thread counts are not dispatched");
 }
 
+// An install prefix (bin/svp-builder) whose runtime bundle's components.json
+// lists the sherpa-onnx library, written to disk only when `with_library`.
+struct SherpaBundlePrefix {
+  std::filesystem::path root;
+
+  explicit SherpaBundlePrefix(bool with_library) {
+    root = std::filesystem::temp_directory_path() /
+           ("svp-sherpa-naming-" + std::to_string(::getpid()) + "-" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    write(executable(), "builder");
+    if (with_library) {
+      write(library(), "sherpa library bytes");
+    }
+    const nlohmann::json components = {
+        {"schema", "svp.runtime.components/1"},
+        {"arch", "arm64"},
+        {"macos_deployment_target", "15.0"},
+        {"components",
+         {{{"component", "sherpa-onnx"},
+           {"files",
+            {{{"path", "lib/libsherpa-onnx-c-api.dylib"},
+              {"blake3", "blake3:" + std::string(64, 'a')},
+              {"size_bytes", 20}}}}}}},
+        {"support_files", nlohmann::json::array()}};
+    write(root / "libexec/svp/runtime/components.json", components.dump(2));
+  }
+  ~SherpaBundlePrefix() {
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
+  }
+  std::filesystem::path executable() const { return root / "bin/svp-builder"; }
+  std::filesystem::path library() const {
+    return root / "libexec/svp/runtime/lib/libsherpa-onnx-c-api.dylib";
+  }
+
+ private:
+  static void write(const std::filesystem::path& path, const std::string& text) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream(path, std::ios::binary | std::ios::trunc) << text;
+  }
+};
+
+// SHERPA_ONNX_LIB_PATH unset for one scope, restored after.
+class WithoutSherpaEnvironment {
+ public:
+  WithoutSherpaEnvironment() {
+    if (const char* value = std::getenv(kVariable)) previous_ = value;
+    ::unsetenv(kVariable);
+  }
+  ~WithoutSherpaEnvironment() {
+    if (previous_) ::setenv(kVariable, previous_->c_str(), 1);
+  }
+
+ private:
+  static constexpr const char* kVariable = "SHERPA_ONNX_LIB_PATH";
+  std::optional<std::string> previous_;
+};
+
+svp::builder::calibration::AudioCalibrationSetup diarizing_audio_setup() {
+  svp::builder::calibration::AudioCalibrationSetup setup;
+  setup.audio.asr_model_refs = {test_model_ref("whisper"), test_model_ref("vad")};
+  setup.audio.diarization_model_ref = test_model_ref("sherpa");
+  return setup;
+}
+
+// `workers sync` names the diarization library as a build does; a bundle
+// that lists the library but lacks it skips diarize.window, with the reason,
+// and every other type is still measured instead of the command failing.
+void test_broken_bundled_sherpa_skips_only_diarization() {
+  namespace calibration = svp::builder::calibration;
+  const WithoutSherpaEnvironment environment;
+  {
+    const SherpaBundlePrefix broken(false);
+    calibration::AudioCalibrationSetup setup = diarizing_audio_setup();
+    std::optional<std::string> skipped;
+    bool threw = false;
+    try {
+      skipped = calibration::name_diarization_library(setup, broken.executable());
+    } catch (...) {
+      threw = true;
+    }
+    require(!threw, "a broken bundled library never fails the calibration");
+    require(skipped && skipped->starts_with("diarize.window: ") &&
+                skipped->find("lib/libsherpa-onnx-c-api.dylib") != std::string::npos,
+            "the skip names diarize.window and why: " + skipped.value_or("(none)"));
+    require(!setup.audio.diarization_model_ref && setup.sherpa_library.empty() &&
+                setup.audio.asr_model_refs.size() == 2,
+            "only diarization is dropped");
+
+    svp::builder::DistributedVisionWork vision;
+    vision.evidence_crops = true;
+    const std::vector<calibration::CalibrationStep> steps = calibration::calibration_steps(
+        vision, setup.audio, calibration::calibrated_tracking_qualities());
+    const auto has = [&](std::string_view type) {
+      return std::any_of(steps.begin(), steps.end(),
+                         [&](const auto& step) { return step.task_type == type; });
+    };
+    require(has(tasks::kOcrFrameBatchTaskType) && has(tasks::kOcrCropBatchTaskType) &&
+                has(svp::audio::tasks::kAsrChunkBatchTaskType) &&
+                !has(svp::audio::tasks::kDiarizeWindowTaskType),
+            "OCR, vision, and ASR are still measured; diarize.window is not");
+  }
+  {
+    const SherpaBundlePrefix installed(true);
+    calibration::AudioCalibrationSetup setup = diarizing_audio_setup();
+    require(!calibration::name_diarization_library(setup, installed.executable()) &&
+                setup.audio.diarization_model_ref,
+            "an installed bundled library is used");
+    const std::string expected =
+        svp::exec::blake3_prefixed(svp::exec::blake3_digest(std::string("sherpa library bytes")));
+    require(setup.sherpa_library == expected,
+            "the bundle's library is named by its bytes: " + setup.sherpa_library);
+    svp::audio::set_sherpa_bundled_lib_path({});
+  }
+  calibration::AudioCalibrationSetup no_diarization;
+  require(!calibration::name_diarization_library(no_diarization, "/nonexistent/bin/svp-builder"),
+          "a setup without diarization has nothing to name");
+}
+
 }  // namespace
 
 int main() {
@@ -608,6 +734,7 @@ int main() {
   test_declined_leases_are_reported();
   test_calibration_steps_cover_every_dispatched_type();
   test_planned_audio_models();
+  test_broken_bundled_sherpa_skips_only_diarization();
   test_dispatched_calibration_graph();
   test_planned_vision_work();
   std::cout << "dispatched work tests passed\n";
