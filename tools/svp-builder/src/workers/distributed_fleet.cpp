@@ -554,7 +554,9 @@ DistributedFleet PairedWorkerFleet::prepare(const DistributedOcrWork& work) {
   // The audio types on this Mac (M5). asr.chunk_batch is measured now;
   // diarize.window loads sherpa-onnx, which must not load in this process
   // before the build's own ONNX Runtime models, so it is measured in the
-  // diarization stage, once sherpa-onnx is loaded there (measure_in_stage).
+  // diarization stage, once sherpa-onnx is loaded there (measure_in_stage);
+  // after `workers sync` (workers_calibration_command.hpp) its stored record
+  // is current and the stage only reads it.
   const auto admitted_audio_slots = [](std::string_view type, std::size_t measured) {
     const svp::exec::worker::HostFacts host = svp::exec::worker::detect_host_facts();
     return std::min(measured,

@@ -90,6 +90,16 @@ using EnvironmentLookup =
 [[nodiscard]] std::optional<RuntimeToolChoice> bundled_runtime_tool(
     RuntimeTool tool, const std::optional<RuntimeBundle>& bundle);
 
+// Offers the bundle's sherpa-onnx library to svp-audio's search
+// (svp::audio::set_sherpa_bundled_lib_path), after the explicit path and
+// SHERPA_ONNX_LIB_PATH and before every unpinned location, and returns it.
+// Every command of this process that loads or names sherpa-onnx calls it
+// first (a build, a worker session, `workers sync`), so each finds exactly
+// the library the others do. nullopt, and nothing offered, when the bundle
+// declares none.
+std::optional<RuntimeToolChoice> offer_bundled_sherpa_library(
+    const std::optional<RuntimeBundle>& bundle);
+
 // What one command resolved. Tools the command does not use stay empty.
 struct RuntimeToolSelection {
   std::optional<std::filesystem::path> bundle_root;

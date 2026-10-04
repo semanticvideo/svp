@@ -70,6 +70,7 @@ void TrackingWindowProgress::observe(const svp::exec::AttemptEvent& event) {
       return;
     case AttemptEventKind::rejected:
       leased_at_.erase(event.lease_id);
+      declined_.observe(event);
       return;
     default:
       return;
@@ -100,6 +101,7 @@ std::string TrackingWindowProgress::summary() const {
     }
     out << "\n";
   }
+  out << declined_.summary("tracking windows");
   return out.str();
 }
 

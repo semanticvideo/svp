@@ -2,7 +2,6 @@
 
 #include "cli_context.hpp"
 
-#include "svp/audio/sherpa_diarization.hpp"
 #include "svp/core/executable_path.hpp"
 
 #include <exception>
@@ -60,11 +59,7 @@ svp::builder::RuntimeToolSelection resolve_selected_command_tools(
       // svp-audio owns the sherpa search; the bundle adds one candidate after
       // the explicit path and SHERPA_ONNX_LIB_PATH.
       selection.uses_sherpa = true;
-      selection.sherpa_bundled =
-          svp::builder::bundled_runtime_tool(RuntimeTool::sherpa_onnx, bundle);
-      if (selection.sherpa_bundled) {
-        svp::audio::set_sherpa_bundled_lib_path(selection.sherpa_bundled->path);
-      }
+      selection.sherpa_bundled = svp::builder::offer_bundled_sherpa_library(bundle);
       continue;
     }
     const std::optional<std::string> flag_value =

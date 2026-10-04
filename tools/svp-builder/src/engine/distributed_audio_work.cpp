@@ -22,16 +22,13 @@ std::optional<svp::exec::TaskModelRef> verified_ref(const std::filesystem::path&
 
 }  // namespace
 
-DistributedAudioWork plan_distributed_audio_work(const BuildPipelineOptions& options,
-                                                 const BuildStageExecutionPlan& stage_plan,
-                                                 const svp::media::MediaIngestPlan& plan,
-                                                 const svp::models::ThreadPlan& thread_plan) {
+DistributedAudioWork plan_distributed_audio_models(const std::filesystem::path& model_cache_root,
+                                                   const svp::models::ThreadPlan& thread_plan) {
   DistributedAudioWork work;
-  if (!stage_plan.run_audio || plan.probe.audio_streams.empty() ||
-      options.model_cache_dir.empty()) {
+  if (model_cache_root.empty()) {
     return work;
   }
-  const std::filesystem::path cache(options.model_cache_dir);
+  const std::filesystem::path& cache = model_cache_root;
   const bool asr_threads = thread_plan.whisper.decode >= 1 && thread_plan.whisper.vad >= 1 &&
                            thread_plan.forced_alignment.intra_op >= 1 &&
                            thread_plan.forced_alignment.inter_op >= 1;
@@ -59,6 +56,17 @@ DistributedAudioWork plan_distributed_audio_work(const BuildPipelineOptions& opt
     }
   }
   return work;
+}
+
+DistributedAudioWork plan_distributed_audio_work(const BuildPipelineOptions& options,
+                                                 const BuildStageExecutionPlan& stage_plan,
+                                                 const svp::media::MediaIngestPlan& plan,
+                                                 const svp::models::ThreadPlan& thread_plan) {
+  if (!stage_plan.run_audio || plan.probe.audio_streams.empty() ||
+      options.model_cache_dir.empty()) {
+    return {};
+  }
+  return plan_distributed_audio_models(options.model_cache_dir, thread_plan);
 }
 
 }  // namespace svp::builder::engine

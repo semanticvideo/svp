@@ -23,9 +23,11 @@ add_library(svp-builder-lib
   src/processor_provenance.cpp
   src/vision_stage_progress.cpp
   src/calibration/audio_capacity_workloads.cpp
+  src/calibration/calibration_plan.cpp
   src/calibration/capacity_sweep.cpp
   src/calibration/dispatched_capacity_workloads.cpp
   src/calibration/ocr_capacity_calibration.cpp
+  src/calibration/sherpa_library_naming.cpp
   src/calibration/track_window_capacity_calibration.cpp
   src/engine/audio_work_dispatch.cpp
   src/engine/build_assembly.cpp
@@ -36,6 +38,7 @@ add_library(svp-builder-lib
   src/engine/build_task_graph.cpp
   src/engine/canonical_frames_codec.cpp
   src/engine/committed_stage_results.cpp
+  src/engine/declined_lease_tally.cpp
   src/engine/dispatch_scratch.cpp
   src/engine/distributed_audio_work.cpp
   src/engine/distributed_vision_work.cpp
@@ -164,6 +167,7 @@ if(APPLE)
     src/workers/calibration_store.cpp
     src/workers/capacity_record_support.cpp
     src/workers/coordinator_context.cpp
+    src/workers/default_build_calibration.cpp
     src/workers/dispatched_calibration_runs.cpp
     src/workers/distributed_fleet.cpp
     src/workers/fleet_pairing.cpp
@@ -176,6 +180,7 @@ if(APPLE)
     src/workers/worker_reach.cpp
     src/workers/worker_restart.cpp
     src/workers/worker_supplies.cpp
+    src/workers/workers_calibration_command.cpp
     src/workers/workers_cli.cpp
     src/workers/workers_fleet.cpp
     src/workers/workers_pair.cpp
@@ -271,7 +276,11 @@ if(BUILD_TESTING)
   target_link_libraries(svp-builder-dispatched-work-tests
     PRIVATE
       svp::builder
+      svp::audio
+      svp::audio_tasks
       svp::exec
+      svp::media
+      svp::models
       svp::package
       svp::vision
       svp::vision_tasks
@@ -377,6 +386,7 @@ if(BUILD_TESTING)
   target_link_libraries(svp-builder-runtime-tools-tests
     PRIVATE
       svp::builder
+      svp::audio
       svp::exec
       nlohmann_json::nlohmann_json
   )

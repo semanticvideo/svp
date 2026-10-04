@@ -9,10 +9,12 @@
 //     stage's span covers the windows and the fold;
 //   * one stderr line per lost or failed window attempt, so a worker dropping
 //     out is visible while the build goes on;
-//   * per-executor totals for the end-of-build summary.
+//   * per-executor totals for the end-of-build summary, with the leases each
+//     executor declined (declined_lease_tally.hpp).
 // observe() is called on the scheduler thread; the stage calls are made by
 // the fold's task on an executor thread. Thread-safe.
 
+#include "engine/declined_lease_tally.hpp"
 #include "engine/tracking_window_plan.hpp"
 
 #include "svp/builder/build_progress.hpp"
@@ -47,7 +49,8 @@ class TrackingWindowProgress {
   void fold_started();
   void fold_finished();
 
-  // One line per executor that ran windows, for stderr.
+  // One line per executor that ran windows, then one per executor that
+  // declined any, for stderr.
   [[nodiscard]] std::string summary() const;
 
  private:
@@ -64,6 +67,7 @@ class TrackingWindowProgress {
   bool completed_ = false;
   std::map<std::string, std::chrono::milliseconds> leased_at_;
   std::map<std::string, TrackingExecutorTotals> totals_;
+  DeclinedLeaseTally declined_;
 };
 
 }  // namespace svp::builder::engine

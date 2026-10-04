@@ -97,13 +97,4 @@ struct CalibrationOutcome {
 
 [[nodiscard]] std::string describe_calibration(const calibration::OcrCalibration& ocr);
 
-// `workers pair` / `workers sync`: measures (or confirms) this Mac's and the
-// worker's OCR capacity, and their capacity for each dispatched vision task
-// type, for a default build, and prints one line for each.
-// Returns false, after saying why, when either could not be measured.
-bool calibrate_for_workers_command(const svp::exec::worker::CoordinatorPairingRecord& record,
-                                   const svp::exec::worker::CoordinatorHello& hello,
-                                   const svp::exec::worker::CoordinatorRuntime& runtime,
-                                   const std::filesystem::path& model_cache);
-
 }  // namespace svp::builder::workers

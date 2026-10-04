@@ -1,9 +1,6 @@
 #include "ocr_calibration_runs.hpp"
-#include "worker_restart.hpp"
 
 #include "coordinator_context.hpp"
-#include "dispatched_calibration_runs.hpp"
-#include "engine/distributed_vision_work.hpp"
 
 #include "svp/builder/build_thread_plan.hpp"
 #include "svp/builder/runtime_tools.hpp"
@@ -14,7 +11,6 @@
 #include "svp/exec/remote/remote_executor.hpp"
 #include "svp/exec/worker/admission.hpp"
 #include "svp/exec/worker/pairing_store.hpp"
-#include "svp/exec/worker/worker_connection.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 #include "svp/vision/ocr_generation.hpp"
 #include "svp/vision/tasks/ffmpeg_build_identity.hpp"
@@ -22,7 +18,7 @@
 #include "svp/vision/tasks/ocr_frame_batch_task.hpp"
 
 #include <cstdio>
-#include <iostream>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <sstream>
@@ -277,88 +273,6 @@ std::string describe_calibration(const calibration::OcrCalibration& ocr) {
   }
   out << "; " << ocr.stopped_because << ")";
   return out.str();
-}
-
-bool calibrate_for_workers_command(const svp::exec::worker::CoordinatorPairingRecord& record,
-                                   const svp::exec::worker::CoordinatorHello& hello,
-                                   const svp::exec::worker::CoordinatorRuntime& runtime,
-                                   const std::filesystem::path& model_cache) {
-  try {
-    const OcrCalibrationSetup setup = default_ocr_calibration_setup(model_cache);
-    // The default build's dispatched vision work (M4), measured beside OCR.
-    const calibration::DispatchedCalibrationSetup dispatched{
-        .pp_ocr = setup.pp_ocr,
-        .pp_ocr_model_refs = setup.model_refs,
-        .vision = engine::plan_distributed_vision_work(model_cache,
-                                                       default_build_thread_plan(model_cache)),
-        .ffmpeg_build = setup.ffmpeg_build};
-    WorkerSupplies supplies;
-    supplies.hello = hello;
-    supplies.runtime = runtime;
-    std::vector<std::string> model_ids;
-    for (const svp::exec::TaskModelRef& ref : setup.model_refs) {
-      model_ids.push_back(ref.model_id);
-    }
-    for (const std::optional<DistributedOnnxWork>* onnx :
-         {&dispatched.vision.text_embeddings, &dispatched.vision.keyframe_embeddings,
-          &dispatched.vision.depth}) {
-      if (*onnx) {
-        model_ids.push_back((*onnx)->model_ref.model_id);
-      }
-    }
-    supplies.models = svp::exec::worker::prepare_model_bundles(model_cache, model_ids);
-    CalibrationClipFile clip(setup.ffmpeg_path);
-    const CalibrationStore store;
-    const svp::exec::CancellationToken never_cancelled;
-    const CalibrationOutcome local = ensure_coordinator_calibration(
-        setup, svp::exec::blake3_prefixed(runtime.runtime_id), clip, store, never_cancelled);
-    std::cout << "this Mac: " << (local.measured ? "calibrated: " : "calibration current: ")
-              << describe_calibration(local.ocr) << "\n";
-    svp::exec::worker::WorkerHelloAck ack;
-    {
-      const std::unique_ptr<svp::exec::worker::WorkerConnection> connection =
-          svp::exec::worker::connect_to_worker(record.key);
-      svp::exec::worker::WorkerSessionClient client(*connection->reader, *connection->writer);
-      ack = supply_worker_session(*connection->reader, *connection->writer, supplies).ack;
-      client.shutdown();
-    }
-    if (const std::optional<svp::exec::worker::WorkerHelloAck> restarted =
-            await_worker_runtime_switch(record.key, supplies.hello, supplies.runtime, ack, {},
-                                        [](const std::string& line) { std::cout << line << "\n"; })) {
-      ack = *restarted;
-    }
-    const CalibrationOutcome worker = ensure_worker_calibration(
-        record.key, supplies, ack, setup, clip, store, never_cancelled);
-    std::cout << "worker: " << (worker.measured ? "calibrated: " : "calibration current: ")
-              << describe_calibration(worker.ocr) << "\n";
-    // The dispatched types are measured best effort: the command's outcome
-    // stays OCR's, and a distributed build measures any type missing here.
-    for (const std::string& type : calibration::dispatched_task_types(dispatched.vision)) {
-      try {
-        const CapacityOutcome local_capacity = ensure_coordinator_capacity(
-            type, dispatched, svp::exec::blake3_prefixed(runtime.runtime_id), clip, store,
-            model_cache, setup.ffmpeg_path, never_cancelled);
-        std::cout << "this Mac: "
-                  << (local_capacity.measured ? "calibrated: " : "calibration current: ")
-                  << describe_capacity(type, local_capacity.capacity) << "\n";
-        const CapacityOutcome worker_capacity =
-            ensure_worker_capacity(record.key, supplies, ack, type, dispatched, clip,
-                                   setup.ffmpeg_path, store, never_cancelled);
-        std::cout << "worker: "
-                  << (worker_capacity.measured ? "calibrated: " : "calibration current: ")
-                  << describe_capacity(type, worker_capacity.capacity) << "\n";
-      } catch (const std::exception& error) {
-        std::cerr << "svp-builder: warning: " << type << " capacity calibration failed: "
-                  << error.what() << "\n  a --distributed build measures it again\n";
-      }
-    }
-    return true;
-  } catch (const std::exception& error) {
-    std::cerr << "svp-builder: OCR capacity calibration failed: " << error.what()
-              << "\n  `svp-builder workers sync` measures it again; a --distributed build "
-                 "measures a worker it has no current calibration for\n";
-    return false;
-  }
 }
 
 }  // namespace svp::builder::workers

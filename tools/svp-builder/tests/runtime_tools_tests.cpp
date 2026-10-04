@@ -1,4 +1,5 @@
 #include "runtime_tools_json.hpp"
+#include "svp/audio/sherpa_diarization.hpp"
 #include "svp/builder/runtime_tools.hpp"
 #include "svp/exec/runtime_manifest.hpp"
 #include "svp/exec/runtime_manifest_assembly.hpp"
@@ -11,8 +12,10 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <cstdlib>
 #include <unistd.h>
 
 namespace {
@@ -172,6 +175,65 @@ void test_bundle_without_a_tool_falls_back_to_path() {
          "a tool the bundle does not declare comes from PATH");
 }
 
+// SHERPA_ONNX_LIB_PATH for one scope, restored after.
+class ScopedSherpaEnvironment {
+ public:
+  explicit ScopedSherpaEnvironment(const std::optional<std::string>& value) {
+    if (const char* previous = std::getenv(kVariable)) previous_ = previous;
+    if (value) {
+      ::setenv(kVariable, value->c_str(), 1);
+    } else {
+      ::unsetenv(kVariable);
+    }
+  }
+  ~ScopedSherpaEnvironment() {
+    if (previous_) {
+      ::setenv(kVariable, previous_->c_str(), 1);
+    } else {
+      ::unsetenv(kVariable);
+    }
+  }
+
+ private:
+  static constexpr const char* kVariable = "SHERPA_ONNX_LIB_PATH";
+  std::optional<std::string> previous_;
+};
+
+// Every command that names sherpa-onnx (a build, a worker session, `workers
+// sync`) offers the bundle's library the same way, so svp-audio's search
+// finds the library a build of this runtime loads: SHERPA_ONNX_LIB_PATH
+// first, then the bundle's pinned copy.
+void test_bundled_sherpa_library_is_offered_to_the_search() {
+  const InstallPrefix prefix;
+  prefix.install_bundle(kFullBundle);
+  const auto bundle = svp::builder::locate_runtime_bundle(prefix.executable());
+  const fs::path bundled = prefix.bundle() / "lib/libsherpa-onnx-c-api.dylib";
+  {
+    const ScopedSherpaEnvironment unset(std::nullopt);
+    const auto offered = svp::builder::offer_bundled_sherpa_library(bundle);
+    expect(offered && fs::equivalent(offered->path, bundled), "the bundle's library is offered");
+    expect(offered->source == RuntimeToolSource::bundled, "offered as bundled");
+    const std::string expected = svp::audio::sherpa_lib_path_expected();
+    expect(!expected.empty() && fs::equivalent(expected, bundled),
+           "the search finds the bundle's library: " + expected);
+  }
+  {
+    const fs::path override_library = prefix.root / "override/libsherpa-onnx-c-api.dylib";
+    write_file(override_library, "override");
+    const ScopedSherpaEnvironment set(override_library.string());
+    expect_equal(svp::audio::sherpa_lib_path_expected(), override_library.string(),
+                 "SHERPA_ONNX_LIB_PATH precedes the bundle");
+  }
+  svp::audio::set_sherpa_bundled_lib_path({});
+
+  const InstallPrefix bare;
+  bare.install_bundle({{"bin/ffmpeg", "ffmpeg"}});
+  const auto no_library = svp::builder::locate_runtime_bundle(bare.executable());
+  expect(!svp::builder::offer_bundled_sherpa_library(no_library) &&
+             !svp::builder::offer_bundled_sherpa_library(std::nullopt),
+         "nothing is offered without a bundled library");
+}
+
 void test_broken_bundle_is_an_error() {
   {
     const InstallPrefix prefix;
@@ -258,6 +320,8 @@ int main() {
        test_bundle_is_used_after_flag_and_environment},
       {"bundle without a tool falls back to PATH",
        test_bundle_without_a_tool_falls_back_to_path},
+      {"bundled sherpa library is offered to the search",
+       test_bundled_sherpa_library_is_offered_to_the_search},
       {"broken bundle is an error", test_broken_bundle_is_an_error},
       {"runtime_id from manifest", test_runtime_id_from_manifest},
       {"selection JSON", test_selection_json},
