@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp.dev/schemas/package-export-record.schema.json",
+  "title": "SVP Package Export JSONL Record",
+  "description": "One line of an exported JSONL layer (docs/svpi/Package_Export_v1.md Sections 4.1 and 5). The record's own members are exactly the package record's members, governed by that layer's schema; this schema only constrains the `svp_export` member the export may append. Removing `svp_export` gives back the package record.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "svp_export": {
+      "$ref": "#/$defs/svp_export"
+    }
+  },
+  "$defs": {
+    "svp_export": {
+      "description": "Resolutions keyed by the original member they resolve.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/frame_resolution"
+          },
+          {
+            "$ref": "#/$defs/crop_resolution"
+          },
+          {
+            "$ref": "#/$defs/entry_path_resolution"
+          },
+          {
+            "$ref": "#/$defs/block_resolution"
+          },
+          {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/frame_resolution"
+                },
+                {
+                  "$ref": "#/$defs/crop_resolution"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "frame_resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "found"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "found": {
+          "type": "boolean"
+        },
+        "frame_index": {
+          "description": "The frame record's frame_index, as declared, or null."
+        },
+        "pts_us": {
+          "description": "The frame record's pts_us (integer microseconds), as declared, or null."
+        }
+      },
+      "if": {
+        "properties": {
+          "found": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": ["frame_index", "pts_us"]
+      }
+    },
+    "crop_resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "found"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "found": {
+          "type": "boolean"
+        },
+        "file": {
+          "type": ["string", "null"],
+          "pattern": "^layers/"
+        }
+      },
+      "if": {
+        "properties": {
+          "found": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": ["file"]
+      }
+    },
+    "entry_path_resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "found", "file"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "found": {
+          "type": "boolean"
+        },
+        "file": {
+          "type": ["string", "null"],
+          "pattern": "^layers/"
+        }
+      }
+    },
+    "block_resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["block_file", "block_offset", "found"],
+      "properties": {
+        "block_file": {
+          "type": "string"
+        },
+        "block_offset": {
+          "description": "The record's block_offset, as declared, or null."
+        },
+        "found": {
+          "type": "boolean"
+        },
+        "block_ordinal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "decoded_file": {
+          "type": "string",
+          "pattern": "^layers/.*\\.decoded\\.bin$"
+        },
+        "decoded_offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "decoded_length": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dtype": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dtype_name": {
+          "type": ["string", "null"]
+        },
+        "extents": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minItems": 3,
+          "maxItems": 3
+        }
+      },
+      "if": {
+        "properties": {
+          "found": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "block_ordinal",
+          "decoded_file",
+          "decoded_offset",
+          "decoded_length",
+          "dtype",
+          "dtype_name",
+          "extents"
+        ]
+      }
+    }
+  },
+  "examples": [
+    {
+      "text_observation_id": "text_obs_000001",
+      "text_region_id": "text_region_000001",
+      "raw_text": "SUBTO",
+      "source_frame_ids": ["frame_000016", "frame_999999"],
+      "evidence_crop_refs": ["crop_000001"],
+      "svp_export": {
+        "source_frame_ids": [
+          {
+            "id": "frame_000016",
+            "found": true,
+            "frame_index": 15,
+            "pts_us": 0
+          },
+          {
+            "id": "frame_999999",
+            "found": false
+          }
+        ],
+        "evidence_crop_refs": [
+          {
+            "id": "crop_000001",
+            "found": true,
+            "file": "layers/text/evidence_crops/crop_000001.jpg"
+          }
+        ]
+      }
+    },
+    {
+      "id": "depth_frame_000002",
+      "frame_id": "frame_000002",
+      "block_file": "spatial/depth.blocks.svpdz",
+      "block_offset": 0,
+      "svp_export": {
+        "frame_id": {
+          "id": "frame_000002",
+          "found": true,
+          "frame_index": 1,
+          "pts_us": 62022804
+        },
+        "block_file": {
+          "block_file": "spatial/depth.blocks.svpdz",
+          "block_offset": 0,
+          "found": true,
+          "block_ordinal": 0,
+          "decoded_file": "layers/spatial/depth.blocks.svpdz.decoded.bin",
+          "decoded_offset": 0,
+          "decoded_length": 460800,
+          "dtype": 2,
+          "dtype_name": "uint16",
+          "extents": [640, 360, 1]
+        }
+      }
+    }
+  ]
+}

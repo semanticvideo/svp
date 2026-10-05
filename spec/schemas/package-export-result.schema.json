@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp.dev/schemas/package-export-result.schema.json",
+  "title": "SVP Package Export Command Result",
+  "description": "The one JSON object `svp-inspector export` prints on stdout (docs/svpi/Package_Export_v1.md Section 9).",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "exit_code",
+        "out",
+        "package_kind",
+        "export_format_version",
+        "layer_count",
+        "file_count"
+      ],
+      "properties": {
+        "status": {
+          "const": "exported"
+        },
+        "exit_code": {
+          "const": 0
+        },
+        "out": {
+          "type": "string"
+        },
+        "package_kind": {
+          "enum": ["svp", "svpi", "embedded_svpi"]
+        },
+        "export_format_version": {
+          "const": 1
+        },
+        "layer_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "file_count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "exit_code", "error"],
+      "properties": {
+        "status": {
+          "const": "error"
+        },
+        "exit_code": {
+          "enum": [1, 2, 3, 4, 5, 6]
+        },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message", "details"],
+          "properties": {
+            "code": {
+              "enum": [
+                "internal_error",
+                "validation_unavailable",
+                "input_missing",
+                "input_not_regular_file",
+                "input_unrecognized",
+                "package_invalid",
+                "unsupported_version",
+                "output_exists",
+                "output_not_replaceable",
+                "insufficient_space",
+                "output_write_failed",
+                "unsafe_entry_name",
+                "output_path_collision",
+                "entry_unreadable",
+                "entry_size_mismatch",
+                "malformed_record",
+                "malformed_document",
+                "record_too_large",
+                "invalid_block_stream",
+                "reserved_member_present",
+                "package_changed"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "details": {
+              "description": "Machine-readable context: `validation` (the full validation report) for package_invalid and validation_unavailable; `field`, `declared`, `supported` for unsupported_version; `entry` (and `line`) for content errors.",
+              "type": "object"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "examples": [
+    {
+      "status": "exported",
+      "exit_code": 0,
+      "out": "exports/clip",
+      "package_kind": "svpi",
+      "export_format_version": 1,
+      "layer_count": 52,
+      "file_count": 1970
+    },
+    {
+      "status": "error",
+      "exit_code": 4,
+      "error": {
+        "code": "unsupported_version",
+        "message": "Package declares svpi_version \"0.2\", which this build does not support.",
+        "details": {
+          "field": "svpi_version",
+          "declared": "0.2",
+          "supported": ["0.1"]
+        }
+      }
+    }
+  ]
+}
