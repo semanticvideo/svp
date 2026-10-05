@@ -412,14 +412,14 @@ void test_output_rules(const Context& context) {
 
   // Nor a directory that holds the package being exported.
   const auto holder = temp.path() / "holder";
-  export_test::write_file(holder / "export.json", "{}");
+  expect_exported(export_test::run_export(context.inspector, package, holder));
   const auto inner = holder / "inner.svpi";
   fs::copy_file(package, inner);
+  const auto holder_before = export_test::read_tree(holder);
   const auto inside = export_test::run_export(context.inspector, inner, holder, true);
   EXPORT_CHECK(inside.exit_code == 5);
   EXPORT_CHECK(inside.json().at("error").at("code") == "output_not_replaceable");
-  EXPORT_CHECK(fs::exists(inner));
-  EXPORT_CHECK(export_test::read_file(holder / "export.json") == "{}");
+  EXPORT_CHECK(export_test::read_tree(holder) == holder_before);
 
   // Nor a regular file.
   const auto file_target = temp.path() / "file-target";
@@ -427,6 +427,64 @@ void test_output_rules(const Context& context) {
   EXPORT_CHECK(export_test::run_export(context.inspector, package, file_target, true)
                    .exit_code == 5);
   EXPORT_CHECK(export_test::read_file(file_target) == "file");
+  EXPORT_CHECK(!export_test::has_export_leftovers(temp.path()));
+}
+
+// --overwrite replaces only a directory this exporter wrote; anything else
+// that merely holds a file named export.json is refused and left untouched.
+void test_overwrite_guard(const Context& context) {
+  TempDir temp{"overwrite-guard"};
+  const auto fixture = export_test::make_svpi_fixture();
+  const auto package = write_svpi(temp.path(), fixture.entries);
+
+  struct Lookalike {
+    std::string name;
+    std::string summary;
+    bool with_layers;
+  };
+  const std::vector<Lookalike> lookalikes{
+      {"unrelated", R"({"name":"settings","version":1})", true},
+      {"not-json", "export.json is not JSON", true},
+      {"array", "[\"svp-package-export\",1]", true},
+      {"other-format",
+       R"({"export_format":"other-export","export_format_version":1})", true},
+      {"future-version",
+       R"({"export_format":"svp-package-export","export_format_version":2})",
+       true},
+      {"string-version",
+       R"({"export_format":"svp-package-export","export_format_version":"1"})",
+       true},
+      {"no-layers",
+       R"({"export_format":"svp-package-export","export_format_version":1})",
+       false},
+  };
+  for (const auto& lookalike : lookalikes) {
+    const auto directory = temp.path() / lookalike.name;
+    export_test::write_file(directory / "export.json", lookalike.summary);
+    export_test::write_file(directory / "notes.txt", "keep me");
+    if (lookalike.with_layers) {
+      export_test::write_file(directory / "layers" / "data.bin", "keep me too");
+    }
+    const auto before = export_test::read_tree(directory);
+    const auto result =
+        export_test::run_export(context.inspector, package, directory, true);
+    if (result.exit_code != 5) {
+      std::cerr << lookalike.name << ": " << result.stdout_text << "\n";
+    }
+    EXPORT_CHECK(result.exit_code == 5);
+    EXPORT_CHECK(result.json().at("error").at("code") == "output_not_replaceable");
+    EXPORT_CHECK(export_test::read_tree(directory) == before);
+    EXPORT_CHECK(!export_test::has_export_leftovers(temp.path()));
+  }
+
+  // A real previous export, with a file added since, is replaced whole.
+  const auto previous = temp.path() / "previous";
+  expect_exported(export_test::run_export(context.inspector, package, previous));
+  const auto exported = export_test::read_tree(previous);
+  export_test::write_file(previous / "stale.txt", "stale");
+  expect_exported(
+      export_test::run_export(context.inspector, package, previous, true));
+  EXPORT_CHECK(export_test::read_tree(previous) == exported);
   EXPORT_CHECK(!export_test::has_export_leftovers(temp.path()));
 }
 
@@ -584,6 +642,7 @@ int main(int argc, char** argv) {
       {"unsupported-version", test_unsupported_version},
       {"path-traversal", test_path_traversal},
       {"output-rules", test_output_rules},
+      {"overwrite-guard", test_overwrite_guard},
       {"malformed-content", test_malformed_content},
       {"unreadable-input", test_unreadable_input},
       {"schema-conformance", test_schema_conformance},

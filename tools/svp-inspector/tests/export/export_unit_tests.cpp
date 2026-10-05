@@ -8,10 +8,12 @@
 #include "export/export_plan.hpp"
 #include "export/jsonl_line_reader.hpp"
 #include "export/jsonl_record.hpp"
+#include "export/previous_export.hpp"
 #include "export/reference_rules.hpp"
 #include "export/version_policy.hpp"
 
 #include <climits>
+#include <filesystem>
 #include <functional>
 #include <iostream>
 #include <set>
@@ -175,6 +177,53 @@ void test_representations_and_rules() {
                    .size() == 2);
 }
 
+void test_previous_export_guard() {
+  namespace fs = std::filesystem;
+  export_test::TempDir temp{"previous-export"};
+  const std::string summary =
+      R"({"export_format":"svp-package-export","export_format_version":1})";
+  const auto make = [&](const std::string& name, const std::string& text) {
+    const auto directory = temp.path() / name;
+    export_test::write_file(directory / "export.json", text);
+    fs::create_directories(directory / "layers");
+    return directory;
+  };
+
+  const auto valid = make("valid", summary);
+  EXPORT_CHECK(package_export::is_previous_export(valid));
+  // The size bound is inclusive and checked before anything is read.
+  EXPORT_CHECK(package_export::is_previous_export(valid, summary.size()));
+  EXPORT_CHECK(!package_export::is_previous_export(valid, summary.size() - 1));
+
+  EXPORT_CHECK(!package_export::is_previous_export(temp.path() / "missing"));
+  EXPORT_CHECK(!package_export::is_previous_export(make("empty", "")));
+  EXPORT_CHECK(!package_export::is_previous_export(
+      make("float-version",
+           R"({"export_format":"svp-package-export","export_format_version":1.5})")));
+  EXPORT_CHECK(!package_export::is_previous_export(
+      make("no-format", R"({"export_format_version":1})")));
+
+  // Links never count: not for export.json, and not for layers/.
+  const auto linked_summary = temp.path() / "linked-summary";
+  fs::create_directories(linked_summary / "layers");
+  fs::create_symlink(valid / "export.json", linked_summary / "export.json");
+  EXPORT_CHECK(!package_export::is_previous_export(linked_summary));
+  const auto linked_layers = temp.path() / "linked-layers";
+  export_test::write_file(linked_layers / "export.json", summary);
+  fs::create_directory_symlink(valid / "layers", linked_layers / "layers");
+  EXPORT_CHECK(!package_export::is_previous_export(linked_layers));
+
+  // layers must be a directory; export.json must be a file.
+  const auto file_layers = temp.path() / "file-layers";
+  export_test::write_file(file_layers / "export.json", summary);
+  export_test::write_file(file_layers / "layers", "not a directory");
+  EXPORT_CHECK(!package_export::is_previous_export(file_layers));
+  const auto directory_summary = temp.path() / "directory-summary";
+  fs::create_directories(directory_summary / "export.json");
+  fs::create_directories(directory_summary / "layers");
+  EXPORT_CHECK(!package_export::is_previous_export(directory_summary));
+}
+
 void test_exit_codes() {
   using package_export::exit_code_for;
   EXPORT_CHECK(exit_code_for(ExportErrorCode::input_unrecognized) == 2);
@@ -194,6 +243,7 @@ int main() {
       {"record-splice", test_record_splice},
       {"version-policy", test_version_policy},
       {"representations-and-rules", test_representations_and_rules},
+      {"previous-export-guard", test_previous_export_guard},
       {"exit-codes", test_exit_codes},
   };
   int failures = 0;

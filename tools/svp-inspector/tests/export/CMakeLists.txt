@@ -43,6 +43,7 @@ foreach(export_case IN ITEMS
     unsupported-version
     path-traversal
     output-rules
+    overwrite-guard
     malformed-content
     unreadable-input
     schema-conformance)
