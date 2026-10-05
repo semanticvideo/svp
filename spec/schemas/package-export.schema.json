@@ -1,0 +1,427 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp.dev/schemas/package-export.schema.json",
+  "title": "SVP Package Export Summary (export.json)",
+  "description": "Summary written by `svp-inspector export` at the root of an export directory. See docs/svpi/Package_Export_v1.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "export_format",
+    "export_format_version",
+    "exporter",
+    "package",
+    "validation",
+    "manifest",
+    "media_binding",
+    "sections",
+    "resolution_sources",
+    "layers"
+  ],
+  "properties": {
+    "export_format": {
+      "const": "svp-package-export"
+    },
+    "export_format_version": {
+      "const": 1
+    },
+    "exporter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "tool_version"],
+      "properties": {
+        "tool": {
+          "const": "svp-inspector"
+        },
+        "tool_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "mimetype", "format_versions", "embedded_transport"],
+      "properties": {
+        "kind": {
+          "enum": ["svp", "svpi", "embedded_svpi"]
+        },
+        "mimetype": {
+          "type": ["string", "null"]
+        },
+        "format_versions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "svp_version",
+            "svpi_version",
+            "embedded_transport_profile_version"
+          ],
+          "properties": {
+            "svp_version": {
+              "type": ["string", "null"]
+            },
+            "svpi_version": {
+              "type": ["string", "null"]
+            },
+            "embedded_transport_profile_version": {
+              "type": ["integer", "null"],
+              "minimum": 0
+            }
+          }
+        },
+        "embedded_transport": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "container_kind",
+                "major_brand",
+                "profile_version",
+                "box_offset",
+                "box_size",
+                "payload_offset",
+                "payload_size"
+              ],
+              "properties": {
+                "container_kind": {
+                  "type": "string"
+                },
+                "major_brand": {
+                  "type": "string"
+                },
+                "profile_version": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "box_offset": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "box_size": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "payload_offset": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "payload_size": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["validator", "status", "core_status", "errors", "warnings", "infos"],
+      "properties": {
+        "validator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          }
+        },
+        "status": {
+          "enum": ["valid", "valid_with_warnings"]
+        },
+        "core_status": {
+          "enum": ["valid", "valid_with_warnings"]
+        },
+        "errors": {
+          "$ref": "#/$defs/code_counts"
+        },
+        "warnings": {
+          "$ref": "#/$defs/code_counts"
+        },
+        "infos": {
+          "$ref": "#/$defs/code_counts"
+        }
+      }
+    },
+    "manifest": {
+      "description": "The package manifest.json, as declared.",
+      "type": "object"
+    },
+    "media_binding": {
+      "description": "The package media_binding.json, as declared; null when the package has none.",
+      "type": ["object", "null"]
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "declared_state",
+          "declaration",
+          "declared_required",
+          "layer_count"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "declared_state": {
+            "type": ["string", "null"]
+          },
+          "declaration": {
+            "description": "manifest.sections.<name> as declared, or null."
+          },
+          "declared_required": {
+            "description": "manifest.required_sections.<name> as declared, or null."
+          },
+          "layer_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "resolution_sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frames", "evidence_crops"],
+      "properties": {
+        "frames": {
+          "$ref": "#/$defs/resolution_source"
+        },
+        "evidence_crops": {
+          "$ref": "#/$defs/resolution_source"
+        }
+      }
+    },
+    "layers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/layer"
+      }
+    }
+  },
+  "$defs": {
+    "code_counts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "count"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "resolution_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry", "present", "record_count"],
+      "properties": {
+        "entry": {
+          "type": "string"
+        },
+        "present": {
+          "type": "boolean"
+        },
+        "record_count": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      }
+    },
+    "layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry",
+        "section",
+        "representation",
+        "files",
+        "record_count",
+        "state",
+        "source_size_bytes",
+        "resolutions"
+      ],
+      "properties": {
+        "entry": {
+          "type": "string",
+          "minLength": 1
+        },
+        "section": {
+          "type": ["string", "null"]
+        },
+        "representation": {
+          "enum": ["jsonl", "json", "block_stream", "file"]
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "role", "size_bytes"],
+            "properties": {
+              "path": {
+                "type": "string",
+                "pattern": "^layers/"
+              },
+              "role": {
+                "enum": ["records", "document", "bytes", "block_table", "decoded_payloads"]
+              },
+              "size_bytes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "record_count": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "state": {
+          "enum": ["present", "empty"]
+        },
+        "source_size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resolutions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["member", "kind"],
+            "properties": {
+              "member": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": ["frame", "frame_list", "crop", "crop_list", "entry_path", "block"]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "export_format": "svp-package-export",
+      "export_format_version": 1,
+      "exporter": {
+        "tool": "svp-inspector",
+        "tool_version": "1.0.0-rc2"
+      },
+      "package": {
+        "kind": "svpi",
+        "mimetype": "application/vnd.svp.interlace+zip",
+        "format_versions": {
+          "svp_version": "1.0-rc.2",
+          "svpi_version": "0.1",
+          "embedded_transport_profile_version": null
+        },
+        "embedded_transport": null
+      },
+      "validation": {
+        "validator": {
+          "name": "svp-validator",
+          "version": "1.0.0-rc2"
+        },
+        "status": "valid",
+        "core_status": "valid",
+        "errors": [],
+        "warnings": [],
+        "infos": []
+      },
+      "manifest": {
+        "format": "svpi",
+        "svpi_version": "0.1",
+        "svp_version": "1.0-rc.2",
+        "sections": {
+          "text": {
+            "state": "generated"
+          }
+        }
+      },
+      "media_binding": {
+        "schema": "svpi.media_binding.v0.1",
+        "primary_binding_id": "mb_primary_000001",
+        "bindings": []
+      },
+      "sections": [
+        {
+          "name": "text",
+          "declared_state": "generated",
+          "declaration": {
+            "state": "generated"
+          },
+          "declared_required": null,
+          "layer_count": 1
+        }
+      ],
+      "resolution_sources": {
+        "frames": {
+          "entry": "timeline/frames.jsonl",
+          "present": false,
+          "record_count": null
+        },
+        "evidence_crops": {
+          "entry": "text/evidence_crops.jsonl",
+          "present": false,
+          "record_count": null
+        }
+      },
+      "layers": [
+        {
+          "entry": "text/text_observations.jsonl",
+          "section": "text",
+          "representation": "jsonl",
+          "files": [
+            {
+              "path": "layers/text/text_observations.jsonl",
+              "role": "records",
+              "size_bytes": 512
+            }
+          ],
+          "record_count": 2,
+          "state": "present",
+          "source_size_bytes": 300,
+          "resolutions": [
+            {
+              "member": "source_frame_ids",
+              "kind": "frame_list"
+            },
+            {
+              "member": "evidence_crop_refs",
+              "kind": "crop_list"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

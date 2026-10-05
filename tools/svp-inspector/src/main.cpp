@@ -1,6 +1,7 @@
 #include "dump_command.hpp"
 #include "embedded_input_controller.hpp"
 #include "embedded_transport_output.hpp"
+#include "export/export_command.hpp"
 #include "inspect_output.hpp"
 #include "query_output.hpp"
 
@@ -152,7 +153,28 @@ int main(int argc, char** argv) {
   query->add_option("--target", query_target,
                     "Audio stream target_id for loudness or spectrum mode");
 
+  package_export::ExportOptions export_options;
+  auto* export_command = app.add_subcommand(
+      "export",
+      "Validate a package and export every layer to a directory "
+      "(docs/svpi/Package_Export_v1.md)");
+  export_command
+      ->add_option("package", export_options.package,
+                   "Path to an SVP, SVPI, or Embedded SVPI Transport")
+      ->required();
+  export_command
+      ->add_option("--out", export_options.out,
+                   "Directory to create; must not exist or must be empty")
+      ->required();
+  export_command->add_flag(
+      "--overwrite", export_options.overwrite,
+      "Replace an existing --out that holds a previous export");
+
   CLI11_PARSE(app, argc, argv);
+
+  if (*export_command) {
+    return package_export::run_export(export_options, std::cout);
+  }
 
   if (*inspect) {
     const auto input = embedded_input_controller::preflight(package_path);

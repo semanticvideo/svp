@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://svp.dev/schemas/package-export-block.schema.json",
+  "title": "SVP Package Export Block Table Record",
+  "description": "One line of `<block stream entry>.blocks.jsonl`: one verified SVPB block and where its decompressed payload sits in `<block stream entry>.decoded.bin` (docs/svpi/Package_Export_v1.md Section 6). Header fields are copied as declared (SVP RC2 Section 14.5).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "block_ordinal",
+    "block_offset",
+    "block_length",
+    "version",
+    "header_size",
+    "block_type",
+    "block_type_name",
+    "compression",
+    "endian",
+    "flags",
+    "uncompressed_size",
+    "compressed_size",
+    "extent_0",
+    "extent_1",
+    "extent_2",
+    "dtype",
+    "dtype_name",
+    "start_frame",
+    "frame_count",
+    "start_us",
+    "end_us",
+    "payload_blake3",
+    "header_blake3",
+    "decoded_file",
+    "decoded_offset",
+    "decoded_length"
+  ],
+  "properties": {
+    "block_ordinal": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "block_offset": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "block_length": {
+      "type": "integer",
+      "minimum": 160
+    },
+    "version": {
+      "const": 1
+    },
+    "header_size": {
+      "const": 160
+    },
+    "block_type": {
+      "enum": [1, 2, 3]
+    },
+    "block_type_name": {
+      "enum": ["depth", "mask", "embedding"]
+    },
+    "compression": {
+      "const": 1
+    },
+    "endian": {
+      "const": 1
+    },
+    "flags": {
+      "const": 0
+    },
+    "uncompressed_size": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "compressed_size": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "extent_0": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "extent_1": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "extent_2": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "dtype": {
+      "enum": [1, 2, 3, 4, 5, 6]
+    },
+    "dtype_name": {
+      "enum": ["uint8", "uint16", "float16", "float32", "bitpacked_lsb_first", "svp-rle-v1"]
+    },
+    "start_frame": {
+      "description": "First frame index, or 18446744073709551615 (UINT64_MAX) for non-frame blocks.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "frame_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "start_us": {
+      "description": "Inclusive start time in microseconds, or -1 when not time-bound.",
+      "type": "integer",
+      "minimum": -1
+    },
+    "end_us": {
+      "description": "Exclusive end time in microseconds, or -1 when not time-bound.",
+      "type": "integer",
+      "minimum": -1
+    },
+    "payload_blake3": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "header_blake3": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "decoded_file": {
+      "type": "string",
+      "pattern": "^layers/.*\\.decoded\\.bin$"
+    },
+    "decoded_offset": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "decoded_length": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "examples": [
+    {
+      "block_ordinal": 0,
+      "block_offset": 0,
+      "block_length": 386815,
+      "version": 1,
+      "header_size": 160,
+      "block_type": 1,
+      "block_type_name": "depth",
+      "compression": 1,
+      "endian": 1,
+      "flags": 0,
+      "uncompressed_size": 460800,
+      "compressed_size": 386655,
+      "extent_0": 640,
+      "extent_1": 360,
+      "extent_2": 1,
+      "dtype": 2,
+      "dtype_name": "uint16",
+      "start_frame": 0,
+      "frame_count": 1,
+      "start_us": 62022804,
+      "end_us": 62022805,
+      "payload_blake3": "cc13b6972021272fcd22d7bb9a4166856297e67db9ba3a9ef2efe7e503006a0d",
+      "header_blake3": "34078afc5c47d1b901a38a90937983911909f3bf3784613e7daf68cad815454d",
+      "decoded_file": "layers/spatial/depth.blocks.svpdz.decoded.bin",
+      "decoded_offset": 0,
+      "decoded_length": 460800
+    }
+  ]
+}

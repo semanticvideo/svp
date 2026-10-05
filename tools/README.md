@@ -51,6 +51,21 @@ svp-inspector dump <package.svp> --section manifest
 svp-inspector dump <package.svp> --section index_manifest
 ```
 
+### Export every layer
+
+```
+svp-inspector export <package> --out <dir> [--overwrite]
+```
+
+Validates an `.svp`, `.svpi`, or Embedded SVPI Transport with the validator
+library, then writes `export.json` plus every package layer under `layers/`:
+JSONL records as declared (with resolved references appended under
+`svp_export`), JSON documents and files byte for byte, and SVPB block streams
+as a block table plus decoded little-endian payloads. Output is
+deterministic and written atomically; an invalid or unsupported package writes
+nothing. The format, exit codes, and schemas are in
+[`docs/svpi/Package_Export_v1.md`](../docs/svpi/Package_Export_v1.md).
+
 ### Query modes
 
 ```

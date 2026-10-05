@@ -742,6 +742,15 @@ Query speakers:
 svp-inspector query build/local-intro/intro.svp --mode speakers
 ```
 
+Export every layer of a validated package to a plain directory of JSON, JSONL,
+decoded binary payloads, and evidence files that any tool can read (format:
+[`docs/svpi/Package_Export_v1.md`](docs/svpi/Package_Export_v1.md)):
+
+```bash
+svp-inspector export build/local-intro/intro.svp --out build/local-intro/export
+svp-inspector export /path/to/video-with-semantics.mov --out ./export --overwrite
+```
+
 ## Model Cache Notes
 
 Full media builds depend on model bundles in the local model cache. Current

@@ -12,6 +12,7 @@ context.
 | --- | --- |
 | `SVPI_v0.1_Draft_Specification.md` | Current draft specification for `.svpi` layout, binding, validation, provenance, and media hygiene. |
 | `Embedded_SVPI_Transport_ISO_BMFF_v1.md` | Production Embedded SVPI Transport profile for one canonical SVPI in a top-level ISO BMFF `uuid` box. |
+| `Package_Export_v1.md` | Directory export of every layer of an SVP, SVPI, or Embedded SVPI Transport (`svp-inspector export`) for downstream tools. |
 | `SVPI_SPEC_AGENT_BRIEF.md` | Original drafting brief and design prompt for the SVPI spec. |
 
 ## Core idea
