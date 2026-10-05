@@ -75,4 +75,6 @@ if(BUILD_TESTING)
   target_link_libraries(svp-inspector-embedded-input-tests PRIVATE svp::package)
   add_test(NAME svp-inspector-embedded-input-tests
            COMMAND svp-inspector-embedded-input-tests)
+
+  add_subdirectory(tests/export)
 endif()
