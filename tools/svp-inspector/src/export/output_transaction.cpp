@@ -108,18 +108,18 @@ void StagedFile::write(std::string_view bytes) {
     flush();
   }
   if (bytes.size() >= kWriteBufferBytes) {
-    buffer_.assign(bytes);
-    flush();
+    // Large chunks (decoded block payloads, mirrored media) go straight from
+    // the caller's memory, so the buffer never grows past kWriteBufferBytes.
+    write_all(bytes.data(), bytes.size());
     return;
   }
   buffer_.append(bytes);
 }
 
-void StagedFile::flush() {
+void StagedFile::write_all(const char* data, std::size_t size) {
   std::size_t written = 0;
-  while (written < buffer_.size()) {
-    const auto count = ::write(descriptor_, buffer_.data() + written,
-                               buffer_.size() - written);
+  while (written < size) {
+    const auto count = ::write(descriptor_, data + written, size - written);
     if (count < 0) {
       if (errno == EINTR) {
         continue;
@@ -128,6 +128,10 @@ void StagedFile::flush() {
     }
     written += static_cast<std::size_t>(count);
   }
+}
+
+void StagedFile::flush() {
+  write_all(buffer_.data(), buffer_.size());
   buffer_.clear();
 }
 

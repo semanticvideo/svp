@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <set>
@@ -31,6 +32,8 @@ class StagedFile {
 
  private:
   void flush();
+  // Writes `size` bytes from `data` with write(2), retrying on EINTR.
+  void write_all(const char* data, std::size_t size);
 
   int descriptor_ = -1;
   std::string relative_path_;
