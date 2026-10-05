@@ -18,6 +18,7 @@ add_library(svp-inspector-export STATIC
   src/export/output_transaction.cpp
   src/export/package_kind.cpp
   src/export/package_reader.cpp
+  src/export/previous_export.cpp
   src/export/reference_resolver.cpp
   src/export/reference_rules.cpp
   src/export/validation_gate.cpp

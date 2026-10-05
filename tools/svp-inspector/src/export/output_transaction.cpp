@@ -2,6 +2,7 @@
 
 #include "export_error.hpp"
 #include "export_plan.hpp"
+#include "previous_export.hpp"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -69,13 +70,6 @@ void apply_default_directory_mode(const std::filesystem::path& directory) {
 bool is_empty_directory(const std::filesystem::path& path) {
   std::error_code error;
   return std::filesystem::is_empty(path, error) && !error;
-}
-
-bool holds_previous_export(const std::filesystem::path& directory) {
-  std::error_code error;
-  const auto summary = std::filesystem::symlink_status(
-      directory / std::string{kSummaryFileName}, error);
-  return !error && std::filesystem::is_regular_file(summary);
 }
 
 void remove_tree_quietly(const std::filesystem::path& path) {
@@ -168,10 +162,11 @@ void OutputTransaction::check_target(const std::filesystem::path& out,
                         "replace a previous export.",
                         details);
     }
-    if (!holds_previous_export(target)) {
+    if (!is_previous_export(target)) {
       throw ExportError(ExportErrorCode::output_not_replaceable,
-                        "--overwrite only replaces a previous export (a "
-                        "directory holding export.json).",
+                        "--overwrite only replaces a previous export: a "
+                        "directory with a layers/ subdirectory and an "
+                        "export.json written by svp-inspector export.",
                         details);
     }
     return;

@@ -29,7 +29,7 @@ svp-inspector export <package> --out <dir> [--overwrite]
 | --- | --- |
 | `<package>` | An `.svp` package, an `.svpi` sidecar, or an ISO BMFF file (`.mp4`, `.mov`, `.m4v`, `.m4a`) carrying an Embedded SVPI Transport. |
 | `--out <dir>` | Directory that receives the export. It must not exist, or must be an empty directory. |
-| `--overwrite` | Replace an existing `--out` that holds a previous export (a directory whose top level contains `export.json`). Any other non-empty directory, any non-directory, a symbolic link, and any directory that contains the input package are never replaced. |
+| `--overwrite` | Replace an existing `--out` that holds a previous export (Section 1.5). Any other non-empty directory, any non-directory, a symbolic link, and any directory that contains the input package are never replaced. |
 
 The command prints exactly one JSON document on stdout, for success and for
 every failure that happens after argument parsing (Section 9). It prints nothing
@@ -100,6 +100,24 @@ and the output checks have passed. On any failure the staging directory is
 removed and `--out` is left exactly as it was. With `--overwrite`, the previous
 export is moved aside, the new export is renamed into place, and only then is
 the previous export removed.
+
+### 1.5 What `--overwrite` replaces
+
+`--overwrite` deletes the old `--out` once the new export is in place, so it
+only accepts a directory this exporter wrote. A non-empty `--out` is a previous
+export only when all of these hold (`previous_export.cpp`):
+
+1. `export.json` at its top level is a regular file, not a symbolic link, of
+   at most `kMaxPreviousSummaryBytes` (64 MiB, the export's bound for one JSON
+   document in memory; a larger file is not read and so never qualifies).
+2. `export.json` parses as a JSON object.
+3. Its `export_format` is `"svp-package-export"` and its
+   `export_format_version` is an integer this build supports (`1`).
+4. A `layers/` subdirectory exists and is a real directory, not a link.
+
+Any other directory is refused with `output_not_replaceable` (exit 5) and left
+exactly as it was, including one that merely contains a file named
+`export.json`. An empty directory needs no `--overwrite`.
 
 ## 2. Export directory layout
 
