@@ -47,6 +47,23 @@ svp::audio::AudioStagePlan plan_audio_stage(const BuildPipelineContext& context)
   return plan_audio_stage(context.options, context.plan, context.model_runtime_available);
 }
 
+// Diarization is required (neither --allow-fallback-diarization nor
+// --force-single-speaker) but cannot run: the diarization stage fails and the
+// transcribe stage stops the build.
+AudioStageExit stop_without_diarization(BuildPipelineContext& context, std::string reason) {
+  emit_stage_failed(context, ProgressStageId::diarization, reason);
+  return AudioStageExit{.exit_code = kBuildFailedExitCode, .reason = std::move(reason)};
+}
+
+// The first line of each blocker, for a one-line reason.
+std::string blocker_summary(const std::vector<std::string>& blockers) {
+  std::string summary;
+  for (const std::string& blocker : blockers) {
+    summary += (summary.empty() ? "" : "; ") + blocker.substr(0, blocker.find('\n'));
+  }
+  return summary;
+}
+
 }  // namespace
 
 bool audio_uses_microphone_path(const BuildPipelineOptions& options,
@@ -130,9 +147,9 @@ AudioExtractStageState run_audio_extract_stage(BuildPipelineContext& context) {
   return state;
 }
 
-std::optional<int> run_audio_transcribe_stage(BuildPipelineContext& context,
-                                              const AudioExtractStageState& extracted,
-                                              const engine::AudioWorkDispatch* dispatch) {
+std::optional<AudioStageExit> run_audio_transcribe_stage(
+    BuildPipelineContext& context, const AudioExtractStageState& extracted,
+    const engine::AudioWorkDispatch* dispatch) {
   const svp::audio::AudioStagePlan audio_plan = plan_audio_stage(context);
   nlohmann::json audio_json = extracted.audio_json;
 
@@ -284,6 +301,7 @@ std::optional<int> run_audio_transcribe_stage(BuildPipelineContext& context,
           diar_model_available,
           diar_model_verified,
           media_duration_us);
+  emit_stage_started(context, ProgressStageId::diarization);
   // Check sherpa-onnx availability AFTER ASR has loaded its models.
   // Loading sherpa's dylib (which bundles its own onnxruntime) before
   // ASR model loading corrupts the ONNX schema registry.
@@ -301,7 +319,8 @@ std::optional<int> run_audio_transcribe_stage(BuildPipelineContext& context,
               << "    --allow-fallback-diarization\n\n"
               << "  Or to skip diarization intentionally:\n"
               << "    --force-single-speaker\n\n";
-    return 1;
+    return stop_without_diarization(
+        context, "diarization cannot run: the sherpa-onnx C API library was not found");
   }
   if (!context.options.force_single_speaker &&
       context.options.allow_fallback_diarization &&
@@ -314,7 +333,6 @@ std::optional<int> run_audio_transcribe_stage(BuildPipelineContext& context,
                  "Speaker data is fabricated fallback, not real.");
   }
 
-  emit_stage_started(context, ProgressStageId::diarization);
   diar_boundary = svp::audio::execute_diarization_boundary(
       std::move(diar_boundary), context.staging_dir, model_cache_root,
       context.thread_plan.sherpa,
@@ -330,7 +348,6 @@ std::optional<int> run_audio_transcribe_stage(BuildPipelineContext& context,
         }
       },
       engine::single_diarization_window_dispatch(dispatch));
-  emit_stage_completed(context, ProgressStageId::diarization);
 
   if (context.stage_plan.run_audio &&
       diar_boundary.diarization_status == svp::audio::DiarizationStatus::unavailable &&
@@ -347,8 +364,11 @@ std::optional<int> run_audio_transcribe_stage(BuildPipelineContext& context,
               << "    Ensure analysis audio was extracted successfully.\n\n"
               << "  To proceed WITHOUT diarization (NOT RECOMMENDED):\n"
               << "    --allow-fallback-diarization\n\n";
-    return 1;
+    const std::string causes = blocker_summary(diar_boundary.blockers);
+    return stop_without_diarization(
+        context, "diarization is unavailable" + (causes.empty() ? "" : ": " + causes));
   }
+  emit_stage_completed(context, ProgressStageId::diarization);
 
   // Serialize diarization boundary before moving segments out.
   audio_json["diarization_execution_boundary"] =

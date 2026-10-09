@@ -717,11 +717,16 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
       started.journal.set_build_session_status(build_session_id,
                                                svp::exec::BuildSessionStatus::failed);
       started.journal.close();
-      if (const std::optional<int> exit_code = stage_exits.exit_code()) {
-        return with_plan({.exit_code = *exit_code});
-      }
       const std::string message =
           outcome.failure ? outcome.failure->message : std::string("build failed");
+      if (const std::optional<int> exit_code = stage_exits.exit_code()) {
+        // A stage that asked for an exit status already printed its
+        // diagnosis; the message (task and reason) is for callers such as
+        // interlace create, which report the failure themselves.
+        return with_plan({.exit_code = *exit_code,
+                          .failure = BuildPipelineFailure::processing,
+                          .error_message = message});
+      }
       svp::core::trace_memory_event("builder.run.exception", {{"error", message}});
       std::cerr << "svp-builder: " << message << "\n";
       return with_plan({.exit_code = kBuildFailedExitCode,

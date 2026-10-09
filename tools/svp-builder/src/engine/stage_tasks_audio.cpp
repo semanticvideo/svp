@@ -22,9 +22,9 @@ StageStates run_audio_transcribe_task(const StageTaskEnvironment& environment) {
   const AudioExtractStageState extracted = audio_extract_stage_state_from_json(
       environment.results.json_state(stage_task_id(StageTaskKind::audio_extract),
                                      kAudioExtractState));
-  if (const std::optional<int> exit_code =
+  if (const std::optional<AudioStageExit> exit =
           run_audio_transcribe_stage(task.context(), extracted, environment.audio_dispatch)) {
-    throw StageExitError(*exit_code);
+    throw StageExitError(exit->exit_code, exit->reason);
   }
   StageStates states;
   states[state_name::kFoundation] = json_state_bytes(task.output());

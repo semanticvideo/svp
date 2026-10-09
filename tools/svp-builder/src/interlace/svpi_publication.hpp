@@ -1,8 +1,8 @@
 #pragma once
 
 // Writing an SVPI sidecar from a package build's staging directory: the
-// interlace create publication steps, shared by the SVPI write task and the
-// interlace create fallback paths.
+// interlace create publication steps, shared by the SVPI write task and
+// interlace create's core-only diagnostic.
 
 #include "svp/builder/build_progress.hpp"
 #include "svp/builder/interlace.hpp"

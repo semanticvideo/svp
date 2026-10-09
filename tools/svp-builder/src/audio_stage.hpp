@@ -14,6 +14,7 @@
 #include <nlohmann/json.hpp>
 
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace svp::builder {
@@ -46,11 +47,19 @@ struct AudioExtractStageState {
 [[nodiscard]] AudioExtractStageState run_audio_extract_stage(
     BuildPipelineContext& context);
 
-// Sets context.output["audio_foundation"]. Returns the lane's exit status when
-// it must stop the build (diarization required but unavailable).
+// Why the transcribe stage stopped the build: the exit status it asks for and
+// a one-line reason for the build's error message.
+struct AudioStageExit {
+  int exit_code = kBuildFailedExitCode;
+  std::string reason;
+};
+
+// Sets context.output["audio_foundation"]. Returns the lane's exit when it
+// must stop the build (diarization required but unavailable); the
+// diarization stage then reports failed.
 // `dispatch` (--distributed only, else null) runs ASR chunks and
 // diarization windows as tasks (engine/audio_work_dispatch.hpp).
-[[nodiscard]] std::optional<int> run_audio_transcribe_stage(
+[[nodiscard]] std::optional<AudioStageExit> run_audio_transcribe_stage(
     BuildPipelineContext& context, const AudioExtractStageState& extracted,
     const engine::AudioWorkDispatch* dispatch = nullptr);
 

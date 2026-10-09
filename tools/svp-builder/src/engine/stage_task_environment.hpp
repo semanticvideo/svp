@@ -37,10 +37,13 @@ class TrackingWindowProgress;
 
 // A stage that ends the build with a specific exit status rather than an
 // error (the audio lane when diarization is required but unavailable).
+// `reason` says why, for the build's error message.
 class StageExitError : public std::runtime_error {
  public:
-  explicit StageExitError(int exit_code)
-      : std::runtime_error("stage requested exit status " + std::to_string(exit_code)),
+  StageExitError(int exit_code, const std::string& reason)
+      : std::runtime_error(reason.empty() ? "stage requested exit status " +
+                                                std::to_string(exit_code)
+                                          : reason),
         exit_code_(exit_code) {}
   [[nodiscard]] int exit_code() const noexcept { return exit_code_; }
 

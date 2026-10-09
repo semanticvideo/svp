@@ -1,6 +1,7 @@
 #include "svp/builder/interlace.hpp"
 #include "svp/builder/build_progress.hpp"
 #include "model_cache_test_fixture.hpp"
+#include "pipeline_input_fixture.hpp"
 
 #include "svp/package/media_binding.hpp"
 #include "svp/package/media_binding_factory.hpp"
@@ -22,6 +23,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -363,8 +365,11 @@ void test_interlace_create_produces_valid_svpi() {
   std::cout << "  test_interlace_create_produces_valid_svpi passed\n";
 }
 
-void test_interlace_create_falls_back_on_pipeline_failure() {
-  auto root = make_test_dir("svp-phase2-create-fallback");
+// A package build that fails publishes nothing: a sidecar of what staging
+// held would declare the sections the failed stages never wrote as not
+// generated and pass validation (RC2 section 20: the builder fails instead).
+void test_interlace_create_publishes_nothing_on_pipeline_failure() {
+  auto root = make_test_dir("svp-phase2-create-failure");
   auto source = root / "test.mov";
   create_mock_source_media(source, 1024);
   auto svpi_path = root / "output.svpi";
@@ -379,21 +384,13 @@ void test_interlace_create_falls_back_on_pipeline_failure() {
                              root / "model-cache").string();
 
   auto result = svp::builder::interlace_create(opts);
-  CHECK(result.success);
-  CHECK(std::filesystem::exists(svpi_path));
-
-  auto manifest_entry = svp::package::read_package_entry(svpi_path, "manifest.json");
-  CHECK(manifest_entry.has_value());
-  auto manifest_json = nlohmann::json::parse(manifest_entry.value(), nullptr, false);
-  CHECK(manifest_json.is_object());
-  CHECK(manifest_json.contains("sections"));
-  for (const auto& key : {"transcript", "timeline", "text", "colors",
-                          "entities", "spatial", "relationships", "embeddings"}) {
-    CHECK(manifest_json["sections"][key]["state"] == "blocked");
-  }
+  CHECK(!result.success);
+  CHECK(!result.error_message.empty());
+  CHECK(result.pipeline_exit_code != 0);
+  CHECK(!std::filesystem::exists(svpi_path));
 
   std::filesystem::remove_all(root);
-  std::cout << "  test_interlace_create_falls_back_on_pipeline_failure passed\n";
+  std::cout << "  test_interlace_create_publishes_nothing_on_pipeline_failure passed\n";
 }
 
 void test_interlace_validate_structure_only() {
@@ -880,13 +877,18 @@ void test_extract_preserves_existing_provenance_events() {
 
 namespace {
 
+// Builds run stage tasks on several threads, so events arrive concurrently.
 class CapturingProgressSink : public svp::builder::BuildProgressSink {
  public:
   void emit(const svp::builder::ProgressEvent& event) override {
+    const std::lock_guard lock(mutex_);
     events.push_back(event);
   }
 
   std::vector<svp::builder::ProgressEvent> events;
+
+ private:
+  std::mutex mutex_;
 };
 
 bool has_event(const std::vector<svp::builder::ProgressEvent>& events,
@@ -932,6 +934,46 @@ void test_interlace_create_emits_progress_events() {
 
   std::filesystem::remove_all(root);
   std::cout << "  test_interlace_create_emits_progress_events passed\n";
+}
+
+// A stage that stops the build (here the transcribe stage: diarization is
+// required, as neither --allow-fallback-diarization nor --force-single-speaker
+// is given, and cannot run on placeholder media) fails interlace create: no
+// SVPI is written, the error says why, the diarization stage reports failed,
+// and the recovery journal is kept for --resume.
+void test_interlace_create_fails_when_a_stage_stops_the_build() {
+  const auto root = make_test_dir("svp_interlace_stage_stops_build");
+  const auto source_path = svp::builder::test::write_mock_media_file(root);
+  const auto svpi_path = root / "output.svpi";
+  auto sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::InterlaceCreateOptions opts;
+  opts.source_path = source_path.string();
+  opts.output_path = svpi_path.string();
+  opts.probe_json_path = svp::builder::test::write_minimal_probe_json(root).string();
+  opts.ffprobe_path = "/usr/bin/true";
+  opts.ffmpeg_path = "/usr/bin/true";
+  opts.compute_chunk_proof = false;
+  opts.model_cache_dir = svp::builder::test::write_valid_model_cache(
+                             root / "model-cache").string();
+  opts.progress_sink = sink;
+
+  const auto result = svp::builder::interlace_create(opts);
+  CHECK(!result.success);
+  CHECK(result.pipeline_failure == svp::builder::BuildPipelineFailure::processing);
+  CHECK(result.pipeline_exit_code == svp::builder::kBuildFailedExitCode);
+  CHECK(result.error_message.find("diarization") != std::string::npos);
+  CHECK(!std::filesystem::exists(svpi_path));
+  CHECK(std::filesystem::is_directory(root / "output.svpi-journal"));
+  CHECK(has_event(sink->events, svp::builder::ProgressEventKind::stage_failed,
+                  svp::builder::ProgressStageId::diarization));
+  CHECK(!has_event(sink->events, svp::builder::ProgressEventKind::stage_completed,
+                   svp::builder::ProgressStageId::diarization));
+  CHECK(!has_event(sink->events, svp::builder::ProgressEventKind::stage_started,
+                   svp::builder::ProgressStageId::svpi_write));
+
+  std::filesystem::remove_all(root);
+  std::cout << "  test_interlace_create_fails_when_a_stage_stops_the_build passed\n";
 }
 
 void test_interlace_validate_emits_progress_events() {
@@ -1092,8 +1134,8 @@ void test_interlace_create_core_only_no_visible_staging() {
   std::cout << "  test_interlace_create_core_only_no_visible_staging passed\n";
 }
 
-void test_interlace_create_fallback_no_visible_staging() {
-  auto root = make_test_dir("svp-staging-cleanup-ic-fallback");
+void test_interlace_create_failure_no_visible_staging() {
+  auto root = make_test_dir("svp-staging-cleanup-ic-failure");
   auto source = root / "test.mov";
   create_mock_source_media(source, 512);
   auto svpi_path = root / "output.svpi";
@@ -1109,8 +1151,8 @@ void test_interlace_create_fallback_no_visible_staging() {
                              root / "model-cache").string();
 
   auto result = svp::builder::interlace_create(opts);
-  CHECK(result.success);
-  CHECK(std::filesystem::exists(svpi_path));
+  CHECK(!result.success);
+  CHECK(!std::filesystem::exists(svpi_path));
   CHECK(!std::filesystem::exists(expected_staging));
 
   auto parent = svpi_path.parent_path();
@@ -1119,7 +1161,7 @@ void test_interlace_create_fallback_no_visible_staging() {
   }
 
   std::filesystem::remove_all(root);
-  std::cout << "  test_interlace_create_fallback_no_visible_staging passed\n";
+  std::cout << "  test_interlace_create_failure_no_visible_staging passed\n";
 }
 
 void test_interlace_create_preserves_explicit_staging() {
@@ -1210,7 +1252,7 @@ int main() {
   test_media_binding_verification_matching();
   test_media_binding_verification_wrong_file();
   test_interlace_create_produces_valid_svpi();
-  test_interlace_create_falls_back_on_pipeline_failure();
+  test_interlace_create_publishes_nothing_on_pipeline_failure();
   test_interlace_validate_structure_only();
   test_interlace_validate_with_matching_media();
   test_interlace_validate_with_wrong_media();
@@ -1227,13 +1269,14 @@ int main() {
   test_extract_preserves_existing_provenance_events();
 
   test_interlace_create_emits_progress_events();
+  test_interlace_create_fails_when_a_stage_stops_the_build();
   test_interlace_validate_emits_progress_events();
   test_interlace_extract_emits_progress_events();
   test_interlace_recombine_emits_progress_events();
 
   test_interlace_create_removes_default_staging();
   test_interlace_create_core_only_no_visible_staging();
-  test_interlace_create_fallback_no_visible_staging();
+  test_interlace_create_failure_no_visible_staging();
   test_interlace_create_preserves_explicit_staging();
   test_interlace_recombine_removes_default_staging();
   test_interlace_recombine_preserves_explicit_staging();

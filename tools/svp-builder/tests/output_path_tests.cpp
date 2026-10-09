@@ -5,6 +5,8 @@
 //    their missing parent directories created.
 // 2. A package or artifact that cannot be written must fail the command with a
 //    non-zero exit status and must never print a success line.
+// 3. A build stopped by a failing stage writes no artifact and fails the same
+//    way, and its run report does not say it succeeded.
 //
 // argv[1] is the svp-builder executable, used for the command-line checks.
 
@@ -14,6 +16,8 @@
 
 #include "model_cache_test_fixture.hpp"
 #include "pipeline_input_fixture.hpp"
+
+#include <nlohmann/json.hpp>
 
 #include <cassert>
 #include <cerrno>
@@ -373,6 +377,48 @@ void test_cli_svpi_write_failure_exits_nonzero_silently(
   std::cout << "  test_cli_svpi_write_failure_exits_nonzero_silently passed\n";
 }
 
+// `build --output-format svpi` without --allow-fallback-diarization or
+// --force-single-speaker, on media diarization cannot run on: the transcribe
+// stage stops the build.
+void test_cli_svpi_build_fails_when_a_stage_stops_it(
+    const fs::path& builder, const fs::path& root,
+    const PipelineInputs& inputs) {
+  const fs::path cwd = root / "cli-svpi-stage-stops";
+  ScopedCwd scoped(cwd);
+  const fs::path output = cwd / "clip.svpi";
+  const fs::path report_path = cwd / "report.json";
+  const auto result = run_builder(
+      builder,
+      {"build", inputs.media.string(),
+       "--output-format", "svpi",
+       "--probe-json", inputs.probe.string(),
+       "--ffprobe", "/usr/bin/true",
+       "--ffmpeg", "/usr/bin/true",
+       "--model-cache", inputs.model_cache.string(),
+       "--progress", "none",
+       "--run-report", report_path.string(),
+       "--out", output.string()},
+      root / "capture");
+  if (result.exit_code == 0 || printed_success(result) || fs::exists(output) ||
+      result.err.find("diarization") == std::string::npos) {
+    fail("a build stopped by a stage must fail, say why, and write no SVPI", result);
+  }
+  const nlohmann::json report = nlohmann::json::parse(read_file(report_path));
+  bool diarization_failed = false;
+  for (const nlohmann::json& stage : report.at("stages")) {
+    if (stage.at("stage") != "diarization") continue;
+    for (const nlohmann::json& span : stage.at("spans")) {
+      diarization_failed = diarization_failed || span.at("end") == "failed";
+    }
+  }
+  if (report.at("status") == "succeeded" || report.at("exit_code") == 0 ||
+      !diarization_failed) {
+    fail("the run report must record the failed build and stage: " + report.dump(),
+         result);
+  }
+  std::cout << "  test_cli_svpi_build_fails_when_a_stage_stops_it passed\n";
+}
+
 void test_cli_run_report_accepts_bare_filename(const fs::path& builder,
                                                const fs::path& root,
                                                const PipelineInputs& inputs) {
@@ -425,6 +471,7 @@ int main(int argc, char** argv) {
   test_cli_build_write_failure_exits_nonzero_silently(builder, root, inputs);
   test_cli_svpi_accepts_every_output_spelling(builder, root, inputs);
   test_cli_svpi_write_failure_exits_nonzero_silently(builder, root, inputs);
+  test_cli_svpi_build_fails_when_a_stage_stops_it(builder, root, inputs);
   test_cli_run_report_accepts_bare_filename(builder, root, inputs);
   test_cli_run_report_write_failure_fails_command(builder, root, inputs);
 
