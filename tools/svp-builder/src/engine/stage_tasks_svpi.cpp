@@ -17,7 +17,7 @@ constexpr const char* kSvpiResultState = "svpi_result";
 
 // The exit status the package build alone would have ended with: the SVPI
 // write falls back to core-only content when that is non-zero and staging
-// holds no semantic sections, as interlace create always has.
+// holds no semantic sections.
 int package_exit_code(const PackageSkeletonStageResult& package) {
   if (!package.package_written) {
     return kBuildFailedExitCode;

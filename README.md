@@ -500,8 +500,10 @@ it. The journal is deleted once the package (or SVPI) is written and passes
 strict validation (RC2 §20.5.1); if writing or validation fails, the builder
 says so and keeps the journal.
 
-If a build is interrupted (Ctrl-C, SIGTERM, a crash, or a power loss) or its
-output fails to publish, the journal stays:
+A build stopped by a failing stage (for example, diarization is required but
+the sherpa-onnx library is not found) writes no package or SVPI and exits
+non-zero. If a build is interrupted (Ctrl-C, SIGTERM, a crash, or a power
+loss), a stage fails, or its output fails to publish, the journal stays:
 
 - `--resume` continues the build. It first verifies that the source media
   still matches and that every journaled stage output is intact, then runs only

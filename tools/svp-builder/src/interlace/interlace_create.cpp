@@ -123,46 +123,16 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
     return result;
   }
 
-  // The build stopped before publishing. Model preflight, recovery-journal,
-  // and cancellation failures publish nothing.
-  if (pipeline_result.failure == BuildPipelineFailure::model_cache_preflight ||
-      pipeline_result.failure == BuildPipelineFailure::recovery_journal ||
-      pipeline_result.failure == BuildPipelineFailure::cancelled) {
-    result.error_message = pipeline_result.error_message;
-    return result;
-  }
-
-  // A stage failed: publish what staging holds, as before (core-only when the
-  // semantic pipeline produced nothing). The recovery journal is kept so the
-  // build can be resumed once the failure is fixed.
-  auto binding_doc = create_binding();
-  result.blake3_state = svp::package::to_string(
-      binding_doc.bindings[0].identity.blake3_state);
-
-  if (std::filesystem::exists(temp_svp_path)) {
-    std::filesystem::remove(temp_svp_path);
-  }
-  if (std::filesystem::exists(temp_svp_path.string() + ".json")) {
-    std::filesystem::remove(temp_svp_path.string() + ".json");
-  }
-
-  const nlohmann::json sections = detect_section_states(staging_dir);
-  const bool semantic_content = has_semantic_content(sections);
-  InterlaceCreateResult published;
-  if (!semantic_content) {
-    std::filesystem::remove_all(staging_dir);
-    published = write_core_only_svpi(request, binding_doc, result.blake3_state,
-                                     "blocked", kSvpiBlockedNotes, staging_dir, *sink);
-  } else {
-    published = write_svpi_from_staging(request, binding_doc, result.blake3_state,
-                                        staging_dir, sections,
-                                        svpi_provenance_notes(semantic_content), *sink);
-  }
-  published.thread_plan = result.thread_plan;
-  published.pipeline_failure = result.pipeline_failure;
-  published.pipeline_exit_code = result.pipeline_exit_code;
-  if (published.success) staging_guard.cleanup_on_success();
-  return published;
+  // The build stopped before publishing, so it publishes nothing. A sidecar
+  // of whatever staging held would declare the sections the failed stages
+  // never wrote as not generated, and would pass validation; RC2 section 20
+  // has the builder fail instead. A failed stage keeps the recovery journal,
+  // so the build can resume once the failure is fixed.
+  result.error_message = pipeline_result.error_message.empty()
+                             ? "the package build exited with status " +
+                                   std::to_string(pipeline_result.exit_code)
+                             : pipeline_result.error_message;
+  return result;
 }
 
 }  // namespace svp::builder

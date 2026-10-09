@@ -869,8 +869,7 @@ void test_complete_identity_updates_pending_blake3() {
 
   svp::builder::BatchCreateOptions create_opts;
   create_opts.source_dir = dir.string();
-  create_opts.model_cache_dir = svp::builder::test::write_valid_model_cache(
-                                    root / "model-cache").string();
+  create_opts.core_only_diagnostic = true;
   create_opts.ffprobe_path = "/usr/bin/true";
   create_opts.no_blake3 = true;
 
@@ -902,8 +901,7 @@ void test_complete_identity_refuses_mismatch() {
 
   svp::builder::BatchCreateOptions create_opts;
   create_opts.source_dir = dir.string();
-  create_opts.model_cache_dir = svp::builder::test::write_valid_model_cache(
-                                    root / "model-cache").string();
+  create_opts.core_only_diagnostic = true;
   create_opts.ffprobe_path = "/usr/bin/true";
   create_opts.no_blake3 = true;
   auto create_result = svp::builder::interlace_create_batch(create_opts);
@@ -1473,8 +1471,7 @@ void test_complete_identity_emits_progress_events() {
 
   svp::builder::BatchCreateOptions create_opts;
   create_opts.source_dir = src.string();
-  create_opts.model_cache_dir = svp::builder::test::write_valid_model_cache(
-                                    root / "model-cache").string();
+  create_opts.core_only_diagnostic = true;
   create_opts.ffprobe_path = "/usr/bin/true";
   create_opts.no_blake3 = true;
 
@@ -1595,8 +1592,7 @@ void test_complete_identity_mismatch_emits_terminal_identity_failed() {
 
   svp::builder::BatchCreateOptions create_opts;
   create_opts.source_dir = dir.string();
-  create_opts.model_cache_dir = svp::builder::test::write_valid_model_cache(
-                                    root / "model-cache").string();
+  create_opts.core_only_diagnostic = true;
   create_opts.ffprobe_path = "/usr/bin/true";
   create_opts.no_blake3 = true;
   auto create_result = svp::builder::interlace_create_batch(create_opts);
