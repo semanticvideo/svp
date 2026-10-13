@@ -77,7 +77,8 @@ Sources:
   - No semantic recognition changes.
   - No output-changing shortcuts. The one deliberate exception is per-box
     recognition reuse (below), measured against compliance results before it
-    was adopted.
+    was adopted. Readable-text fixes (below) change output on purpose: they
+    correct decoding and grouping, not speed.
 - Keep runtime memory conservative:
   - The user-approved experiment range is about 1-2 GB.
   - Around 3 GB is not acceptable.
@@ -564,3 +565,38 @@ escalation off) kept every on-screen comment it made on the baseline packages
 branch packages; it also made a few comments on the branch packages that it
 did not make on the baseline.
 
+## Readable Text
+
+Three fixes so a reading holds what the screen says, once:
+
+- **Spaces.** PP-OCR recognizers trained with `use_space_char` output the
+  space as one class past the character list (blank, the 18,708 characters of
+  `inference.yml`, then the space: 18,710 classes). The CTC decoder only knew
+  the list, so every space was dropped ("Level2Investor:SplitBetweenIncome").
+  It now decodes that class as a space and trims spaces at either end.
+- **Apostrophes.** The list writes an apostrophe inside single quotes as two
+  (`''''`), and the loader kept both, so every apostrophe came out doubled
+  ("you''re").
+- **One observation per line.** Readings were grouped by exact text, so each
+  clipped or misread reading of the same line ("nvestor do to the park",
+  "ouy this park today") became its own observation with its own evidence
+  crop. Readings in the same place (box IoU > 0.3) within 5 s whose text is
+  near-identical now join one observation: one is a piece of the other
+  (ignoring up to 2 garbled characters at each end of the piece) or they are
+  at least 80% alike by edit distance. Readings with different digits never
+  join, so a changed number stays its own observation. The most-read text
+  (then the longest) names the observation, and its span, frames and box
+  cover every reading.
+
+None of them adds work. Measured on short slices (local builds, one at a time;
+before is this branch with reuse only, except the comments-screenshot slice,
+whose before already decoded spaces, which changes neither time nor counts):
+
+| Slice | Whole build (s) | OCR (s) | Evidence crops (s) | Text observations |
+| --- | ---: | ---: | ---: | ---: |
+| RV Park 5:25-6:25 (whiteboard) | 322 → 244 | 143 → 138 | 142 → 74 | 239 → 130 |
+| RV Park 0:00-0:40 (comments screenshot) | 138 → 115 | 54 → 52 | 55 → 35 | 95 → 64 |
+| Gator 9-25 9:00-10:00 (app screens) | 387 → 365 | 227 → 218 | 131 → 119 | 565 → 530 |
+
+On the app-screen slice, 172 of 173 distinct numbers read before are still
+read (the one gone is a map-pin label string).
