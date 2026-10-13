@@ -136,23 +136,22 @@ std::vector<ReconciledObservation> reconcile_detections(
   std::iota(parent.begin(), parent.end(), std::size_t{0});
   std::vector<std::size_t> kept;
   for (const auto& [key, indices] : by_text_key) {
-    std::vector<std::size_t> heads;  // one member of each place this text was seen
+    std::vector<std::vector<std::size_t>> places;  // each place this text was seen
     for (std::size_t idx : indices) {
       kept.push_back(idx);
       bool added = false;
-      for (std::size_t head : heads) {
-        for (std::size_t member : indices) {
-          if (member >= idx) break;
-          if (find_root(parent, member) != find_root(parent, head)) continue;
+      for (auto& place : places) {
+        for (std::size_t member : place) {
           if (bbox_iou(detections[idx], detections[member]) > kSamePlaceIou) {
-            parent[find_root(parent, idx)] = find_root(parent, head);
+            parent[idx] = place.front();
+            place.push_back(idx);
             added = true;
             break;
           }
         }
         if (added) break;
       }
-      if (!added) heads.push_back(idx);
+      if (!added) places.push_back({idx});
     }
   }
 

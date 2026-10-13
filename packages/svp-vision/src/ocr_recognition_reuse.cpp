@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 
 namespace svp::vision {
@@ -154,20 +155,39 @@ std::vector<PpOcrDetection> OcrRecognitionReuse::read(std::uint64_t ordinal,
   }
 
   OcrReuseAnalysisFrame analysis = make_ocr_reuse_analysis_frame(frame);
+
+  // Each earlier reading goes to at most one current box, highest overlap first
+  // (ties by box order), so two boxes never both take one box's text.
+  struct Candidate {
+    double iou;
+    std::size_t box;
+    std::size_t earlier;
+  };
+  std::vector<Candidate> candidates;
+  for (std::size_t index = 0; index < boxes.size(); ++index) {
+    for (std::size_t earlier = 0; earlier < previous_.size(); ++earlier) {
+      const double iou = box_iou(previous_[earlier].box, boxes[index]);
+      if (iou > kOcrReuseMinBoxIou) candidates.push_back({iou, index, earlier});
+    }
+  }
+  std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+    if (a.iou != b.iou) return a.iou > b.iou;
+    return std::tie(a.box, a.earlier) < std::tie(b.box, b.earlier);
+  });
+  std::vector<const BoxReading*> matches(boxes.size(), nullptr);
+  std::vector<bool> taken(previous_.size(), false);
+  for (const Candidate& candidate : candidates) {
+    if (matches[candidate.box] != nullptr || taken[candidate.earlier]) continue;
+    matches[candidate.box] = &previous_[candidate.earlier];
+    taken[candidate.earlier] = true;
+  }
+
   std::vector<BoxReading> current(boxes.size());
   std::vector<std::size_t> pending;
   for (std::size_t index = 0; index < boxes.size(); ++index) {
     const PpOcrTextBox& box = boxes[index];
     current[index].box = box;
-    const BoxReading* match = nullptr;
-    double best_iou = kOcrReuseMinBoxIou;
-    for (const BoxReading& candidate : previous_) {
-      const double iou = box_iou(candidate.box, box);
-      if (iou > best_iou) {
-        best_iou = iou;
-        match = &candidate;
-      }
-    }
+    const BoxReading* match = matches[index];
     const std::optional<OcrReuseAnalysisFrame>* reference =
         match != nullptr ? &group_frames_[match->recognized_at] : nullptr;
     if (match != nullptr && match->consecutive_reuses < kOcrReuseMaxConsecutive &&

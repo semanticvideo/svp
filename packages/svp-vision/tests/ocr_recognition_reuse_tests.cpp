@@ -379,6 +379,25 @@ internal::FrameDetection sighting(int frame, double confidence, bool reused) {
   return detection;
 }
 
+void test_an_earlier_reading_goes_to_one_box_only() {
+  OcrRecognitionReuse reuse;
+  FakeRecognizer recognizer;
+  const ColorRasterFrame frame = sign_frame();
+  (void)read(reuse, recognizer, 0, frame, {kSign});
+
+  // The sign now detected as two overlapping boxes, each overlapping the earlier
+  // box by more than 0.5: only the closer one may take its text.
+  const PpOcrTextBox left_part{.left = 200, .top = 100, .right = 580, .bottom = 160};
+  const PpOcrTextBox right_part{.left = 260, .top = 100, .right = 600, .bottom = 160};
+  const auto second = read(reuse, recognizer, 1, frame, {right_part, left_part});
+  require(second.size() == 2, "a reading per box");
+  require(!second[0].reused && second[0].text == "s1#0",
+          "the box with less overlap is recognized");
+  require(second[1].reused && second[1].text == "s0#0",
+          "the box with the most overlap takes the earlier reading");
+  require(reuse.recognized_boxes() == 2 && reuse.reused_boxes() == 1, "counters");
+}
+
 void test_reconciliation_counts_sightings_not_copies() {
   const auto reconciled = internal::reconcile_detections(
       {sighting(0, 0.6, false), sighting(1, 0.6, true), sighting(2, 0.6, true),
@@ -409,6 +428,7 @@ int main() {
   test_empty_reading_is_reused_as_empty();
   test_reread_cap_and_groups();
   test_batching_does_not_change_readings();
+  test_an_earlier_reading_goes_to_one_box_only();
   test_reconciliation_counts_sightings_not_copies();
   std::cout << "All OCR recognition reuse tests passed.\n";
   return 0;
