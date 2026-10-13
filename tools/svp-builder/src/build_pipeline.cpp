@@ -33,6 +33,8 @@
 #include "engine/whole_stage_scheduler_policy.hpp"
 #include "runtime_tools_json.hpp"
 #include "staging_cleanup.hpp"
+#include "working_copy/working_copy.hpp"
+#include "working_copy/working_copy_stage.hpp"
 #include "svp/audio/sherpa_diarization.hpp"
 #include "svp/audio/whisper_model.hpp"
 #include "svp/core/memory_diagnostics.hpp"
@@ -95,6 +97,12 @@ svp::exec::SourceFingerprintRecord fingerprint_build_source(
       .size_bytes = 0,
       .mtime_ns = std::nullopt,
       .blake3 = svp::exec::blake3_digest(std::string_view{})};
+}
+
+// --max-height: only builds that decode frames make a working copy.
+bool decodes_frames(const BuildStageExecutionPlan& stage_plan) {
+  return stage_plan.run_vision_plan || stage_plan.run_foundation_color ||
+         stage_plan.run_foundation_ocr || stage_plan.run_package_skeleton;
 }
 
 bool should_write_builder_foundation_json(
@@ -215,11 +223,14 @@ DistributedTrackingWork distributed_tracking_work(const engine::TrackingWorkPlan
           tracking.options.detector.maximum_detections)};
 }
 
+// `frame_source` fingerprints the file frames are decoded from
+// (svp::media::frame_source_path): the source, or its --max-height working
+// copy, which is then what workers receive.
 PlannedSplitExecution plan_split_execution(
     const BuildPipelineOptions& options, const BuildStageExecutionPlan& stage_plan,
     const svp::media::MediaIngestPlan& plan, const nlohmann::json& plan_json,
     const svp::models::ThreadPlan& thread_plan, bool model_runtime_available,
-    const svp::exec::SourceFingerprintRecord& source,
+    const svp::exec::SourceFingerprintRecord& frame_source,
     const std::vector<engine::PlannedStageTask>& tasks, const std::string& build_session_id,
     const engine::BuildJournalSession& journal_session,
     const svp::vision::FrameCatalog& planned_catalog,
@@ -232,8 +243,8 @@ PlannedSplitExecution plan_split_execution(
       .media_plan_json = plan_json,
       .thread_plan = thread_plan,
       .model_runtime_available = model_runtime_available,
-      .source_blake3 = source.blake3,
-      .source_bytes = source.size_bytes,
+      .source_blake3 = frame_source.blake3,
+      .source_bytes = frame_source.size_bytes,
   });
   std::optional<engine::TrackingWorkPlan> tracking;
   if (engine::split_tracking_stage(options.journal_mode, options.distributed != nullptr,
@@ -245,8 +256,8 @@ PlannedSplitExecution plan_split_execution(
         .media_plan_json = plan_json,
         .thread_plan = thread_plan,
         .model_runtime_available = model_runtime_available,
-        .source_blake3 = source.blake3,
-        .source_bytes = source.size_bytes,
+        .source_blake3 = frame_source.blake3,
+        .source_bytes = frame_source.size_bytes,
     });
   }
   svp::vision::tasks::TrackWindowCostPolicy window_cost;
@@ -403,13 +414,23 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     const svp::models::ThreadPlan& thread_plan = resolved_thread_plan->plan;
 
     sink->emit(make_stage_started(ProgressStageId::media_probe));
-    const svp::media::MediaIngestPlan plan =
+    // Describes the source throughout; a --max-height working copy only sets
+    // the file frames are decoded from (frame_decode_path), after plan_json.
+    svp::media::MediaIngestPlan plan =
         svp::media::build_media_ingest_plan(
             options.source_path,
             load_or_run_probe(options.source_path, options.probe_json_path,
                               options.ffprobe_path));
     const nlohmann::json plan_json = svp::media::media_ingest_plan_to_json(plan);
     sink->emit(make_stage_completed(ProgressStageId::media_probe));
+    // --max-height (working_copy/working_copy.hpp). Where it changes nothing,
+    // the build runs exactly as without it.
+    const working_copy::WorkingCopyDecision working_copy_decision =
+        working_copy::decide_working_copy(effective_options.max_height,
+                                          decodes_frames(stage_plan), plan.primary_video_stream);
+    if (!working_copy_decision.geometry) {
+      effective_options.max_height.reset();
+    }
 
     const bool user_supplied_staging = !effective_options.staging_dir.empty();
     const std::filesystem::path staging_dir =
@@ -462,9 +483,41 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         effective_options.journal_output_path.empty() ? effective_options.output_path
                                                       : effective_options.journal_output_path);
     const std::string build_session_id = journal_session.prepare();
+
+    // --max-height (working_copy/working_copy.hpp): frames are decoded from a
+    // copy scaled to fit, here and on every worker. The copy is removed when
+    // this function returns, however the build ends.
+    std::unique_ptr<working_copy::WorkingCopy> analysis_copy;
+    std::string working_copy_unavailable = working_copy_decision.not_used_reason;
+    if (working_copy_decision.geometry) {
+      working_copy::WorkingCopyResult made = working_copy::run_working_copy_stage(
+          {.plan = plan,
+           .geometry = *working_copy_decision.geometry,
+           .ffmpeg_path = effective_options.ffmpeg_path,
+           .ffprobe_path = effective_options.ffprobe_path,
+           .cancellation = &cancellation},
+          *sink, effective_options.quiet);
+      if (made.cancelled) {
+        return cancelled_result();
+      }
+      analysis_copy = std::move(made.copy);
+      if (analysis_copy) {
+        plan.frame_decode_path = analysis_copy->path();
+      } else {
+        working_copy_unavailable = made.unavailable_reason;
+      }
+    }
+    const svp::exec::SourceFingerprintRecord& frame_source =
+        analysis_copy ? analysis_copy->fingerprint() : source;
+    const std::optional<nlohmann::json> working_copy_record =
+        analysis_copy ? std::optional(working_copy::working_copy_processor_record(
+                            *analysis_copy, *effective_options.max_height,
+                            plan.primary_video_stream))
+                      : std::nullopt;
+
     PlannedSplitExecution ocr_execution = plan_split_execution(
         effective_options, stage_plan, plan, plan_json, thread_plan, model_runtime_available,
-        source, tasks, build_session_id, journal_session, planned_catalog, cancellation);
+        frame_source, tasks, build_session_id, journal_session, planned_catalog, cancellation);
     const engine::OcrFrameBatchPlan* ocr_batches =
         ocr_execution.batches ? &*ocr_execution.batches : nullptr;
     const engine::TrackingWindowPlan* tracking_windows =
@@ -581,7 +634,8 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         .audio_dispatch = audio_dispatch ? &audio_dispatch->dispatch : nullptr,
         .tracking_windows = tracking_windows,
         .track_window_runtimes = std::make_shared<svp::vision::tasks::TrackWindowRuntimePool>(),
-        .tracking_progress = tracking_progress ? &*tracking_progress : nullptr};
+        .tracking_progress = tracking_progress ? &*tracking_progress : nullptr,
+        .working_copy_processor_record = working_copy_record ? &*working_copy_record : nullptr};
     engine::register_stage_task_types(registry, tasks, environment, outputs, stage_exits);
     if (ocr_batches != nullptr) {
       outputs.register_input(ocr_batches->work.source, ocr_batches->work.source_path);
@@ -768,6 +822,11 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     if (effective_options.runtime_tools) {
       output["builder_command"]["runtime_tools"] =
           runtime_tools_json(*effective_options.runtime_tools);
+    }
+    if (options.max_height) {
+      output["builder_command"]["max_height"] = *options.max_height;
+      output["builder_command"]["working_copy"] =
+          working_copy::working_copy_summary(analysis_copy.get(), working_copy_unavailable);
     }
 
     if (stage_plan.run_package_skeleton) {

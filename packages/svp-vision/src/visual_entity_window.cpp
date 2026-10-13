@@ -104,7 +104,7 @@ VisualEntityWindowRequest make_visual_entity_window_request(
     const VisualEntityPipelineOptions& options,
     const VisualEntityPipelinePlan& plan,
     std::size_t window_index) {
-  return {.source_path = media_plan.source_path,
+  return {.source_path = media::frame_source_path(media_plan),
           .ffmpeg_path = ffmpeg_path,
           .frame_width = media_plan.canonical_raster.width,
           .frame_height = media_plan.canonical_raster.height,

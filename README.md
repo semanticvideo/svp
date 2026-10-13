@@ -469,6 +469,58 @@ svp-builder build \
   --visual-tracking-quality off
 ```
 
+### Analyse a 4K video at 1080p: `--max-height`
+
+Nothing a build reads from frames needs more than about 1080 lines: OCR
+decodes frames at most 1920 pixels wide, the other frame stages decode at the
+640-pixel canonical raster, and speech uses only the audio. A 4K source still
+costs its full resolution in every frame decode and, in a distributed build,
+in the file sent to every worker. `--max-height <n>` (on `build`, for every
+output format, and on `interlace create`) analyses such a video from a working
+copy instead:
+
+```bash
+svp-builder build "$SVP_VIDEO_PATH" \
+  --out build/local-intro/intro.svp \
+  --model-cache "$SVP_MODEL_CACHE" \
+  --max-height 1080
+```
+
+- When the primary video is displayed taller than `n` (rotation applied), the
+  builder first writes one copy of it scaled to `n` lines (rounded down to an
+  even number), with every frame at its source timestamp, its rotation
+  metadata, and its audio streams copied without re-encoding. It uses
+  VideoToolbox HEVC where the ffmpeg in use has it, otherwise MPEG-4 Part 2 in
+  software (the runtime bundle's ffmpeg has no VideoToolbox). The copy is
+  checked (size, rotation, start time) before use.
+- Every frame decode reads the copy: color and shots, canonical frames, depth,
+  OCR, evidence crops, keyframe embeddings, and visual tracking. A
+  `--distributed` build sends workers the copy instead of the source. Audio
+  stages keep reading the source.
+- The package still describes the source: its media identity and hash, name,
+  duration, frame timing, and dimensions, and frame and evidence-crop
+  coordinates in source pixels. `provenance/processors.jsonl` gains a
+  `proc_ffmpeg_working_copy_0001` record with the copy's size and encoder.
+- A video at or below `n` lines is analysed as is: no copy is made and the
+  package is the one a build without the flag makes. `n` must be at least 640,
+  the canonical raster's longest side. A portrait video is bounded by its
+  displayed height too, so a 2160x3840 phone video at `--max-height 1080` is
+  analysed at 608x1080.
+- The copy lives in a private temporary directory and is removed when the
+  build ends, however it ends. `--resume` makes it again; it must come out the
+  same (it does from the same source with the same ffmpeg on the same Mac) for
+  the journal to match. If no copy can be made (for example, MPEG-4 Part 2
+  cannot keep a time base finer than 1/65535 s, which some Android phones
+  use), the build warns and analyses the source.
+- The builder foundation JSON records `max_height` and the copy under
+  `builder_command.working_copy`; the run report shows the `working_copy`
+  stage.
+
+`build-batch` and `interlace create-batch` do not take `--max-height`: the Mac
+that builds each video would make its own copy, and an encoder's output can
+depend on the Mac (VideoToolbox hardware, or the software encoder's thread
+count), so a batch's packages could depend on which Mac built them.
+
 With the runtime bundle installed, the builder loads its pinned sherpa-onnx
 library automatically. Otherwise, if sherpa-onnx is installed in a nonstandard
 location, pass the C API library explicitly:

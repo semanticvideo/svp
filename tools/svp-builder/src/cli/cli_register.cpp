@@ -1,6 +1,10 @@
 #include "cli_context.hpp"
 #include "batch_coordinators_cli.hpp"
 #include "distributed_cli.hpp"
+#include "working_copy/working_copy_geometry.hpp"
+
+#include <limits>
+#include <string>
 
 namespace {
 
@@ -24,6 +28,19 @@ void add_recovery_journal_flags(CLI::App& command, bool& resume, bool& fresh) {
       "--fresh", fresh,
       "Discard any recovery journal for this output and start the build over");
   resume_flag->excludes(fresh_flag);
+}
+
+// --max-height (BuildPipelineOptions::max_height). The floor keeps every
+// working copy at least as large as the canonical analysis raster.
+void add_max_height_option(CLI::App& command, std::optional<int>& max_height) {
+  command
+      .add_option("--max-height", max_height,
+                  "Analyse frames from a working copy scaled to fit this displayed height "
+                  "(at least " +
+                      std::to_string(svp::builder::working_copy::kMinimumMaxHeight) +
+                      ") when the video is taller; the package still describes the source")
+      ->check(CLI::Range(svp::builder::working_copy::kMinimumMaxHeight,
+                         std::numeric_limits<int>::max()));
 }
 
 void add_visual_tracking_quality_option(
@@ -84,6 +101,7 @@ void register_cli(CLI::App& app, CliContext& context) {
   add_pipeline_performance_options(*build, build_opts.performance);
   add_visual_tracking_quality_option(
       *build, build_opts.visual_tracking_quality);
+  add_max_height_option(*build, build_opts.max_height);
   tool_option(*build, "--sherpa-lib", build_opts.sherpa_lib_path,
               RuntimeTool::sherpa_onnx);
   build->add_flag("--allow-fallback-diarization", build_opts.allow_fallback_diarization,
@@ -219,6 +237,7 @@ void register_cli(CLI::App& app, CliContext& context) {
   add_pipeline_performance_options(*ic_create, opts.ic_performance);
   add_visual_tracking_quality_option(
       *ic_create, opts.ic_visual_tracking_quality);
+  add_max_height_option(*ic_create, opts.ic_max_height);
   ic_create->add_flag("--no-blake3", opts.ic_no_blake3, "Skip full-file BLAKE3 computation");
   ic_create->add_flag("--core-only-diagnostic", opts.ic_core_only,
       "Emit core-only SVPI without running semantic pipeline (diagnostic mode)");

@@ -1,0 +1,425 @@
+// svp-builder build --max-height: the working copy's size, encoders and
+// command, the checks that decide whether it may stand in for the source, the
+// command runner, its provenance record, and its place in the build-inputs
+// digest. With a real ffmpeg and ffprobe ($SVP_FFMPEG / $SVP_FFPROBE or PATH)
+// it also makes copies of synthetic clips with variable frame timing, a
+// rotation, and video that starts after the audio, and proves every frame
+// keeps its timestamp; without them those cases print "Skipping:".
+
+#include "engine/build_inputs_digest.hpp"
+#include "working_copy/cancellable_command.hpp"
+#include "working_copy/working_copy.hpp"
+#include "working_copy/working_copy_check.hpp"
+#include "working_copy/working_copy_encoder.hpp"
+#include "working_copy/working_copy_geometry.hpp"
+
+#include "svp/exec/blake3_digest.hpp"
+#include "svp/media/media_ingest_plan.hpp"
+#include "svp/media/media_probe.hpp"
+#include "svp/vision/canonical_frame_input.hpp"
+
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <iterator>
+#include <optional>
+#include <string>
+#include <thread>
+#include <unistd.h>
+#include <vector>
+
+namespace {
+
+namespace fs = std::filesystem;
+namespace wc = svp::builder::working_copy;
+
+void require(bool condition, const std::string& message) {
+  if (!condition) {
+    std::cerr << "FAIL: " << message << "\n";
+    std::exit(1);
+  }
+}
+
+class TemporaryDirectory {
+ public:
+  explicit TemporaryDirectory(const std::string& name)
+      : path_(fs::temp_directory_path() /
+              (name + "-" + std::to_string(static_cast<long long>(::getpid())))) {
+    fs::remove_all(path_);
+    fs::create_directories(path_);
+  }
+  ~TemporaryDirectory() {
+    std::error_code ignored;
+    fs::remove_all(path_, ignored);
+  }
+  [[nodiscard]] const fs::path& path() const { return path_; }
+
+ private:
+  fs::path path_;
+};
+
+svp::media::VideoStreamProbe video(int width, int height, int rotation) {
+  svp::media::VideoStreamProbe stream;
+  stream.width = width;
+  stream.height = height;
+  stream.rotation_degrees = rotation;
+  return stream;
+}
+
+bool contains(const std::vector<std::string>& words, const std::vector<std::string>& run) {
+  return std::search(words.begin(), words.end(), run.begin(), run.end()) != words.end();
+}
+
+// --- size --------------------------------------------------------------------
+
+void test_geometry_fits_the_displayed_height() {
+  // 4K landscape to 1080 lines.
+  const auto uhd = wc::plan_working_copy_geometry(video(3840, 2160, 0), 1080);
+  require(uhd && uhd->stored_width == 1920 && uhd->stored_height == 1080 &&
+              uhd->display_width == 1920 && uhd->display_height == 1080,
+          "3840x2160 fits 1080 as 1920x1080");
+
+  // At or below the bound: used as is.
+  require(!wc::plan_working_copy_geometry(video(1920, 1080, 0), 1080),
+          "a 1080-line video is not copied for 1080");
+  require(!wc::plan_working_copy_geometry(video(3840, 2160, 0), 2160),
+          "a video exactly as tall as the bound is not copied");
+
+  // A quarter-turn rotation: the displayed height is the stored width, and
+  // the copy keeps the stored orientation.
+  for (const int rotation : {90, -90, 270, -270}) {
+    const auto portrait = wc::plan_working_copy_geometry(video(3840, 2160, rotation), 1080);
+    require(portrait && portrait->display_width == 608 && portrait->display_height == 1080 &&
+                portrait->stored_width == 1080 && portrait->stored_height == 608,
+            "rotated 4K fits 1080 tall as 608x1080 (rotation " + std::to_string(rotation) + ")");
+  }
+  require(!wc::plan_working_copy_geometry(video(1080, 1920, 90), 1080),
+          "a 1920x1080 video stored portrait and rotated displays 1080 tall");
+  const auto half_turn = wc::plan_working_copy_geometry(video(3840, 2160, 180), 1080);
+  require(half_turn && half_turn->stored_width == 1920 && half_turn->stored_height == 1080,
+          "a half turn does not swap sides");
+
+  // An odd bound rounds down to even lines; the width to the nearest even.
+  const auto odd = wc::plan_working_copy_geometry(video(3840, 2160, 0), 1081);
+  require(odd && odd->display_height == 1080 && odd->display_width == 1920,
+          "an odd bound gives an even height");
+  const auto scope = wc::plan_working_copy_geometry(video(4096, 1716, 0), 1080);
+  require(scope && scope->display_height == 1080 && scope->display_width == 2578,
+          "4096x1716 fits 1080 as 2578x1080 (2577.9 to even)");
+
+  // Non-square pixels: both stored sides scale by one factor.
+  const auto anamorphic = wc::plan_working_copy_geometry(video(1440, 1080, 0), 720);
+  require(anamorphic && anamorphic->stored_width == 960 && anamorphic->stored_height == 720,
+          "1440x1080 fits 720 as 960x720 stored");
+
+  require(!wc::plan_working_copy_geometry(video(0, 0, 0), 1080), "no size, no copy");
+  require(wc::kMinimumMaxHeight == svp::media::kCanonicalLongestDisplayDimension,
+          "the smallest bound is the canonical raster's longest side");
+}
+
+// --- encoders and command ----------------------------------------------------
+
+void test_encoders_and_command() {
+  const std::vector<wc::WorkingCopyEncoder> encoders = wc::working_copy_encoders();
+  require(!encoders.empty() && encoders.back().name == "mpeg4" &&
+              encoders.back().execution_provider == "cpu",
+          "the software fallback is tried last");
+#if defined(__APPLE__)
+  require(encoders.size() == 2 && encoders.front().name == "hevc_videotoolbox" &&
+              encoders.front().execution_provider == "videotoolbox",
+          "VideoToolbox is preferred on Apple platforms");
+  require(contains(encoders.front().options, {"-bsf:v", "filter_units=remove_types=39"}),
+          "VideoToolbox's per-run SEI is removed");
+#else
+  require(encoders.size() == 1, "only the software encoder off Apple platforms");
+#endif
+
+  const wc::WorkingCopyGeometry geometry{.stored_width = 1080, .stored_height = 608,
+                                         .display_width = 608, .display_height = 1080};
+  const std::vector<std::string> command = wc::working_copy_ffmpeg_command(
+      "/opt/ffmpeg", "/media/in.mp4", 2, geometry, encoders.back(), "/tmp/out.mov");
+  require(command.front() == "/opt/ffmpeg", "the command runs the given ffmpeg");
+  require(contains(command, {"-noautorotate", "-i", "/media/in.mp4"}),
+          "rotation metadata is kept, not applied");
+  require(contains(command, {"-map", "0:2", "-map", "0:a?", "-c:a", "copy"}),
+          "the primary video by index, and every audio stream copied");
+  require(contains(command, {"-vf", "scale=1080:608"}), "frames are scaled to the stored size");
+  require(contains(command, {"-c:v", "mpeg4", "-q:v", std::string(wc::kMpeg4Quantizer)}),
+          "the encoder and its quality");
+  require(contains(command, {"-fps_mode", "passthrough", "-enc_time_base", "demux"}),
+          "every frame keeps its source timestamp");
+  require(contains(command, {"-f", "mov", "-y", "/tmp/out.mov"}), "a QuickTime file");
+}
+
+// --- start offsets -----------------------------------------------------------
+
+void test_stream_start_offset() {
+  require(wc::stream_start_offset_us(
+              R"({"programs":[],"streams":[{"start_time":"0.500000"}],)"
+              R"("format":{"start_time":"0.000000"}})") == 500000,
+          "video half a second after the file start");
+  require(wc::stream_start_offset_us(
+              R"({"streams":[{"start_time":"0.000000"}],"format":{"start_time":"-0.021333"}})") ==
+              21333,
+          "a negative file start (audio priming)");
+  require(!wc::stream_start_offset_us(R"({"streams":[{}],"format":{"start_time":"0.0"}})"),
+          "no stream start time");
+  require(!wc::stream_start_offset_us(R"({"streams":[],"format":{"start_time":"0.0"}})"),
+          "no stream");
+  require(!wc::stream_start_offset_us("not json"), "not JSON");
+}
+
+// --- build inputs ------------------------------------------------------------
+
+void test_build_inputs_digest_names_max_height_only_when_given() {
+  svp::builder::BuildPipelineOptions options;
+  options.source_path = "/media/in.mp4";
+  options.output_path = "/out/in.svp";
+  const svp::exec::SourceFingerprintRecord source{.source_id = "source_000",
+                                                  .path = "/media/in.mp4",
+                                                  .size_bytes = 3};
+  const nlohmann::json plan = {{"schema_version", "test"}};
+  const nlohmann::json without =
+      svp::builder::engine::describe_build_inputs(options, source, plan, {});
+  require(!without["options"].contains("max_height"), "no --max-height, no field");
+  options.max_height = 1080;
+  const nlohmann::json with =
+      svp::builder::engine::describe_build_inputs(options, source, plan, {});
+  require(with["options"]["max_height"] == 1080, "--max-height is part of the build inputs");
+  require(svp::builder::engine::build_inputs_blake3(with) !=
+              svp::builder::engine::build_inputs_blake3(without),
+          "a journal of one cannot resume as the other");
+}
+
+// --- command runner ----------------------------------------------------------
+
+void test_cancellable_command() {
+  const TemporaryDirectory scratch("svp-working-copy-command");
+  const fs::path out = scratch.path() / "out";
+  const fs::path err = scratch.path() / "err";
+
+  const wc::CommandOutcome ok =
+      wc::run_cancellable_command({"/bin/sh", "-c", "echo hello"}, out, err, nullptr);
+  std::ifstream stdout_file(out);
+  const std::string printed((std::istreambuf_iterator<char>(stdout_file)),
+                            std::istreambuf_iterator<char>());
+  require(ok.started && ok.succeeded && printed == "hello\n", "stdout goes to its file");
+
+  const wc::CommandOutcome failed = wc::run_cancellable_command(
+      {"/bin/sh", "-c", "echo 'no such encoder' >&2; exit 3"}, out, err, nullptr);
+  require(failed.started && !failed.succeeded && !failed.cancelled &&
+              failed.diagnostics.find("exited with status 3") != std::string::npos &&
+              failed.diagnostics.find("no such encoder") != std::string::npos,
+          "a failure names its status and standard error: " + failed.diagnostics);
+
+  const wc::CommandOutcome missing = wc::run_cancellable_command(
+      {(scratch.path() / "no-such-program").string()}, out, err, nullptr);
+  require(!missing.succeeded && !missing.diagnostics.empty(), "a missing program fails");
+
+  svp::exec::CancellationToken cancellation;
+  std::thread cancel([&cancellation] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    cancellation.request();
+  });
+  const auto started = std::chrono::steady_clock::now();
+  const wc::CommandOutcome stopped =
+      wc::run_cancellable_command({"/bin/sh", "-c", "sleep 30"}, out, err, &cancellation);
+  cancel.join();
+  require(stopped.started && stopped.cancelled && !stopped.succeeded,
+          "a cancelled build stops its command");
+  require(std::chrono::steady_clock::now() - started < std::chrono::seconds(10),
+          "the command stops promptly");
+}
+
+// --- with a real ffmpeg ------------------------------------------------------
+
+struct Tools {
+  fs::path ffmpeg;
+  fs::path ffprobe;
+};
+
+std::optional<Tools> real_tools() {
+  const char* ffmpeg = std::getenv("SVP_FFMPEG");
+  const char* ffprobe = std::getenv("SVP_FFPROBE");
+  Tools tools{ffmpeg != nullptr ? fs::path(ffmpeg) : fs::path("ffmpeg"),
+              ffprobe != nullptr ? fs::path(ffprobe) : fs::path("ffprobe")};
+  if (!svp::vision::ffmpeg_executable_available(tools.ffmpeg) ||
+      !svp::vision::ffmpeg_executable_available(tools.ffprobe)) {
+    return std::nullopt;
+  }
+  return tools;
+}
+
+void run_or_fail(const std::vector<std::string>& command, const fs::path& scratch,
+                 const std::string& what) {
+  const wc::CommandOutcome outcome =
+      wc::run_cancellable_command(command, scratch / "run.out", scratch / "run.err", nullptr);
+  require(outcome.succeeded, what + ": " + outcome.diagnostics);
+}
+
+// A 320x240 clip stored with a 90 degree rotation, its video starting half a
+// second after its audio, with every seventh frame shifted off the 30 fps grid
+// by `jitter` ticks of `timebase` (1/N).
+fs::path write_clip(const Tools& tools, const fs::path& dir, const std::string& name,
+                    int timebase, int ticks_per_frame, int jitter) {
+  const fs::path clip = dir / (name + ".mov");
+  const std::string expression = "N*" + std::to_string(ticks_per_frame) +
+                                 "+if(eq(mod(N,7),3)," + std::to_string(jitter) + ",0)+" +
+                                 std::to_string(timebase / 2);
+  run_or_fail({tools.ffmpeg.string(), "-nostdin", "-loglevel", "error", "-y",
+               "-display_rotation", "90", "-noautorotate", "-f", "lavfi", "-i",
+               "testsrc2=size=320x240:rate=30:duration=2", "-f", "lavfi", "-i",
+               "sine=frequency=440:duration=3", "-map", "0:v", "-map", "1:a", "-vf",
+               "settb=1/" + std::to_string(timebase) + ",setpts='" + expression + "'",
+               "-fps_mode", "passthrough", "-enc_time_base", "1/" + std::to_string(timebase),
+               "-video_track_timescale", std::to_string(timebase), "-c:v", "mjpeg", "-q:v",
+               "3", "-c:a", "pcm_s16le", clip.string()},
+              dir, "writing " + name);
+  return clip;
+}
+
+// Every decoded frame's timestamp of `file`'s first video stream.
+std::vector<std::string> frame_times(const Tools& tools, const fs::path& file,
+                                     const fs::path& scratch) {
+  run_or_fail({tools.ffprobe.string(), "-v", "error", "-select_streams", "v:0", "-show_entries",
+               "frame=best_effort_timestamp_time", "-of", "csv=p=0", file.string()},
+              scratch, "listing frames of " + file.filename().string());
+  std::ifstream input(scratch / "run.out");
+  std::vector<std::string> times;
+  for (std::string line; std::getline(input, line);) {
+    line.erase(std::remove(line.begin(), line.end(), ','), line.end());
+    if (!line.empty()) times.push_back(line);
+  }
+  return times;
+}
+
+svp::media::MediaIngestPlan plan_of(const Tools& tools, const fs::path& clip) {
+  return svp::media::build_media_ingest_plan(
+      clip, svp::media::probe_media_with_ffprobe(clip, tools.ffprobe));
+}
+
+void test_working_copies_of_synthetic_clips(const Tools& tools) {
+  const TemporaryDirectory scratch("svp-working-copy-clips");
+  constexpr int kBound = 160;
+
+  // A time base the software fallback can encode in (1/30000), so every
+  // ffmpeg build makes this copy.
+  const fs::path clip = write_clip(tools, scratch.path(), "ntsc", 30000, 1000, 7);
+  const svp::media::MediaIngestPlan plan = plan_of(tools, clip);
+  const auto geometry = wc::plan_working_copy_geometry(plan.primary_video_stream, kBound);
+  require(geometry && geometry->stored_width == 160 && geometry->stored_height == 120 &&
+              geometry->display_width == 120 && geometry->display_height == 160,
+          "the rotated clip fits 160 lines as 120x160");
+
+  fs::path copy_directory;
+  std::string first_blake3;
+  {
+    wc::WorkingCopyResult made = wc::make_working_copy(
+        {.plan = plan, .geometry = *geometry, .ffmpeg_path = tools.ffmpeg,
+         .ffprobe_path = tools.ffprobe});
+    require(made.copy != nullptr, "a copy is made: " + made.unavailable_reason);
+    const wc::WorkingCopy& copy = *made.copy;
+    copy_directory = copy.path().parent_path();
+    require(fs::is_regular_file(copy.path()) && copy.fingerprint().size_bytes ==
+                                                    fs::file_size(copy.path()),
+            "the copy is fingerprinted");
+    first_blake3 = svp::exec::blake3_hex(copy.fingerprint().blake3);
+    require(fs::equivalent(copy_directory.parent_path(), fs::temp_directory_path()) &&
+                copy_directory.filename().string().starts_with("svp-working-copy-"),
+            "the copy lives in a private temporary directory");
+    require(frame_times(tools, copy.path(), scratch.path()) ==
+                frame_times(tools, clip, scratch.path()),
+            "every frame keeps its source timestamp (" + copy.encoder().name + ")");
+    require(!wc::working_copy_mismatch(plan, *geometry, copy.path(), tools.ffprobe,
+                                       scratch.path(), nullptr),
+            "the copy passes its check");
+    wc::WorkingCopyGeometry other = *geometry;
+    other.stored_width += 2;
+    require(wc::working_copy_mismatch(plan, other, copy.path(), tools.ffprobe, scratch.path(),
+                                      nullptr)
+                .has_value(),
+            "a copy of another size is rejected");
+    svp::media::MediaIngestPlan unrotated = plan;
+    unrotated.primary_video_stream.rotation_degrees = 0;
+    require(wc::working_copy_mismatch(unrotated, *geometry, copy.path(), tools.ffprobe,
+                                      scratch.path(), nullptr)
+                .has_value(),
+            "a copy with another rotation is rejected");
+
+    const nlohmann::json record =
+        wc::working_copy_processor_record(copy, kBound, plan.primary_video_stream);
+    const std::string text = record.dump();
+    require(record["id"] == "proc_ffmpeg_working_copy_0001" &&
+                record["parameters"]["display_width"] == 120 &&
+                record["parameters"]["display_height"] == 160 &&
+                record["parameters"]["source_display_width"] == 240 &&
+                record["parameters"]["source_display_height"] == 320 &&
+                record["parameters"]["max_height"] == kBound,
+            "the record names the copy's and the source's displayed sizes: " + text);
+    require(text.find(scratch.path().string()) == std::string::npos &&
+                text.find(copy_directory.string()) == std::string::npos &&
+                text.find("<source>") != std::string::npos,
+            "the record names no host path");
+  }
+  require(!fs::exists(copy_directory), "the copy's directory goes with it");
+
+  {
+    wc::WorkingCopyResult again = wc::make_working_copy(
+        {.plan = plan, .geometry = *geometry, .ffmpeg_path = tools.ffmpeg,
+         .ffprobe_path = tools.ffprobe});
+    require(again.copy != nullptr &&
+                svp::exec::blake3_hex(again.copy->fingerprint().blake3) == first_blake3,
+            "the same source makes the same copy on the same Mac");
+  }
+
+  svp::exec::CancellationToken cancelled;
+  cancelled.request();
+  const wc::WorkingCopyResult stopped = wc::make_working_copy(
+      {.plan = plan, .geometry = *geometry, .ffmpeg_path = tools.ffmpeg,
+       .ffprobe_path = tools.ffprobe, .cancellation = &cancelled});
+  require(stopped.cancelled && stopped.copy == nullptr, "a cancelled build makes no copy");
+
+  // A 1/90000 time base with off-grid frames: MPEG-4 Part 2 cannot encode in
+  // it (its time base denominator is at most 65535), so the copy exists only
+  // where VideoToolbox does. Either way no frame may move.
+  const fs::path fine = write_clip(tools, scratch.path(), "fine", 90000, 3000, 1234);
+  const svp::media::MediaIngestPlan fine_plan = plan_of(tools, fine);
+  const wc::WorkingCopyResult fine_copy = wc::make_working_copy(
+      {.plan = fine_plan,
+       .geometry = *wc::plan_working_copy_geometry(fine_plan.primary_video_stream, kBound),
+       .ffmpeg_path = tools.ffmpeg,
+       .ffprobe_path = tools.ffprobe});
+  if (fine_copy.copy) {
+    require(frame_times(tools, fine_copy.copy->path(), scratch.path()) ==
+                frame_times(tools, fine, scratch.path()),
+            "every frame keeps its 1/90000 timestamp (" + fine_copy.copy->encoder().name + ")");
+    std::cout << "1/90000 clip copied with " << fine_copy.copy->encoder().name << "\n";
+  } else {
+    require(fine_copy.unavailable_reason.find("mpeg4") != std::string::npos,
+            "without a copy the reason names the encoder: " + fine_copy.unavailable_reason);
+    std::cout << "1/90000 clip not copied: " << fine_copy.unavailable_reason << "\n";
+  }
+}
+
+}  // namespace
+
+int main() {
+  test_geometry_fits_the_displayed_height();
+  test_encoders_and_command();
+  test_stream_start_offset();
+  test_build_inputs_digest_names_max_height_only_when_given();
+  test_cancellable_command();
+  if (const std::optional<Tools> tools = real_tools()) {
+    test_working_copies_of_synthetic_clips(*tools);
+  } else {
+    std::cout << "Skipping: working copies of synthetic clips need ffmpeg and ffprobe "
+                 "($SVP_FFMPEG/$SVP_FFPROBE or PATH)\n";
+  }
+  std::cout << "working copy tests passed\n";
+  return 0;
+}

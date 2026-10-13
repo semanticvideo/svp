@@ -39,6 +39,7 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
     ic_opts.allow_fallback_diarization = opts.ic_allow_fallback;
     ic_opts.force_single_speaker = opts.ic_force_single;
     ic_opts.serial_pipeline = opts.ic_serial_pipeline;
+    ic_opts.max_height = opts.ic_max_height;
     ic_opts.journal_mode = journal_mode_from_flags(opts.ic_resume, opts.ic_fresh);
     ic_opts.progress_sink = sink;
     const std::optional<std::shared_ptr<svp::builder::DistributedExecution>> fleet =

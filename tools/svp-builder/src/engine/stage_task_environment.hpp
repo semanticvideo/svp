@@ -85,6 +85,11 @@ struct StageTaskEnvironment {
   std::shared_ptr<svp::vision::tasks::TrackWindowRuntimePool> track_window_runtimes;
   // The tracking stage's progress events while it runs as window tasks.
   TrackingWindowProgress* tracking_progress = nullptr;
+  // --max-height with a working copy: its provenance record
+  // (working_copy::working_copy_processor_record), which the entities task
+  // adds to provenance/processors.jsonl. Null when frames come from the
+  // source.
+  const nlohmann::json* working_copy_processor_record = nullptr;
 };
 
 // Named state blobs a task returns (stage_task_products.hpp).

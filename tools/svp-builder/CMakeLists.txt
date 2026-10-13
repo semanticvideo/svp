@@ -96,6 +96,12 @@ add_library(svp-builder-lib
   src/interlace/interlace_batch_scan.cpp
   src/interlace/interlace_batch_validate.cpp
   src/interlace/interlace_identity.cpp
+  src/working_copy/cancellable_command.cpp
+  src/working_copy/working_copy.cpp
+  src/working_copy/working_copy_check.cpp
+  src/working_copy/working_copy_encoder.cpp
+  src/working_copy/working_copy_geometry.cpp
+  src/working_copy/working_copy_stage.cpp
 )
 
 add_library(svp::builder ALIAS svp-builder-lib)
@@ -249,6 +255,23 @@ if(BUILD_TESTING)
   )
   add_test(NAME svp-builder-ocr-frame-batch-plan-tests
            COMMAND svp-builder-ocr-frame-batch-plan-tests)
+
+  add_executable(svp-builder-working-copy-tests
+    tests/working_copy_tests.cpp
+  )
+  target_include_directories(svp-builder-working-copy-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_compile_features(svp-builder-working-copy-tests PRIVATE cxx_std_20)
+  target_link_libraries(svp-builder-working-copy-tests
+    PRIVATE
+      svp::builder
+      svp::exec
+      svp::media
+      svp::vision
+      nlohmann_json::nlohmann_json
+  )
+  add_test(NAME svp-builder-working-copy-tests COMMAND svp-builder-working-copy-tests)
 
   add_executable(svp-builder-batch-tests
     tests/batch_tests.cpp
@@ -553,6 +576,20 @@ if(BUILD_TESTING)
       PASS_REGULAR_EXPRESSION "--distributed.*--require-workers"
       ENVIRONMENT "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache")
   endforeach()
+  # --max-height (working_copy/working_copy.hpp) on the one-video build commands.
+  foreach(svp_max_height_command IN ITEMS "build" "interlace;create")
+    string(REPLACE ";" "-" svp_max_height_test_name "${svp_max_height_command}")
+    add_test(NAME svp-builder-${svp_max_height_test_name}-offers-max-height
+             COMMAND svp-builder ${svp_max_height_command} --help)
+    set_tests_properties(svp-builder-${svp_max_height_test_name}-offers-max-height PROPERTIES
+      PASS_REGULAR_EXPRESSION "--max-height"
+      ENVIRONMENT "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache")
+  endforeach()
+  add_test(NAME svp-builder-build-rejects-max-height-below-raster
+           COMMAND svp-builder build in.mp4 --out out.svp --max-height 639)
+  set_tests_properties(svp-builder-build-rejects-max-height-below-raster PROPERTIES
+    PASS_REGULAR_EXPRESSION "--max-height: Value 639 not in range"
+    ENVIRONMENT "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache")
   set_tests_properties(
     svp-builder-help-without-model-cache
     svp-builder-version-without-model-cache

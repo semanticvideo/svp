@@ -110,7 +110,7 @@ DecodedCanonicalFrames decode_visual_entity_window(
 
   std::ostringstream command;
   command << shell_quote(ffmpeg_path) << " -v error -ss " << seconds(start_us)
-          << " -i " << shell_quote(media_plan.source_path)
+          << " -i " << shell_quote(media::frame_source_path(media_plan))
           << " -t " << seconds(duration_us)
           << " -vf fps=" << std::setprecision(12) << frames_per_second
           << ",scale=" << width << ':' << height

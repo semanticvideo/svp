@@ -94,14 +94,20 @@ EvidenceCropJob make_crop_job(const EvidenceCropOptions& options,
                               const EvidenceCropGeometry& geometry,
                               std::size_t ordinal,
                               int jpeg_quality) {
-  return EvidenceCropJob{.ordinal = ordinal,
-                         .seek_us = input.source_timestamp_us,
-                         .left = geometry.source_left,
-                         .top = geometry.source_top,
-                         .width = geometry.source_width,
-                         .height = geometry.source_height,
-                         .image_format = options.crop_image_format,
-                         .jpeg_quality = jpeg_quality};
+  EvidenceCropJob job{.ordinal = ordinal,
+                      .seek_us = input.source_timestamp_us,
+                      .left = geometry.source_left,
+                      .top = geometry.source_top,
+                      .width = geometry.source_width,
+                      .height = geometry.source_height,
+                      .image_format = options.crop_image_format,
+                      .jpeg_quality = jpeg_quality};
+  if (options.source_media_is_working_copy) {
+    const CropFrameScale scale = crop_frame_scale(options);
+    job.frame_width = scale.src_w;
+    job.frame_height = scale.src_h;
+  }
+  return job;
 }
 
 constexpr const char* kOneCropPerObservationPolicy = "one_per_observation";

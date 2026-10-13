@@ -130,6 +130,7 @@ Common options:
 | `--ocr-performance <profile>` | OCR profile: `serial`, `background`, `conservative`, or `fast` (default: `background`) |
 | `--allow-fallback-diarization` | Allow explicit fallback when sherpa-onnx is unavailable |
 | `--force-single-speaker` | Intentionally skip diarization and declare one speaker |
+| `--max-height <n>` | Analyse frames from a working copy scaled to fit `n` displayed lines (at least 640) when the video is taller; the package still describes the source. Also on `interlace create`. See [Analyse a 4K video at 1080p](../README.md#analyse-a-4k-video-at-1080p---max-height) |
 
 ### SVPI interlace commands
 

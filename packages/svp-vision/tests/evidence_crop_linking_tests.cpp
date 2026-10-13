@@ -1,4 +1,5 @@
 #include "svp/vision/evidence_crop.hpp"
+#include "svp/vision/evidence_crop_work.hpp"
 #include "svp/vision/foundation_ocr_staging.hpp"
 #include "svp/vision/ocr_generation.hpp"
 
@@ -617,6 +618,73 @@ void test_full_coverage_status() {
 
 }  // namespace
 
+// Crops of a working copy (svp-builder build --max-height) keep their
+// source-frame rectangles; the job carries the source frame size, and the
+// filter cuts the same fraction of whatever frame the copy decodes to, then
+// scales to the size the source crop would have.
+void test_working_copy_crops_keep_source_rectangles() {
+  svp::vision::EvidenceCropOptions options;
+  options.ocr_frame_width = 1920;
+  options.ocr_frame_height = 1080;
+  options.source_frame_width = 3840;
+  options.source_frame_height = 2160;
+  options.crop_image_format = "jpeg";
+  options.jpeg_quality = 95;
+  svp::vision::CropGenerationInput input;
+  input.text_observation_id = "tobs_000001";
+  input.source_timestamp_us = 2'000'000;
+  // 400 OCR pixels wide: between the readability bounds once in source
+  // pixels, so the source crop is not rescaled.
+  input.bbox_left = 100;
+  input.bbox_top = 200;
+  input.bbox_right = 500;
+  input.bbox_bottom = 250;
+  input.frame_width = 1920;
+  input.frame_height = 1080;
+
+  const std::vector<svp::vision::EvidenceCropJob> source_jobs =
+      svp::vision::plan_evidence_crop_jobs(options, {input});
+  options.source_media_is_working_copy = true;
+  const std::vector<svp::vision::EvidenceCropJob> copy_jobs =
+      svp::vision::plan_evidence_crop_jobs(options, {input});
+  require(source_jobs.size() == 1 && copy_jobs.size() == 1, "one crop job each");
+  const svp::vision::EvidenceCropJob& source_job = source_jobs[0];
+  const svp::vision::EvidenceCropJob& copy_job = copy_jobs[0];
+  require(source_job.frame_width == 0 && source_job.frame_height == 0,
+          "a crop of the source names no frame size");
+  require(copy_job.left == source_job.left && copy_job.top == source_job.top &&
+              copy_job.width == source_job.width && copy_job.height == source_job.height,
+          "a working copy's crop keeps the source rectangle");
+  require(copy_job.frame_width == 3840 && copy_job.frame_height == 2160,
+          "a working copy's crop names the source frame size");
+
+  // The source crop's filter is exactly what it has always been.
+  const std::string rectangle = std::to_string(source_job.width) + ":" +
+                                std::to_string(source_job.height) + ":" +
+                                std::to_string(source_job.left) + ":" +
+                                std::to_string(source_job.top);
+  require(svp::vision::evidence_crop_filter(source_job) ==
+              "crop=" + rectangle + ",format=yuvj420p",
+          "source crop filter: " + svp::vision::evidence_crop_filter(source_job));
+  const std::string expected =
+      "crop=w=iw*" + std::to_string(copy_job.width) + "/3840:h=ih*" +
+      std::to_string(copy_job.height) + "/2160:x=iw*" + std::to_string(copy_job.left) +
+      "/3840:y=ih*" + std::to_string(copy_job.top) + "/2160,scale=" +
+      std::to_string(copy_job.width) + ":" + std::to_string(copy_job.height) +
+      ",format=yuvj420p";
+  require(svp::vision::evidence_crop_filter(copy_job) == expected,
+          "working copy crop filter: " + svp::vision::evidence_crop_filter(copy_job));
+
+  // A narrow crop is enlarged for the re-read in both cases, to one size.
+  svp::vision::EvidenceCropJob narrow = copy_job;
+  narrow.width = 200;
+  narrow.height = 40;
+  require(svp::vision::evidence_crop_filter(narrow).find(",scale=400:80,") !=
+              std::string::npos,
+          "a narrow working copy crop scales to the source crop's readable size");
+  std::cout << "test_working_copy_crops_keep_source_rectangles: passed\n";
+}
+
 int main() {
   test_crop_linking_with_skipped_crop();
   test_roi_hardening_linking_with_skipped_crop();
@@ -633,6 +701,7 @@ int main() {
   test_crop_result_json_coverage_fields();
   test_skip_reason_categorization();
   test_full_coverage_status();
+  test_working_copy_crops_keep_source_rectangles();
   std::cout << "All evidence crop linking tests passed.\n";
   return 0;
 }
