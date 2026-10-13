@@ -34,6 +34,7 @@ add_library(svp-vision
   src/ocr_generation/stage_completion.cpp
   src/ocr_generation/staging_io.cpp
   src/ocr_generation.cpp
+  src/ocr_recognition_reuse.cpp
   src/ocr_sample_plan.cpp
   src/ocr_temporal_sampling.cpp
   src/pp_ocr/detection.cpp
@@ -543,6 +544,38 @@ if(BUILD_TESTING)
 
   add_test(NAME svp-vision-ocr-frame-batch-tests
            COMMAND svp-vision-ocr-frame-batch-tests)
+
+  add_executable(svp-vision-ocr-recognition-reuse-tests
+    tests/ocr_recognition_reuse_tests.cpp
+  )
+
+  target_compile_features(svp-vision-ocr-recognition-reuse-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-ocr-recognition-reuse-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-ocr-recognition-reuse-tests
+           COMMAND svp-vision-ocr-recognition-reuse-tests)
+
+  add_executable(svp-vision-ocr-reconciliation-tests
+    tests/ocr_reconciliation_tests.cpp
+  )
+
+  target_compile_features(svp-vision-ocr-reconciliation-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-ocr-reconciliation-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-ocr-reconciliation-tests
+           COMMAND svp-vision-ocr-reconciliation-tests)
 
   add_executable(svp-vision-ocr-numeric-parser-tests
     tests/ocr_numeric_parser_tests.cpp

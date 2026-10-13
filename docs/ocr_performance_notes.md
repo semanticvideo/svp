@@ -75,7 +75,10 @@ Sources:
 - Preserve OCR quality and behavior:
   - No downscaling as a speed fix.
   - No semantic recognition changes.
-  - No output-changing shortcuts.
+  - No output-changing shortcuts. The one deliberate exception is per-box
+    recognition reuse (below), measured against compliance results before it
+    was adopted. Readable-text fixes (below) change output on purpose: they
+    correct decoding and grouping, not speed.
 - Keep runtime memory conservative:
   - The user-approved experiment range is about 1-2 GB.
   - Around 3 GB is not acceptable.
@@ -514,3 +517,86 @@ ONNX Runtime at `max(1, logical_cpus / 2)` on macOS. On other platforms ONNX
 Runtime uses cpuinfo, which SVP does not reproduce, so the plan keeps `auto`
 there and reports `host_independent: false`; a distributed coordinator must
 send concrete values.
+
+## Per-Box Recognition Reuse
+
+Detection still runs on every OCR sample. A detected box that matches a box
+of the previous sample (IoU above 0.5) and whose pixels barely changed since
+it was last recognized (at most 0.5% of the box's pixels differ by more than
+20 on 0-255 luma, compared on a 640-pixel-wide grayscale analysis frame)
+takes that recognition's text and score instead of being recognized again.
+A box is recognized again after at most 2 reuses in a row. The rule, its
+constants, and the measurement behind them live in
+`packages/svp-vision/include/svp/vision/ocr_recognition_reuse.hpp`.
+
+The re-read cap is enforced by fixed reuse groups of 3 consecutive sample
+ordinals: the first sample of a group recognizes every box, and a sample only
+reuses readings of earlier samples of its own group. OCR batches are cut on
+group boundaries (`partition_ocr_samples`; `ocr.frame_batch` version 2
+rejects other batches), so a sample's records do not depend on where the plan
+was cut or which Mac ran it. The real-model loopback test compares the batched
+payload with the whole plan run as one batch.
+
+Reused readings are marked in the frame-batch payload (`"reused":true`).
+Reconciliation counts them as sightings (`detection_count`, source frames,
+time span, box): the box was detected on that frame. Confidence, the
+single-sighting filter, and the +0.1 repeated-reading bonus count only
+recognized readings, so a copied reading never corroborates itself.
+
+Validation builds (local, non-distributed, compliance flags, Apple M4 with
+16 GB, run one at a time; the baseline is the parent commit):
+
+| Video | OCR stage (s) | Whole build (s) | Boxes reused | Text observations |
+| --- | ---: | ---: | ---: | ---: |
+| Gator 9-25 (1080p, 620 s) | 2075 → 1136 (-45%) | 2597 → 1636 (-37%) | 57% of 28,899 | 1,912 → 1,852 |
+| Gator 8-21 (1080p, 778 s) | 1291 → 860 (-33%) | 1825 → 1369 (-25%) | 50% of 15,478 | 2,108 → 1,997 |
+| RV Park (4K whiteboard, 1031 s) | 1349 → 1119 (-17%) | 2534 → 2220 (-12%) | 36% of 8,685 | 1,413 → 1,317 |
+| Gator 9-1-26 (1080p, 1180 s) | 557 → 495 (-11%) | 725 → 653 (-10%) | 37% of 2,367 | 435 → 396 |
+| Gator Arbor St WIDE (1080p, 53 s) | 43 → 43 | 64 → 64 | 3% of 105 | 52 → 52 |
+| All five | 5315 → 3653 (-31%) | 7745 → 5942 (-23%) | 51% | |
+
+Time saved follows recognition's share of OCR time, which is high only on
+text-heavy video: where there is little text, per-sample decoding and
+detection dominate and reuse saves little. The readings only the baseline had
+were OCR variants of text the branch still read (for example `su8to` for
+`subto`, `elips:544` for `flips:544`) or junk. Compliance (Jev only, OSS
+escalation off) kept every on-screen comment it made on the baseline packages
+(17 over the five videos) and every flagged on-screen line was still in the
+branch packages; it also made a few comments on the branch packages that it
+did not make on the baseline.
+
+## Readable Text
+
+Three fixes so a reading holds what the screen says, once:
+
+- **Spaces.** PP-OCR recognizers trained with `use_space_char` output the
+  space as one class past the character list (blank, the 18,708 characters of
+  `inference.yml`, then the space: 18,710 classes). The CTC decoder only knew
+  the list, so every space was dropped ("Level2Investor:SplitBetweenIncome").
+  It now decodes that class as a space and trims spaces at either end.
+- **Apostrophes.** The list writes an apostrophe inside single quotes as two
+  (`''''`), and the loader kept both, so every apostrophe came out doubled
+  ("you''re").
+- **One observation per line.** Readings were grouped by exact text, so each
+  clipped or misread reading of the same line ("nvestor do to the park",
+  "ouy this park today") became its own observation with its own evidence
+  crop. Readings in the same place (box IoU > 0.3) within 5 s whose text is
+  near-identical now join one observation: one is a piece of the other
+  (ignoring up to 2 garbled characters at each end of the piece) or they are
+  at least 80% alike by edit distance. Readings with different digits never
+  join, so a changed number stays its own observation. The most-read text
+  (then the longest) names the observation, and its span, frames and box
+  cover every reading.
+
+None of them adds work. Measured on short slices (local builds, one at a time;
+before is this branch with reuse only, except the comments-screenshot slice,
+whose before already decoded spaces, which changes neither time nor counts):
+
+| Slice | Whole build (s) | OCR (s) | Evidence crops (s) | Text observations |
+| --- | ---: | ---: | ---: | ---: |
+| RV Park 5:25-6:25 (whiteboard) | 322 → 244 | 143 → 138 | 142 → 74 | 239 → 130 |
+| RV Park 0:00-0:40 (comments screenshot) | 138 → 115 | 54 → 52 | 55 → 35 | 95 → 64 |
+| Gator 9-25 9:00-10:00 (app screens) | 387 → 365 | 227 → 218 | 131 → 119 | 565 → 530 |
+
+On the app-screen slice, 172 of 173 distinct numbers read before are still
+read (the one gone is a map-pin label string).

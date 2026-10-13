@@ -14,6 +14,8 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -118,7 +120,7 @@ std::vector<PpOcrDetection> recognize_boxes_parallel(
     const PpOcrSession& session,
     const PpOcrOptions& options,
     const ColorRasterFrame& frame,
-    const std::vector<DetBox>& boxes) {
+    std::span<const DetBox> boxes) {
   std::vector<PpOcrDetection> results(boxes.size());
   if (boxes.empty()) return results;
 
@@ -294,7 +296,8 @@ PpOcrSession create_pp_ocr_session(const PpOcrOptions& options) {
 PpOcrFrameResult run_pp_ocr_on_frame(
     const PpOcrSession& session,
     const PpOcrOptions& options,
-    const ColorRasterFrame& frame) {
+    const ColorRasterFrame& frame,
+    const PpOcrBoxReader& read_boxes) {
   const auto frame_start = SteadyClock::now();
   PpOcrFrameResult result;
   result.frame_id = frame.frame_id;
@@ -369,9 +372,18 @@ PpOcrFrameResult run_pp_ocr_on_frame(
 
   std::size_t recognized_attempts = 0;
   const auto recognition_start = SteadyClock::now();
-  auto recognized = recognize_boxes_parallel(session, options, frame, boxes);
-  recognized_attempts = boxes.size();
-  for (auto& det : recognized) {
+  const PpOcrRecognizer recognize = [&](std::span<const DetBox> some) {
+    recognized_attempts += some.size();
+    return recognize_boxes_parallel(session, options, frame, some);
+  };
+  std::vector<PpOcrDetection> readings =
+      read_boxes ? read_boxes(frame, boxes, recognize) : recognize(boxes);
+  if (readings.size() != boxes.size()) {
+    throw std::logic_error("PP-OCR box reader returned " + std::to_string(readings.size()) +
+                           " readings for " + std::to_string(boxes.size()) + " boxes");
+  }
+  for (auto& det : readings) {
+    if (det.reused) ++result.recognition_reused_count;
     if (!det.text.empty() && det.score >= options.min_text_score) {
       result.detections.push_back(std::move(det));
     }
@@ -384,6 +396,7 @@ PpOcrFrameResult run_pp_ocr_on_frame(
       {"timestamp_us", std::to_string(frame.timestamp_us)},
       {"box_count", std::to_string(boxes.size())},
       {"recognition_attempts", std::to_string(recognized_attempts)},
+      {"recognition_reused", std::to_string(result.recognition_reused_count)},
       {"detection_count", std::to_string(result.detections.size())},
       {"preprocess_detection_ms", std::to_string(result.preprocess_detection_ms)},
       {"detection_inference_ms", std::to_string(result.detection_inference_ms)},

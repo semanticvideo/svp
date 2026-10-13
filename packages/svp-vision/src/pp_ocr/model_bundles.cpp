@@ -34,6 +34,12 @@ std::vector<std::string> load_char_dict_from_yaml(
 
       if (item.size() >= 2 && item.front() == '\'' && item.back() == '\'') {
         item = item.substr(1, item.size() - 2);
+        // YAML writes an apostrophe inside single quotes as two; without undoing
+        // that, every recognized apostrophe came out doubled.
+        for (auto at = item.find("''"); at != std::string::npos;
+             at = item.find("''", at + 1)) {
+          item.erase(at, 1);
+        }
       } else if (item.size() >= 2 && item.front() == '"' && item.back() == '"') {
         item = item.substr(1, item.size() - 2);
       }

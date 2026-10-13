@@ -3,9 +3,11 @@
 #include "parameter_fields.hpp"
 #include "svp/exec/blake3_digest.hpp"
 #include "svp/vision/ocr_generation.hpp"
+#include "svp/vision/ocr_recognition_reuse.hpp"
 #include "svp/vision/tasks/pp_ocr_parameters.hpp"
 
 #include <stdexcept>
+#include <string>
 
 namespace svp::vision::tasks {
 namespace {
@@ -43,6 +45,10 @@ std::vector<OcrSample> samples_from_json(const Json& value) {
       fields().reject(item + " is not strictly after the sample before it");
     }
     samples.push_back(sample);
+  }
+  if (!ocr_reuse_group_starts_at(samples.front().ordinal)) {
+    fields().reject("samples[0] does not start a recognition reuse group (ordinal a multiple of " +
+                    std::to_string(kOcrReuseGroupSamples) + ")");
   }
   return samples;
 }

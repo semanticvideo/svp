@@ -1,5 +1,7 @@
 #include "svp/vision/ocr_batch_policy.hpp"
 
+#include "svp/vision/ocr_recognition_reuse.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -24,12 +26,16 @@ std::uint64_t ocr_batch_sample_count(const OcrBatchPolicy& policy) {
   validate_ocr_batch_policy(policy);
   const double samples =
       std::floor(policy.target_task_seconds / policy.estimated_seconds_per_sample);
-  // A ratio too large for uint64 still means "everything in one batch".
+  // A ratio too large for uint64 still means "everything in one batch", which
+  // starts at ordinal 0 and so on a group boundary.
   constexpr auto kMaxCount = std::numeric_limits<std::uint64_t>::max();
-  if (!(samples < static_cast<double>(kMaxCount))) {
+  constexpr std::uint64_t kLargestAligned =
+      kMaxCount / kOcrReuseGroupSamples * kOcrReuseGroupSamples;
+  if (!(samples < static_cast<double>(kLargestAligned))) {
     return kMaxCount;
   }
-  return std::max<std::uint64_t>(1, static_cast<std::uint64_t>(samples));
+  const std::uint64_t count = std::max<std::uint64_t>(1, static_cast<std::uint64_t>(samples));
+  return (count + kOcrReuseGroupSamples - 1) / kOcrReuseGroupSamples * kOcrReuseGroupSamples;
 }
 
 std::vector<OcrSampleBatch> partition_ocr_samples(std::size_t sample_count,

@@ -40,11 +40,13 @@ struct OcrFrameBatchWorkerEnvironment {
   bool record_start_failures = false;
 };
 
-// Registers ocr.frame_batch version 1 with its strict parameter validator.
+// Registers ocr.frame_batch (kOcrFrameBatchTaskTypeVersion) with its strict
+// parameter validator.
 //
 // The task decodes the spec's samples from its `source` input and runs PP-OCR
-// on each, returning one OcrSampleDetections JSONL output
-// (kOcrFrameDetectionsRole), one record per sample in parameter order. Before
+// on each (run_ocr_frame_batch, recognition reuse included), returning one
+// OcrSampleDetections JSONL output (kOcrFrameDetectionsRole), one record per
+// sample in parameter order; diagnostics count recognized and reused boxes. Before
 // running it requires the spec's model_refs to name exactly the parameters'
 // detector and recognizer, and the worker's loaded bundles to match those
 // refs' bundle_blake3. PP-OCR sessions are pooled for the registry's lifetime

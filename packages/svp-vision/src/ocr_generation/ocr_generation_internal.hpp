@@ -37,6 +37,9 @@ struct FrameDetection {
   int bbox_top = 0;
   int bbox_right = 0;
   int bbox_bottom = 0;
+  // Detected on this frame with an earlier frame's recognition copied in
+  // (OcrTextDetection::reused).
+  bool reused = false;
 };
 
 struct ReconciledObservation {
@@ -102,6 +105,12 @@ struct RoiHardeningSummary {
     const std::string& raw_text,
     double confidence);
 
+// Groups detections by text key and box overlap into observations. Every
+// detection in a group counts as a sighting (detection_count, frames, time
+// span, box), reused ones included: the box was detected on that frame and
+// its pixels had not changed. Confidence, the single-sighting confidence
+// filter, and the repeated-reading bonus count only recognized detections,
+// so a copied reading never corroborates itself.
 [[nodiscard]] std::vector<ReconciledObservation> reconcile_detections(
     const std::vector<FrameDetection>& detections,
     int total_frames,

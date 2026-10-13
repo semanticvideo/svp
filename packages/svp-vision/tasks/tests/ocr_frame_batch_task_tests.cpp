@@ -146,6 +146,8 @@ void test_parameter_validator_rejects() {
        }},
       {"length mismatch", [](Json& v) { v["samples"]["timestamps_us"].push_back(5'000'000); }},
       {"descending ordinals", [](Json& v) { v["samples"]["ordinals"] = Json::array({4, 3}); }},
+      {"first sample inside a reuse group",
+       [](Json& v) { v["samples"]["ordinals"] = Json::array({4, 5}); }},
       {"duplicate timestamps",
        [](Json& v) { v["samples"]["timestamps_us"] = Json::array({3'000'000, 3'000'000}); }},
       {"negative timestamp",
@@ -190,8 +192,10 @@ void test_task_spec() {
   const vision::OcrSampleBatch batch{.first_ordinal = 3, .count = 2};
   const exec::TaskSpec spec = tasks::make_ocr_frame_batch_task_spec(task_inputs(), plan, batch);
   require(spec.task_id == "task.ocr.frame_batch.samples_000003_000004", "task id");
-  require(spec.task_type == tasks::kOcrFrameBatchTaskType && spec.task_type_version == 1,
-          "task type");
+  require(spec.task_type == tasks::kOcrFrameBatchTaskType &&
+              spec.task_type_version == tasks::kOcrFrameBatchTaskTypeVersion &&
+              tasks::kOcrFrameBatchTaskTypeVersion == 2,
+          "task type (version 2: recognition reuse)");
   require(spec.model_refs.size() == 2 &&
               spec.model_refs[0].model_id < spec.model_refs[1].model_id,
           "model refs sorted by model_id");
@@ -221,6 +225,12 @@ void test_task_spec() {
                                                     {.first_ordinal = 4, .count = 2});
       },
       "a batch outside the plan is rejected");
+  require_throws<std::invalid_argument>(
+      [&] {
+        (void)tasks::make_ocr_frame_batch_task_spec(task_inputs(), plan,
+                                                    {.first_ordinal = 1, .count = 2});
+      },
+      "a batch starting inside a recognition reuse group is rejected");
 
   exec::TaskTypeRegistry registry;
   tasks::register_ocr_frame_batch_task(registry, {});

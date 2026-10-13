@@ -140,6 +140,7 @@ void collect_ocr_sample(const OcrSampleDetections& sample,
     fdet.bbox_top = det.bbox_top;
     fdet.bbox_right = det.bbox_right;
     fdet.bbox_bottom = det.bbox_bottom;
+    fdet.reused = det.reused;
     collected.detections.push_back(std::move(fdet));
   }
 }

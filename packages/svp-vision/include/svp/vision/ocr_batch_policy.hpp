@@ -11,6 +11,10 @@ namespace svp::vision {
 // the output: every batch returns one record per sample and the reducer
 // consumes them in sample-ordinal order, so any partition reduces to the same
 // bytes (tested for sizes 1, 3, 8, all-in-one, and shuffled completion).
+// Batches hold whole recognition reuse groups (ocr_recognition_reuse.hpp):
+// a sample's records depend on the earlier samples of its group, so every
+// batch starts where a group starts, and then any such partition produces the
+// same records.
 //
 // Sizing is by time, not by a frame count: a batch holds as many samples as
 // fit in target_task_seconds at the current per-sample cost estimate. Per
@@ -40,11 +44,13 @@ struct OcrSampleBatch {
 // Throws std::invalid_argument unless both policy values are finite and > 0.
 void validate_ocr_batch_policy(const OcrBatchPolicy& policy);
 
-// Samples per batch: floor(target / estimate), at least one.
+// Samples per batch: floor(target / estimate) rounded up to whole reuse
+// groups (kOcrReuseGroupSamples), so at least one group.
 [[nodiscard]] std::uint64_t ocr_batch_sample_count(const OcrBatchPolicy& policy);
 
 // Cuts [0, sample_count) into consecutive batches of ocr_batch_sample_count
-// samples (the last may be shorter). Empty for sample_count == 0.
+// samples (the last may be shorter); every batch starts a reuse group. Empty
+// for sample_count == 0.
 [[nodiscard]] std::vector<OcrSampleBatch> partition_ocr_samples(
     std::size_t sample_count,
     const OcrBatchPolicy& policy);

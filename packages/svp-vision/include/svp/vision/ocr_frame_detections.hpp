@@ -45,6 +45,10 @@ struct OcrTextDetection {
   int bbox_top = 0;
   int bbox_right = 0;
   int bbox_bottom = 0;
+  // The box was detected on this sample, but its text and confidence are an
+  // earlier sample's recognition of the same unchanged box
+  // (ocr_recognition_reuse.hpp), not a reading of their own.
+  bool reused = false;
 
   bool operator==(const OcrTextDetection&) const = default;
 };
@@ -72,8 +76,10 @@ class OcrFrameDetectionsCodecError : public std::runtime_error {
 };
 
 // Canonical JSON form of one record (sorted keys, integers for time, sizes,
-// and boxes; confidence in shortest round-trip floating-point form):
-//   ok:            {"detections":[{"bbox":[l,t,r,b],"confidence":c,"text":s}],
+// and boxes; confidence in shortest round-trip floating-point form; "reused"
+// only on reused detections, always true):
+//   ok:            {"detections":[{"bbox":[l,t,r,b],"confidence":c,
+//                                  "reused":true,"text":s}],
 //                   "frame_height","frame_width","sample_ordinal","status",
 //                   "timestamp_us"}
 //   decode_missed: {"error","sample_ordinal","status","timestamp_us"}
