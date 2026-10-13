@@ -576,19 +576,20 @@ if(BUILD_TESTING)
       PASS_REGULAR_EXPRESSION "--distributed.*--require-workers"
       ENVIRONMENT "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache")
   endforeach()
-  # --max-height (working_copy/working_copy.hpp) on the one-video build commands.
-  foreach(svp_max_height_command IN ITEMS "build" "interlace;create")
-    string(REPLACE ";" "-" svp_max_height_test_name "${svp_max_height_command}")
-    add_test(NAME svp-builder-${svp_max_height_test_name}-offers-max-height
-             COMMAND svp-builder ${svp_max_height_command} --help)
-    set_tests_properties(svp-builder-${svp_max_height_test_name}-offers-max-height PROPERTIES
-      PASS_REGULAR_EXPRESSION "--max-height"
+  # --max-resolution (working_copy/working_copy.hpp) on the one-video build commands.
+  foreach(svp_max_resolution_command IN ITEMS "build" "interlace;create")
+    string(REPLACE ";" "-" svp_max_resolution_test_name "${svp_max_resolution_command}")
+    add_test(NAME svp-builder-${svp_max_resolution_test_name}-offers-max-resolution
+             COMMAND svp-builder ${svp_max_resolution_command} --help)
+    set_tests_properties(
+      svp-builder-${svp_max_resolution_test_name}-offers-max-resolution PROPERTIES
+      PASS_REGULAR_EXPRESSION "--max-resolution"
       ENVIRONMENT "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache")
   endforeach()
-  add_test(NAME svp-builder-build-rejects-max-height-below-raster
-           COMMAND svp-builder build in.mp4 --out out.svp --max-height 639)
-  set_tests_properties(svp-builder-build-rejects-max-height-below-raster PROPERTIES
-    PASS_REGULAR_EXPRESSION "--max-height: Value 639 not in range"
+  add_test(NAME svp-builder-build-rejects-max-resolution-below-raster
+           COMMAND svp-builder build in.mp4 --out out.svp --max-resolution 639)
+  set_tests_properties(svp-builder-build-rejects-max-resolution-below-raster PROPERTIES
+    PASS_REGULAR_EXPRESSION "--max-resolution: Value 639 not in range"
     ENVIRONMENT "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache")
   set_tests_properties(
     svp-builder-help-without-model-cache

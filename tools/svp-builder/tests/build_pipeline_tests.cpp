@@ -545,12 +545,12 @@ void test_verbose_package_build_writes_foundation_json_sidecar() {
   std::filesystem::remove_all(tmp_dir);
 }
 
-// --max-height on a package build that cannot or need not use a working
+// --max-resolution on a package build that cannot or need not use a working
 // copy: the build ends as it does without the flag (this synthetic package
 // does not pass strict validation either way), frames come from the source,
 // the package names no working copy, and the builder foundation JSON says
 // why.
-struct MaxHeightBuild {
+struct MaxResolutionBuild {
   svp::builder::BuildPipelineResult result;
   nlohmann::json builder_command;
   std::string processors;
@@ -559,9 +559,9 @@ struct MaxHeightBuild {
 
 // Every build runs in the same directory, so the records that name host
 // paths match.
-MaxHeightBuild run_max_height_build(std::optional<int> max_height) {
+MaxResolutionBuild run_max_resolution_build(std::optional<int> max_resolution) {
   const std::filesystem::path tmp_dir =
-      std::filesystem::temp_directory_path() / "svp_max_height_build";
+      std::filesystem::temp_directory_path() / "svp_max_resolution_build";
   std::filesystem::remove_all(tmp_dir);
   std::filesystem::create_directories(tmp_dir);
   const std::filesystem::path package_path = tmp_dir / "output.svp";
@@ -580,13 +580,13 @@ MaxHeightBuild run_max_height_build(std::optional<int> max_height) {
   options.force_single_speaker = true;
   options.verbose = true;
   options.quiet = true;
-  options.max_height = max_height;
+  options.max_resolution = max_resolution;
   options.progress_sink = sink;
 
   std::ostringstream captured_stdout;
   std::streambuf* old_cout = std::cout.rdbuf();
   std::cout.rdbuf(captured_stdout.rdbuf());
-  MaxHeightBuild build;
+  MaxResolutionBuild build;
   build.result = svp::builder::BuildPipeline{}.run(options);
   std::cout.rdbuf(old_cout);
 
@@ -600,33 +600,33 @@ MaxHeightBuild run_max_height_build(std::optional<int> max_height) {
   return build;
 }
 
-bool has_stage_events(const MaxHeightBuild& build, svp::builder::ProgressStageId stage) {
+bool has_stage_events(const MaxResolutionBuild& build, svp::builder::ProgressStageId stage) {
   return std::any_of(build.events.begin(), build.events.end(),
                      [stage](const svp::builder::ProgressEvent& event) {
                        return event.stage_id == stage;
                      });
 }
 
-void test_max_height_without_a_working_copy() {
-  const MaxHeightBuild plain = run_max_height_build(std::nullopt);
+void test_max_resolution_without_a_working_copy() {
+  const MaxResolutionBuild plain = run_max_resolution_build(std::nullopt);
   assert(!plain.processors.empty());
-  assert(!plain.builder_command.contains("max_height"));
+  assert(!plain.builder_command.contains("max_resolution"));
   assert(!plain.builder_command.contains("working_copy"));
   assert(!has_stage_events(plain, svp::builder::ProgressStageId::working_copy));
 
-  // The synthetic video is 1920x1080: a 1080 bound leaves it as is.
-  const MaxHeightBuild fits = run_max_height_build(1080);
+  // The synthetic video is 1920x1080: its 1080 short side fits a 1080 bound.
+  const MaxResolutionBuild fits = run_max_resolution_build(1080);
   assert(fits.result.exit_code == plain.result.exit_code);
-  assert(fits.builder_command.at("max_height") == 1080);
+  assert(fits.builder_command.at("max_resolution") == 1080);
   assert(fits.builder_command.at("working_copy").at("used") == false);
   assert(fits.builder_command.at("working_copy").at("reason") ==
-         "the video is not displayed taller than --max-height");
+         "the video's displayed short side is not longer than --max-resolution");
   assert(!has_stage_events(fits, svp::builder::ProgressStageId::working_copy));
   assert(fits.processors == plain.processors);
 
   // A 720 bound asks for a copy, but this ffmpeg writes none: the build
   // warns and analyses the source.
-  const MaxHeightBuild failed = run_max_height_build(720);
+  const MaxResolutionBuild failed = run_max_resolution_build(720);
   assert(failed.result.exit_code == plain.result.exit_code);
   assert(failed.builder_command.at("working_copy").at("used") == false);
   assert(!failed.builder_command.at("working_copy").at("reason").get<std::string>().empty());
@@ -1250,7 +1250,7 @@ int main() {
   test_package_build_removes_default_foundation_json_sidecar();
   test_verbose_package_build_writes_foundation_json_sidecar();
   test_serial_package_pipeline_runs_audio_before_package_write();
-  test_max_height_without_a_working_copy();
+  test_max_resolution_without_a_working_copy();
   test_warning_event_factory_for_diarization_and_index();
   test_stage_progress_event_has_progress_fields();
   test_stage_progress_zero_total_no_fraction();

@@ -35,7 +35,7 @@ struct EvidenceCropJob {
   int jpeg_quality = 0;
   // The source frame size the rectangle is measured in, set when the file the
   // crop is cut from is a working copy at a lower resolution (svp-builder
-  // build --max-height); 0 when the rectangle is in that file's own pixels.
+  // build --max-resolution); 0 when the rectangle is in that file's own pixels.
   // The cut then takes the same fraction of the decoded frame and scales it
   // to the size a crop of the source would have (evidence_crop_filter).
   int frame_width = 0;

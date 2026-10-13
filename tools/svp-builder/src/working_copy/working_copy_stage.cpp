@@ -5,20 +5,21 @@
 
 namespace svp::builder::working_copy {
 
-WorkingCopyDecision decide_working_copy(const std::optional<int>& max_height,
+WorkingCopyDecision decide_working_copy(const std::optional<int>& max_resolution,
                                         bool build_decodes_frames,
                                         const svp::media::VideoStreamProbe& primary_video) {
   WorkingCopyDecision decision;
-  if (!max_height) {
+  if (!max_resolution) {
     return decision;
   }
   if (!build_decodes_frames) {
     decision.not_used_reason = "this build decodes no frames";
     return decision;
   }
-  decision.geometry = plan_working_copy_geometry(primary_video, *max_height);
+  decision.geometry = plan_working_copy_geometry(primary_video, *max_resolution);
   if (!decision.geometry) {
-    decision.not_used_reason = "the video is not displayed taller than --max-height";
+    decision.not_used_reason =
+        "the video's displayed short side is not longer than --max-resolution";
   }
   return decision;
 }

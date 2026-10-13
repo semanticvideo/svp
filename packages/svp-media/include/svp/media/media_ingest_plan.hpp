@@ -14,7 +14,7 @@ struct MediaIngestPlan {
   VideoStreamProbe primary_video_stream;
   CanonicalAnalysisRaster canonical_raster;
   // The file frame decoders read instead of source_path: a working copy of
-  // the primary video at a lower resolution (svp-builder build --max-height)
+  // the primary video at a lower resolution (svp-builder build --max-resolution)
   // with the same frames at the same timestamps and the same rotation. Empty
   // means decoders read source_path. Everything else in the plan (probe,
   // timing, dimensions, raster) still describes source_path, and

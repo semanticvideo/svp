@@ -136,8 +136,16 @@ WorkingCopyResult make_working_copy(const WorkingCopyRequest& request) {
       result.unavailable_reason = encoder.name + " copy rejected: " + *mismatch;
       return result;
     }
-    svp::exec::SourceFingerprintRecord fingerprint =
-        svp::exec::fingerprint_source(std::string(kWorkingCopySourceId), output);
+    // A copy that cannot be fingerprinted cannot be sent or keyed; like any
+    // other copy failure, the source is then analysed instead.
+    svp::exec::SourceFingerprintRecord fingerprint;
+    try {
+      fingerprint = svp::exec::fingerprint_source(std::string(kWorkingCopySourceId), output);
+    } catch (const std::exception& error) {
+      result.unavailable_reason =
+          encoder.name + " copy cannot be fingerprinted: " + std::string(error.what());
+      return result;
+    }
     guard.release();
     result.copy = std::make_unique<WorkingCopy>(directory, request.geometry, encoder,
                                                 std::move(fingerprint), encode_seconds);
@@ -147,7 +155,7 @@ WorkingCopyResult make_working_copy(const WorkingCopyRequest& request) {
   return result;
 }
 
-nlohmann::json working_copy_processor_record(const WorkingCopy& copy, int max_height,
+nlohmann::json working_copy_processor_record(const WorkingCopy& copy, int max_resolution,
                                              const svp::media::VideoStreamProbe& source_video) {
   const WorkingCopyGeometry& geometry = copy.geometry();
   const bool swaps = rotated_a_quarter_turn(source_video.rotation_degrees);
@@ -167,7 +175,7 @@ nlohmann::json working_copy_processor_record(const WorkingCopy& copy, int max_he
       {"model_refs", nlohmann::json::array()},
       {"task_ids", nlohmann::json::array()},
       {"parameters",
-       {{"max_height", max_height},
+       {{"max_resolution", max_resolution},
         {"source_display_width", swaps ? source_video.height : source_video.width},
         {"source_display_height", swaps ? source_video.width : source_video.height},
         {"rotation_degrees", source_video.rotation_degrees},
@@ -181,8 +189,9 @@ nlohmann::json working_copy_processor_record(const WorkingCopy& copy, int max_he
       {"note",
        "Every analysed frame (color and shots, canonical frames, depth, OCR, evidence "
        "crops, keyframe embeddings, visual tracking) was decoded from this working copy, "
-       "not from the source. Media identity, timing, and dimensions in this package, and "
-       "frame and crop coordinates, describe the source."},
+       "whose displayed short side is max_resolution, not from the source. Media "
+       "identity, timing, and dimensions in this package, and frame and crop coordinates, "
+       "describe the source."},
   };
 }
 

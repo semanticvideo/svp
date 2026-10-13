@@ -1,6 +1,6 @@
 #pragma once
 
-// The --max-height step of BuildPipeline::run (working_copy.hpp): whether a
+// The --max-resolution step of BuildPipeline::run (working_copy.hpp): whether a
 // build uses a working copy at all, and the `working_copy` progress stage
 // that writes it.
 
@@ -19,15 +19,15 @@ namespace svp::builder::working_copy {
 struct WorkingCopyDecision {
   // Set when the build makes a working copy of this size.
   std::optional<WorkingCopyGeometry> geometry;
-  // Otherwise, with --max-height given, why not.
+  // Otherwise, with --max-resolution given, why not.
   std::string not_used_reason;
 };
 
-// A copy is made only when --max-height is given, the build decodes frames,
-// and the primary video is displayed taller than the bound. In every other
+// A copy is made only when --max-resolution is given, the build decodes frames,
+// and the primary video's displayed short side is longer than the bound. In every other
 // case the flag changes nothing and the build runs exactly as without it.
 [[nodiscard]] WorkingCopyDecision decide_working_copy(
-    const std::optional<int>& max_height, bool build_decodes_frames,
+    const std::optional<int>& max_resolution, bool build_decodes_frames,
     const svp::media::VideoStreamProbe& primary_video);
 
 // make_working_copy as the `working_copy` progress stage: started and

@@ -81,8 +81,8 @@ struct BuildCliOptions {
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
   bool serial_pipeline = false;
-  // --max-height (BuildPipelineOptions::max_height).
-  std::optional<int> max_height;
+  // --max-resolution (BuildPipelineOptions::max_resolution).
+  std::optional<int> max_resolution;
   // --resume / --fresh (RC2 §21), mutually exclusive.
   bool resume = false;
   bool fresh = false;
@@ -150,7 +150,7 @@ struct InterlaceCliOptions {
   bool ic_allow_fallback = false;
   bool ic_force_single = false;
   bool ic_serial_pipeline = false;
-  std::optional<int> ic_max_height;
+  std::optional<int> ic_max_resolution;
   bool ic_resume = false;
   bool ic_fresh = false;
   std::string ic_progress_mode = "auto";

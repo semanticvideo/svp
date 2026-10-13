@@ -12,7 +12,7 @@ namespace svp::builder {
 
 enum class ProgressStageId {
   media_probe,
-  // --max-height: writing the analysis working copy.
+  // --max-resolution: writing the analysis working copy.
   working_copy,
   media_binding,
   audio_extract,

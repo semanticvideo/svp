@@ -23,24 +23,26 @@ bool rotated_a_quarter_turn(std::int32_t rotation_degrees) {
 }  // namespace
 
 std::optional<WorkingCopyGeometry> plan_working_copy_geometry(
-    const svp::media::VideoStreamProbe& video, int max_height) {
-  if (video.width <= 0 || video.height <= 0 || max_height < kChromaBlockSide) {
+    const svp::media::VideoStreamProbe& video, int max_resolution) {
+  if (video.width <= 0 || video.height <= 0 || max_resolution < kChromaBlockSide) {
     return std::nullopt;
   }
   const bool swaps = rotated_a_quarter_turn(video.rotation_degrees);
   const int display_width = swaps ? video.height : video.width;
   const int display_height = swaps ? video.width : video.height;
-  if (display_height <= max_height) {
+  const int short_side = std::min(display_width, display_height);
+  const int long_side = std::max(display_width, display_height);
+  if (short_side <= max_resolution) {
     return std::nullopt;
   }
-  const int copy_display_height = max_height - (max_height % kChromaBlockSide);
-  const double factor =
-      static_cast<double>(copy_display_height) / static_cast<double>(display_height);
-  const int copy_display_width = nearest_even(display_width * factor);
-  WorkingCopyGeometry geometry{.display_width = copy_display_width,
-                               .display_height = copy_display_height};
-  geometry.stored_width = swaps ? copy_display_height : copy_display_width;
-  geometry.stored_height = swaps ? copy_display_width : copy_display_height;
+  const int copy_short_side = max_resolution - (max_resolution % kChromaBlockSide);
+  const int copy_long_side = nearest_even(
+      long_side * (static_cast<double>(copy_short_side) / static_cast<double>(short_side)));
+  const bool landscape = display_width >= display_height;
+  WorkingCopyGeometry geometry{.display_width = landscape ? copy_long_side : copy_short_side,
+                               .display_height = landscape ? copy_short_side : copy_long_side};
+  geometry.stored_width = swaps ? geometry.display_height : geometry.display_width;
+  geometry.stored_height = swaps ? geometry.display_width : geometry.display_height;
   return geometry;
 }
 

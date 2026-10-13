@@ -99,7 +99,7 @@ svp::exec::SourceFingerprintRecord fingerprint_build_source(
       .blake3 = svp::exec::blake3_digest(std::string_view{})};
 }
 
-// --max-height: only builds that decode frames make a working copy.
+// --max-resolution: only builds that decode frames make a working copy.
 bool decodes_frames(const BuildStageExecutionPlan& stage_plan) {
   return stage_plan.run_vision_plan || stage_plan.run_foundation_color ||
          stage_plan.run_foundation_ocr || stage_plan.run_package_skeleton;
@@ -224,7 +224,7 @@ DistributedTrackingWork distributed_tracking_work(const engine::TrackingWorkPlan
 }
 
 // `frame_source` fingerprints the file frames are decoded from
-// (svp::media::frame_source_path): the source, or its --max-height working
+// (svp::media::frame_source_path): the source, or its --max-resolution working
 // copy, which is then what workers receive.
 PlannedSplitExecution plan_split_execution(
     const BuildPipelineOptions& options, const BuildStageExecutionPlan& stage_plan,
@@ -414,7 +414,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
     const svp::models::ThreadPlan& thread_plan = resolved_thread_plan->plan;
 
     sink->emit(make_stage_started(ProgressStageId::media_probe));
-    // Describes the source throughout; a --max-height working copy only sets
+    // Describes the source throughout; a --max-resolution working copy only sets
     // the file frames are decoded from (frame_decode_path), after plan_json.
     svp::media::MediaIngestPlan plan =
         svp::media::build_media_ingest_plan(
@@ -423,13 +423,13 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
                               options.ffprobe_path));
     const nlohmann::json plan_json = svp::media::media_ingest_plan_to_json(plan);
     sink->emit(make_stage_completed(ProgressStageId::media_probe));
-    // --max-height (working_copy/working_copy.hpp). Where it changes nothing,
+    // --max-resolution (working_copy/working_copy.hpp). Where it changes nothing,
     // the build runs exactly as without it.
     const working_copy::WorkingCopyDecision working_copy_decision =
-        working_copy::decide_working_copy(effective_options.max_height,
+        working_copy::decide_working_copy(effective_options.max_resolution,
                                           decodes_frames(stage_plan), plan.primary_video_stream);
     if (!working_copy_decision.geometry) {
-      effective_options.max_height.reset();
+      effective_options.max_resolution.reset();
     }
 
     const bool user_supplied_staging = !effective_options.staging_dir.empty();
@@ -484,7 +484,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
                                                       : effective_options.journal_output_path);
     const std::string build_session_id = journal_session.prepare();
 
-    // --max-height (working_copy/working_copy.hpp): frames are decoded from a
+    // --max-resolution (working_copy/working_copy.hpp): frames are decoded from a
     // copy scaled to fit, here and on every worker. The copy is removed when
     // this function returns, however the build ends.
     std::unique_ptr<working_copy::WorkingCopy> analysis_copy;
@@ -511,7 +511,7 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
         analysis_copy ? analysis_copy->fingerprint() : source;
     const std::optional<nlohmann::json> working_copy_record =
         analysis_copy ? std::optional(working_copy::working_copy_processor_record(
-                            *analysis_copy, *effective_options.max_height,
+                            *analysis_copy, *effective_options.max_resolution,
                             plan.primary_video_stream))
                       : std::nullopt;
 
@@ -823,8 +823,8 @@ BuildPipelineResult BuildPipeline::run(const BuildPipelineOptions& options) cons
       output["builder_command"]["runtime_tools"] =
           runtime_tools_json(*effective_options.runtime_tools);
     }
-    if (options.max_height) {
-      output["builder_command"]["max_height"] = *options.max_height;
+    if (options.max_resolution) {
+      output["builder_command"]["max_resolution"] = *options.max_resolution;
       output["builder_command"]["working_copy"] =
           working_copy::working_copy_summary(analysis_copy.get(), working_copy_unavailable);
     }

@@ -618,7 +618,7 @@ void test_full_coverage_status() {
 
 }  // namespace
 
-// Crops of a working copy (svp-builder build --max-height) keep their
+// Crops of a working copy (svp-builder build --max-resolution) keep their
 // source-frame rectangles; the job carries the source frame size, and the
 // filter cuts the same fraction of whatever frame the copy decodes to, then
 // scales to the size the source crop would have.

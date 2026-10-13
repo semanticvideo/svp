@@ -1,9 +1,10 @@
 #pragma once
 
-// The analysis working copy of svp-builder build --max-height.
+// The analysis working copy of svp-builder build --max-resolution.
 //
-// When the primary video is displayed taller than --max-height, the build
-// writes one copy of it scaled to fit (working_copy_geometry.hpp), with every
+// When the primary video's displayed short side is longer than
+// --max-resolution, the build writes one copy of it scaled so that side fits
+// (working_copy_geometry.hpp), with every
 // frame at its source timestamp and the audio copied untouched
 // (working_copy_encoder.hpp), checks it (working_copy_check.hpp), and decodes
 // every analysed frame from it: color and shots, canonical frames, depth,
@@ -88,13 +89,13 @@ struct WorkingCopyResult {
 
 // The provenance/processors.jsonl record of a build whose frames were
 // analysed from `copy`: what it is (size, encoder, timing and audio rules),
-// for which --max-height, and what read it. It names no path or time, so it
+// for which --max-resolution, and what read it. It names no path or time, so it
 // is the same for every build of the same source with the same options on
 // the same Mac, local or distributed.
 [[nodiscard]] nlohmann::json working_copy_processor_record(
-    const WorkingCopy& copy, int max_height, const svp::media::VideoStreamProbe& source_video);
+    const WorkingCopy& copy, int max_resolution, const svp::media::VideoStreamProbe& source_video);
 
-// The builder foundation JSON's account of --max-height (not packaged):
+// The builder foundation JSON's account of --max-resolution (not packaged):
 // whether a copy was used, and its size, encoder, bytes, and encode time, or
 // why none was made.
 [[nodiscard]] nlohmann::json working_copy_summary(const WorkingCopy* copy,

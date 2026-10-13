@@ -1,4 +1,4 @@
-// svp-builder build --max-height: the working copy's size, encoders and
+// svp-builder build --max-resolution: the working copy's size, encoders and
 // command, the checks that decide whether it may stand in for the source, the
 // command runner, its provenance record, and its place in the build-inputs
 // digest. With a real ffmpeg and ffprobe ($SVP_FFMPEG / $SVP_FFPROBE or PATH)
@@ -12,6 +12,9 @@
 #include "working_copy/working_copy_check.hpp"
 #include "working_copy/working_copy_encoder.hpp"
 #include "working_copy/working_copy_geometry.hpp"
+#include "working_copy/working_copy_stage.hpp"
+
+#include "svp/builder/build_progress.hpp"
 
 #include "svp/exec/blake3_digest.hpp"
 #include "svp/media/media_ingest_plan.hpp"
@@ -77,48 +80,61 @@ bool contains(const std::vector<std::string>& words, const std::vector<std::stri
 
 // --- size --------------------------------------------------------------------
 
-void test_geometry_fits_the_displayed_height() {
-  // 4K landscape to 1080 lines.
+void test_geometry_bounds_the_displayed_short_side() {
+  // 4K landscape to 1080p.
   const auto uhd = wc::plan_working_copy_geometry(video(3840, 2160, 0), 1080);
   require(uhd && uhd->stored_width == 1920 && uhd->stored_height == 1080 &&
               uhd->display_width == 1920 && uhd->display_height == 1080,
-          "3840x2160 fits 1080 as 1920x1080");
+          "3840x2160 at 1080 is 1920x1080");
 
-  // At or below the bound: used as is.
+  // A short side at or below the bound: used as is, landscape or portrait.
   require(!wc::plan_working_copy_geometry(video(1920, 1080, 0), 1080),
-          "a 1080-line video is not copied for 1080");
+          "a 1920x1080 video is not copied for 1080");
+  require(!wc::plan_working_copy_geometry(video(1080, 1920, 0), 1080),
+          "a 1080x1920 video is not copied for 1080");
+  require(!wc::plan_working_copy_geometry(video(1920, 1080, 90), 1080),
+          "a rotated 1920x1080 video is not copied for 1080");
   require(!wc::plan_working_copy_geometry(video(3840, 2160, 0), 2160),
-          "a video exactly as tall as the bound is not copied");
+          "a short side exactly the bound is not copied");
 
-  // A quarter-turn rotation: the displayed height is the stored width, and
-  // the copy keeps the stored orientation.
+  // Portrait 4K, whether its frames are coded tall or coded wide with a
+  // quarter-turn rotation, is analysed 1080 wide and 1920 tall, the frames
+  // OCR reads from it today. A rotated copy keeps the stored orientation.
+  const auto tall = wc::plan_working_copy_geometry(video(2160, 3840, 0), 1080);
+  require(tall && tall->display_width == 1080 && tall->display_height == 1920 &&
+              tall->stored_width == 1080 && tall->stored_height == 1920,
+          "a 2160x3840 frame at 1080 is 1080x1920");
   for (const int rotation : {90, -90, 270, -270}) {
-    const auto portrait = wc::plan_working_copy_geometry(video(3840, 2160, rotation), 1080);
-    require(portrait && portrait->display_width == 608 && portrait->display_height == 1080 &&
-                portrait->stored_width == 1080 && portrait->stored_height == 608,
-            "rotated 4K fits 1080 tall as 608x1080 (rotation " + std::to_string(rotation) + ")");
+    const auto rotated = wc::plan_working_copy_geometry(video(3840, 2160, rotation), 1080);
+    require(rotated && rotated->display_width == 1080 && rotated->display_height == 1920 &&
+                rotated->stored_width == 1920 && rotated->stored_height == 1080,
+            "3840x2160 rotated " + std::to_string(rotation) +
+                " degrees at 1080 is 1080x1920 displayed, 1920x1080 stored");
   }
-  require(!wc::plan_working_copy_geometry(video(1080, 1920, 90), 1080),
-          "a 1920x1080 video stored portrait and rotated displays 1080 tall");
   const auto half_turn = wc::plan_working_copy_geometry(video(3840, 2160, 180), 1080);
   require(half_turn && half_turn->stored_width == 1920 && half_turn->stored_height == 1080,
           "a half turn does not swap sides");
 
-  // An odd bound rounds down to even lines; the width to the nearest even.
+  // An odd bound rounds down to an even short side; the long side goes to the
+  // nearest even number.
   const auto odd = wc::plan_working_copy_geometry(video(3840, 2160, 0), 1081);
   require(odd && odd->display_height == 1080 && odd->display_width == 1920,
-          "an odd bound gives an even height");
+          "an odd bound gives an even short side");
   const auto scope = wc::plan_working_copy_geometry(video(4096, 1716, 0), 1080);
   require(scope && scope->display_height == 1080 && scope->display_width == 2578,
-          "4096x1716 fits 1080 as 2578x1080 (2577.9 to even)");
+          "4096x1716 at 1080 is 2578x1080 (2577.9 to even)");
+  const auto scope_tall = wc::plan_working_copy_geometry(video(1716, 4096, 0), 1080);
+  require(scope_tall && scope_tall->display_width == 1080 &&
+              scope_tall->display_height == 2578,
+          "1716x4096 at 1080 is 1080x2578");
 
   // Non-square pixels: both stored sides scale by one factor.
   const auto anamorphic = wc::plan_working_copy_geometry(video(1440, 1080, 0), 720);
   require(anamorphic && anamorphic->stored_width == 960 && anamorphic->stored_height == 720,
-          "1440x1080 fits 720 as 960x720 stored");
+          "1440x1080 at 720 is 960x720 stored");
 
   require(!wc::plan_working_copy_geometry(video(0, 0, 0), 1080), "no size, no copy");
-  require(wc::kMinimumMaxHeight == svp::media::kCanonicalLongestDisplayDimension,
+  require(wc::kMinimumMaxResolution == svp::media::kCanonicalLongestDisplayDimension,
           "the smallest bound is the canonical raster's longest side");
 }
 
@@ -176,7 +192,7 @@ void test_stream_start_offset() {
 
 // --- build inputs ------------------------------------------------------------
 
-void test_build_inputs_digest_names_max_height_only_when_given() {
+void test_build_inputs_digest_names_max_resolution_only_when_given() {
   svp::builder::BuildPipelineOptions options;
   options.source_path = "/media/in.mp4";
   options.output_path = "/out/in.svp";
@@ -186,11 +202,12 @@ void test_build_inputs_digest_names_max_height_only_when_given() {
   const nlohmann::json plan = {{"schema_version", "test"}};
   const nlohmann::json without =
       svp::builder::engine::describe_build_inputs(options, source, plan, {});
-  require(!without["options"].contains("max_height"), "no --max-height, no field");
-  options.max_height = 1080;
+  require(!without["options"].contains("max_resolution"), "no --max-resolution, no field");
+  options.max_resolution = 1080;
   const nlohmann::json with =
       svp::builder::engine::describe_build_inputs(options, source, plan, {});
-  require(with["options"]["max_height"] == 1080, "--max-height is part of the build inputs");
+  require(with["options"]["max_resolution"] == 1080,
+          "--max-resolution is part of the build inputs");
   require(svp::builder::engine::build_inputs_blake3(with) !=
               svp::builder::engine::build_inputs_blake3(without),
           "a journal of one cannot resume as the other");
@@ -236,6 +253,67 @@ void test_cancellable_command() {
           "the command stops promptly");
 }
 
+// --- a copy that cannot be fingerprinted --------------------------------------
+
+class CapturingSink : public svp::builder::BuildProgressSink {
+ public:
+  void emit(const svp::builder::ProgressEvent& event) override { events.push_back(event); }
+  std::vector<svp::builder::ProgressEvent> events;
+};
+
+void write_script(const fs::path& path, const std::string& body) {
+  std::ofstream(path) << "#!/bin/sh\n" << body;
+  fs::permissions(path, fs::perms::owner_all, fs::perm_options::add);
+}
+
+// An ffmpeg that "writes" the copy as a directory (so ffprobe, faked to
+// describe a good copy, passes it, and hashing it fails), and records where.
+// The copy cannot be fingerprinted, so the build analyses the source: no
+// copy, the reason, a warning, and no directory left behind.
+void test_unfingerprintable_copy_falls_back_to_the_source() {
+  const TemporaryDirectory scratch("svp-working-copy-fingerprint");
+  const fs::path ffmpeg = scratch.path() / "ffmpeg";
+  const fs::path ffprobe = scratch.path() / "ffprobe";
+  const fs::path written = scratch.path() / "written";
+  write_script(ffmpeg, "for last; do :; done\nmkdir -p \"$last\"\necho \"$last\" > '" +
+                           written.string() + "'\n");
+  write_script(ffprobe,
+               "case \"$*\" in\n"
+               "  *start_time*) echo '{\"streams\":[{\"start_time\":\"0.000000\"}],"
+               "\"format\":{\"start_time\":\"0.000000\"}}' ;;\n"
+               "  *) echo '{\"format\":{\"format_name\":\"mov\"},\"streams\":[{\"index\":0,"
+               "\"codec_type\":\"video\",\"width\":160,\"height\":120}]}' ;;\n"
+               "esac\n");
+  const fs::path source = scratch.path() / "source.mp4";
+  std::ofstream(source) << "source bytes";
+  svp::media::MediaProbe probe;
+  probe.video_streams.push_back(video(320, 240, 0));
+  const svp::media::MediaIngestPlan plan = svp::media::build_media_ingest_plan(source, probe);
+  const auto geometry = wc::plan_working_copy_geometry(plan.primary_video_stream, 120);
+  require(geometry && geometry->stored_width == 160 && geometry->stored_height == 120,
+          "320x240 at 120 is 160x120");
+
+  CapturingSink sink;
+  const wc::WorkingCopyResult result = wc::run_working_copy_stage(
+      {.plan = plan, .geometry = *geometry, .ffmpeg_path = ffmpeg, .ffprobe_path = ffprobe},
+      sink, /*quiet=*/true);
+  require(result.copy == nullptr && !result.cancelled,
+          "a copy that cannot be fingerprinted is not used");
+  require(result.unavailable_reason.find("cannot be fingerprinted") != std::string::npos,
+          "the reason says so: " + result.unavailable_reason);
+  require(std::any_of(sink.events.begin(), sink.events.end(),
+                      [](const svp::builder::ProgressEvent& event) {
+                        return event.kind == svp::builder::ProgressEventKind::warning &&
+                               event.stage_id == svp::builder::ProgressStageId::working_copy;
+                      }),
+          "the stage warns that frames come from the source");
+  std::ifstream recorded(written);
+  std::string copy_path;
+  std::getline(recorded, copy_path);
+  require(!copy_path.empty() && !fs::exists(fs::path(copy_path).parent_path()),
+          "the copy's directory is removed");
+}
+
 // --- with a real ffmpeg ------------------------------------------------------
 
 struct Tools {
@@ -262,24 +340,37 @@ void run_or_fail(const std::vector<std::string>& command, const fs::path& scratc
   require(outcome.succeeded, what + ": " + outcome.diagnostics);
 }
 
-// A 320x240 clip stored with a 90 degree rotation, its video starting half a
-// second after its audio, with every seventh frame shifted off the 30 fps grid
-// by `jitter` ticks of `timebase` (1/N).
+// How a clip's frames are coded: their stored size, and the rotation its
+// metadata asks for.
+struct ClipShape {
+  std::string size = "320x240";
+  int rotation = 90;
+};
+
+// A clip of `shape`, its video starting half a second after its audio, with
+// every seventh frame shifted off the 30 fps grid by `jitter` ticks of
+// `timebase` (1/N).
 fs::path write_clip(const Tools& tools, const fs::path& dir, const std::string& name,
-                    int timebase, int ticks_per_frame, int jitter) {
+                    int timebase, int ticks_per_frame, int jitter,
+                    const ClipShape& shape = {}) {
   const fs::path clip = dir / (name + ".mov");
   const std::string expression = "N*" + std::to_string(ticks_per_frame) +
                                  "+if(eq(mod(N,7),3)," + std::to_string(jitter) + ",0)+" +
                                  std::to_string(timebase / 2);
-  run_or_fail({tools.ffmpeg.string(), "-nostdin", "-loglevel", "error", "-y",
-               "-display_rotation", "90", "-noautorotate", "-f", "lavfi", "-i",
-               "testsrc2=size=320x240:rate=30:duration=2", "-f", "lavfi", "-i",
-               "sine=frequency=440:duration=3", "-map", "0:v", "-map", "1:a", "-vf",
-               "settb=1/" + std::to_string(timebase) + ",setpts='" + expression + "'",
-               "-fps_mode", "passthrough", "-enc_time_base", "1/" + std::to_string(timebase),
-               "-video_track_timescale", std::to_string(timebase), "-c:v", "mjpeg", "-q:v",
-               "3", "-c:a", "pcm_s16le", clip.string()},
-              dir, "writing " + name);
+  std::vector<std::string> command{tools.ffmpeg.string(), "-nostdin", "-loglevel", "error",
+                                   "-y"};
+  if (shape.rotation != 0) {
+    command.insert(command.end(), {"-display_rotation", std::to_string(shape.rotation)});
+  }
+  command.insert(
+      command.end(),
+      {"-noautorotate", "-f", "lavfi", "-i", "testsrc2=size=" + shape.size + ":rate=30:duration=2",
+       "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-map", "0:v", "-map", "1:a", "-vf",
+       "settb=1/" + std::to_string(timebase) + ",setpts='" + expression + "'", "-fps_mode",
+       "passthrough", "-enc_time_base", "1/" + std::to_string(timebase),
+       "-video_track_timescale", std::to_string(timebase), "-c:v", "mjpeg", "-q:v", "3", "-c:a",
+       "pcm_s16le", clip.string()});
+  run_or_fail(command, dir, "writing " + name);
   return clip;
 }
 
@@ -305,7 +396,7 @@ svp::media::MediaIngestPlan plan_of(const Tools& tools, const fs::path& clip) {
 
 void test_working_copies_of_synthetic_clips(const Tools& tools) {
   const TemporaryDirectory scratch("svp-working-copy-clips");
-  constexpr int kBound = 160;
+  constexpr int kBound = 120;
 
   // A time base the software fallback can encode in (1/30000), so every
   // ffmpeg build makes this copy.
@@ -314,7 +405,7 @@ void test_working_copies_of_synthetic_clips(const Tools& tools) {
   const auto geometry = wc::plan_working_copy_geometry(plan.primary_video_stream, kBound);
   require(geometry && geometry->stored_width == 160 && geometry->stored_height == 120 &&
               geometry->display_width == 120 && geometry->display_height == 160,
-          "the rotated clip fits 160 lines as 120x160");
+          "the rotated clip's 240-pixel short side at 120 is 120x160");
 
   fs::path copy_directory;
   std::string first_blake3;
@@ -359,7 +450,7 @@ void test_working_copies_of_synthetic_clips(const Tools& tools) {
                 record["parameters"]["display_height"] == 160 &&
                 record["parameters"]["source_display_width"] == 240 &&
                 record["parameters"]["source_display_height"] == 320 &&
-                record["parameters"]["max_height"] == kBound,
+                record["parameters"]["max_resolution"] == kBound,
             "the record names the copy's and the source's displayed sizes: " + text);
     require(text.find(scratch.path().string()) == std::string::npos &&
                 text.find(copy_directory.string()) == std::string::npos &&
@@ -383,6 +474,27 @@ void test_working_copies_of_synthetic_clips(const Tools& tools) {
       {.plan = plan, .geometry = *geometry, .ffmpeg_path = tools.ffmpeg,
        .ffprobe_path = tools.ffprobe, .cancellation = &cancelled});
   require(stopped.cancelled && stopped.copy == nullptr, "a cancelled build makes no copy");
+
+  // A portrait clip coded tall (no rotation metadata) is bounded by its short
+  // side too: 240x320 at 120 is 120x160, every frame at its timestamp.
+  const fs::path tall = write_clip(tools, scratch.path(), "tall", 30000, 1000, 7,
+                                   {.size = "240x320", .rotation = 0});
+  const svp::media::MediaIngestPlan tall_plan = plan_of(tools, tall);
+  const auto tall_geometry =
+      wc::plan_working_copy_geometry(tall_plan.primary_video_stream, kBound);
+  require(tall_geometry && tall_geometry->stored_width == 120 &&
+              tall_geometry->stored_height == 160 && tall_geometry->display_width == 120 &&
+              tall_geometry->display_height == 160,
+          "the tall clip's 240-pixel short side at 120 is 120x160");
+  {
+    const wc::WorkingCopyResult tall_copy = wc::make_working_copy(
+        {.plan = tall_plan, .geometry = *tall_geometry, .ffmpeg_path = tools.ffmpeg,
+         .ffprobe_path = tools.ffprobe});
+    require(tall_copy.copy != nullptr, "a tall clip is copied: " + tall_copy.unavailable_reason);
+    require(frame_times(tools, tall_copy.copy->path(), scratch.path()) ==
+                frame_times(tools, tall, scratch.path()),
+            "every frame of the tall clip keeps its timestamp");
+  }
 
   // A 1/90000 time base with off-grid frames: MPEG-4 Part 2 cannot encode in
   // it (its time base denominator is at most 65535), so the copy exists only
@@ -409,11 +521,12 @@ void test_working_copies_of_synthetic_clips(const Tools& tools) {
 }  // namespace
 
 int main() {
-  test_geometry_fits_the_displayed_height();
+  test_geometry_bounds_the_displayed_short_side();
   test_encoders_and_command();
   test_stream_start_offset();
-  test_build_inputs_digest_names_max_height_only_when_given();
+  test_build_inputs_digest_names_max_resolution_only_when_given();
   test_cancellable_command();
+  test_unfingerprintable_copy_falls_back_to_the_source();
   if (const std::optional<Tools> tools = real_tools()) {
     test_working_copies_of_synthetic_clips(*tools);
   } else {
