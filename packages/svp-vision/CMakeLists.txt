@@ -561,6 +561,22 @@ if(BUILD_TESTING)
   add_test(NAME svp-vision-ocr-recognition-reuse-tests
            COMMAND svp-vision-ocr-recognition-reuse-tests)
 
+  add_executable(svp-vision-ocr-reconciliation-tests
+    tests/ocr_reconciliation_tests.cpp
+  )
+
+  target_compile_features(svp-vision-ocr-reconciliation-tests PRIVATE
+    cxx_std_20
+  )
+
+  target_link_libraries(svp-vision-ocr-reconciliation-tests
+    PRIVATE
+      svp::vision
+  )
+
+  add_test(NAME svp-vision-ocr-reconciliation-tests
+           COMMAND svp-vision-ocr-reconciliation-tests)
+
   add_executable(svp-vision-ocr-numeric-parser-tests
     tests/ocr_numeric_parser_tests.cpp
   )
