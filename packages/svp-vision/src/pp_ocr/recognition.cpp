@@ -89,13 +89,22 @@ std::string ctc_decode(
       }
     }
     if (max_idx != 0 && max_idx != prev_idx) {
-      if (max_idx - 1 < static_cast<int>(char_dict.size())) {
-        result += char_dict[max_idx - 1];
+      const int index = max_idx - 1;
+      const int dict_size = static_cast<int>(char_dict.size());
+      if (index < dict_size) {
+        result += char_dict[index];
+      } else if (index == dict_size && num_classes == dict_size + 2) {
+        // PaddleOCR recognizers trained with use_space_char output the space as
+        // one class past the character list (blank, the list, then the space);
+        // it is not in the list itself, so without this every space was lost.
+        result += ' ';
       }
     }
     prev_idx = max_idx;
   }
-  return result;
+  const auto first = result.find_first_not_of(' ');
+  if (first == std::string::npos) return {};
+  return result.substr(first, result.find_last_not_of(' ') - first + 1);
 }
 
 double recognition_confidence(
