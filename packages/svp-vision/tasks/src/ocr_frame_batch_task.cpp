@@ -79,7 +79,8 @@ std::vector<std::byte> to_bytes(const std::string& text) {
 }
 
 TaskResult succeeded(const TaskSpec& spec, const OcrFrameBatchWorkerEnvironment& environment,
-                     const std::vector<OcrSampleDetections>& samples) {
+                     const std::vector<OcrSampleDetections>& samples,
+                     std::size_t recognized_boxes = 0, std::size_t reused_boxes = 0) {
   std::size_t decoded = 0;
   std::size_t detections = 0;
   for (const OcrSampleDetections& sample : samples) {
@@ -98,6 +99,8 @@ TaskResult succeeded(const TaskSpec& spec, const OcrFrameBatchWorkerEnvironment&
   result.diagnostics = {
       {"decoded_samples", decoded},
       {"detections", detections},
+      {"recognized_boxes", recognized_boxes},
+      {"reused_boxes", reused_boxes},
       {"samples", samples.size()},
   };
   return result;
@@ -196,7 +199,8 @@ TaskResult execute(const TaskSpec& spec, const svp::exec::ResolvedInputs& inputs
                            outcome.skipped_reason);
   }
   svp::exec::throw_if_cancelled(cancellation, "ocr.frame_batch before output");
-  return succeeded(spec, environment, outcome.samples);
+  return succeeded(spec, environment, outcome.samples, outcome.recognized_boxes,
+                   outcome.reused_boxes);
 }
 
 }  // namespace

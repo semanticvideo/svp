@@ -5,6 +5,7 @@
 #include "svp/vision/ocr_sample_plan.hpp"
 #include "svp/vision/pp_ocr.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -14,15 +15,19 @@
 namespace svp::vision {
 
 // The work of one ocr.frame_batch task (plan §4.2): decode a slice of the OCR
-// sample plan and run PP-OCR on each frame. Nothing here knows about tasks,
-// workers, or frame IDs; the local OCR stage calls it in-process and the task
-// function calls it on a worker, so both produce the same records.
+// sample plan and run PP-OCR on each frame, reusing unchanged boxes'
+// recognitions within each reuse group (ocr_recognition_reuse.hpp). Nothing
+// here knows about tasks, workers, or frame IDs; the local OCR stage calls it
+// in-process and the task function calls it on a worker, so both produce the
+// same records.
 struct OcrFrameBatchRequest {
   std::filesystem::path source_path;
   std::filesystem::path ffmpeg_path;
   int frame_width = 0;
   int frame_height = 0;
-  // Plan slice, in ordinal order.
+  // Plan slice, in ordinal order. The first sample must open a reuse group
+  // (ocr_reuse_group_starts_at), so the records do not depend on where the
+  // plan was cut.
   std::vector<OcrSample> samples;
 };
 
@@ -42,10 +47,15 @@ struct OcrFrameBatchOutcome {
   std::string skipped_reason;
   // One record per request sample, in request order.
   std::vector<OcrSampleDetections> samples;
+  // Detected boxes the recognizer ran on, and boxes that reused an earlier
+  // sample's recognition instead.
+  std::size_t recognized_boxes = 0;
+  std::size_t reused_boxes = 0;
 };
 
 // `session` must be available. PP-OCR exceptions are recorded per sample
-// (ocr_failed), not thrown; exceptions from hooks propagate.
+// (ocr_failed), not thrown; exceptions from hooks propagate. Throws
+// std::invalid_argument when the first sample does not open a reuse group.
 [[nodiscard]] OcrFrameBatchOutcome run_ocr_frame_batch(
     const PpOcrSession& session,
     const PpOcrOptions& options,
@@ -53,12 +63,14 @@ struct OcrFrameBatchOutcome {
     const OcrFrameBatchHooks& hooks = {});
 
 // PP-OCR on one already decoded frame, as a sample record (ok, frame_invalid,
-// or ocr_failed). Shared by run_ocr_frame_batch and the canonical-frame
+// or ocr_failed), reading its boxes with `read_boxes` when given (see
+// run_pp_ocr_on_frame). Shared by run_ocr_frame_batch and the canonical-frame
 // fallback so both classify frames identically.
 [[nodiscard]] OcrSampleDetections run_ocr_on_decoded_frame(
     const PpOcrSession& session,
     const PpOcrOptions& options,
     const ColorRasterFrame& frame,
-    std::uint64_t sample_ordinal);
+    std::uint64_t sample_ordinal,
+    const PpOcrBoxReader& read_boxes = {});
 
 }  // namespace svp::vision

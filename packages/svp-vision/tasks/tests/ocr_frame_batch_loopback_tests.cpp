@@ -2,7 +2,9 @@
 // run (1) directly in-process the way the local OCR stage runs them, (2)
 // through the task engine's InProcessExecutor, and (3) through the
 // LoopbackExecutor's child worker process with its own PP-OCR sessions, must
-// produce byte-identical payloads, which assemble to the full sample plan.
+// produce byte-identical payloads, which assemble to the full sample plan and
+// to exactly what the whole plan run as one batch produces (recognition reuse
+// does not depend on where the plan is cut).
 //
 // Needs real inputs, so it skips (prints "Skipping:") unless these are set:
 //   SVP_OCR_TASK_TEST_SOURCE         source video
@@ -164,11 +166,24 @@ int run(const std::filesystem::path& worker) {
   const std::vector<vision::OcrSampleBatch> batches =
       vision::partition_ocr_samples(plan.samples.size(), policy);
 
-  // (1) Direct, as generate_ocr_observations runs batches.
+  // (1) Direct, as generate_ocr_observations runs batches, and the whole plan
+  // as one batch.
   std::vector<std::string> direct;
+  std::string unbatched;
+  std::size_t reused_boxes = 0;
   {
     const vision::PpOcrSession session = vision::create_pp_ocr_session(pp_ocr);
     require(session.available, "PP-OCR unavailable: " + session.blocker);
+    const vision::OcrFrameBatchOutcome whole = vision::run_ocr_frame_batch(
+        session, pp_ocr,
+        vision::OcrFrameBatchRequest{.source_path = *source,
+                                     .ffmpeg_path = *ffmpeg,
+                                     .frame_width = width,
+                                     .frame_height = height,
+                                     .samples = plan.samples});
+    require(whole.decoding_attempted, "direct decode: " + whole.skipped_reason);
+    unbatched = vision::encode_ocr_sample_detections_jsonl(whole.samples);
+    reused_boxes = whole.reused_boxes;
     for (const vision::OcrSampleBatch& batch : batches) {
       const auto first = plan.samples.begin() + static_cast<std::ptrdiff_t>(batch.first_ordinal);
       const vision::OcrFrameBatchOutcome outcome = vision::run_ocr_frame_batch(
@@ -252,12 +267,15 @@ int run(const std::filesystem::path& worker) {
   const std::vector<vision::OcrSampleDetections> assembled =
       vision::assemble_ocr_frame_batches(plan, std::move(batch_records));
   const std::string assembled_bytes = vision::encode_ocr_sample_detections_jsonl(assembled);
+  require(assembled_bytes == unbatched,
+          "the batched payload differs from the whole plan run as one batch");
 
   std::size_t detections = 0;
   for (const auto& sample : assembled) detections += sample.detections.size();
   std::cout << "ocr.frame_batch: " << graph.size() << " batches, " << assembled.size()
-            << " samples, " << detections << " detections, " << assembled_bytes.size()
-            << " payload bytes; direct == in-process executor == loopback child\n";
+            << " samples, " << detections << " detections (" << reused_boxes
+            << " boxes reused), " << assembled_bytes.size()
+            << " payload bytes; direct == in-process executor == loopback child == one batch\n";
 
   if (const auto fixture = env("SVP_OCR_TASK_TEST_FIXTURE_OUT")) {
     std::ofstream(*fixture, std::ios::binary) << assembled_bytes;

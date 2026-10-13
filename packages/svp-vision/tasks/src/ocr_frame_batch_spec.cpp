@@ -4,6 +4,7 @@
 #include "svp/exec/cache_key.hpp"
 #include "svp/exec/parameters_digest.hpp"
 #include "svp/models/manifest.hpp"
+#include "svp/vision/ocr_recognition_reuse.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_parameters.hpp"
 
 #include <algorithm>
@@ -90,6 +91,10 @@ svp::exec::TaskSpec make_ocr_frame_batch_task_spec(const OcrFrameBatchTaskInputs
   if (batch.count == 0 || batch.first_ordinal >= plan.samples.size() ||
       batch.count > plan.samples.size() - batch.first_ordinal) {
     throw std::invalid_argument("ocr.frame_batch batch is outside the sample plan");
+  }
+  if (!ocr_reuse_group_starts_at(batch.first_ordinal)) {
+    throw std::invalid_argument(
+        "ocr.frame_batch batch does not start a recognition reuse group");
   }
   OcrFrameBatchParameters parameters;
   const auto first =

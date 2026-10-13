@@ -109,16 +109,26 @@ void validate_record(const OcrSampleDetections& record) {
 }
 
 Json detection_to_json(const OcrTextDetection& detection) {
-  return Json{
+  Json value{
       {"bbox", Json::array({detection.bbox_left, detection.bbox_top,
                             detection.bbox_right, detection.bbox_bottom})},
       {"confidence", detection.confidence},
       {"text", detection.text},
   };
+  if (detection.reused) value["reused"] = true;
+  return value;
 }
 
 OcrTextDetection detection_from_json(const Json& value, const std::string& where) {
-  require_fields(value, {"bbox", "confidence", "text"}, where);
+  // "reused" is written only as true, so false is non-canonical.
+  const bool reused = value.is_object() && value.contains("reused");
+  if (reused && value.at("reused") != Json(true)) {
+    fail(where + ".reused must be true when present");
+  }
+  require_fields(value,
+                 reused ? std::set<std::string>{"bbox", "confidence", "reused", "text"}
+                        : std::set<std::string>{"bbox", "confidence", "text"},
+                 where);
   const Json& bbox = value.at("bbox");
   if (!bbox.is_array() || bbox.size() != 4) {
     fail(where + ".bbox must be an array of four integers");
@@ -135,6 +145,7 @@ OcrTextDetection detection_from_json(const Json& value, const std::string& where
       .bbox_top = require_integer<int>(bbox[1], where + ".bbox[1]"),
       .bbox_right = require_integer<int>(bbox[2], where + ".bbox[2]"),
       .bbox_bottom = require_integer<int>(bbox[3], where + ".bbox[3]"),
+      .reused = reused,
   };
 }
 

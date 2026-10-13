@@ -20,12 +20,7 @@ struct DetInputImage {
   double ratio = 1.0;
 };
 
-struct DetBox {
-  int left = 0;
-  int top = 0;
-  int right = 0;
-  int bottom = 0;
-};
+using DetBox = PpOcrTextBox;
 
 struct RecInput {
   std::vector<float> data;

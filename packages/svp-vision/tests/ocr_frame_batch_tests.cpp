@@ -9,6 +9,7 @@
 #include "svp/vision/ocr_batch_policy.hpp"
 #include "svp/vision/ocr_frame_batch_reduction.hpp"
 #include "svp/vision/ocr_frame_detections.hpp"
+#include "svp/vision/ocr_recognition_reuse.hpp"
 #include "svp/vision/ocr_sample_plan.hpp"
 
 #include <algorithm>
@@ -95,7 +96,7 @@ std::vector<OcrSampleDetections> golden_records() {
                 {{.text = "SALE $4,997", .confidence = 0.875, .bbox_left = 10,
                   .bbox_top = 20, .bbox_right = 300, .bbox_bottom = 60},
                  {.text = "\xC3\x9Cn\xC3\xAF", .confidence = 0.1 + 0.2, .bbox_left = 1,
-                  .bbox_top = 2, .bbox_right = 3, .bbox_bottom = 4}}),
+                  .bbox_top = 2, .bbox_right = 3, .bbox_bottom = 4, .reused = true}}),
       missed_sample(1, 1'000'000),
       failed,
       ok_sample(3, 3'000'000),
@@ -105,7 +106,8 @@ std::vector<OcrSampleDetections> golden_records() {
 void test_codec_golden_bytes() {
   const std::string expected =
       R"({"detections":[{"bbox":[10,20,300,60],"confidence":0.875,"text":"SALE $4,997"},)"
-      "{\"bbox\":[1,2,3,4],\"confidence\":0.30000000000000004,\"text\":\"\xC3\x9Cn\xC3\xAF\"}],"
+      "{\"bbox\":[1,2,3,4],\"confidence\":0.30000000000000004,\"reused\":true,"
+      "\"text\":\"\xC3\x9Cn\xC3\xAF\"}],"
       R"("frame_height":1080,"frame_width":1920,"sample_ordinal":0,"status":"ok","timestamp_us":0})"
       "\n"
       R"j({"error":"short read: got 0/6220800 bytes (ffmpeg exit 0)","sample_ordinal":1,)j"
@@ -166,6 +168,16 @@ void test_codec_rejects() {
       {"negative ordinal",
        R"({"error":"x","sample_ordinal":-1,"status":"decode_missed","timestamp_us":1})"
        "\n"},
+      {"reused written as false",
+       R"({"detections":[{"bbox":[1,2,3,4],"confidence":1.0,"reused":false,"text":"A"}],)"
+       R"("frame_height":1080,"frame_width":1920,"sample_ordinal":3,"status":"ok",)"
+       R"("timestamp_us":3000000})"
+       "\n"},
+      {"reused not a boolean",
+       R"({"detections":[{"bbox":[1,2,3,4],"confidence":1.0,"reused":1,"text":"A"}],)"
+       R"("frame_height":1080,"frame_width":1920,"sample_ordinal":3,"status":"ok",)"
+       R"("timestamp_us":3000000})"
+       "\n"},
       {"short bbox",
        R"({"detections":[{"bbox":[1,2,3],"confidence":1.0,"text":"A"}],"frame_height":1080,)"
        R"("frame_width":1920,"sample_ordinal":3,"status":"ok","timestamp_us":3000000})"
@@ -198,13 +210,23 @@ void test_batch_policy() {
                                           .estimated_seconds_per_sample = 1.0}) == 3,
           "three one-second samples fit a three-second batch");
   require(vision::ocr_batch_sample_count({.target_task_seconds = 0.1,
-                                          .estimated_seconds_per_sample = 2.0}) == 1,
-          "a batch holds at least one sample");
+                                          .estimated_seconds_per_sample = 2.0}) ==
+              vision::kOcrReuseGroupSamples,
+          "a batch holds at least one reuse group");
+  require(vision::ocr_batch_sample_count({.target_task_seconds = 4.0,
+                                          .estimated_seconds_per_sample = 1.0}) == 6,
+          "four samples round up to whole reuse groups");
   const vision::OcrBatchPolicy defaults;
-  require(vision::ocr_batch_sample_count(defaults) ==
-              static_cast<std::uint64_t>(std::floor(defaults.target_task_seconds /
-                                                    defaults.estimated_seconds_per_sample)),
-          "default batch size follows the policy");
+  const auto fitting = static_cast<std::uint64_t>(
+      std::floor(defaults.target_task_seconds / defaults.estimated_seconds_per_sample));
+  const std::uint64_t groups =
+      (fitting + vision::kOcrReuseGroupSamples - 1) / vision::kOcrReuseGroupSamples;
+  require(vision::ocr_batch_sample_count(defaults) == groups * vision::kOcrReuseGroupSamples,
+          "default batch size follows the policy, in whole reuse groups");
+  require(vision::ocr_batch_sample_count({.target_task_seconds = 1e300,
+                                          .estimated_seconds_per_sample = 1e-300}) ==
+              std::numeric_limits<std::uint64_t>::max(),
+          "an unbounded ratio is one batch");
 
   const auto batches = vision::partition_ocr_samples(
       8, {.target_task_seconds = 3.0, .estimated_seconds_per_sample = 1.0});

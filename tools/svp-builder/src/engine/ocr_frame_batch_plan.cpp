@@ -5,6 +5,7 @@
 
 #include "svp/vision/canonical_frame_input.hpp"
 #include "svp/vision/ocr_generation.hpp"
+#include "svp/vision/ocr_recognition_reuse.hpp"
 #include "svp/vision/tasks/ffmpeg_build_identity.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_spec.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_parameters.hpp"
@@ -137,7 +138,10 @@ std::optional<std::vector<svp::vision::OcrSampleBatch>> ocr_batches_from_task_id
     }
     const std::uint64_t first = std::stoull(match[1].str());
     const std::uint64_t last = std::stoull(match[2].str());
-    if (last < first || !by_first.emplace(first, last - first + 1).second) {
+    // A batch inside a reuse group cannot be planned again (a journal of an
+    // earlier builder); the build then cuts a fresh partition.
+    if (last < first || !svp::vision::ocr_reuse_group_starts_at(first) ||
+        !by_first.emplace(first, last - first + 1).second) {
       return std::nullopt;
     }
   }

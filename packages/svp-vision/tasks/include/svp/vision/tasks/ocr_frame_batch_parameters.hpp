@@ -13,9 +13,11 @@
 namespace svp::vision::tasks {
 
 // Task type identity (plan §4.2). The version changes whenever the parameter
-// schema, the payload format, or the meaning of either changes.
+// schema, the payload format, or the meaning of either changes. Version 2:
+// boxes reuse recognitions within reuse groups (ocr_recognition_reuse.hpp),
+// detections carry "reused", and a batch starts on a group boundary.
 inline constexpr std::string_view kOcrFrameBatchTaskType = "ocr.frame_batch";
-inline constexpr std::uint64_t kOcrFrameBatchTaskTypeVersion = 1;
+inline constexpr std::uint64_t kOcrFrameBatchTaskTypeVersion = 2;
 // TaskSpec input holding the source media bytes.
 inline constexpr std::string_view kOcrFrameBatchSourceInput = "source";
 inline constexpr std::string_view kOcrFrameBatchSourceRole = "source_media";
@@ -64,8 +66,9 @@ struct OcrFrameBatchParameters {
 
 // The registry's parameter validator (plan §4.3): nullopt when `value` is a
 // valid parameters object, otherwise why not. Unknown, missing, or mistyped
-// fields; samples that are empty, unequal in length, or not strictly
-// ascending; an ffmpeg_build that is not "b3:<64 hex>"; a decode size
+// fields; samples that are empty, unequal in length, not strictly
+// ascending, or not starting on a recognition reuse group boundary
+// (ocr_reuse_group_starts_at); an ffmpeg_build that is not "b3:<64 hex>"; a decode size
 // outside 1..kOcrMaxFrameDimension; a thread or
 // worker count below 1; and out-of-range thresholds are all rejected.
 [[nodiscard]] std::optional<std::string> validate_ocr_frame_batch_parameters(

@@ -95,8 +95,8 @@ struct OcrFrameBatchPlan {
 // Batch partition recorded in an existing journal's task IDs, for a resumed
 // build: the batches must be exactly the ones whose results were committed,
 // whatever the per-sample estimate is now. nullopt when `task_ids` hold no
-// frame-batch task or they do not cut [0, sample_count) into consecutive
-// batches.
+// frame-batch task, they do not cut [0, sample_count) into consecutive
+// batches, or a batch does not start a recognition reuse group.
 [[nodiscard]] std::optional<std::vector<svp::vision::OcrSampleBatch>>
 ocr_batches_from_task_ids(const std::vector<std::string>& task_ids, std::size_t sample_count);
 

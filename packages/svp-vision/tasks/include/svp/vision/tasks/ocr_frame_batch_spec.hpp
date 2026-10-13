@@ -60,7 +60,8 @@ struct OcrFrameBatchTaskInputs {
 // [model_bundle_id...], parameters_blake3]): the source bytes, model bundles,
 // and every output-affecting parameter (thread counts and the samples
 // included) identify the result. Throws std::invalid_argument for a batch
-// outside the plan or parameters that fail validation.
+// outside the plan, one that does not start a recognition reuse group
+// (ocr_reuse_group_starts_at), or parameters that fail validation.
 [[nodiscard]] svp::exec::TaskSpec make_ocr_frame_batch_task_spec(
     const OcrFrameBatchTaskInputs& inputs,
     const OcrSamplePlan& plan,

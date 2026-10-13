@@ -2,8 +2,11 @@
 
 #include "svp/vision/canonical_frame_input.hpp"
 #include "svp/vision/foundation_ocr_staging.hpp"
+#include "svp/vision/ocr_recognition_reuse.hpp"
 
 #include <exception>
+#include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace svp::vision {
@@ -29,7 +32,8 @@ OcrSampleDetections decode_missed(const OcrSample& sample, std::string error) {
 OcrSampleDetections run_ocr_on_decoded_frame(const PpOcrSession& session,
                                              const PpOcrOptions& options,
                                              const ColorRasterFrame& frame,
-                                             std::uint64_t sample_ordinal) {
+                                             std::uint64_t sample_ordinal,
+                                             const PpOcrBoxReader& read_boxes) {
   OcrSampleDetections record;
   record.sample_ordinal = sample_ordinal;
   record.timestamp_us = frame.timestamp_us;
@@ -44,7 +48,7 @@ OcrSampleDetections run_ocr_on_decoded_frame(const PpOcrSession& session,
 
   PpOcrFrameResult result;
   try {
-    result = run_pp_ocr_on_frame(session, options, frame);
+    result = run_pp_ocr_on_frame(session, options, frame, read_boxes);
   } catch (const std::exception& error) {
     record.status = OcrSampleStatus::ocr_failed;
     record.error = sanitize_utf8(error.what());
@@ -61,6 +65,7 @@ OcrSampleDetections run_ocr_on_decoded_frame(const PpOcrSession& session,
         .bbox_top = detection.bbox_top,
         .bbox_right = detection.bbox_right,
         .bbox_bottom = detection.bbox_bottom,
+        .reused = detection.reused,
     });
   }
   return record;
@@ -70,6 +75,12 @@ OcrFrameBatchOutcome run_ocr_frame_batch(const PpOcrSession& session,
                                          const PpOcrOptions& options,
                                          const OcrFrameBatchRequest& request,
                                          const OcrFrameBatchHooks& hooks) {
+  if (!request.samples.empty() &&
+      !ocr_reuse_group_starts_at(request.samples.front().ordinal)) {
+    throw std::invalid_argument("OCR frame batch starts at sample " +
+                                std::to_string(request.samples.front().ordinal) +
+                                ", inside a recognition reuse group");
+  }
   OcrFrameBatchOutcome outcome;
   if (!ffmpeg_executable_available(request.ffmpeg_path)) {
     outcome.skipped_reason = "ffmpeg not found at: " + request.ffmpeg_path.string();
@@ -81,6 +92,7 @@ OcrFrameBatchOutcome run_ocr_frame_batch(const PpOcrSession& session,
   }
   outcome.decoding_attempted = true;
   outcome.samples.reserve(request.samples.size());
+  OcrRecognitionReuse reuse;
 
   for (const OcrSample& sample : request.samples) {
     if (hooks.before_sample) hooks.before_sample();
@@ -102,9 +114,11 @@ OcrFrameBatchOutcome run_ocr_frame_batch(const PpOcrSession& session,
         false,
         std::move(pixels),
     };
-    outcome.samples.push_back(
-        run_ocr_on_decoded_frame(session, options, frame, sample.ordinal));
+    outcome.samples.push_back(run_ocr_on_decoded_frame(
+        session, options, frame, sample.ordinal, reuse.reader_for(sample.ordinal)));
   }
+  outcome.recognized_boxes = reuse.recognized_boxes();
+  outcome.reused_boxes = reuse.reused_boxes();
   return outcome;
 }
 

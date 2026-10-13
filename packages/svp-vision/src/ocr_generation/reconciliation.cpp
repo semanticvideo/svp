@@ -87,7 +87,11 @@ std::vector<ReconciledObservation> reconcile_detections(
       obs.frame_height = detections[cluster[0]].frame_height;
       obs.detection_count = static_cast<int>(cluster.size());
 
+      // Confidence comes from recognitions only: a reused detection repeats
+      // an earlier frame's recognition and adds no reading of its own.
       double conf_sum = 0.0;
+      double reused_conf_sum = 0.0;
+      std::size_t recognized = 0;
       obs.bbox_left = INT_MAX;
       obs.bbox_top = INT_MAX;
       obs.bbox_right = 0;
@@ -99,7 +103,12 @@ std::vector<ReconciledObservation> reconcile_detections(
 
       for (std::size_t idx : cluster) {
         const auto& det = detections[idx];
-        conf_sum += det.confidence;
+        if (det.reused) {
+          reused_conf_sum += det.confidence;
+        } else {
+          conf_sum += det.confidence;
+          ++recognized;
+        }
         obs.bbox_left = std::min(obs.bbox_left, det.bbox_left);
         obs.bbox_top = std::min(obs.bbox_top, det.bbox_top);
         obs.bbox_right = std::max(obs.bbox_right, det.bbox_right);
@@ -111,12 +120,17 @@ std::vector<ReconciledObservation> reconcile_detections(
         obs.source_frame_ids.push_back(det.frame_id);
       }
 
-      obs.confidence = conf_sum / static_cast<double>(cluster.size());
-      if (total_frames > 1 && cluster.size() == 1 && obs.confidence < min_confidence) {
+      // A cluster of only reused detections (their recognition clustered
+      // elsewhere) still holds one reading: the confidence they copied.
+      const std::size_t readings = std::max<std::size_t>(1, recognized);
+      obs.confidence = recognized > 0
+                           ? conf_sum / static_cast<double>(recognized)
+                           : reused_conf_sum / static_cast<double>(cluster.size());
+      if (total_frames > 1 && readings == 1 && obs.confidence < min_confidence) {
         continue;
       }
-      if (cluster.size() > 1) {
-        obs.confidence = std::min(1.0, obs.confidence + 0.1 * (cluster.size() - 1));
+      if (readings > 1) {
+        obs.confidence = std::min(1.0, obs.confidence + 0.1 * (readings - 1));
       }
       reconciled.push_back(std::move(obs));
     }

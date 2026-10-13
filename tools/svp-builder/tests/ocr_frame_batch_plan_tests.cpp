@@ -12,6 +12,7 @@
 
 #include "svp/exec/exec_error.hpp"
 #include "svp/exec/output_digest.hpp"
+#include "svp/vision/ocr_recognition_reuse.hpp"
 #include "svp/vision/tasks/ocr_frame_batch_parameters.hpp"
 
 #include <algorithm>
@@ -174,6 +175,14 @@ void test_resume_recovers_the_recorded_partition() {
           "overlapping batches are not a partition");
   require(!ocr_batches_from_task_ids({"task.ocr.frame_batch.samples_000000_000009"}, 12),
           "a partition of another sample count is not reused");
+  require(!ocr_batches_from_task_ids({"task.ocr.frame_batch.samples_000000_000003",
+                                      "task.ocr.frame_batch.samples_000004_000009"},
+                                     10),
+          "a recorded batch starting inside a recognition reuse group is not reused");
+  for (const svp::vision::OcrSampleBatch& batch : recorded.batches) {
+    require(svp::vision::ocr_reuse_group_starts_at(batch.first_ordinal),
+            "planned batches start on recognition reuse groups");
+  }
 }
 
 void test_committed_batch_outputs_reach_the_reducer() {
