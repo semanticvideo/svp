@@ -42,6 +42,7 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
            .ffmpeg_path = opts.ic_ffmpeg,
            .ffprobe_path = opts.ic_ffprobe,
            .resume = opts.ic_resume,
+           .overwrite = opts.ic_fresh,
            .cancellation = &cancellation},
           *sink, opts.ic_quiet);
       if (resized.cancelled) {

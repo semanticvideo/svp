@@ -51,7 +51,7 @@ int run_build_command(const BuildCliOptions& requested, CLI::App* build_subcomma
          .ffmpeg_path = requested.ffmpeg_path,
          .ffprobe_path = requested.ffprobe_path,
          .resume = requested.resume,
-         .overwrite = requested.overwrite,
+         .overwrite = requested.fresh || requested.overwrite,
          .cancellation = &cancellation},
         *progress_sink, requested.quiet);
     if (resized->cancelled) {

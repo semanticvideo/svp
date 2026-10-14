@@ -157,7 +157,7 @@ ResizeOutcome resize_source(const ResizeRequest& request, BuildProgressSink& sin
         return refused(std::move(outcome),
                        "the resized media " + target.string() +
                            " cannot be resumed from: " + *mismatch +
-                           "; pass --fresh --overwrite to write it again",
+                           "; pass --fresh to write it again",
                        sink);
       }
       return resized(std::move(outcome), target, *geometry, "written by the interrupted build",
@@ -166,7 +166,7 @@ ResizeOutcome resize_source(const ResizeRequest& request, BuildProgressSink& sin
     if (!request.overwrite) {
       return refused(std::move(outcome),
                      target.string() +
-                         " already exists; pass --overwrite to replace it or --resume to "
+                         " already exists; pass --fresh to write it again or --resume to "
                          "build from it",
                      sink);
     }

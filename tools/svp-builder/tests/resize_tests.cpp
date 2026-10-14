@@ -379,8 +379,9 @@ void test_resizing_synthetic_clips(const Tools& tools) {
   const std::string resized_digest = digest_of(made.media_path);
   const rs::ResizeOutcome refused =
       rs::resize_source(request_for(tools, clip, out / "talk.svpi", kBound), sink, true);
-  require(!refused.error.empty() && refused.error.find("--overwrite") != std::string::npos,
-          "existing resized media is refused without --resume or --overwrite");
+  require(!refused.error.empty() && refused.error.find("--fresh") != std::string::npos &&
+              refused.error.find("--resume") != std::string::npos,
+          "existing resized media is refused without --resume or --fresh");
   rs::ResizeRequest resume = request_for(tools, clip, out / "talk.svpi", kBound);
   resume.resume = true;
   const rs::ResizeOutcome resumed = rs::resize_source(resume, sink, true);
@@ -392,7 +393,7 @@ void test_resizing_synthetic_clips(const Tools& tools) {
   const rs::ResizeOutcome replaced = rs::resize_source(overwrite, sink, true);
   require(replaced.error.empty() && replaced.geometry &&
               digest_of(replaced.media_path) == resized_digest,
-          "--overwrite writes it again, the same bytes from the same source");
+          "--fresh writes it again, the same bytes from the same source");
 
   // Within the bound: built as is, nothing written.
   const rs::ResizeOutcome within =

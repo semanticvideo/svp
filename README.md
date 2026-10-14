@@ -509,8 +509,9 @@ svp-builder build "$SVP_VIDEO_PATH" \
   microseconds of its source time. The resized video is checked (size,
   rotation, start time) before the build uses it; if none can be written, the
   build warns and builds from the source, and the package describes the source.
-- A resized video already beside the output (from an earlier build) is refused
-  unless `--overwrite` replaces it or `--resume` builds from it again.
+- A resized video already beside the output (left by an earlier build) is
+  refused unless `--resume` builds from it again or `--fresh` writes it again
+  (on `build`, `--overwrite` also writes it again).
 - The run report shows the `resize` stage.
 
 `build-batch` and `interlace create-batch` do not take `--max-resolution`.

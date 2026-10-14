@@ -19,8 +19,8 @@
 // Where the resized media ends up depends on the output: an SVPI sidecar
 // describes it, so it stays beside the sidecar; an .svp package or an
 // embedded SVPI carries it, so the separate file is removed once that output
-// is written (finish_resized_media). After a failed build it stays, and
-// --resume builds from it again.
+// is written (finish_resized_media). After a failed build it stays: --resume
+// builds from it again and --fresh writes it again.
 //
 // If no resized media can be written, the build warns and builds from the
 // source, so the package describes the source.
@@ -45,10 +45,11 @@ struct ResizeRequest {
   int max_resolution = 0;
   std::filesystem::path ffmpeg_path;
   std::filesystem::path ffprobe_path;
-  // --resume: resized media already beside the output is built from as is,
-  // once it passes the check.
+  // --resume: resized media already beside the output (left by an earlier
+  // build) is built from as is, once it passes the check.
   bool resume = false;
-  // --overwrite: resized media already beside the output is written again.
+  // --fresh (or build's --overwrite): resized media already beside the output
+  // is written again.
   bool overwrite = false;
   const svp::exec::CancellationToken* cancellation = nullptr;
 };
