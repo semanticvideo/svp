@@ -230,14 +230,19 @@ void test_overlap_reconciliation_retains_continuation_after_content_anchor() {
 
   const auto reconciled =
       svp::audio::reconcile_overlapping_chunks(chunk_words, plan.chunks);
-  assert(reconciled.size() == 9);
-  assert(reconciled[5].text == "rent");
-  assert(reconciled[6].text == "it");
-  assert(reconciled[7].text == "out");
-  assert(reconciled[8].text == "refinance");
+  // Chunk 0's "renovate" is its cut-off copy of "rent it out": dropped, not
+  // kept at zero length. The anchor's "sub" ends where "rent" starts.
+  assert(reconciled.size() == 8);
+  assert(reconciled[3].text == "sub");
+  assert(reconciled[3].end_us == 14200000);
+  assert(reconciled[4].text == "rent");
+  assert(reconciled[5].text == "it");
+  assert(reconciled[6].text == "out");
+  assert(reconciled[7].text == "refinance");
   for (std::size_t i = 1; i < reconciled.size(); ++i) {
     assert(reconciled[i].start_us >= reconciled[i - 1].end_us);
   }
+  for (const auto& word : reconciled) assert(word.end_us > word.start_us);
 }
 
 void test_overlap_reconciliation_empty_token_breaks_content_anchor() {

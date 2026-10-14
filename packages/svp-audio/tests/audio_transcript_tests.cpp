@@ -42,6 +42,14 @@ int main() {
   test_overlap_reconciliation_skips_lcs_after_empty_chunk();
   test_overlap_reconciliation_no_false_dedepe_outside_overlap();
   test_overlap_reconciliation_empty_chunks();
+  test_overlap_reconciliation_seam_drops_cut_off_prior_word_past_the_seam();
+  test_overlap_reconciliation_seam_drops_prior_words_that_collapsed_to_the_seam();
+  test_overlap_reconciliation_seam_drops_prior_anchor_copy_timed_past_the_seam();
+  test_overlap_reconciliation_seam_drops_cut_off_prior_word_before_the_seam();
+  test_overlap_reconciliation_seam_trims_anchor_word_reaching_past_the_seam();
+  test_overlap_reconciliation_seam_keeps_repetition_across_anchored_seam();
+  test_overlap_reconciliation_seam_keeps_repetition_across_unanchored_seam();
+  test_overlap_reconciliation_seam_ignores_anchor_repeated_earlier_in_prior();
   test_asr_model_present_vs_verified_distinction();
   test_asr_execution_boundary_blocked_when_model_missing();
   test_asr_slice_workspaces_are_unique_and_removed();
