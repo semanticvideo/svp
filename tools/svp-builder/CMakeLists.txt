@@ -257,6 +257,17 @@ if(BUILD_TESTING)
   add_test(NAME svp-builder-ocr-frame-batch-plan-tests
            COMMAND svp-builder-ocr-frame-batch-plan-tests)
 
+  add_executable(svp-builder-cli-run-telemetry-tests
+    tests/cli_run_telemetry_tests.cpp
+    src/cli/cli_run_telemetry.cpp
+  )
+  target_include_directories(svp-builder-cli-run-telemetry-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_compile_features(svp-builder-cli-run-telemetry-tests PRIVATE cxx_std_20)
+  target_link_libraries(svp-builder-cli-run-telemetry-tests PRIVATE svp::builder)
+  add_test(NAME svp-builder-cli-run-telemetry-tests COMMAND svp-builder-cli-run-telemetry-tests)
+
   add_executable(svp-builder-video-placement-tests
     tests/video_placement_tests.cpp
   )
