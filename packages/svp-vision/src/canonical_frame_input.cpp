@@ -277,7 +277,7 @@ DecodedCanonicalFrames decode_frames_at_timestamps(
     }
     std::string decode_error;
     std::vector<Srgb8Pixel> pixels = decode_frame_at(ffmpeg_path,
-                                                      media::frame_source_path(plan),
+                                                      plan.source_path,
                                                       timestamps_us[static_cast<std::size_t>(i)],
                                                       width,
                                                       height,
@@ -365,7 +365,7 @@ DecodedCanonicalFrames decode_frames_at_timestamps_streaming(
     std::string decode_error;
     std::vector<Srgb8Pixel> pixels = decode_frame_at(
         ffmpeg_path,
-        media::frame_source_path(plan),
+        plan.source_path,
         timestamps_us[static_cast<std::size_t>(i)],
         width,
         height,

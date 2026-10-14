@@ -1,10 +1,10 @@
-#include "working_copy/working_copy_geometry.hpp"
+#include "resize/resize_geometry.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 
-namespace svp::builder::working_copy {
+namespace svp::builder::resize {
 namespace {
 
 // 4:2:0 chroma covers 2x2 pixels, so encoders need even frame sides.
@@ -22,7 +22,7 @@ bool rotated_a_quarter_turn(std::int32_t rotation_degrees) {
 
 }  // namespace
 
-std::optional<WorkingCopyGeometry> plan_working_copy_geometry(
+std::optional<ResizeGeometry> plan_resize_geometry(
     const svp::media::VideoStreamProbe& video, int max_resolution) {
   if (video.width <= 0 || video.height <= 0 || max_resolution < kChromaBlockSide) {
     return std::nullopt;
@@ -35,15 +35,15 @@ std::optional<WorkingCopyGeometry> plan_working_copy_geometry(
   if (short_side <= max_resolution) {
     return std::nullopt;
   }
-  const int copy_short_side = max_resolution - (max_resolution % kChromaBlockSide);
-  const int copy_long_side = nearest_even(
-      long_side * (static_cast<double>(copy_short_side) / static_cast<double>(short_side)));
+  const int resized_short_side = max_resolution - (max_resolution % kChromaBlockSide);
+  const int resized_long_side = nearest_even(
+      long_side * (static_cast<double>(resized_short_side) / static_cast<double>(short_side)));
   const bool landscape = display_width >= display_height;
-  WorkingCopyGeometry geometry{.display_width = landscape ? copy_long_side : copy_short_side,
-                               .display_height = landscape ? copy_short_side : copy_long_side};
+  ResizeGeometry geometry{.display_width = landscape ? resized_long_side : resized_short_side,
+                               .display_height = landscape ? resized_short_side : resized_long_side};
   geometry.stored_width = swaps ? geometry.display_height : geometry.display_width;
   geometry.stored_height = swaps ? geometry.display_width : geometry.display_height;
   return geometry;
 }
 
-}  // namespace svp::builder::working_copy
+}  // namespace svp::builder::resize

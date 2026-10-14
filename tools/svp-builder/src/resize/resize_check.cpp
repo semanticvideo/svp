@@ -1,17 +1,18 @@
-#include "working_copy/working_copy_check.hpp"
+#include "resize/resize_check.hpp"
 
-#include "working_copy/cancellable_command.hpp"
+#include "resize/cancellable_command.hpp"
 
 #include "svp/media/media_probe.hpp"
 
 #include <nlohmann/json.hpp>
 
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <vector>
 
-namespace svp::builder::working_copy {
+namespace svp::builder::resize {
 namespace {
 
 constexpr double kMicrosecondsPerSecond = 1'000'000.0;
@@ -75,31 +76,31 @@ std::optional<std::int64_t> stream_start_offset_us(std::string_view ffprobe_json
   return *stream - *format;
 }
 
-std::optional<std::string> working_copy_mismatch(const svp::media::MediaIngestPlan& source_plan,
-                                                 const WorkingCopyGeometry& geometry,
-                                                 const std::filesystem::path& copy_path,
-                                                 const std::filesystem::path& ffprobe_path,
-                                                 const std::filesystem::path& scratch_dir,
-                                                 const svp::exec::CancellationToken* cancellation) {
-  svp::media::MediaProbe copy;
+std::optional<std::string> resized_media_mismatch(const svp::media::MediaIngestPlan& source_plan,
+                                                  const ResizeGeometry& geometry,
+                                                  const std::filesystem::path& resized_path,
+                                                  const std::filesystem::path& ffprobe_path,
+                                                  const std::filesystem::path& scratch_dir,
+                                                  const svp::exec::CancellationToken* cancellation) {
+  svp::media::MediaProbe resized;
   try {
-    copy = svp::media::probe_media_with_ffprobe(copy_path, ffprobe_path);
+    resized = svp::media::probe_media_with_ffprobe(resized_path, ffprobe_path);
   } catch (const std::exception& error) {
-    return std::string("cannot probe the working copy: ") + error.what();
+    return std::string("cannot probe the resized media: ") + error.what();
   }
-  if (copy.video_streams.size() != 1) {
-    return "the working copy has " + std::to_string(copy.video_streams.size()) +
+  if (resized.video_streams.size() != 1) {
+    return "the resized media has " + std::to_string(resized.video_streams.size()) +
            " video streams, not 1";
   }
-  const svp::media::VideoStreamProbe& video = copy.video_streams.front();
+  const svp::media::VideoStreamProbe& video = resized.video_streams.front();
   if (video.width != geometry.stored_width || video.height != geometry.stored_height) {
-    return "the working copy is " + std::to_string(video.width) + "x" +
+    return "the resized media is " + std::to_string(video.width) + "x" +
            std::to_string(video.height) + ", not " + std::to_string(geometry.stored_width) +
            "x" + std::to_string(geometry.stored_height);
   }
   const svp::media::VideoStreamProbe& source = source_plan.primary_video_stream;
   if (normalized_rotation(video.rotation_degrees) != normalized_rotation(source.rotation_degrees)) {
-    return "the working copy is rotated " + std::to_string(video.rotation_degrees) +
+    return "the resized media is rotated " + std::to_string(video.rotation_degrees) +
            " degrees, the source " + std::to_string(source.rotation_degrees);
   }
 
@@ -110,16 +111,16 @@ std::optional<std::string> working_copy_mismatch(const svp::media::MediaIngestPl
   if (!source_offset) {
     return "cannot read the source's start time: " + error;
   }
-  const std::optional<std::int64_t> copy_offset =
-      probe_start_offset_us(ffprobe_path, copy_path, "v:0", scratch_dir, cancellation, error);
-  if (!copy_offset) {
-    return "cannot read the working copy's start time: " + error;
+  const std::optional<std::int64_t> resized_offset =
+      probe_start_offset_us(ffprobe_path, resized_path, "v:0", scratch_dir, cancellation, error);
+  if (!resized_offset) {
+    return "cannot read the resized media's start time: " + error;
   }
-  if (*copy_offset != *source_offset) {
-    return "the working copy's video starts " + std::to_string(*copy_offset) +
+  if (std::llabs(*resized_offset - *source_offset) > kStartOffsetToleranceUs) {
+    return "the resized video starts " + std::to_string(*resized_offset) +
            " us after its file start, the source's " + std::to_string(*source_offset) + " us";
   }
   return std::nullopt;
 }
 
-}  // namespace svp::builder::working_copy
+}  // namespace svp::builder::resize

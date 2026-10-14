@@ -181,8 +181,7 @@ std::optional<ShotKeyframeEmbeddings> embed_dispatched_keyframes(
                                 " values, not " + std::to_string(request.embedding_dim));
     }
     if (!outcome.embedded) {
-      outcome = embed_keyframe(session, request.ffmpeg_path,
-                               media::frame_source_path(*request.media_plan),
+      outcome = embed_keyframe(session, request.ffmpeg_path, request.media_plan->source_path,
                                items[index], request.embedding_dim);
     }
     if (outcome.embedded) {
@@ -269,7 +268,7 @@ ShotKeyframeEmbeddings embed_shot_keyframes(
       KeyframeInput item{i, {}};
       try {
         item.input = keyframe_model_input(request.ffmpeg_path,
-                                          media::frame_source_path(*request.media_plan),
+                                          request.media_plan->source_path,
                                           embedding_item(keyframe));
       } catch (...) {
         item.input.clear();

@@ -85,48 +85,32 @@ std::uint64_t evidence_crop_image_pixels(const EvidenceCropJob& job) {
          static_cast<std::uint64_t>(std::max(0, size.height));
 }
 
-std::string evidence_crop_filter(const EvidenceCropJob& job) {
-  const ScaledCropSize scaled = scaled_crop_size(job.width, job.height);
-  std::string crop_filter;
-  if (job.frame_width > 0 && job.frame_height > 0) {
-    // The rectangle is in source-frame pixels and the file is a working copy
-    // at another size: cut the same fraction of the decoded frame (iw x ih),
-    // then scale to the size the source crop would have.
-    const auto fraction = [](const char* decoded, int value, int frame) {
-      return std::string(decoded) + "*" + std::to_string(value) + "/" + std::to_string(frame);
-    };
-    crop_filter = "crop=w=" + fraction("iw", job.width, job.frame_width) +
-                  ":h=" + fraction("ih", job.height, job.frame_height) +
-                  ":x=" + fraction("iw", job.left, job.frame_width) +
-                  ":y=" + fraction("ih", job.top, job.frame_height) +
-                  ",scale=" + std::to_string(scaled.width) + ":" +
-                  std::to_string(scaled.height);
-  } else {
-    crop_filter = "crop=" + std::to_string(job.width) + ":" + std::to_string(job.height) +
-                  ":" + std::to_string(job.left) + ":" + std::to_string(job.top);
-    if (scaled.scaled) {
-      crop_filter += ",scale=" + std::to_string(scaled.width) + ":" +
-                     std::to_string(scaled.height);
-    }
-  }
-  if (job.image_format == "jpeg" || job.image_format == "jpg") {
-    crop_filter += ",format=yuvj420p";
-  }
-  return crop_filter;
-}
-
 bool extract_evidence_crop_image(const std::filesystem::path& ffmpeg_path,
                                  const std::filesystem::path& source_path,
                                  const EvidenceCropJob& job,
                                  const std::filesystem::path& output_path,
                                  std::string& error) {
   const std::string seek = microseconds_to_seek_string(job.seek_us);
-  const std::string crop_filter = evidence_crop_filter(job);
+  const int target_width = job.width;
+  const int target_height = job.height;
+
+  std::string crop_filter =
+      "crop=" + std::to_string(job.width) + ":" +
+      std::to_string(job.height) + ":" +
+      std::to_string(job.left) + ":" +
+      std::to_string(job.top);
+
+  if (const ScaledCropSize scaled = scaled_crop_size(target_width, target_height);
+      scaled.scaled) {
+    crop_filter += ",scale=" + std::to_string(scaled.width) + ":" +
+                    std::to_string(scaled.height);
+  }
 
   std::string codec_opts;
   if (job.image_format == "jpeg" || job.image_format == "jpg") {
     codec_opts = " -c:v mjpeg -q:v " + std::to_string(
         std::max(1, std::min(31, 31 - (job.jpeg_quality * 31) / 100)));
+    crop_filter += ",format=yuvj420p";
   }
 
   std::string cmd =

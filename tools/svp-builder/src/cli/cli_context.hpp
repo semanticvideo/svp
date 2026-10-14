@@ -81,7 +81,7 @@ struct BuildCliOptions {
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
   bool serial_pipeline = false;
-  // --max-resolution (BuildPipelineOptions::max_resolution).
+  // --max-resolution (resize/resized_source.hpp).
   std::optional<int> max_resolution;
   // --resume / --fresh (RC2 §21), mutually exclusive.
   bool resume = false;

@@ -31,8 +31,6 @@ struct InterlaceCreateOptions {
   bool allow_fallback_diarization = false;
   bool force_single_speaker = false;
   bool serial_pipeline = false;
-  // BuildPipelineOptions::max_resolution.
-  std::optional<int> max_resolution;
   // The recovery journal lives next to output_path (`<out>.svpi-journal/`).
   RecoveryJournalMode journal_mode = RecoveryJournalMode::require_new;
   std::shared_ptr<BuildProgressSink> progress_sink;

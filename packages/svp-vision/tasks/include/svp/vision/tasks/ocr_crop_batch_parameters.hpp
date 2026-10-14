@@ -16,9 +16,7 @@ namespace svp::vision::tasks {
 // (svp/vision/evidence_crop_work.hpp). The version changes whenever the
 // parameter schema, the payload format, or the meaning of either changes.
 inline constexpr std::string_view kOcrCropBatchTaskType = "ocr.crop_batch";
-// Version 2: jobs may carry the source frame size their rectangle is measured
-// in (EvidenceCropJob::frame_width/height, a working copy's crops).
-inline constexpr std::uint64_t kOcrCropBatchTaskTypeVersion = 2;
+inline constexpr std::uint64_t kOcrCropBatchTaskTypeVersion = 1;
 // TaskSpec input holding the source media bytes (role
 // kOcrFrameBatchSourceRole, the same source the OCR frame batches read).
 inline constexpr std::string_view kOcrCropBatchSourceInput = "source";
@@ -46,8 +44,7 @@ struct OcrCropBatchParameters {
 // Canonical parameters object: the PP-OCR fields (pp_ocr_parameters.hpp) and
 //   {"decode":{"ffmpeg_build"},
 //    "jobs":[{"height","image_format","jpeg_quality","left","ordinal",
-//             "seek_us","top","width"[,"frame_height","frame_width"]}, ...]}
-// A job names its frame size only when it has one (a working copy's crop).
+//             "seek_us","top","width"}, ...]}
 // Throws std::invalid_argument when the values break the schema below.
 [[nodiscard]] nlohmann::json ocr_crop_batch_parameters_to_json(
     const OcrCropBatchParameters& parameters);
@@ -58,8 +55,7 @@ struct OcrCropBatchParameters {
 
 // nullopt when `value` is valid: known fields only, jobs non-empty with
 // strictly ascending ordinals, non-negative seek and origin, a size of at
-// least 1x1, a frame size (both fields or neither) that contains the
-// rectangle, a supported image format, a JPEG quality in 1..100, a decoder
+// least 1x1, a supported image format, a JPEG quality in 1..100, a decoder
 // "b3:<64 hex>", and the PP-OCR rules of pp_ocr_parameters.hpp.
 [[nodiscard]] std::optional<std::string> validate_ocr_crop_batch_parameters(
     const nlohmann::json& value);

@@ -62,7 +62,7 @@ std::optional<OcrWorkPlan> plan_ocr_work(const OcrWorkPlanInputs& inputs) {
       .bytes = inputs.source_bytes,
       .media_type = kSourceMediaType,
       .role = std::string(svp::vision::tasks::kOcrFrameBatchSourceRole)};
-  work.source_path = svp::media::frame_source_path(inputs.media_plan);
+  work.source_path = inputs.options.source_path;
   return work;
 }
 

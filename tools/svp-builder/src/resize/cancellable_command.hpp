@@ -1,9 +1,9 @@
 #pragma once
 
-// Runs one external command (ffmpeg, ffprobe) for the working copy, without a
-// shell, and stops it when the build is cancelled. Making a working copy of a
-// long video takes minutes, so unlike the builder's short ffmpeg calls it
-// must not outlive a Ctrl-C.
+// Runs one external command (ffmpeg, ffprobe) for --max-resolution, without a
+// shell, and stops it when the build is cancelled. Resizing a long video takes
+// minutes, so unlike the builder's short ffmpeg calls it must not outlive a
+// Ctrl-C.
 
 #include "svp/exec/cancellation_token.hpp"
 
@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace svp::builder::working_copy {
+namespace svp::builder::resize {
 
 // How often a running command checks for cancellation: far inside the
 // builder's interrupt grace period (build_interrupt.hpp), so a cancelled
@@ -40,4 +40,4 @@ struct CommandOutcome {
     const std::filesystem::path& stderr_path,
     const svp::exec::CancellationToken* cancellation);
 
-}  // namespace svp::builder::working_copy
+}  // namespace svp::builder::resize

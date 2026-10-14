@@ -1,4 +1,4 @@
-#include "working_copy/cancellable_command.hpp"
+#include "resize/cancellable_command.hpp"
 
 #include <cerrno>
 #include <csignal>
@@ -12,7 +12,7 @@
 
 extern char** environ;
 
-namespace svp::builder::working_copy {
+namespace svp::builder::resize {
 namespace {
 
 std::string trimmed(const std::string& text) {
@@ -171,4 +171,4 @@ CommandOutcome run_cancellable_command(const std::vector<std::string>& argv,
   return outcome;
 }
 
-}  // namespace svp::builder::working_copy
+}  // namespace svp::builder::resize

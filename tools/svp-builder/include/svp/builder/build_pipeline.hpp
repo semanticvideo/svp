@@ -91,12 +91,6 @@ struct BuildPipelineOptions {
   bool force_single_speaker = false;
   bool serial_pipeline = false;
   bool reset_staging_before_stages = false;
-  // --max-resolution: when the primary video's displayed short side is longer
-  // than this, frame analysis decodes a working copy scaled so that side fits
-  // (working_copy/working_copy.hpp) instead of the source. The package still
-  // describes the source. Empty: frames are decoded from the source, as
-  // always.
-  std::optional<int> max_resolution;
   // Runtime thread counts to use as given (a distributed coordinator's plan).
   // Empty: the build resolves its plan from the host once at start.
   std::optional<svp::models::ThreadPlan> thread_plan;

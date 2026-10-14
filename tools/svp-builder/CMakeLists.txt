@@ -96,12 +96,11 @@ add_library(svp-builder-lib
   src/interlace/interlace_batch_scan.cpp
   src/interlace/interlace_batch_validate.cpp
   src/interlace/interlace_identity.cpp
-  src/working_copy/cancellable_command.cpp
-  src/working_copy/working_copy.cpp
-  src/working_copy/working_copy_check.cpp
-  src/working_copy/working_copy_encoder.cpp
-  src/working_copy/working_copy_geometry.cpp
-  src/working_copy/working_copy_stage.cpp
+  src/resize/cancellable_command.cpp
+  src/resize/resize_check.cpp
+  src/resize/resize_encoder.cpp
+  src/resize/resize_geometry.cpp
+  src/resize/resized_source.cpp
 )
 
 add_library(svp::builder ALIAS svp-builder-lib)
@@ -256,22 +255,37 @@ if(BUILD_TESTING)
   add_test(NAME svp-builder-ocr-frame-batch-plan-tests
            COMMAND svp-builder-ocr-frame-batch-plan-tests)
 
-  add_executable(svp-builder-working-copy-tests
-    tests/working_copy_tests.cpp
+  add_executable(svp-builder-resize-tests
+    tests/resize_tests.cpp
   )
-  target_include_directories(svp-builder-working-copy-tests PRIVATE
+  target_include_directories(svp-builder-resize-tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
   )
-  target_compile_features(svp-builder-working-copy-tests PRIVATE cxx_std_20)
-  target_link_libraries(svp-builder-working-copy-tests
+  target_compile_features(svp-builder-resize-tests PRIVATE cxx_std_20)
+  target_link_libraries(svp-builder-resize-tests
     PRIVATE
       svp::builder
       svp::exec
       svp::media
       svp::vision
-      nlohmann_json::nlohmann_json
   )
-  add_test(NAME svp-builder-working-copy-tests COMMAND svp-builder-working-copy-tests)
+  add_test(NAME svp-builder-resize-tests COMMAND svp-builder-resize-tests)
+
+  # --max-resolution (resize/resized_source.hpp) on the one-video build commands.
+  foreach(svp_max_resolution_command IN ITEMS "build" "interlace;create")
+    string(REPLACE ";" "-" svp_max_resolution_test_name "${svp_max_resolution_command}")
+    add_test(NAME svp-builder-${svp_max_resolution_test_name}-offers-max-resolution
+             COMMAND svp-builder ${svp_max_resolution_command} --help)
+    set_tests_properties(
+      svp-builder-${svp_max_resolution_test_name}-offers-max-resolution PROPERTIES
+      PASS_REGULAR_EXPRESSION "--max-resolution"
+      ENVIRONMENT "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache")
+  endforeach()
+  add_test(NAME svp-builder-build-rejects-max-resolution-below-raster
+           COMMAND svp-builder build in.mp4 --out out.svp --max-resolution 639)
+  set_tests_properties(svp-builder-build-rejects-max-resolution-below-raster PROPERTIES
+    PASS_REGULAR_EXPRESSION "--max-resolution: Value 639 not in range"
+    ENVIRONMENT "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache")
 
   add_executable(svp-builder-batch-tests
     tests/batch_tests.cpp
@@ -576,21 +590,6 @@ if(BUILD_TESTING)
       PASS_REGULAR_EXPRESSION "--distributed.*--require-workers"
       ENVIRONMENT "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache")
   endforeach()
-  # --max-resolution (working_copy/working_copy.hpp) on the one-video build commands.
-  foreach(svp_max_resolution_command IN ITEMS "build" "interlace;create")
-    string(REPLACE ";" "-" svp_max_resolution_test_name "${svp_max_resolution_command}")
-    add_test(NAME svp-builder-${svp_max_resolution_test_name}-offers-max-resolution
-             COMMAND svp-builder ${svp_max_resolution_command} --help)
-    set_tests_properties(
-      svp-builder-${svp_max_resolution_test_name}-offers-max-resolution PROPERTIES
-      PASS_REGULAR_EXPRESSION "--max-resolution"
-      ENVIRONMENT "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache")
-  endforeach()
-  add_test(NAME svp-builder-build-rejects-max-resolution-below-raster
-           COMMAND svp-builder build in.mp4 --out out.svp --max-resolution 639)
-  set_tests_properties(svp-builder-build-rejects-max-resolution-below-raster PROPERTIES
-    PASS_REGULAR_EXPRESSION "--max-resolution: Value 639 not in range"
-    ENVIRONMENT "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache")
   set_tests_properties(
     svp-builder-help-without-model-cache
     svp-builder-version-without-model-cache

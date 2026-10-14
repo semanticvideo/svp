@@ -63,12 +63,8 @@ StageStates run_entities_task(const StageTaskEnvironment& environment) {
       svp::package::vision_tracking_stage_result_from_json(
           vision(StageTaskKind::tracking, vision_state::kTracking)));
 
-  std::vector<nlohmann::json> processor_records = lane.processor_records;
-  if (environment.working_copy_processor_record != nullptr) {
-    processor_records.push_back(*environment.working_copy_processor_record);
-  }
   const PackageEntitiesStageResult entities =
-      run_package_entities_stage(task.context(), processor_records);
+      run_package_entities_stage(task.context(), lane.processor_records);
 
   const nlohmann::json foundation = {
       {"spatial_embedding_placeholders",

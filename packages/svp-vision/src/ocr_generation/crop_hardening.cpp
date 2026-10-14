@@ -57,10 +57,7 @@ EvidenceCropOptions build_crop_options(const OcrGenerationOptions& options) {
 
   EvidenceCropOptions crop_opts;
   crop_opts.ffmpeg_path = options.ffmpeg_path;
-  // Crops are cut from the file frames are decoded from; their rectangles stay
-  // in source-frame pixels either way.
-  crop_opts.source_media_path = media::frame_source_path(*options.media_plan);
-  crop_opts.source_media_is_working_copy = media::decodes_working_copy(*options.media_plan);
+  crop_opts.source_media_path = options.media_plan->source_path;
   crop_opts.ocr_frame_width = options.ocr_frame_width;
   crop_opts.ocr_frame_height = options.ocr_frame_height;
   crop_opts.source_frame_width = source_dims.width;

@@ -95,7 +95,6 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
   pipeline_opts.allow_fallback_diarization = options.allow_fallback_diarization;
   pipeline_opts.force_single_speaker = options.force_single_speaker;
   pipeline_opts.serial_pipeline = options.serial_pipeline;
-  pipeline_opts.max_resolution = options.max_resolution;
   pipeline_opts.distributed = options.distributed;
   pipeline_opts.thread_plan = options.thread_plan;
   pipeline_opts.reset_staging_before_stages = true;

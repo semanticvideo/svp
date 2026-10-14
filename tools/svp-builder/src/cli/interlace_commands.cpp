@@ -3,6 +3,10 @@
 #include "cli_context.hpp"
 #include "cli_completion.hpp"
 #include "cli_run_telemetry.hpp"
+#include "build_interrupt.hpp"
+#include "resize/resized_source.hpp"
+
+#include "svp/exec/cancellation_token.hpp"
 
 #include "svp/builder/build_pipeline.hpp"
 #include "svp/builder/interlace.hpp"
@@ -23,14 +27,44 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
                               opts.ic_run_report_path, opts.ic_runtime_tools);
     auto sink = telemetry.progress_sink();
 
+    // --max-resolution (resize/resized_source.hpp): the SVPI describes the
+    // resized media, which stays beside it.
+    std::string source_path = opts.ic_source;
+    std::string probe_json_path = opts.ic_probe_json;
+    if (opts.ic_max_resolution) {
+      svp::exec::CancellationToken cancellation;
+      const svp::builder::BuildInterruptScope interrupt_scope(cancellation);
+      const svp::builder::resize::ResizeOutcome resized = svp::builder::resize::resize_source(
+          {.source_path = opts.ic_source,
+           .probe_json_path = opts.ic_probe_json,
+           .output_path = opts.ic_out,
+           .max_resolution = *opts.ic_max_resolution,
+           .ffmpeg_path = opts.ic_ffmpeg,
+           .ffprobe_path = opts.ic_ffprobe,
+           .resume = opts.ic_resume,
+           .cancellation = &cancellation},
+          *sink, opts.ic_quiet);
+      if (resized.cancelled) {
+        return telemetry.finish(svp::builder::resize::resize_cancelled_exit_code());
+      }
+      if (!resized.error.empty()) {
+        std::cerr << "interlace create failed: " << resized.error << "\n";
+        return telemetry.finish(svp::builder::kBuildFailedExitCode);
+      }
+      if (resized.geometry) {
+        source_path = resized.media_path.string();
+        probe_json_path.clear();
+      }
+    }
+
     svp::builder::InterlaceCreateOptions ic_opts;
-    ic_opts.source_path = opts.ic_source;
+    ic_opts.source_path = source_path;
     ic_opts.output_path = opts.ic_out;
     ic_opts.staging_dir = opts.ic_staging;
     ic_opts.model_cache_dir = opts.ic_model_cache;
     ic_opts.ffprobe_path = opts.ic_ffprobe;
     ic_opts.ffmpeg_path = opts.ic_ffmpeg;
-    ic_opts.probe_json_path = opts.ic_probe_json;
+    ic_opts.probe_json_path = probe_json_path;
     ic_opts.sherpa_lib_path = opts.ic_sherpa_lib;
     ic_opts.performance = opts.ic_performance;
     ic_opts.visual_tracking_quality = opts.ic_visual_tracking_quality;
@@ -39,7 +73,6 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
     ic_opts.allow_fallback_diarization = opts.ic_allow_fallback;
     ic_opts.force_single_speaker = opts.ic_force_single;
     ic_opts.serial_pipeline = opts.ic_serial_pipeline;
-    ic_opts.max_resolution = opts.ic_max_resolution;
     ic_opts.journal_mode = journal_mode_from_flags(opts.ic_resume, opts.ic_fresh);
     ic_opts.progress_sink = sink;
     const std::optional<std::shared_ptr<svp::builder::DistributedExecution>> fleet =
