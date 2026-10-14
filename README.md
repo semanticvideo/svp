@@ -606,6 +606,39 @@ batch, sharing their workers with each other; with `--distributed`, each
 video's work is also spread over workers. A Mac that becomes unavailable gives
 its video back to the queue for another Mac.
 
+### One video at a time per coordinator: `build --coordinators`
+
+Each Mac coordinates one video at a time: a build already spreads over every
+Mac's measured slots, so a second video coordinated by the same Mac only
+competes with the first. When videos arrive one by one rather than as a
+batch (an editor submits a draft while another one builds), give each
+`build` the other Macs that may coordinate it:
+
+```bash
+svp-builder build "$SVP_VIDEO_PATH" \
+  --out build/intro.svpi --output-format svpi \
+  --distributed --coordinators all
+```
+
+- While no other `build --coordinators` on this Mac is coordinating a video,
+  this one is coordinated here, exactly as without the option.
+- While one is, this video goes to the first listed Mac that takes it, as a
+  batch video would: that Mac coordinates it, with `--distributed` spread over
+  that Mac's own paired workers, and the output (and `--run-report`, written by
+  that Mac's build) come back to `--out`. A Mac coordinating another video is
+  asked again after a pause; one that cannot take whole-video jobs is not asked
+  again for this video. If no Mac can take it, it waits for this Mac. A video
+  never fails only because every Mac was busy.
+- `all` is every Mac this Mac is paired with; pairing ids or `user@host`
+  targets name particular Macs. Coordinating Macs need the fleet's other Macs
+  paired too (`svp-builder workers fleet pair` on each coordinator; see
+  [Worker Fleet Setup](docs/macos/Worker_Fleet_Setup.md)).
+- `--max-resolution` resizes on this Mac first; the resized video is what is
+  sent, and the package describes it either way.
+- The package is the same whichever Mac coordinates it.
+- With `--coordinators`, an existing output is refused unless `--overwrite` is
+  given, and only complete packages (`--stop-after package`) are built.
+
 ### Worker cleanup
 
 When a distributed build or a batch job ends, each worker deletes what it

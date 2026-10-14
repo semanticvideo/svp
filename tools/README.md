@@ -131,6 +131,7 @@ Common options:
 | `--allow-fallback-diarization` | Allow explicit fallback when sherpa-onnx is unavailable |
 | `--force-single-speaker` | Intentionally skip diarization and declare one speaker |
 | `--max-resolution <n>` | Build from the video resized so its displayed short side is `n` (at least 640) when it is longer; the resized video is written beside the output and the package describes it, never the source. Also on `interlace create`. See [Build at a lower resolution](../README.md#build-at-a-lower-resolution---max-resolution) |
+| `--coordinators <macs\|all>` | While another `build --coordinators` on this Mac coordinates a video, hand this one to the first free listed Mac (or any paired Mac with `all`); it stays distributed over that Mac's workers and the output comes back to `--out`. See [One video at a time per coordinator](../README.md#one-video-at-a-time-per-coordinator-build---coordinators) |
 
 ### SVPI interlace commands
 

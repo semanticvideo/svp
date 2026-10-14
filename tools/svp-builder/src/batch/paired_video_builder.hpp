@@ -39,6 +39,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace svp::builder::batch {
@@ -72,9 +73,13 @@ class PairedVideoBuilder final : public RemoteVideoBuilder {
   svp::exec::worker::RuntimeSwitchWatch switch_watch_;
 };
 
+// `--coordinators all`: every Mac this Mac is paired with, in pairing id
+// order, so a command names no host.
+inline constexpr std::string_view kAllCoordinators = "all";
+
 // The builders for `coordinators` (pairing ids or user@host targets of this
-// Mac's pairings). Throws WorkerError(configuration) naming an entry that
-// matches no pairing, or several.
+// Mac's pairings, or kAllCoordinators). Throws WorkerError(configuration)
+// naming an entry that matches no pairing, or several.
 [[nodiscard]] std::vector<std::shared_ptr<RemoteVideoBuilder>> paired_video_builders(
     const std::vector<std::string>& coordinators,
     const std::shared_ptr<const VideoBuildSupplies>& supplies);

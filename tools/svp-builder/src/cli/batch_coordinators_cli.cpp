@@ -16,8 +16,9 @@ void add_coordinators_option(CLI::App& command, std::vector<std::string>& coordi
   command
       .add_option("--coordinators", coordinators,
                   "Other Macs (pairing ids or user@host of this Mac's paired workers, comma "
-                  "separated) that may each coordinate one video of the batch at a time; their "
-                  "worker service must run as a LaunchDaemon (workers pair --system-service)")
+                  "separated, or `all` for every one) that may each coordinate one video of the "
+                  "batch at a time; their worker service must run as a LaunchDaemon (workers "
+                  "pair --system-service)")
       ->delimiter(',');
 }
 
