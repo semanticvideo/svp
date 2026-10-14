@@ -73,7 +73,9 @@ struct TrackingWorkPlanInputs {
   const nlohmann::json& media_plan_json;
   const svp::models::ThreadPlan& thread_plan;
   bool model_runtime_available = false;
-  // The source's whole-file BLAKE3 and size (the journal's fingerprint).
+  // Whole-file BLAKE3 and size of the file frames are decoded from
+  // (svp::media::frame_source_path(media_plan)): the source, whose
+  // fingerprint the journal holds, or its --max-resolution working copy.
   svp::exec::Blake3Digest source_blake3{};
   std::uint64_t source_bytes = 0;
 };

@@ -160,6 +160,23 @@ void test_ffprobe_side_data_rotation_feeds_canonical_raster() {
   assert(plan.canonical_raster.height == 640);
 }
 
+// A working copy changes only which file frames are decoded from: the plan's
+// JSON (and so everything it describes) stays the source's.
+void test_frame_decode_path_defaults_to_the_source_and_stays_out_of_json() {
+  svp::media::MediaProbe probe;
+  probe.video_streams.push_back({.id = "vstream_0001", .width = 3840, .height = 2160});
+  svp::media::MediaIngestPlan plan =
+      svp::media::build_media_ingest_plan("/media/source.mp4", probe);
+  assert(svp::media::frame_source_path(plan) == "/media/source.mp4");
+  assert(!svp::media::decodes_working_copy(plan));
+  const nlohmann::json before = svp::media::media_ingest_plan_to_json(plan);
+
+  plan.frame_decode_path = "/tmp/working-copy.mov";
+  assert(svp::media::frame_source_path(plan) == "/tmp/working-copy.mov");
+  assert(svp::media::decodes_working_copy(plan));
+  assert(svp::media::media_ingest_plan_to_json(plan) == before);
+}
+
 }  // namespace
 
 int main() {
@@ -170,5 +187,6 @@ int main() {
   test_probe_json_round_trip_preserves_nested_timing();
   test_probe_json_parser_keeps_legacy_flat_timing();
   test_ffprobe_side_data_rotation_feeds_canonical_raster();
+  test_frame_decode_path_defaults_to_the_source_and_stays_out_of_json();
   return 0;
 }

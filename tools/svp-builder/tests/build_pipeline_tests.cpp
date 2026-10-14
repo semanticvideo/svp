@@ -7,11 +7,14 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -540,6 +543,100 @@ void test_verbose_package_build_writes_foundation_json_sidecar() {
   assert(std::filesystem::exists(json_sidecar));
 
   std::filesystem::remove_all(tmp_dir);
+}
+
+// --max-resolution on a package build that cannot or need not use a working
+// copy: the build ends as it does without the flag (this synthetic package
+// does not pass strict validation either way), frames come from the source,
+// the package names no working copy, and the builder foundation JSON says
+// why.
+struct MaxResolutionBuild {
+  svp::builder::BuildPipelineResult result;
+  nlohmann::json builder_command;
+  std::string processors;
+  std::vector<svp::builder::ProgressEvent> events;
+};
+
+// Every build runs in the same directory, so the records that name host
+// paths match.
+MaxResolutionBuild run_max_resolution_build(std::optional<int> max_resolution) {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_max_resolution_build";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path package_path = tmp_dir / "output.svp";
+  auto sink = std::make_shared<CapturingProgressSink>();
+
+  svp::builder::BuildPipelineOptions options;
+  options.source_path = write_mock_media_file(tmp_dir).string();
+  options.probe_json_path = write_minimal_probe_json(tmp_dir).string();
+  options.ffmpeg_path = "/usr/bin/true";
+  options.ffprobe_path = (tmp_dir / "no-ffprobe").string();
+  options.output_path = package_path;
+  options.staging_dir = tmp_dir / "staging";
+  options.model_cache_dir =
+      svp::builder::test::write_valid_model_cache(tmp_dir / "model-cache");
+  options.stop_after = svp::builder::BuildStage::package_skeleton;
+  options.force_single_speaker = true;
+  options.verbose = true;
+  options.quiet = true;
+  options.max_resolution = max_resolution;
+  options.progress_sink = sink;
+
+  std::ostringstream captured_stdout;
+  std::streambuf* old_cout = std::cout.rdbuf();
+  std::cout.rdbuf(captured_stdout.rdbuf());
+  MaxResolutionBuild build;
+  build.result = svp::builder::BuildPipeline{}.run(options);
+  std::cout.rdbuf(old_cout);
+
+  std::ifstream foundation(package_path.string() + ".json");
+  build.builder_command = nlohmann::json::parse(foundation).at("builder_command");
+  std::ifstream processors(options.staging_dir / "provenance" / "processors.jsonl");
+  build.processors.assign(std::istreambuf_iterator<char>(processors),
+                          std::istreambuf_iterator<char>());
+  build.events = sink->events;
+  std::filesystem::remove_all(tmp_dir);
+  return build;
+}
+
+bool has_stage_events(const MaxResolutionBuild& build, svp::builder::ProgressStageId stage) {
+  return std::any_of(build.events.begin(), build.events.end(),
+                     [stage](const svp::builder::ProgressEvent& event) {
+                       return event.stage_id == stage;
+                     });
+}
+
+void test_max_resolution_without_a_working_copy() {
+  const MaxResolutionBuild plain = run_max_resolution_build(std::nullopt);
+  assert(!plain.processors.empty());
+  assert(!plain.builder_command.contains("max_resolution"));
+  assert(!plain.builder_command.contains("working_copy"));
+  assert(!has_stage_events(plain, svp::builder::ProgressStageId::working_copy));
+
+  // The synthetic video is 1920x1080: its 1080 short side fits a 1080 bound.
+  const MaxResolutionBuild fits = run_max_resolution_build(1080);
+  assert(fits.result.exit_code == plain.result.exit_code);
+  assert(fits.builder_command.at("max_resolution") == 1080);
+  assert(fits.builder_command.at("working_copy").at("used") == false);
+  assert(fits.builder_command.at("working_copy").at("reason") ==
+         "the video's displayed short side is not longer than --max-resolution");
+  assert(!has_stage_events(fits, svp::builder::ProgressStageId::working_copy));
+  assert(fits.processors == plain.processors);
+
+  // A 720 bound asks for a copy, but this ffmpeg writes none: the build
+  // warns and analyses the source.
+  const MaxResolutionBuild failed = run_max_resolution_build(720);
+  assert(failed.result.exit_code == plain.result.exit_code);
+  assert(failed.builder_command.at("working_copy").at("used") == false);
+  assert(!failed.builder_command.at("working_copy").at("reason").get<std::string>().empty());
+  assert(std::any_of(failed.events.begin(), failed.events.end(),
+                     [](const svp::builder::ProgressEvent& event) {
+                       return event.kind == svp::builder::ProgressEventKind::warning &&
+                              event.stage_id == svp::builder::ProgressStageId::working_copy;
+                     }));
+  assert(failed.processors == plain.processors);
+  assert(failed.processors.find("proc_ffmpeg_working_copy") == std::string::npos);
 }
 
 void test_serial_package_pipeline_runs_audio_before_package_write() {
@@ -1153,6 +1250,7 @@ int main() {
   test_package_build_removes_default_foundation_json_sidecar();
   test_verbose_package_build_writes_foundation_json_sidecar();
   test_serial_package_pipeline_runs_audio_before_package_write();
+  test_max_resolution_without_a_working_copy();
   test_warning_event_factory_for_diarization_and_index();
   test_stage_progress_event_has_progress_fields();
   test_stage_progress_zero_total_no_fraction();

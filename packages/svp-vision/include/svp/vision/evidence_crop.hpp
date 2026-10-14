@@ -128,6 +128,12 @@ struct EvidenceCropOptions {
   int source_frame_width = 0;
   int source_frame_height = 0;
 
+  // source_media_path is a working copy of the source at a lower resolution
+  // (svp-builder build --max-resolution): crop rectangles stay in source-frame
+  // pixels, and each job carries the source frame size so the cut takes the
+  // same fraction of the copy's frame (EvidenceCropJob::frame_width).
+  bool source_media_is_working_copy = false;
+
   // Canonical raster dimensions (for metadata auditing)
   int canonical_raster_width = 0;
   int canonical_raster_height = 0;

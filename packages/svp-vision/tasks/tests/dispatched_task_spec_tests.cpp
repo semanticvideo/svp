@@ -232,6 +232,35 @@ void test_crop_parameters() {
   rejects([](Json& v) { v["recognizer"]["threads"]["intra_op"] = 0; },
           "a thread count left to the worker");
   rejects([](Json& v) { v["command"] = "rm"; }, "an unknown top-level field");
+
+  // A working copy's crop names the source frame size its rectangle is
+  // measured in; the field pair is written only then, and must hold the
+  // rectangle.
+  tasks::OcrCropBatchParameters framed = parameters;
+  for (vision::EvidenceCropJob& job : framed.jobs) {
+    job.frame_width = 3840;
+    job.frame_height = 2160;
+  }
+  const Json framed_value = tasks::ocr_crop_batch_parameters_to_json(framed);
+  require(framed_value["jobs"][0]["frame_width"] == 3840 &&
+              framed_value["jobs"][0]["frame_height"] == 2160,
+          "a framed job writes its frame size");
+  require(!value["jobs"][0].contains("frame_width"), "an unframed job writes none");
+  require(tasks::ocr_crop_batch_parameters_from_json(framed_value).jobs == framed.jobs,
+          "framed crop parameters round-trip");
+  const auto rejects_framed = [&](const std::function<void(Json&)>& edit,
+                                  const std::string& what) {
+    Json bad = framed_value;
+    edit(bad);
+    require(tasks::validate_ocr_crop_batch_parameters(bad).has_value(), "rejects " + what);
+  };
+  rejects_framed([](Json& v) { v["jobs"][0].erase("frame_height"); }, "half a frame size");
+  rejects([](Json& v) { v["jobs"][0]["frame_height"] = 2160; }, "a frame height alone");
+  rejects_framed([](Json& v) { v["jobs"][0]["frame_width"] = 0; }, "an empty frame");
+  rejects_framed([](Json& v) { v["jobs"][0]["frame_width"] = 309; },
+                 "a rectangle wider than its frame");
+  rejects_framed([](Json& v) { v["jobs"][0]["frame_height"] = 59; },
+                 "a rectangle taller than its frame");
 }
 
 tasks::OcrCropBatchTaskInputs crop_inputs() {

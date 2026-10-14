@@ -72,6 +72,14 @@ MediaIngestPlan build_media_ingest_plan(std::filesystem::path source_path,
   };
 }
 
+const std::filesystem::path& frame_source_path(const MediaIngestPlan& plan) {
+  return plan.frame_decode_path.empty() ? plan.source_path : plan.frame_decode_path;
+}
+
+bool decodes_working_copy(const MediaIngestPlan& plan) {
+  return !plan.frame_decode_path.empty();
+}
+
 nlohmann::json media_ingest_plan_to_json(const MediaIngestPlan& plan) {
   return {
       {"schema_version", "svp-builder-media-ingest-foundation-v1"},
