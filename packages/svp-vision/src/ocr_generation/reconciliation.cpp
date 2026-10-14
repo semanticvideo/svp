@@ -50,12 +50,62 @@ constexpr double kSamePlaceIou = 0.3;
 constexpr std::int64_t kNearIdenticalWithinUs = 5'000'000;
 constexpr double kNearIdenticalSimilarity = 0.8;
 
+bool is_digit(char c) { return c >= '0' && c <= '9'; }
+bool is_letter(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+bool is_number_mark(char c) { return c == '$' || c == ',' || c == '.'; }
+
 std::string digits_of(const std::string& key) {
   std::string digits;
   for (char c : key) {
-    if (c >= '0' && c <= '9') digits += c;
+    if (is_digit(c)) digits += c;
   }
   return digits;
+}
+
+// The recognizer reads a digit as the letter it looks like ("$2.O65.512" for
+// "$2,065,512", "Flips: 1O43" for "Flips: 1043"), so before readings are
+// compared those letters are read back as digits, but only inside a number: a
+// run of digits, number marks ($ , .) and look-alike letters with at least one
+// digit. A run with any other letter is a word and keeps its letters ("SOLD",
+// "4.Benjamin"); so does a run without a digit ("BOSS."). An S that starts a
+// number stays: it is as often a misread $ ("S774" for "$774") as a 5.
+char digit_lookalike(char c) {
+  switch (c) {
+    case 'O':
+    case 'o':
+      return '0';
+    case 'I':
+    case 'l':
+      return '1';
+    case 'S':
+      return '5';
+    case 'B':
+      return '8';
+    default:
+      return '\0';
+  }
+}
+
+std::string read_digit_lookalikes(std::string text) {
+  for (std::size_t start = 0; start < text.size();) {
+    std::size_t end = start;
+    bool has_digit = false;
+    bool is_word = false;
+    for (; end < text.size(); ++end) {
+      const char c = text[end];
+      if (!is_digit(c) && !is_letter(c) && !is_number_mark(c)) break;
+      has_digit = has_digit || is_digit(c);
+      is_word = is_word || (is_letter(c) && digit_lookalike(c) == '\0');
+    }
+    if (has_digit && !is_word) {
+      for (std::size_t i = start; i < end; ++i) {
+        if (i == start && text[i] == 'S') continue;
+        if (const char digit = digit_lookalike(text[i])) text[i] = digit;
+      }
+    }
+    start = end + 1;
+  }
+  return text;
 }
 
 // 1 - edit distance / longer length, or 0 as soon as it can't reach `floor`.
@@ -81,11 +131,12 @@ double similarity(const std::string& a, const std::string& b, double floor) {
   return 1.0 - static_cast<double>(row[b.size()]) / static_cast<double>(longer);
 }
 
-// Two readings of one line: the same digits, and one is a clipped piece of the
-// other or they differ by a few letters. A clipped piece often has its edge
-// letters misread ("ouy this park" for "buy this park"), so up to
-// kClippedEdgeChars at each end of it are ignored. Different digits never merge,
-// so a changed number stays its own observation.
+// Two readings of one line (as read_digit_lookalikes reads them): the same
+// digits, and one is a clipped piece of the other or they differ by a few
+// letters. A clipped piece often has its edge letters misread ("ouy this park"
+// for "buy this park"), so up to kClippedEdgeChars at each end of it are
+// ignored. Different digits never merge, so a changed number stays its own
+// observation.
 constexpr std::size_t kClippedEdgeChars = 2;
 
 bool near_identical(const std::string& a, const std::string& b) {
@@ -123,12 +174,15 @@ std::vector<ReconciledObservation> reconcile_detections(
   std::vector<ReconciledObservation> reconciled;
 
   std::vector<std::string> keys(detections.size());
+  std::vector<std::string> compared_keys(detections.size());
   std::map<std::string, std::vector<std::size_t>> by_text_key;
   for (std::size_t i = 0; i < detections.size(); ++i) {
     const std::string norm = normalize_text(detections[i].raw_text);
     keys[i] = alphanumeric_key(norm);
     if (keys[i].length() < min_text_chars) continue;
     by_text_key[keys[i]].push_back(i);
+    compared_keys[i] =
+        alphanumeric_key(normalize_text(read_digit_lookalikes(detections[i].raw_text)));
   }
 
   // The same text in the same place is one observation, whenever it was seen.
@@ -167,7 +221,9 @@ std::vector<ReconciledObservation> reconcile_detections(
       const std::size_t a = find_root(parent, kept[i]);
       const std::size_t b = find_root(parent, kept[j]);
       if (a == b || bbox_iou(first, later) <= kSamePlaceIou) continue;
-      if (near_identical(keys[kept[i]], keys[kept[j]])) parent[std::max(a, b)] = std::min(a, b);
+      if (near_identical(compared_keys[kept[i]], compared_keys[kept[j]])) {
+        parent[std::max(a, b)] = std::min(a, b);
+      }
     }
   }
 

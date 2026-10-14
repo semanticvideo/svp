@@ -584,9 +584,10 @@ Three fixes so a reading holds what the screen says, once:
   near-identical now join one observation: one is a piece of the other
   (ignoring up to 2 garbled characters at each end of the piece) or they are
   at least 80% alike by edit distance. Readings with different digits never
-  join, so a changed number stays its own observation. The most-read text
-  (then the longest) names the observation, and its span, frames and box
-  cover every reading.
+  join, so a changed number stays its own observation (letters that look
+  like digits are read as digits inside a number first; see Digit
+  Look-Alikes). The most-read text (then the longest) names the observation,
+  and its span, frames and box cover every reading.
 
 None of them adds work. Measured on short slices (local builds, one at a time;
 before is this branch with reuse only, except the comments-screenshot slice,
@@ -600,3 +601,36 @@ whose before already decoded spaces, which changes neither time nor counts):
 
 On the app-screen slice, 172 of 173 distinct numbers read before are still
 read (the one gone is a map-pin label string).
+
+## Digit Look-Alikes
+
+On app screens the recognizer reads some digits as letters that look like
+them (`$2.O65.512` for `$2,065,512`, `Flips: 1O43`), and such a reading never
+joined the line's other readings because their digits differed. Before
+readings are compared, letters that look like digits (O and o as 0, I and l as
+1, S as 5, B as 8) are now read as those digits, but only inside a number: a
+run of digits, number marks (`$ , .`) and those letters that has at least one
+digit. A run with any other letter is a word and keeps its letters (`SOLD`,
+`4.Benjamin`), and so does a run without a digit (`BOSS.`). An S that starts a
+number stays an S, because it is as often a misread `$` (`S774` for `$774`) as
+a 5. Everything else is unchanged: a merge still needs the same place, 5 s and
+near-identical text, the digits must still match, and the most-read text names
+the line (`read_digit_lookalikes` in `ocr_generation/reconciliation.cpp`).
+
+Measured once each on the Gator 9-25 9:00-10:00 app-screen slice (re-encoded,
+59.9 s; local builds, one at a time, `--visual-tracking-quality off`; before is
+main):
+
+| Slice | Text observations | Named with a look-alike in a number | Numbers lost |
+| --- | ---: | ---: | ---: |
+| Gator 9-25 9:00-10:00 (app screens) | 503 → 498 | 20 → 15 | 0 |
+
+Every other observation is identical (text and frames). Five lines joined
+(for example `Avg. Gross Profit: $48.O45` with `$48.045`), and every number
+read before is still read; `$1O 464.439`, whose misread space split the
+number, joined `$10.464.439`. One joined line is still named by a look-alike
+reading, because that line was never read correctly in that place
+(`Total Profit:-$1.1O8.018.113` in 8 frames, `-$11O8 O18 113` in 4). The other
+look-alike readings on the slice have no other reading in the same place
+within 5 s: the leaderboard scrolls, so each reading of a line is in a
+different place, and the same-place rule keeps them apart.
