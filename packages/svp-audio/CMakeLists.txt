@@ -105,6 +105,7 @@ target_link_libraries(svp-audio
 if(BUILD_TESTING)
   add_executable(svp-audio-tests
     tests/asr_boundary_tests.cpp
+    tests/asr_chunk_seam_tests.cpp
     tests/asr_chunk_purity_tests.cpp
     tests/asr_slice_workspace_tests.cpp
     tests/audio_stage_tests.cpp

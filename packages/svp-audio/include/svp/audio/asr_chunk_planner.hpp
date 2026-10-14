@@ -57,6 +57,16 @@ struct AsrWord {
   std::string timing_source = "whisper_cpp_dtw";
 };
 
+// Folds the chunks' words, in chunk order, into one transcript on source
+// time. Where a chunk overlaps its predecessor, four or more matching words
+// in its overlap anchor the seam and it continues after the anchor; when the
+// two chunks' copies of the anchor overlap in time, the predecessor's words
+// after the anchor are its copy of that continuation and are dropped. With
+// no anchor, the chunk continues with its first word starting after the
+// predecessor's last word ends. Either way the continuation keeps its own
+// timestamps: predecessor words starting at or after its first word are
+// dropped, and one that starts before it and reaches past is trimmed to end
+// there. No reconciled word has zero length.
 [[nodiscard]] std::vector<AsrWord> reconcile_overlapping_chunks(
     const std::vector<std::vector<AsrWord>>& chunk_words,
     const std::vector<AsrChunkPlan>& chunks);

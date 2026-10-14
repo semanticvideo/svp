@@ -98,23 +98,43 @@ std::vector<AsrWord> reconcile_overlapping_chunks(
     const bool has_adjacent_predecessor =
         chunk_index > 0 && result.back().chunk_ordinal ==
                                static_cast<std::int64_t>(chunk_index - 1);
+    // The predecessor's words are the tail of the result, from prior_begin.
+    std::size_t prior_begin = result.size();
     if (has_adjacent_predecessor) {
       const AsrChunkPlan& chunk = chunks[chunk_index];
       const std::int64_t overlap_end_us =
           chunk.source_start_us + chunk.overlap_before_us;
-      for (const AsrWord& word : result) {
-        if (word.chunk_ordinal == static_cast<std::int64_t>(chunk_index - 1)) {
-          prior_overlap.push_back(word);
-        }
+      while (prior_begin > 0 &&
+             result[prior_begin - 1].chunk_ordinal ==
+                 static_cast<std::int64_t>(chunk_index - 1)) {
+        --prior_begin;
       }
+      prior_overlap.assign(result.begin() + prior_begin, result.end());
       for (const AsrWord& word : current) {
         if (word.start_us < overlap_end_us) current_overlap.push_back(word);
       }
       match = longest_contiguous_match(prior_overlap, current_overlap);
     }
     std::size_t append_from = 0;
+    // Prior words from kept_prior_end on are the prior chunk's own copy of
+    // the incoming continuation.
+    std::size_t kept_prior_end = result.size();
     if (match.length >= kMinimumAlignedOverlapTokens) {
       append_from = match.current_start + match.length;
+      // When the two chunks' copies of the anchor overlap in time they are
+      // the same audio, so every prior word after it is the prior chunk's
+      // copy of the continuation, often a word cut off at the prior chunk's
+      // end, whatever its timestamps say. A phrase repeated earlier in the
+      // prior chunk can also match; it says nothing about the seam, and only
+      // timestamps decide there.
+      const std::size_t prior_anchor_begin = prior_begin + match.prior_start;
+      const std::size_t prior_anchor_end = prior_anchor_begin + match.length;
+      if (result[prior_anchor_end - 1].end_us >
+              current[match.current_start].start_us &&
+          current[append_from - 1].end_us >
+              result[prior_anchor_begin].start_us) {
+        kept_prior_end = prior_anchor_end;
+      }
     } else {
       while (append_from < current.size() &&
              current[append_from].start_us < result.back().end_us) {
@@ -124,17 +144,18 @@ std::vector<AsrWord> reconcile_overlapping_chunks(
     if (append_from >= current.size()) continue;
 
     // Seam conflicts are local to the overlap: the incoming chunk keeps its
-    // own timestamps, and prior words reaching past the continuation start
-    // trim or collapse to the seam instead of dragging every incoming word.
+    // own timestamps and owns the audio from its continuation start on.
+    // Prior copies of that audio are dropped, never kept at zero length: the
+    // words after a same-audio anchor, and any prior word starting at or
+    // after the seam. A prior word that starts before the seam and reaches
+    // past it is trimmed to end there.
+    result.resize(kept_prior_end);
     const std::int64_t seam_start = current[append_from].start_us;
-    std::size_t tail = result.size();
-    while (tail > 0 && result[tail - 1].start_us >= seam_start) {
-      result[tail - 1].start_us = seam_start;
-      result[tail - 1].end_us = seam_start;
-      --tail;
+    while (!result.empty() && result.back().start_us >= seam_start) {
+      result.pop_back();
     }
-    if (tail > 0 && result[tail - 1].end_us > seam_start) {
-      result[tail - 1].end_us = seam_start;
+    if (!result.empty() && result.back().end_us > seam_start) {
+      result.back().end_us = seam_start;
     }
     for (std::size_t i = append_from; i < current.size(); ++i) {
       result.push_back(std::move(current[i]));
