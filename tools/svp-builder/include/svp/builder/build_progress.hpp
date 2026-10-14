@@ -12,8 +12,8 @@ namespace svp::builder {
 
 enum class ProgressStageId {
   media_probe,
-  // --max-resolution: writing the analysis working copy.
-  working_copy,
+  // --max-resolution: writing the resized media the build describes.
+  resize,
   media_binding,
   audio_extract,
   asr,

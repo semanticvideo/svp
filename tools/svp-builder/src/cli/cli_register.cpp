@@ -1,7 +1,7 @@
 #include "cli_context.hpp"
 #include "batch_coordinators_cli.hpp"
 #include "distributed_cli.hpp"
-#include "working_copy/working_copy_geometry.hpp"
+#include "resize/resize_geometry.hpp"
 
 #include <limits>
 #include <string>
@@ -30,17 +30,18 @@ void add_recovery_journal_flags(CLI::App& command, bool& resume, bool& fresh) {
   resume_flag->excludes(fresh_flag);
 }
 
-// --max-resolution (BuildPipelineOptions::max_resolution): the displayed short
-// side of the frames analysed. The floor keeps every working copy at least as
-// large as the canonical analysis raster.
+// --max-resolution (resize/resized_source.hpp): the displayed short side of the
+// media the package describes. The floor keeps resized media at least as large
+// as the canonical analysis raster.
 void add_max_resolution_option(CLI::App& command, std::optional<int>& max_resolution) {
   command
       .add_option("--max-resolution", max_resolution,
-                  "Analyse frames from a working copy whose displayed short side is this long "
-                  "(at least " +
-                      std::to_string(svp::builder::working_copy::kMinimumMaxResolution) +
-                      ") when the video's is longer; the package still describes the source")
-      ->check(CLI::Range(svp::builder::working_copy::kMinimumMaxResolution,
+                  "Build from the video resized so its displayed short side is this long (at "
+                  "least " +
+                      std::to_string(svp::builder::resize::kMinimumMaxResolution) +
+                      ") when it is longer; the resized video is written beside the output and "
+                      "the package describes it, never the source")
+      ->check(CLI::Range(svp::builder::resize::kMinimumMaxResolution,
                          std::numeric_limits<int>::max()));
 }
 

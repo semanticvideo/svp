@@ -33,13 +33,6 @@ struct EvidenceCropJob {
   // "jpeg" or "png".
   std::string image_format;
   int jpeg_quality = 0;
-  // The source frame size the rectangle is measured in, set when the file the
-  // crop is cut from is a working copy at a lower resolution (svp-builder
-  // build --max-resolution); 0 when the rectangle is in that file's own pixels.
-  // The cut then takes the same fraction of the decoded frame and scales it
-  // to the size a crop of the source would have (evidence_crop_filter).
-  int frame_width = 0;
-  int frame_height = 0;
 
   bool operator==(const EvidenceCropJob&) const = default;
 };
@@ -66,16 +59,9 @@ struct EvidenceCropJobOutcome {
   bool operator==(const EvidenceCropJobOutcome&) const = default;
 };
 
-// The ffmpeg filter chain that cuts the job's crop out of a decoded frame:
-// crop, scale toward a readable width, and the JPEG pixel format. With the
-// job's frame size set, the crop is the same fraction of whatever frame the
-// file decodes to, and the scale always lands on the size the crop of a
-// source frame would have, so the image keeps that size.
-[[nodiscard]] std::string evidence_crop_filter(const EvidenceCropJob& job);
-
 // Cuts the job's crop out of `source_path` into `output_path` (ffmpeg seek,
-// evidence_crop_filter, encode). False with `error` set when ffmpeg failed or
-// wrote nothing.
+// crop, scale toward a readable width, encode). False with `error` set when
+// ffmpeg failed or wrote nothing.
 bool extract_evidence_crop_image(const std::filesystem::path& ffmpeg_path,
                                  const std::filesystem::path& source_path,
                                  const EvidenceCropJob& job,

@@ -15,7 +15,7 @@ struct StageCatalogEntry {
 
 constexpr StageCatalogEntry stage_catalog[] = {
     {ProgressStageId::media_probe, "media_probe", "Media Probe"},
-    {ProgressStageId::working_copy, "working_copy", "Working Copy"},
+    {ProgressStageId::resize, "resize", "Resize"},
     {ProgressStageId::media_binding, "media_binding", "Media Binding"},
     {ProgressStageId::audio_extract, "audio_extract", "Audio Extraction"},
     {ProgressStageId::asr, "asr", "ASR"},

@@ -469,59 +469,52 @@ svp-builder build \
   --visual-tracking-quality off
 ```
 
-### Analyse a 4K video at 1080p: `--max-resolution`
+### Build at a lower resolution: `--max-resolution`
 
-Nothing a build reads from frames needs more than 1080p: OCR decodes frames
-at most 1920 pixels on their long side, the other frame stages decode at the
-640-pixel canonical raster, and speech uses only the audio. A 4K source still
-costs its full resolution in every frame decode and, in a distributed build,
-in the file sent to every worker. `--max-resolution <n>` (on `build`, for every
-output format, and on `interlace create`) analyses such a video from a working
-copy instead:
+A package describes exactly the media it was built from. `--max-resolution <n>`
+(on `build`, for every output format, and on `interlace create`) builds from
+the video resized so its displayed short side is `n`, and the package describes
+that resized video, never the source:
 
 ```bash
 svp-builder build "$SVP_VIDEO_PATH" \
-  --out build/local-intro/intro.svp \
+  --out build/local-intro/intro.svpi --output-format svpi \
   --model-cache "$SVP_MODEL_CACHE" \
   --max-resolution 1080
 ```
 
 - `n` bounds the displayed short side (rotation applied), so landscape and
-  portrait are treated alike: at `--max-resolution 1080`, 3840x2160 is
-  analysed at 1920x1080 and a 2160x3840 phone video at 1080x1920, the frames
-  OCR reads from either source.
-- When the primary video's displayed short side is longer than `n`, the
-  builder first writes one copy of it with that side scaled to `n` (rounded
-  down to an even number), every frame at its source timestamp, its rotation
-  metadata, and its audio streams copied without re-encoding. It uses
-  VideoToolbox HEVC where the ffmpeg in use has it, otherwise MPEG-4 Part 2 in
-  software (the runtime bundle's ffmpeg has no VideoToolbox). The copy is
-  checked (size, rotation, start time) before use.
-- Every frame decode reads the copy: color and shots, canonical frames, depth,
-  OCR, evidence crops, keyframe embeddings, and visual tracking. A
-  `--distributed` build sends workers the copy instead of the source. Audio
-  stages keep reading the source.
-- The package still describes the source: its media identity and hash, name,
-  duration, frame timing, and dimensions, and frame and evidence-crop
-  coordinates in source pixels. `provenance/processors.jsonl` gains a
-  `proc_ffmpeg_working_copy_0001` record with the copy's size and encoder.
-- A video whose short side is at most `n` is analysed as is: no copy is made
-  and the package is the one a build without the flag makes. `n` must be at
-  least 640, the canonical raster's longest side.
-- The copy lives in a private temporary directory and is removed when the
-  build ends, however it ends. `--resume` makes it again; it must come out the
-  same (it does from the same source with the same ffmpeg on the same Mac) for
-  the journal to match. If no copy can be made (for example, MPEG-4 Part 2
-  cannot keep a time base finer than 1/65535 s, which some Android phones
-  use), the build warns and analyses the source.
-- The builder foundation JSON records `max_resolution` and the copy under
-  `builder_command.working_copy`; the run report shows the `working_copy`
-  stage.
+  portrait are treated alike: at `--max-resolution 1080`, 3840x2160 becomes
+  1920x1080 and a 2160x3840 phone video 1080x1920. `n` must be at least 640,
+  the canonical raster's longest side. A video whose short side is at most `n`
+  is built as is, exactly as without the flag.
+- The resized video is a new ISO base media file written beside the output and
+  named after it with its short side: `intro.svpi` at 1080 gives
+  `intro.1080p.mp4` (MP4 for an MP4 source, QuickTime for any other). The
+  source is only read; it is never modified or removed. The build then runs on
+  the resized video as if it had been given as the source: the package's media
+  identity and hash, size, duration, frame timing, dimensions, and frame and
+  evidence-crop coordinates are all the resized video's own.
+- Where it ends up depends on the output: an SVPI sidecar describes it, so it
+  stays beside the sidecar; an `.svp` package or an embedded SVPI carries it
+  (the embedded SVPI's file is the resized video), so the separate file is
+  removed once that output is written.
+- The video is MPEG-4 Part 2 (`-q:v 2`), written in software by the same ffmpeg
+  on every platform with a fixed number of encoder threads, so the same source
+  gives the same bytes on any machine. Every frame keeps its source time and
+  the audio streams are copied without re-encoding, so the resized video shares
+  the source's timeline: a time in the package is the same moment in either
+  file. A source time base finer than MPEG-4 Part 2 can store (1/90000 s, used
+  by many Android phones) is written as 1/60000 s, each frame within 9
+  microseconds of its source time. The resized video is checked (size,
+  rotation, start time) before the build uses it; if none can be written, the
+  build warns and builds from the source, and the package describes the source.
+- A resized video already beside the output (left by an earlier build) is
+  refused unless `--resume` builds from it again or `--fresh` writes it again
+  (on `build`, `--overwrite` also writes it again).
+- The run report shows the `resize` stage.
 
-`build-batch` and `interlace create-batch` do not take `--max-resolution`: the
-Mac that builds each video would make its own copy, and an encoder's output can
-depend on the Mac (VideoToolbox hardware, or the software encoder's thread
-count), so a batch's packages could depend on which Mac built them.
+`build-batch` and `interlace create-batch` do not take `--max-resolution`.
 
 With the runtime bundle installed, the builder loads its pinned sherpa-onnx
 library automatically. Otherwise, if sherpa-onnx is installed in a nonstandard

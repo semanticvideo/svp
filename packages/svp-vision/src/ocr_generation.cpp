@@ -89,7 +89,7 @@ OcrGenerationResult run_sample_plan_in_process(
     const auto first = plan.samples.begin() +
         static_cast<std::ptrdiff_t>(batch.first_ordinal);
     OcrFrameBatchRequest request{
-        .source_path = media::frame_source_path(*options.media_plan),
+        .source_path = options.media_plan->source_path,
         .ffmpeg_path = options.ffmpeg_path,
         .frame_width = plan.frame_width,
         .frame_height = plan.frame_height,

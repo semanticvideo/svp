@@ -30,11 +30,6 @@ nlohmann::json describe_build_inputs(const BuildPipelineOptions& options,
         {"sherpa_lib", options.sherpa_lib_path}}},
       {"thread_plan", svp::models::thread_plan_to_json(thread_plan)},
   };
-  // --max-resolution changes which frames analysis sees. Named only when given, so
-  // a build without it keeps the digest it always had.
-  if (options.max_resolution) {
-    description["options"]["max_resolution"] = *options.max_resolution;
-  }
   // The published artifact. interlace create builds its package at a
   // temporary staging path, which therefore stays out of the digest.
   if (!options.svpi) {

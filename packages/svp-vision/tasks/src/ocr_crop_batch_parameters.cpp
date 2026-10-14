@@ -5,7 +5,6 @@
 
 #include <array>
 #include <limits>
-#include <set>
 #include <stdexcept>
 
 namespace svp::vision::tasks {
@@ -22,15 +21,11 @@ constexpr std::array<std::string_view, 2> kImageFormats = {kEvidenceCropFormatJp
                                                            kEvidenceCropFormatPng};
 
 EvidenceCropJob job_from_json(const Json& value, const std::string& where) {
-  // The frame size is optional, as a pair (a working copy's crop).
-  const bool has_frame = value.is_object() && value.contains("frame_width");
-  std::set<std::string> expected{"height", "image_format", "jpeg_quality", "left",
-                                 "ordinal", "seek_us", "top", "width"};
-  if (has_frame) {
-    expected.insert({"frame_height", "frame_width"});
-  }
-  fields().require_fields(value, expected, where);
-  EvidenceCropJob job{
+  fields().require_fields(value,
+                          {"height", "image_format", "jpeg_quality", "left", "ordinal",
+                           "seek_us", "top", "width"},
+                          where);
+  return EvidenceCropJob{
       .ordinal = fields().integer_at<std::uint64_t>(value, "ordinal", where, 0),
       .seek_us = fields().integer_at<std::int64_t>(value, "seek_us", where, 0),
       .left = fields().integer_at<int>(value, "left", where, 0),
@@ -40,26 +35,13 @@ EvidenceCropJob job_from_json(const Json& value, const std::string& where) {
       .image_format = fields().one_of(value, "image_format", where, kImageFormats),
       .jpeg_quality = fields().integer_at<int>(value, "jpeg_quality", where, 1, kMaxJpegQuality),
   };
-  if (has_frame) {
-    job.frame_width = fields().integer_at<int>(value, "frame_width", where, 1);
-    job.frame_height = fields().integer_at<int>(value, "frame_height", where, 1);
-    if (job.left > job.frame_width - job.width || job.top > job.frame_height - job.height) {
-      fields().reject(where + " rectangle does not fit its frame");
-    }
-  }
-  return job;
 }
 
 Json job_to_json(const EvidenceCropJob& job) {
-  Json value{{"height", job.height},       {"image_format", job.image_format},
-             {"jpeg_quality", job.jpeg_quality}, {"left", job.left},
-             {"ordinal", job.ordinal},     {"seek_us", job.seek_us},
-             {"top", job.top},             {"width", job.width}};
-  if (job.frame_width != 0 || job.frame_height != 0) {
-    value["frame_width"] = job.frame_width;
-    value["frame_height"] = job.frame_height;
-  }
-  return value;
+  return Json{{"height", job.height},       {"image_format", job.image_format},
+              {"jpeg_quality", job.jpeg_quality}, {"left", job.left},
+              {"ordinal", job.ordinal},     {"seek_us", job.seek_us},
+              {"top", job.top},             {"width", job.width}};
 }
 
 }  // namespace

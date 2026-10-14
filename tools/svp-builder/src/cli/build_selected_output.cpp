@@ -29,7 +29,6 @@ svp::builder::InterlaceCreateOptions make_create_options(
   create.allow_fallback_diarization = options.allow_fallback_diarization;
   create.force_single_speaker = options.force_single_speaker;
   create.serial_pipeline = options.serial_pipeline;
-  create.max_resolution = options.max_resolution;
   create.journal_mode = journal_mode_from_flags(options.resume, options.fresh);
   create.progress_sink = progress_sink;
   create.distributed = distributed;
