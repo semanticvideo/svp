@@ -312,14 +312,22 @@ std::vector<std::shared_ptr<RemoteVideoBuilder>> paired_video_builders(
   const PairingDirectory pairings(default_coordinator_pairings_dir());
   std::vector<std::shared_ptr<RemoteVideoBuilder>> builders;
   std::vector<std::string> seen;
-  for (const std::string& coordinator : coordinators) {
-    CoordinatorPairingRecord record =
-        svp::builder::workers::find_pairing(pairings, coordinator);
+  const auto add = [&](CoordinatorPairingRecord record) {
     if (std::find(seen.begin(), seen.end(), record.key.pairing_id) != seen.end()) {
-      continue;
+      return;
     }
     seen.push_back(record.key.pairing_id);
     builders.push_back(std::make_shared<PairedVideoBuilder>(std::move(record), supplies));
+  };
+  for (const std::string& coordinator : coordinators) {
+    if (coordinator == kAllCoordinators) {
+      for (CoordinatorPairingRecord& record :
+           svp::exec::worker::load_coordinator_pairings(pairings)) {
+        add(std::move(record));
+      }
+      continue;
+    }
+    add(svp::builder::workers::find_pairing(pairings, coordinator));
   }
   return builders;
 }

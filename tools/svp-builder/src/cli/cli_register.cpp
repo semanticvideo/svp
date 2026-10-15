@@ -104,6 +104,14 @@ void register_cli(CLI::App& app, CliContext& context) {
   add_visual_tracking_quality_option(
       *build, build_opts.visual_tracking_quality);
   add_max_resolution_option(*build, build_opts.max_resolution);
+  build
+      ->add_option("--coordinators", build_opts.coordinators,
+                   "Other Macs (pairing ids or user@host of this Mac's paired workers, comma "
+                   "separated, or `all` for every one) that may coordinate this video while "
+                   "this Mac coordinates another build that also passes --coordinators; with "
+                   "--distributed it is spread over that Mac's workers, and the output and run "
+                   "report come back here")
+      ->delimiter(',');
   tool_option(*build, "--sherpa-lib", build_opts.sherpa_lib_path,
               RuntimeTool::sherpa_onnx);
   build->add_flag("--allow-fallback-diarization", build_opts.allow_fallback_diarization,

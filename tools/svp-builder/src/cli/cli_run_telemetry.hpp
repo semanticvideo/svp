@@ -34,6 +34,12 @@ class CliRunTelemetry {
   void record_thread_plan(
       std::optional<svp::models::ThreadPlanResolution> thread_plan);
 
+  // Another Mac coordinated the build and wrote its run report at the
+  // requested path: finish() and the destructor leave that report as it is.
+  void leave_report_to_other_mac() noexcept {
+    run_report_path_.clear();
+    recorder_.reset();
+  }
   // Writes the run report (if requested) and returns the command's exit code:
   // `exit_code` unchanged, except that a successful command whose requested
   // report could not be written fails with kBuildFailedExitCode.

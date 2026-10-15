@@ -8,10 +8,20 @@
 #include "distributed_cli.hpp"
 #include "build_interrupt.hpp"
 #include "resize/resized_source.hpp"
+#include "batch/video_placement.hpp"
+#include "batch_coordinators_cli.hpp"
+
+#include "svp/builder/remote_video_builder.hpp"
+#include "svp/builder/video_build_parameters.hpp"
 
 #include "svp/exec/cancellation_token.hpp"
+#if defined(__APPLE__)
+#include "svp/exec/worker/local_load.hpp"
+#endif
 
 #include <chrono>
+#include <filesystem>
+#include <string>
 #include <memory>
 #include <iostream>
 #include <optional>
@@ -74,6 +84,95 @@ int run_build_command(const BuildCliOptions& requested, CLI::App* build_subcomma
                                                  output_written);
     }
   };
+
+  // --coordinators (batch/video_placement.hpp): while another build on this
+  // Mac coordinates a video, this one goes to the first free Mac listed, still
+  // distributed, and its output and run report come back here.
+#if defined(__APPLE__)
+  // Declared before the slot, so it outlives it.
+  std::unique_ptr<svp::exec::worker::LocalLoadRecorder> coordinator_load;
+#endif
+  std::optional<svp::builder::batch::CoordinatorSlot> coordinator_slot;
+  if (!options.coordinators.empty()) {
+    const std::chrono::steady_clock::time_point placed_from = std::chrono::steady_clock::now();
+    if (*parsed_stage != svp::builder::BuildStage::package_skeleton) {
+      std::cerr << "svp-builder build: --coordinators needs the complete package stage\n";
+      return telemetry.finish(2);
+    }
+    if (std::filesystem::exists(options.output_path) && !options.overwrite) {
+      std::cerr << "output already exists; pass --overwrite to replace it\n";
+      return telemetry.finish(svp::builder::kBuildFailedExitCode);
+    }
+    const std::optional<svp::builder::batch::VideoOutputFormat> format =
+        svp::builder::batch::parse_video_output_format(options.output_format);
+    std::optional<CliBatchCoordinators> coordinators = make_cli_batch_coordinators(
+        options.coordinators, options.performance, options.model_cache_dir, options.ffmpeg_path,
+        options.quiet, "build");
+    if (!format || !coordinators) {
+      return telemetry.finish(2);
+    }
+    svp::builder::batch::VideoBuildParameters parameters = coordinators->parameters;
+    parameters.output_format = *format;
+    parameters.source_name = std::filesystem::path(options.source_path).filename().string();
+    parameters.performance = options.performance;
+    parameters.visual_tracking_quality = options.visual_tracking_quality;
+    parameters.allow_fallback_diarization = options.allow_fallback_diarization;
+    parameters.force_single_speaker = options.force_single_speaker;
+    parameters.serial_pipeline = options.serial_pipeline;
+    parameters.distributed = options.distributed;
+    parameters.require_workers = options.require_workers;
+    parameters.run_report = !options.run_report_path.empty();
+    svp::exec::CancellationToken cancellation;
+    const svp::builder::BuildInterruptScope interrupt_scope(cancellation);
+    svp::builder::batch::VideoPlacement placed = svp::builder::batch::place_video(
+        {.slot_path = svp::builder::batch::default_coordinator_slot_path(),
+         .coordinators = std::move(coordinators->macs),
+         .request = {.item_id = "video",
+                     .parameters = parameters,
+                     .source_path = options.source_path,
+                     .output_path = options.output_path,
+                     .run_report_path = options.run_report_path},
+         .busy_backoff = svp::builder::batch::kRemoteVideoBusyBackoff,
+         .cancellation = &cancellation,
+         .report = [quiet = options.quiet](const std::string& line) {
+           if (!quiet) {
+             std::cerr << "svp-builder build: " << line << "\n";
+           }
+         }});
+    using Where = svp::builder::batch::VideoPlacement::Where;
+    if (placed.where == Where::cancelled) {
+      return telemetry.finish(svp::builder::resize::resize_cancelled_exit_code());
+    }
+    if (placed.where == Where::other_mac) {
+      const bool built = placed.outcome.status == svp::builder::batch::RemoteVideoStatus::built;
+      if (!options.quiet) {
+        std::cerr << "svp-builder build: coordinated by " << placed.mac << ": "
+                  << (built ? std::string("built") : "failed: " + placed.outcome.message)
+                  << "\n";
+      }
+      if (built) {
+        telemetry.leave_report_to_other_mac();
+      }
+      const int exit_code = telemetry.finish(built ? 0 : svp::builder::kBuildFailedExitCode);
+      finish_resized(exit_code == 0);
+      if (exit_code == 0) {
+        std::cout << format_cli_completion(build_artifact_label(options.output_format),
+                                           "created", options.output_path,
+                                           std::chrono::steady_clock::now() - placed_from)
+                  << "\n";
+      }
+      return exit_code;
+    }
+    coordinator_slot = std::move(placed.slot);
+#if defined(__APPLE__)
+    // This Mac's worker agent must see that it coordinates a video, so it takes
+    // no whole-video job from another Mac while this build runs
+    // (svp/exec/worker/local_load.hpp). A distributed build records it too once
+    // its workers are prepared; a plain local build otherwise records nothing.
+    coordinator_load = std::make_unique<svp::exec::worker::LocalLoadRecorder>();
+    coordinator_load->add(svp::exec::worker::kCoordinatingTaskType);
+#endif
+  }
 
   const auto started_at = std::chrono::steady_clock::now();
   // --distributed: the paired workers this build may use, for every output

@@ -83,6 +83,9 @@ struct BuildCliOptions {
   bool serial_pipeline = false;
   // --max-resolution (resize/resized_source.hpp).
   std::optional<int> max_resolution;
+  // --coordinators (batch/video_placement.hpp): other Macs that may coordinate
+  // this video while this Mac coordinates another, or `all`.
+  std::vector<std::string> coordinators;
   // --resume / --fresh (RC2 §21), mutually exclusive.
   bool resume = false;
   bool fresh = false;

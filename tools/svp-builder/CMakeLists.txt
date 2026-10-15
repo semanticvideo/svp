@@ -85,9 +85,11 @@ add_library(svp-builder-lib
   src/transport/transport_output_policy.cpp
   src/batch/batch_dispatch.cpp
   src/batch/build_batch.cpp
+  src/batch/coordinator_slot.cpp
   src/batch/existing_output_check.cpp
   src/batch/video_build_parameters.cpp
   src/batch/video_build_run.cpp
+  src/batch/video_placement.cpp
   src/interlace/interlace_batch_discovery.cpp
   src/interlace/interlace_batch_sidecar.cpp
   src/interlace/interlace_batch_output.cpp
@@ -254,6 +256,31 @@ if(BUILD_TESTING)
   )
   add_test(NAME svp-builder-ocr-frame-batch-plan-tests
            COMMAND svp-builder-ocr-frame-batch-plan-tests)
+
+  add_executable(svp-builder-cli-run-telemetry-tests
+    tests/cli_run_telemetry_tests.cpp
+    src/cli/cli_run_telemetry.cpp
+  )
+  target_include_directories(svp-builder-cli-run-telemetry-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_compile_features(svp-builder-cli-run-telemetry-tests PRIVATE cxx_std_20)
+  target_link_libraries(svp-builder-cli-run-telemetry-tests PRIVATE svp::builder)
+  add_test(NAME svp-builder-cli-run-telemetry-tests COMMAND svp-builder-cli-run-telemetry-tests)
+
+  add_executable(svp-builder-video-placement-tests
+    tests/video_placement_tests.cpp
+  )
+  target_include_directories(svp-builder-video-placement-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_compile_features(svp-builder-video-placement-tests PRIVATE cxx_std_20)
+  target_link_libraries(svp-builder-video-placement-tests PRIVATE svp::builder svp::exec)
+  add_test(NAME svp-builder-video-placement-tests COMMAND svp-builder-video-placement-tests)
+  add_test(NAME svp-builder-build-offers-coordinators COMMAND svp-builder build --help)
+  set_tests_properties(svp-builder-build-offers-coordinators PROPERTIES
+    PASS_REGULAR_EXPRESSION "--coordinators"
+    ENVIRONMENT "SVP_MODEL_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/missing-model-cache")
 
   add_executable(svp-builder-resize-tests
     tests/resize_tests.cpp
