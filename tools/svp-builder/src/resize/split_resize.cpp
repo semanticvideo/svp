@@ -427,11 +427,13 @@ SplitResizeOutcome split_resize(const SplitResizeRequest& request) {
     }
   });
   queue.wait();
+  // Every piece is encoded (or the resize stopped): a Mac still preparing its
+  // session has nothing left to take.
+  queue.close();
   local.join();
   if (remote.joinable()) {
     remote.join();
   }
-  queue.close();
   watch.join();
   if (cancelled(request.cancellation)) {
     return outcome(Status::cancelled, "cancelled");

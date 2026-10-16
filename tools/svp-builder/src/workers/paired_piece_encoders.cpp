@@ -55,8 +55,10 @@ struct Shared {
   const svp::exec::CancellationToken* cancellation;
   std::mutex report_mutex;
 
+  // The build was cancelled, the resize stopped, or no piece is left.
   bool stopping() const {
-    return (cancellation != nullptr && cancellation->requested()) || queue.closed();
+    return (cancellation != nullptr && cancellation->requested()) || queue.closed() ||
+           queue.all_encoded();
   }
   void tell(const std::string& line) {
     if (report) {
