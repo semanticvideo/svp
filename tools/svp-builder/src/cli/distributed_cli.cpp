@@ -2,6 +2,7 @@
 
 #if defined(__APPLE__)
 #include "workers/distributed_fleet.hpp"
+#include "workers/paired_piece_encoders.hpp"
 #endif
 
 #include <iostream>
@@ -31,5 +32,18 @@ make_cli_distributed_execution(bool distributed, std::size_t require_workers, bo
   (void)quiet;
   std::cerr << "svp-builder " << command_name << ": --distributed needs macOS (paired workers)\n";
   return std::nullopt;
+#endif
+}
+
+std::shared_ptr<svp::builder::resize::RemotePieceEncoders> make_cli_remote_piece_encoders(
+    bool distributed, std::size_t require_workers, const std::filesystem::path& ffmpeg_path) {
+  if (!distributed && require_workers == 0) {
+    return nullptr;
+  }
+#if defined(__APPLE__)
+  return std::make_shared<svp::builder::workers::PairedPieceEncoders>(ffmpeg_path);
+#else
+  (void)ffmpeg_path;
+  return nullptr;
 #endif
 }

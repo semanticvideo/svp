@@ -1,5 +1,6 @@
 #include "builder_worker_tasks.hpp"
 
+#include "resize_piece_task.hpp"
 #include "worker_model_view.hpp"
 
 #include "../batch/video_build_task.hpp"
@@ -73,6 +74,16 @@ void register_builder_worker_task_types(svp::exec::TaskTypeRegistry& registry,
           .worker_session_id = environment.worker_session_id,
           .models = models,
           .tools = environment.tools});
+  // Pieces of another Mac's split resize (--max-resolution).
+  register_resize_piece_task(
+      registry, artifacts,
+      ResizePieceWorkerEnvironment{.session_dir = environment.session_dir,
+                                   .cas_root = environment.cas_root,
+                                   .worker_session_id = environment.worker_session_id,
+                                   .ffmpeg_path = environment.tools.ffmpeg
+                                                      ? std::filesystem::path(
+                                                            environment.tools.ffmpeg->path)
+                                                      : environment.ffmpeg_path});
 }
 
 }  // namespace svp::builder::workers

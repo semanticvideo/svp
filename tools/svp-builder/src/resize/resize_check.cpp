@@ -34,7 +34,8 @@ std::optional<std::int64_t> seconds_us(const nlohmann::json& object) {
   }
 }
 
-// The start offset of stream `stream` (an ffprobe stream specifier) of `file`.
+}  // namespace
+
 std::optional<std::int64_t> probe_start_offset_us(const std::filesystem::path& ffprobe_path,
                                                   const std::filesystem::path& file,
                                                   const std::string& stream,
@@ -59,8 +60,6 @@ std::optional<std::int64_t> probe_start_offset_us(const std::filesystem::path& f
   }
   return offset;
 }
-
-}  // namespace
 
 std::optional<std::int64_t> stream_start_offset_us(std::string_view ffprobe_json) {
   const nlohmann::json report = nlohmann::json::parse(ffprobe_json, nullptr, false);

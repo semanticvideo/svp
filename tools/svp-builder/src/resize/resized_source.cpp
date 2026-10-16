@@ -181,6 +181,58 @@ ResizeOutcome resize_source(const ResizeRequest& request, BuildProgressSink& sin
     std::filesystem::remove(partial, ignored);
   };
   const auto started = std::chrono::steady_clock::now();
+  const auto seconds_since_start = [&started]() {
+    return std::to_string(std::lround(
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count()));
+  };
+  const auto report = [quiet](const std::string& line) {
+    if (!quiet) {
+      std::cerr << "svp-builder: " << line << "\n";
+    }
+  };
+
+  // In pieces when the video can be cut exactly (split_resize.hpp).
+  const SplitResizeOutcome split = split_resize(SplitResizeRequest{
+      .source_path = request.source_path,
+      .video = plan.primary_video_stream,
+      .geometry = *geometry,
+      .container = resize_container_for(request.source_path),
+      .output_path = partial,
+      .ffmpeg_path = request.ffmpeg_path,
+      .ffprobe_path = request.ffprobe_path,
+      .scratch_dir = scratch->path(),
+      .remote = request.remote_pieces,
+      .report = report,
+      .cancellation = request.cancellation});
+  if (split.status == SplitResizeOutcome::Status::cancelled || cancelled(request.cancellation)) {
+    remove_partial();
+    return interrupted(std::move(outcome), sink);
+  }
+  if (split.status == SplitResizeOutcome::Status::written) {
+    const std::optional<std::string> mismatch = resized_media_mismatch(
+        plan, *geometry, partial, request.ffprobe_path, scratch->path(), request.cancellation);
+    if (cancelled(request.cancellation)) {
+      remove_partial();
+      return interrupted(std::move(outcome), sink);
+    }
+    if (!mismatch) {
+      std::filesystem::rename(partial, target, ec);
+      if (!ec) {
+        return resized(std::move(outcome), target, *geometry,
+                       "written in " + seconds_since_start() + " s from " +
+                           std::to_string(split.pieces) + " pieces, " +
+                           std::to_string(split.remote_pieces) + " encoded on other Macs",
+                       sink, quiet);
+      }
+    }
+    remove_partial();
+    report("resizing in one pass: the joined pieces " +
+           (mismatch ? *mismatch : "cannot be moved into place: " + ec.message()));
+  } else {
+    remove_partial();
+    report("resizing in one pass: " + split.why);
+  }
+
   const CommandOutcome encoded = run_cancellable_command(
       resize_ffmpeg_command(request.ffmpeg_path, request.source_path, plan.primary_video_stream,
                             *geometry, resize_container_for(request.source_path), partial),
@@ -193,8 +245,6 @@ ResizeOutcome resize_source(const ResizeRequest& request, BuildProgressSink& sin
     remove_partial();
     return from_source(std::move(outcome), "ffmpeg mpeg4: " + encoded.diagnostics, sink, quiet);
   }
-  const double encode_seconds =
-      std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
   if (const std::optional<std::string> mismatch = resized_media_mismatch(
           plan, *geometry, partial, request.ffprobe_path, scratch->path(), request.cancellation)) {
     remove_partial();
@@ -210,7 +260,7 @@ ResizeOutcome resize_source(const ResizeRequest& request, BuildProgressSink& sin
                        quiet);
   }
   return resized(std::move(outcome), target, *geometry,
-                 "written in " + std::to_string(std::lround(encode_seconds)) + " s", sink, quiet);
+                 "written in " + seconds_since_start() + " s in one pass", sink, quiet);
 }
 
 void finish_resized_media(const ResizeOutcome& outcome, bool output_carries_media,

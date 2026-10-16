@@ -99,10 +99,15 @@ add_library(svp-builder-lib
   src/interlace/interlace_batch_validate.cpp
   src/interlace/interlace_identity.cpp
   src/resize/cancellable_command.cpp
+  src/resize/piece_commands.cpp
+  src/resize/piece_plan.cpp
+  src/resize/piece_task.cpp
   src/resize/resize_check.cpp
   src/resize/resize_encoder.cpp
   src/resize/resize_geometry.cpp
   src/resize/resized_source.cpp
+  src/resize/source_packets.cpp
+  src/resize/split_resize.cpp
 )
 
 add_library(svp::builder ALIAS svp-builder-lib)
@@ -173,12 +178,15 @@ if(APPLE)
     src/workers/builder_worker_tasks.cpp
     src/workers/calibration_store.cpp
     src/workers/capacity_record_support.cpp
+    src/workers/cas_output_pins.cpp
     src/workers/coordinator_context.cpp
     src/workers/default_build_calibration.cpp
     src/workers/dispatched_calibration_runs.cpp
     src/workers/distributed_fleet.cpp
     src/workers/fleet_pairing.cpp
     src/workers/ocr_calibration_runs.cpp
+    src/workers/paired_piece_encoders.cpp
+    src/workers/resize_piece_task.cpp
     src/workers/track_window_calibration_runs.cpp
     src/workers/ssh_session.cpp
     src/workers/worker_commands.cpp
@@ -297,6 +305,23 @@ if(BUILD_TESTING)
       svp::vision
   )
   add_test(NAME svp-builder-resize-tests COMMAND svp-builder-resize-tests)
+
+  add_executable(svp-builder-split-resize-tests
+    tests/split_resize_tests.cpp
+  )
+  target_include_directories(svp-builder-split-resize-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  target_compile_features(svp-builder-split-resize-tests PRIVATE cxx_std_20)
+  target_link_libraries(svp-builder-split-resize-tests
+    PRIVATE
+      nlohmann_json::nlohmann_json
+      svp::builder
+      svp::exec
+      svp::media
+      svp::vision
+  )
+  add_test(NAME svp-builder-split-resize-tests COMMAND svp-builder-split-resize-tests)
 
   # --max-resolution (resize/resized_source.hpp) on the one-video build commands.
   foreach(svp_max_resolution_command IN ITEMS "build" "interlace;create")

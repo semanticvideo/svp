@@ -36,8 +36,9 @@ struct WorkerTaskEnvironment {
 // execution call the same function from the same runtime): ocr.frame_batch
 // and the dispatched vision stage work (ocr.crop_batch, embed.text_batch,
 // embed.keyframe_batch, depth.frame_batch), track.window, and the audio
-// stage work (asr.chunk_batch, diarize.window), and whole-video jobs
-// (video.build, batch/video_build_task.hpp), with their
+// stage work (asr.chunk_batch, diarize.window), whole-video jobs
+// (video.build, batch/video_build_task.hpp), and pieces of a split resize
+// (resize.piece, resize_piece_task.hpp), with their
 // source from the session's content-addressed cache, their models from the
 // worker's verified bundles, and their scratch files in the session
 // directory. Any other ASSIGN is answered with the

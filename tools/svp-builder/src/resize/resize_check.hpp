@@ -35,4 +35,12 @@ inline constexpr std::int64_t kStartOffsetToleranceUs = 20;
 // start_time minus the format's. nullopt when either is missing.
 [[nodiscard]] std::optional<std::int64_t> stream_start_offset_us(std::string_view ffprobe_json);
 
+// The start offset in microseconds of stream `stream` (an ffprobe stream
+// specifier) of `file`: stream_start_offset_us of ffprobe's report.
+// nullopt, with `error` saying why, when ffprobe cannot tell.
+[[nodiscard]] std::optional<std::int64_t> probe_start_offset_us(
+    const std::filesystem::path& ffprobe_path, const std::filesystem::path& file,
+    const std::string& stream, const std::filesystem::path& scratch_dir,
+    const svp::exec::CancellationToken* cancellation, std::string& error);
+
 }  // namespace svp::builder::resize
