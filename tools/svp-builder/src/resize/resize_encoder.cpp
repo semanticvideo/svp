@@ -13,6 +13,15 @@ ResizeContainer resize_container_for(const std::filesystem::path& source) {
                                                     : ResizeContainer::quicktime;
 }
 
+ResizeContainer resize_container_for(const std::filesystem::path& source,
+                                     const std::function<bool(ResizeContainer)>& audio_copies_into) {
+  const ResizeContainer preferred = resize_container_for(source);
+  if (preferred == ResizeContainer::mp4 || audio_copies_into(ResizeContainer::quicktime)) {
+    return preferred;
+  }
+  return audio_copies_into(ResizeContainer::mp4) ? ResizeContainer::mp4 : preferred;
+}
+
 std::filesystem::path resized_media_path(const std::filesystem::path& output,
                                          const ResizeGeometry& geometry,
                                          ResizeContainer container) {

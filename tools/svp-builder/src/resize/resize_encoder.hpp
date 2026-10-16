@@ -19,6 +19,7 @@
 #include "svp/media/rational.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -50,6 +51,17 @@ enum class ResizeContainer { mp4, quicktime };
 // the audio codecs of camera and phone files (AAC, PCM, ALAC) by stream copy.
 // Both are ISO base media files.
 [[nodiscard]] ResizeContainer resize_container_for(const std::filesystem::path& source);
+
+// resize_container_for(source), except that a source whose audio QuickTime
+// cannot take by stream copy but MP4 can is written as MP4: ffmpeg's
+// QuickTime muxer refuses Opus and FLAC, which WebM and Matroska files often
+// carry. `audio_copies_into` says whether every audio stream of the source
+// copies into a container (resize_check.hpp audio_copies_into). Audio
+// neither takes keeps resize_container_for(source); the encode then fails
+// and the build describes the source, as before.
+[[nodiscard]] ResizeContainer resize_container_for(
+    const std::filesystem::path& source,
+    const std::function<bool(ResizeContainer)>& audio_copies_into);
 
 // The resized media's path: beside `output` (the --out artifact), named after
 // it, with the resized short side: `talk.svpi` at 1080 -> `talk.1080p.mp4`.

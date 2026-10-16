@@ -6,6 +6,7 @@
 // video does, so the two files share one timeline and a time in one is the
 // same moment in the other.
 
+#include "resize/resize_encoder.hpp"
 #include "resize/resize_geometry.hpp"
 
 #include "svp/exec/cancellation_token.hpp"
@@ -34,6 +35,19 @@ inline constexpr std::int64_t kStartOffsetToleranceUs = 20;
 // (-show_entries format=start_time:stream=start_time -of json): the stream's
 // start_time minus the format's. nullopt when either is missing.
 [[nodiscard]] std::optional<std::int64_t> stream_start_offset_us(std::string_view ffprobe_json);
+
+// How much of the source's audio audio_copies_into copies: enough for the
+// muxer to write its header, which is where it refuses a codec it can't hold.
+inline constexpr std::string_view kAudioCopyCheckSeconds = "0.1";
+
+// Whether ffmpeg copies every audio stream of `source` into `container`, tried
+// on the first kAudioCopyCheckSeconds of it, written in `scratch_dir` and
+// removed. False when cancelled. Call only for a source with audio.
+[[nodiscard]] bool audio_copies_into(const std::filesystem::path& ffmpeg_path,
+                                     const std::filesystem::path& source,
+                                     ResizeContainer container,
+                                     const std::filesystem::path& scratch_dir,
+                                     const svp::exec::CancellationToken* cancellation);
 
 // The start offset in microseconds of stream `stream` (an ffprobe stream
 // specifier) of `file`: stream_start_offset_us of ffprobe's report.
