@@ -129,20 +129,30 @@ ResizeOutcome resize_source(const ResizeRequest& request, BuildProgressSink& sin
     return outcome;
   }
 
-  const std::filesystem::path target = resized_media_path(
-      request.output_path, *geometry, resize_container_for(request.source_path));
-  if (same_file(target, request.source_path)) {
-    return refused(std::move(outcome),
-                   "the resized media would replace the source " + target.string() +
-                       "; choose another --out",
-                   sink);
-  }
-
   std::optional<ScratchDirectory> scratch;
   try {
     scratch.emplace();
   } catch (const std::exception& error) {
     return from_source(std::move(outcome), error.what(), sink, quiet);
+  }
+  // MP4 when QuickTime can't take the source's audio but MP4 can.
+  const ResizeContainer container =
+      resize_container_for(request.source_path, [&](ResizeContainer candidate) {
+        return plan.probe.audio_streams.empty() ||
+               audio_copies_into(request.ffmpeg_path, request.source_path, candidate,
+                                 scratch->path(), request.cancellation);
+      });
+  if (cancelled(request.cancellation)) {
+    return interrupted(std::move(outcome), sink);
+  }
+
+  const std::filesystem::path target =
+      resized_media_path(request.output_path, *geometry, container);
+  if (same_file(target, request.source_path)) {
+    return refused(std::move(outcome),
+                   "the resized media would replace the source " + target.string() +
+                       "; choose another --out",
+                   sink);
   }
 
   std::error_code ec;
@@ -196,7 +206,7 @@ ResizeOutcome resize_source(const ResizeRequest& request, BuildProgressSink& sin
       .source_path = request.source_path,
       .video = plan.primary_video_stream,
       .geometry = *geometry,
-      .container = resize_container_for(request.source_path),
+      .container = container,
       .output_path = partial,
       .ffmpeg_path = request.ffmpeg_path,
       .ffprobe_path = request.ffprobe_path,
@@ -235,7 +245,7 @@ ResizeOutcome resize_source(const ResizeRequest& request, BuildProgressSink& sin
 
   const CommandOutcome encoded = run_cancellable_command(
       resize_ffmpeg_command(request.ffmpeg_path, request.source_path, plan.primary_video_stream,
-                            *geometry, resize_container_for(request.source_path), partial),
+                            *geometry, container, partial),
       scratch->path() / "encode.out", scratch->path() / "encode.log", request.cancellation);
   if (encoded.cancelled || cancelled(request.cancellation)) {
     remove_partial();

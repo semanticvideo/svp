@@ -125,6 +125,22 @@ void test_name_container_and_command() {
   require(rs::resize_container_for("a/talk.mp4") == rs::ResizeContainer::mp4 &&
               rs::resize_container_for("a/talk.M4V") == rs::ResizeContainer::mp4,
           "an MP4 source is resized to MP4");
+  {
+    const auto takes = [](bool quicktime, bool mp4) {
+      return [=](rs::ResizeContainer c) {
+        return c == rs::ResizeContainer::quicktime ? quicktime : mp4;
+      };
+    };
+    require(rs::resize_container_for("a/talk.mkv", takes(true, true)) ==
+                    rs::ResizeContainer::quicktime &&
+                rs::resize_container_for("a/talk.webm", takes(false, true)) ==
+                    rs::ResizeContainer::mp4 &&
+                rs::resize_container_for("a/talk.mkv", takes(false, false)) ==
+                    rs::ResizeContainer::quicktime &&
+                rs::resize_container_for("a/talk.mp4", takes(false, false)) ==
+                    rs::ResizeContainer::mp4,
+            "QuickTime unless only MP4 takes the source's audio; an MP4 source stays MP4");
+  }
   require(rs::resize_container_for("a/talk.mov") == rs::ResizeContainer::quicktime &&
               rs::resize_container_for("a/talk.mkv") == rs::ResizeContainer::quicktime,
           "every other source is resized to QuickTime");
@@ -267,6 +283,8 @@ struct ClipShape {
   std::string size = "320x240";
   int rotation = 90;
   std::string extension = ".mov";
+  // Empty: AAC in an MP4, PCM otherwise.
+  std::string audio_codec;
 };
 
 // A clip of `shape`, its video starting half a second after its audio, with
@@ -291,7 +309,10 @@ fs::path write_clip(const Tools& tools, const fs::path& dir, const std::string& 
        "settb=1/" + std::to_string(timebase) + ",setpts='" + expression + "'", "-fps_mode",
        "passthrough", "-enc_time_base", "1/" + std::to_string(timebase),
        "-video_track_timescale", std::to_string(timebase), "-c:v", "mjpeg", "-q:v", "3", "-c:a",
-       shape.extension == ".mp4" ? "aac" : "pcm_s16le", clip.string()});
+       !shape.audio_codec.empty()       ? shape.audio_codec
+       : shape.extension == ".mp4" ? std::string("aac")
+                                   : std::string("pcm_s16le"),
+       "-strict", "-2", clip.string()});
   run_or_fail(command, dir, "writing " + name);
   return clip;
 }
@@ -445,6 +466,37 @@ void test_resizing_synthetic_clips(const Tools& tools) {
   require(svp::media::probe_media_with_ffprobe(tall_made.media_path, tools.ffprobe)
                   .format_name.find("mp4") != std::string::npos,
           "the resized MP4 is an MP4");
+
+  // Matroska with audio QuickTime refuses (Opus, FLAC): resized to MP4, the
+  // audio copied as it is.
+  for (const std::string codec : {"opus", "flac"}) {
+    const fs::path clip_with = write_clip(tools, scratch.path(), "mkv-" + codec, 30000, 1000, 7,
+                                          {.extension = ".mkv", .audio_codec = codec});
+    const rs::ResizeOutcome made_with = rs::resize_source(
+        request_for(tools, clip_with, out / ("mkv-" + codec + ".svpi"), kBound), sink, true);
+    require(made_with.error.empty() && made_with.geometry &&
+                made_with.media_path == out / ("mkv-" + codec + ".120p.mp4"),
+            "Matroska with " + codec + " audio is resized to MP4: " + made_with.error +
+                made_with.media_path.string());
+    const svp::media::MediaProbe resized_with =
+        svp::media::probe_media_with_ffprobe(made_with.media_path, tools.ffprobe);
+    require(resized_with.audio_streams.size() == 1 &&
+                resized_with.audio_streams[0].codec_name == codec,
+            "its " + codec + " audio is copied as it is");
+    require(same_frame_times(frame_times(tools, clip_with, scratch.path()),
+                             frame_times(tools, made_with.media_path, scratch.path()), 1e-6),
+            "every frame keeps its source time");
+  }
+
+  // Audio neither container takes (TrueHD): not resized, the build describes
+  // the source, as before.
+  const fs::path truehd = write_clip(tools, scratch.path(), "mkv-truehd", 30000, 1000, 7,
+                                     {.extension = ".mkv", .audio_codec = "truehd"});
+  CapturingSink warned;
+  const rs::ResizeOutcome kept =
+      rs::resize_source(request_for(tools, truehd, out / "truehd.svpi", kBound), warned, true);
+  require(kept.error.empty() && !kept.geometry && kept.media_path == truehd,
+          "a source whose audio no container takes is built as is");
 }
 
 }  // namespace

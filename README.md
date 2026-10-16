@@ -490,8 +490,10 @@ svp-builder build "$SVP_VIDEO_PATH" \
   is built as is, exactly as without the flag.
 - The resized video is a new ISO base media file written beside the output and
   named after it with its short side: `intro.svpi` at 1080 gives
-  `intro.1080p.mp4` (MP4 for an MP4 source, QuickTime for any other). The
-  source is only read; it is never modified or removed. The build then runs on
+  `intro.1080p.mp4` (MP4 for an MP4 source, QuickTime for any other, unless
+  its audio is one only MP4 takes by stream copy, such as the Opus or FLAC of
+  many WebM and Matroska files; then MP4). The source is only read; it is
+  never modified or removed. The build then runs on
   the resized video as if it had been given as the source: the package's media
   identity and hash, size, duration, frame timing, dimensions, and frame and
   evidence-crop coordinates are all the resized video's own.

@@ -36,6 +36,22 @@ std::optional<std::int64_t> seconds_us(const nlohmann::json& object) {
 
 }  // namespace
 
+bool audio_copies_into(const std::filesystem::path& ffmpeg_path,
+                       const std::filesystem::path& source, ResizeContainer container,
+                       const std::filesystem::path& scratch_dir,
+                       const svp::exec::CancellationToken* cancellation) {
+  const bool mp4 = container == ResizeContainer::mp4;
+  const std::filesystem::path copy = scratch_dir / (mp4 ? "audio-copy.mp4" : "audio-copy.mov");
+  const CommandOutcome outcome = run_cancellable_command(
+      {ffmpeg_path.string(), "-nostdin", "-hide_banner", "-loglevel", "error", "-i",
+       source.string(), "-map", "0:a", "-c", "copy", "-t", std::string(kAudioCopyCheckSeconds),
+       "-f", mp4 ? "mp4" : "mov", "-y", copy.string()},
+      scratch_dir / "audio-copy.out", scratch_dir / "audio-copy.log", cancellation);
+  std::error_code ignored;
+  std::filesystem::remove(copy, ignored);
+  return outcome.succeeded;
+}
+
 std::optional<std::int64_t> probe_start_offset_us(const std::filesystem::path& ffprobe_path,
                                                   const std::filesystem::path& file,
                                                   const std::string& stream,
