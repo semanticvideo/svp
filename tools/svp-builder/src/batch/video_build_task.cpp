@@ -4,6 +4,7 @@
 #include "video_build_run.hpp"
 
 #include "../cli/cli_run_telemetry.hpp"
+#include "../workers/cas_output_pins.hpp"
 #include "../workers/distributed_fleet.hpp"
 
 #include "svp/builder/build_progress.hpp"
@@ -37,49 +38,6 @@ constexpr std::string_view kPinHolderSuffix = ".video-build";
 // stamps the real attempt number and worker session over these.
 constexpr std::uint64_t kUnstampedAttempt = 1;
 constexpr std::string_view kUnstampedWorkerSession = "ws_unstamped";
-
-// The packages this session's jobs stored, pinned so cache eviction cannot
-// remove one before the batch fetched it; released with the session.
-class PackagePins {
- public:
-  PackagePins(std::filesystem::path cas_root, std::string holder)
-      : cas_root_(std::move(cas_root)), holder_(std::move(holder)) {}
-
-  // Stores `file` in the worker cache and pins it.
-  svp::exec::Blake3Digest store(const std::filesystem::path& file) {
-    const std::lock_guard lock(mutex_);
-    if (!store_) {
-      svp::exec::CacheResult<svp::exec::CasStore> opened = svp::exec::CasStore::at(cas_root_);
-      if (!opened) {
-        throw std::runtime_error("cannot open the worker cache: " + opened.error().message);
-      }
-      store_.emplace(std::move(opened).value());
-      svp::exec::CacheResult<svp::exec::CasPinSet> pins = store_->pin_set(holder_);
-      if (!pins) {
-        throw std::runtime_error("cannot pin in the worker cache: " + pins.error().message);
-      }
-      pins_.emplace(std::move(pins).value());
-    }
-    svp::exec::CacheResult<svp::exec::Blake3Digest> stored = store_->put_file(file);
-    if (!stored) {
-      throw std::runtime_error("cannot store the package in the worker cache: " +
-                               stored.error().message);
-    }
-    const svp::exec::CacheStatus pinned = pins_->add(stored.value());
-    if (!pinned) {
-      throw std::runtime_error("cannot pin the package in the worker cache: " +
-                               pinned.error().message);
-    }
-    return stored.value();
-  }
-
- private:
-  std::filesystem::path cas_root_;
-  std::string holder_;
-  std::mutex mutex_;
-  std::optional<svp::exec::CasStore> store_;
-  std::optional<svp::exec::CasPinSet> pins_;
-};
 
 // A job's package and staging go away with its session, so a package that
 // failed strict validation reports why in the job's error: the first
@@ -196,7 +154,7 @@ svp::exec::TaskResult execute(const svp::exec::TaskSpec& spec,
                               const svp::exec::ResolvedInputs& inputs,
                               svp::exec::CasTaskArtifactAccess& artifacts,
                               const VideoBuildWorkerEnvironment& environment,
-                              PackagePins& pins) {
+                              svp::builder::workers::CasOutputPins& pins) {
   const VideoBuildParameters parameters = video_build_parameters_from_json(spec.parameters);
 
   // Could this Mac reproduce the batch Mac's build at all?
@@ -306,7 +264,7 @@ svp::exec::TaskResult execute(const svp::exec::TaskSpec& spec,
 void register_video_build_task(svp::exec::TaskTypeRegistry& registry,
                                svp::exec::CasTaskArtifactAccess& artifacts,
                                VideoBuildWorkerEnvironment environment) {
-  auto pins = std::make_shared<PackagePins>(
+  auto pins = std::make_shared<svp::builder::workers::CasOutputPins>(
       environment.cas_root, environment.worker_session_id + std::string(kPinHolderSuffix));
   registry.register_type(svp::exec::TaskTypeDefinition{
       .name = std::string(kVideoBuildTaskType),

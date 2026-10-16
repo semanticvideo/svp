@@ -1,6 +1,7 @@
 #include "paired_video_builder.hpp"
 
 #include "../workers/coordinator_context.hpp"
+#include "../workers/silence_watch.hpp"
 #include "../workers/worker_reach.hpp"
 #include "../workers/worker_restart.hpp"
 
@@ -60,57 +61,6 @@ BlobRef source_blob(const std::filesystem::path& source) {
   digests[source.string()] = Entry{.bytes = bytes, .modified = modified, .blob = blob};
   return blob;
 }
-
-// Ends the connection when the worker has sent nothing for a lease period:
-// the job's session heartbeats far more often than that while it builds.
-class SilenceWatch {
- public:
-  SilenceWatch(svp::exec::remote::RemoteStream& stream, std::chrono::milliseconds limit)
-      : stream_(stream), limit_(limit), last_(std::chrono::steady_clock::now()) {
-    thread_ = std::thread([this] { watch(); });
-  }
-  ~SilenceWatch() {
-    {
-      const std::lock_guard lock(mutex_);
-      stopped_ = true;
-    }
-    changed_.notify_all();
-    thread_.join();
-  }
-  void heard() {
-    const std::lock_guard lock(mutex_);
-    last_ = std::chrono::steady_clock::now();
-  }
-  [[nodiscard]] bool expired() const {
-    const std::lock_guard lock(mutex_);
-    return expired_;
-  }
-
- private:
-  void watch() {
-    std::unique_lock lock(mutex_);
-    while (!stopped_) {
-      const auto deadline = last_ + limit_;
-      if (changed_.wait_until(lock, deadline, [&] { return stopped_; })) {
-        return;
-      }
-      if (std::chrono::steady_clock::now() >= last_ + limit_) {
-        expired_ = true;
-        stream_.cancel();
-        return;
-      }
-    }
-  }
-
-  svp::exec::remote::RemoteStream& stream_;
-  std::chrono::milliseconds limit_;
-  mutable std::mutex mutex_;
-  std::condition_variable changed_;
-  std::chrono::steady_clock::time_point last_;
-  bool stopped_ = false;
-  bool expired_ = false;
-  std::thread thread_;
-};
 
 RemoteVideoOutcome unavailable(std::string message) {
   return RemoteVideoOutcome{.status = RemoteVideoStatus::unavailable,
@@ -226,7 +176,7 @@ RemoteVideoOutcome PairedVideoBuilder::build(const RemoteVideoRequest& request) 
     std::optional<svp::exec::Frame> answer;
     bool silent = false;
     try {
-      SilenceWatch watch(*connection->connection.stream, lease.duration);
+      svp::builder::workers::SilenceWatch watch(*connection->connection.stream, lease.duration);
       connection->writer->write(svp::exec::make_leased_assign_frame(spec, lease));
       while (true) {
         std::optional<svp::exec::Frame> frame = connection->reader->read();

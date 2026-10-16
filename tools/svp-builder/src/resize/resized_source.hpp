@@ -16,6 +16,11 @@
 // source time (to within the encoder time base) and the audio is copied
 // untouched, so a time in the package is the same moment in either file.
 //
+// A video that can be cut exactly is resized in pieces (split_resize.hpp),
+// encoded by this Mac and, when the build is distributed, by its paired
+// workers at once; one that cannot, or whose joined pieces fail their check,
+// is resized in one pass on this Mac.
+//
 // Where the resized media ends up depends on the output: an SVPI sidecar
 // describes it, so it stays beside the sidecar; an .svp package or an
 // embedded SVPI carries it, so the separate file is removed once that output
@@ -26,11 +31,13 @@
 // source, so the package describes the source.
 
 #include "resize/resize_geometry.hpp"
+#include "resize/split_resize.hpp"
 
 #include "svp/builder/build_progress.hpp"
 #include "svp/exec/cancellation_token.hpp"
 
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -51,6 +58,9 @@ struct ResizeRequest {
   // --fresh (or build's --overwrite): resized media already beside the output
   // is written again.
   bool overwrite = false;
+  // The paired workers that encode pieces with this Mac (--distributed);
+  // nullptr: this Mac encodes them all.
+  std::shared_ptr<RemotePieceEncoders> remote_pieces;
   const svp::exec::CancellationToken* cancellation = nullptr;
 };
 

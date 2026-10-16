@@ -509,6 +509,21 @@ svp-builder build "$SVP_VIDEO_PATH" \
   microseconds of its source time. The resized video is checked (size,
   rotation, start time) before the build uses it; if none can be written, the
   build warns and builds from the source, and the package describes the source.
+- A video that can be cut exactly is resized in pieces of about 30 seconds:
+  cut without re-encoding at keyframes after which every frame decodes on its
+  own (no frame shown before the keyframe is stored after it), encoded one
+  piece at a time, and joined with the source's audio. With `--distributed`,
+  this Mac's paired workers encode pieces too, each taking the next piece as it
+  comes free. The pieces depend on the source alone, and every Mac encodes a
+  piece with the same command and the same ffmpeg build (checked), so the
+  resized video is the same bytes however many Macs encoded it. The cut pieces
+  are checked against the source packet by packet, and the joined video frame
+  by frame (one frame per source frame, at its source time, with the source's
+  rotation); a video that cannot be cut so (open GOPs, packets without times,
+  an edit list that hides packets, shorter than two pieces), or whose joined
+  pieces fail a check, is resized in one pass instead. The pieces are cut
+  beside the output, so that volume needs room for a copy of the source's
+  video while the resize runs.
 - A resized video already beside the output (left by an earlier build) is
   refused unless `--resume` builds from it again or `--fresh` writes it again
   (on `build`, `--overwrite` also writes it again).
@@ -583,9 +598,10 @@ svp-builder build "$SVP_VIDEO_PATH" \
   workers are ready. Without it, unreachable workers are skipped with a
   warning, and one Mac with no workers is a fully supported configuration.
 - Spread work: OCR frame batches, OCR evidence crops, text and keyframe
-  embeddings, depth, visual tracking windows, ASR chunks, and diarization
-  windows. Workers receive the source media and models they need and verify
-  them by BLAKE3 before use.
+  embeddings, depth, visual tracking windows, ASR chunks, diarization
+  windows, and the pieces of a `--max-resolution` resize. Workers receive the
+  source media (for a resize, only the pieces they encode) and models they
+  need and verify them by BLAKE3 before use.
 - Output does not depend on how many Macs ran a build or which ones. Compare
   two outputs with `svp-validator validate --equivalent <a> <b>`.
 - `--run-report <path>` writes per-stage wall time and resource use.
@@ -633,8 +649,9 @@ svp-builder build "$SVP_VIDEO_PATH" \
   targets name particular Macs. Coordinating Macs need the fleet's other Macs
   paired too (`svp-builder workers fleet pair` on each coordinator; see
   [Worker Fleet Setup](docs/macos/Worker_Fleet_Setup.md)).
-- `--max-resolution` resizes on this Mac first; the resized video is what is
-  sent, and the package describes it either way.
+- `--max-resolution` resizes on this Mac first (with its paired workers when
+  the build is `--distributed`); the resized video is what is sent, and the
+  package describes it either way.
 - The package is the same whichever Mac coordinates it.
 - With `--coordinators`, an existing output is refused unless `--overwrite` is
   given, and only complete packages (`--stop-after package`) are built.
