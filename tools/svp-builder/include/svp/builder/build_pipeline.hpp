@@ -76,6 +76,10 @@ struct SvpiPublicationResult {
 
 struct BuildPipelineOptions {
   std::string source_path;
+  // The file capture metadata is read from (provenance/capture.json): the
+  // source as given, when --max-resolution builds from a resized copy. Empty:
+  // source_path.
+  std::string capture_source_path;
   std::string probe_json_path;
   std::string ffprobe_path = "ffprobe";
   std::string ffmpeg_path = "ffmpeg";

@@ -6,6 +6,7 @@ find_library(BLAKE3_LIBRARY NAMES blake3 REQUIRED)
 
 add_library(svp-validation
   src/block_stream_validation.cpp
+  src/capture_validation.cpp
   src/color_record_validation.cpp
   src/code_registry.cpp
   src/diarization_validation.cpp
@@ -91,6 +92,10 @@ if(BUILD_TESTING)
     tests/entity_record_validation_tests.cpp
   )
 
+  add_executable(svp-capture-validation-tests
+    tests/capture_validation_tests.cpp
+  )
+
   add_executable(svp-runtime-resource-tests
     tests/runtime_resource_tests.cpp
   )
@@ -115,6 +120,7 @@ if(BUILD_TESTING)
   target_compile_features(svp-diarization-validation-tests PRIVATE cxx_std_20)
   target_compile_features(svp-embedded-svpi-validation-tests PRIVATE cxx_std_20)
   target_compile_features(svp-entity-record-validation-tests PRIVATE cxx_std_20)
+  target_compile_features(svp-capture-validation-tests PRIVATE cxx_std_20)
   target_compile_features(svp-runtime-resource-tests PRIVATE cxx_std_20)
   target_compile_options(svp-runtime-resource-tests PRIVATE -UNDEBUG)
   target_compile_definitions(svp-runtime-resource-tests PRIVATE
@@ -146,6 +152,11 @@ if(BUILD_TESTING)
     svp::package
   )
 
+  target_link_libraries(svp-capture-validation-tests PRIVATE
+    svp::validation
+    svp::package
+  )
+
   target_link_libraries(svp-runtime-resource-tests PRIVATE
     svp::core
     svp::validation
@@ -159,6 +170,9 @@ if(BUILD_TESTING)
            WORKING_DIRECTORY ${SVP_VALIDATION_RUNTIME_RESOURCE_TEST_CWD})
   add_test(NAME svp-entity-record-validation-tests
            COMMAND svp-entity-record-validation-tests
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME svp-capture-validation-tests
+           COMMAND svp-capture-validation-tests
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME svp-runtime-resource-tests
            COMMAND svp-runtime-resource-tests)

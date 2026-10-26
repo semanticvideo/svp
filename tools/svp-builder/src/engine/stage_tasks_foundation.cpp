@@ -1,3 +1,4 @@
+#include "capture_provenance.hpp"
 #include "engine/frame_catalog_delta.hpp"
 #include "engine/stage_tasks.hpp"
 
@@ -17,7 +18,8 @@ StageStates foundation_states(StageTaskContext& task) {
 StageStates run_inventory_task(const StageTaskEnvironment& environment) {
   // The media probe and ingest plan are made by the planner (every schedule
   // is computed from them); this task records the plan as the foundation
-  // JSON's base.
+  // JSON's base, and the source's capture metadata (RC2 §18.3).
+  write_capture_provenance(environment.options, environment.staging_dir);
   StageStates states;
   states[state_name::kFoundation] = json_state_bytes(environment.plan_json);
   return states;

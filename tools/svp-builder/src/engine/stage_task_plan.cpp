@@ -1,5 +1,6 @@
 #include "engine/stage_task_plan.hpp"
 
+#include "capture_provenance.hpp"
 #include "processor_provenance.hpp"
 
 #include "svp/exec/cache_key.hpp"
@@ -28,6 +29,7 @@ StagingScope scope_for(StageTaskKind kind, bool microphone_stream_mode) {
   };
   switch (kind) {
     case StageTaskKind::inventory:
+      return {{std::string(kCaptureProvenanceEntry)}};
     case StageTaskKind::vision_plan:
     case StageTaskKind::canonical_frames:
     case StageTaskKind::package_write:

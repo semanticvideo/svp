@@ -200,6 +200,7 @@ int run_build_command(const BuildCliOptions& requested, CLI::App* build_subcomma
 
   svp::builder::BuildPipelineOptions pipeline_options;
   pipeline_options.source_path = options.source_path;
+  pipeline_options.capture_source_path = requested.source_path;
   pipeline_options.probe_json_path = options.probe_json_path;
   pipeline_options.ffprobe_path = options.ffprobe_path;
   pipeline_options.ffmpeg_path = options.ffmpeg_path;
