@@ -285,7 +285,9 @@ CaptureMetadata capture_metadata_from_json(const nlohmann::json& value) {
   const nlohmann::json& root = object_of(
       value, "", {"schema_version", "camera", "lens", "recorded", "start_timecode", "location",
                   "sources"});
-  if (root.value("schema_version", std::string()) != kSchemaVersion) {
+  const auto version = root.find("schema_version");
+  if (version == root.end() || !version->is_string() ||
+      version->get_ref<const std::string&>() != kSchemaVersion) {
     invalid("schema_version", "must be " + std::string(kSchemaVersion));
   }
   CaptureMetadata capture;

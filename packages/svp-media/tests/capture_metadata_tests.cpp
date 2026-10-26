@@ -318,6 +318,8 @@ void test_json_read_back() {
   };
   require(rejected(nlohmann::json::array()), "not an object");
   require(rejected(with("/schema_version", "svp-capture-v2")), "another schema version");
+  require(rejected(with("/schema_version", 1)) && rejected(with("/schema_version", nullptr)),
+          "a schema version that isn't text");
   require(rejected(with("/note", "x")), "an unknown member");
   require(rejected(with("/camera/lens", "x")), "an unknown camera member");
   require(rejected(with("/camera/serial_number", " 1")), "untrimmed text");
