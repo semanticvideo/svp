@@ -15,8 +15,10 @@ namespace svp::builder {
 
 struct InterlaceCreateOptions {
   std::string source_path;
-  // Where capture metadata is read (BuildPipelineOptions::capture_source_path).
+  // Where capture metadata is read (BuildPipelineOptions::capture_source_path),
+  // or what it is (BuildPipelineOptions::capture).
   std::string capture_source_path;
+  std::optional<svp::media::CaptureMetadata> capture;
   std::string output_path;
   std::string staging_dir;
   std::string model_cache_dir;

@@ -31,6 +31,10 @@
         "software": {
           "type": "string",
           "pattern": "^\\S(.*\\S)?$"
+        },
+        "serial_number": {
+          "type": "string",
+          "pattern": "^\\S(.*\\S)?$"
         }
       }
     },

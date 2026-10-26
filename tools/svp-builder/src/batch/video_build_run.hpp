@@ -25,6 +25,8 @@ namespace svp::builder::batch {
 struct VideoBuildRunOptions {
   VideoBuildParameters parameters;
   std::filesystem::path source_path;
+  // Capture metadata read before the build (BuildPipelineOptions::capture).
+  std::optional<svp::media::CaptureMetadata> capture;
   std::filesystem::path output_path;
   // Empty: the build's default beside the output.
   std::filesystem::path staging_dir;

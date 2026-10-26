@@ -19,6 +19,7 @@
 #include <iostream>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <unistd.h>
@@ -166,6 +167,36 @@ void test_spec_names_inputs_and_models() {
               spec.inputs.contains(std::string(batch::kVideoBuildModelLockInput)),
           "source and model lock inputs");
   require(spec.model_refs.front().model_id == "model_a", "model refs sorted for canonical bytes");
+  require(spec.task_type_version == 2, "version 2 takes capture metadata");
+}
+
+void test_spec_carries_capture_metadata_for_a_resized_copy() {
+  const auto spec_with = [](std::optional<exec::ArtifactRef> capture) {
+    return batch::make_video_build_spec(batch::VideoBuildSpecInput{
+        .build_session_id = "batch_1",
+        .task_id = "video_000001",
+        .parameters = sample_parameters(),
+        .source = exec::ArtifactRef{.blake3 = exec::blake3_digest(std::string_view("copy")),
+                                    .bytes = 4},
+        .model_lock = exec::ArtifactRef{.blake3 = exec::blake3_digest(std::string_view("lock")),
+                                        .bytes = 4},
+        .capture = std::move(capture),
+        .model_refs = {model_ref("model_a")}});
+  };
+  const auto capture_of = [](std::string_view text) {
+    return exec::ArtifactRef{.blake3 = exec::blake3_digest(text), .bytes = text.size()};
+  };
+  const exec::TaskSpec without = spec_with(std::nullopt);
+  const exec::TaskSpec with = spec_with(capture_of(R"({"sources":[]})"));
+  const exec::TaskSpec other = spec_with(capture_of(R"({"sources":["container_tags"]})"));
+  const auto input = with.inputs.find(std::string(batch::kVideoBuildCaptureInput));
+  require(!without.inputs.contains(std::string(batch::kVideoBuildCaptureInput)),
+          "no capture input for the source as given");
+  require(input != with.inputs.end() && input->second.media_type == "application/json" &&
+              input->second.role == batch::kVideoBuildCaptureInput,
+          "the capture input");
+  require(with.cache_key != without.cache_key && with.cache_key != other.cache_key,
+          "the package depends on the capture metadata sent");
 }
 
 // A Mac that answers from a script of outcomes, then builds.
@@ -380,6 +411,7 @@ int main() {
   test_parameters_round_trip_and_are_strict();
   test_package_record_round_trips();
   test_spec_names_inputs_and_models();
+  test_spec_carries_capture_metadata_for_a_resized_copy();
   test_dispatch_requeues_what_other_macs_give_back();
   test_dispatch_alone_runs_every_item_here_in_order();
   test_build_batch_outputs();

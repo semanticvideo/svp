@@ -26,7 +26,7 @@
 | RC2 | 2026-06-19 | Adds first-class OCR/visible-text observations and structured color observations to SVP Core; defines package paths, schemas, registries, validation codes, index/query tables, provenance rules, builder roadmap changes, fixture requirements, and implementation pause guidance before Phase 03+. |
 | RC2 | 2026-09-18 | Adds measured audio loudness observations to SVP Core: `media/audio/loudness.jsonl` per-window ITU-R BS.1770 records and `media/audio/loudness_summary.json` per-stream integrated loudness, loudness range, and true peak, with required schemas, validation rules, and provenance requirements. |
 | RC2 | 2026-09-18 | Adds measured audio spectrum observations to SVP Core: `media/audio/spectrum.jsonl` per-window IEC 61260 octave-band energy records and `media/audio/spectrum_summary.json` per-stream band statistics, with required schemas, validation rules, and provenance requirements. |
-| RC2 | 2026-10-26 | Adds optional capture metadata to provenance: `provenance/capture.json` records the camera, lens, recording time, start timecode, and location as the source file's own metadata states them, with `capture.schema.json` and validation rules. |
+| RC2 | 2026-10-26 | Adds optional capture metadata to provenance: `provenance/capture.json` records the camera and its serial number, lens, recording time, start timecode, and location as the source file's own metadata states them, with `capture.schema.json` and validation rules. |
 
 ## Normative artifacts for v1.0
 
@@ -2793,7 +2793,7 @@ Signature-related findings affect `authenticity_status`. They MUST NOT by themse
 
 ### 18.3 Capture metadata
 
-`provenance/capture.json` records what the camera recorded about the shot in the source file's own metadata: the camera, the lens, when recording started, the start timecode, and where the camera was. It is optional. A builder writes it when the source carries any of these, and omits it when the source carries none.
+`provenance/capture.json` records what the camera recorded about the shot in the source file's own metadata: the camera and its serial number, the lens, when recording started, the start timecode, and where the camera was. It is optional. A builder writes it when the source carries any of these, and omits it when the source carries none.
 
 Every value is copied from the source's metadata as written, never inferred or estimated. Values are normalized only in form:
 
@@ -2806,7 +2806,7 @@ Every value is copied from the source's metadata as written, never inferred or e
 ```json
 {
   "schema_version": "svp-capture-v1",
-  "camera": {"make": "Sony", "model": "ILME-FX3"},
+  "camera": {"make": "Sony", "model": "ILME-FX3", "serial_number": "1234567"},
   "lens": {"model": "FE 24mm F1.4 GM"},
   "recorded": "2026-01-02T09:30:00-08:00",
   "start_timecode": "01:00:00:00",
@@ -2818,7 +2818,7 @@ Every value is copied from the source's metadata as written, never inferred or e
 
 Capture metadata is provenance about the source, not an observation layer: it MUST NOT be used to override Core records. When a build reads a resized or transcoded copy of the source, capture metadata is read from the source as given, because a re-encoded container may not keep every camera tag. Per-frame camera metadata tracks (lens, exposure, and orientation over time) are not part of `capture.json` in RC2.
 
-`location` identifies where the camera was and is personal data when it locates a person. It is recorded as the source states it; publishing a package publishes it.
+`location` identifies where the camera was and is personal data when it locates a person, and `camera.serial_number` identifies the camera body. Both are recorded as the source states them; publishing a package publishes them.
 
 ## 19. Labels
 

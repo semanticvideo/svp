@@ -7,9 +7,11 @@
 
 #include "svp/builder/video_build_parameters.hpp"
 #include "svp/exec/lease_policy.hpp"
+#include "svp/media/capture_metadata.hpp"
 
 #include <chrono>
 #include <filesystem>
+#include <optional>
 #include <string>
 
 namespace svp::builder::batch {
@@ -46,6 +48,9 @@ struct RemoteVideoRequest {
   std::string item_id;
   VideoBuildParameters parameters;
   std::filesystem::path source_path;
+  // When `source_path` is a resized copy: the capture metadata read from the
+  // source as given, which the package records instead of the copy's.
+  std::optional<svp::media::CaptureMetadata> capture;
   std::filesystem::path output_path;
   std::filesystem::path run_report_path;
 };

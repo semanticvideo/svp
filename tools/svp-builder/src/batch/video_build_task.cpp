@@ -12,6 +12,7 @@
 #include "svp/exec/cas_store.hpp"
 #include "svp/exec/output_digest.hpp"
 #include "svp/exec/worker/local_load.hpp"
+#include "svp/media/capture_metadata.hpp"
 #include "svp/validation/svpi_validator.hpp"
 #include "svp/validation/validator.hpp"
 #include "svp/vision/tasks/ffmpeg_build_identity.hpp"
@@ -170,6 +171,20 @@ svp::exec::TaskResult execute(const svp::exec::TaskSpec& spec,
                     true);
     }
   }
+  // A resized copy: the capture metadata the batch Mac read from the source
+  // as given.
+  std::optional<svp::media::CaptureMetadata> capture;
+  if (const auto sent = inputs.find(std::string(kVideoBuildCaptureInput));
+      sent != inputs.end()) {
+    try {
+      capture = svp::media::capture_metadata_from_json(
+          nlohmann::json::parse(read_text(sent->second.path)));
+    } catch (const std::exception& error) {
+      return failed(spec, kVideoBuildFailedCode,
+                    std::string("its capture metadata is not capture.json: ") + error.what(),
+                    false);
+    }
+  }
   const std::filesystem::path job = environment.session_dir / ("video-" + spec.task_id);
   std::filesystem::path source;
   std::filesystem::path models;
@@ -205,6 +220,7 @@ svp::exec::TaskResult execute(const svp::exec::TaskSpec& spec,
     run = run_video_build(VideoBuildRunOptions{
         .parameters = parameters,
         .source_path = source,
+        .capture = capture,
         .output_path = output,
         .staging_dir = job / "staging",
         .model_cache_dir = models,

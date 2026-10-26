@@ -1,6 +1,7 @@
 // Sony's NonRealTimeMeta XML (urn:schemas-professionalDisc:nonRealTimeMeta),
-// which Sony cameras write into an ISO BMFF file's `meta` box: the camera
-// (`Device`), the lens (`Lens`), when recording started (`CreationDate`), and
+// which Sony cameras write into an ISO BMFF file's `meta` box: the camera and
+// its serial number (`Device`), the lens (`Lens`), when recording started
+// (`CreationDate`), and
 // GPS as EXIF GPS fields in its `ExifGPS` group.
 //
 // Only start tags and their attributes are read; element text isn't used by
@@ -242,6 +243,9 @@ void merge_sony_nonrealtime_meta(CaptureMetadata& capture, std::string_view xml)
       }
       if (const auto* model = attribute(tag, "modelName")) {
         set_text(capture, capture.model, *model);
+      }
+      if (const auto* serial = attribute(tag, "serialNo")) {
+        set_text(capture, capture.serial_number, *serial);
       }
     } else if (tag.name == "Lens") {
       if (const auto* lens = attribute(tag, "modelName")) {

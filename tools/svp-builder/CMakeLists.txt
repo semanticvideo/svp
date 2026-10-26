@@ -126,6 +126,7 @@ target_compile_features(svp-builder-lib PUBLIC cxx_std_20)
 target_link_libraries(svp-builder-lib
   PUBLIC
     svp::exec
+    svp::media
     svp::vision
     svp::progress
   PRIVATE
@@ -134,7 +135,6 @@ target_link_libraries(svp-builder-lib
     svp::audio_tasks
     svp::core
     svp::vision_tasks
-    svp::media
     svp::models
     svp::package
     svp::validation

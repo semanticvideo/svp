@@ -365,10 +365,12 @@ void test_inventory_writes_capture_provenance() {
   }
 
   const auto build = [&](const std::string& name, const std::filesystem::path& source,
-                         const std::filesystem::path& capture_source) {
+                         const std::filesystem::path& capture_source,
+                         std::optional<svp::media::CaptureMetadata> capture = std::nullopt) {
     svp::builder::BuildPipelineOptions options;
     options.source_path = source.string();
     options.capture_source_path = capture_source.string();
+    options.capture = std::move(capture);
     options.probe_json_path = write_minimal_probe_json(tmp_dir).string();
     options.ffprobe_path = (tmp_dir / "no-such-ffprobe").string();
     options.output_path = tmp_dir / (name + ".json");
@@ -394,6 +396,19 @@ void test_inventory_writes_capture_provenance() {
   // A build from a resized copy reads the camera's metadata from the source as given.
   assert(std::filesystem::exists(build("resized", plain_source, camera_source)));
   assert(!std::filesystem::exists(build("gone", plain_source, tmp_dir / "missing.mp4")));
+
+  // Another Mac's resized copy: what the sending Mac read, and no file read here.
+  svp::media::CaptureMetadata sent;
+  sent.model = "SENT-CAM";
+  sent.serial_number = "0000001";
+  sent.sources = {"sony_nonrealtime_meta"};
+  const auto remote = build("remote", camera_source, {}, sent);
+  std::ifstream remote_json(remote);
+  const nlohmann::json recorded = nlohmann::json::parse(remote_json);
+  assert(recorded.at("camera") ==
+         nlohmann::json({{"model", "SENT-CAM"}, {"serial_number", "0000001"}}));
+  assert(!std::filesystem::exists(
+      build("remote-none", camera_source, {}, svp::media::CaptureMetadata{})));
 
   std::filesystem::remove_all(tmp_dir);
 }

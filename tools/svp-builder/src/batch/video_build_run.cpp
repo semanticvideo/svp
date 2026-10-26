@@ -21,6 +21,7 @@ InterlaceCreateOptions interlace_options(const VideoBuildRunOptions& options,
   const VideoBuildParameters& parameters = options.parameters;
   InterlaceCreateOptions create;
   create.source_path = options.source_path.string();
+  create.capture = options.capture;
   create.output_path = output_path.string();
   create.staging_dir = options.staging_dir.string();
   create.model_cache_dir = options.model_cache_dir.string();
@@ -44,6 +45,7 @@ VideoBuildRunResult run_svp(const VideoBuildRunOptions& options) {
   const VideoBuildParameters& parameters = options.parameters;
   BuildPipelineOptions pipeline;
   pipeline.source_path = options.source_path.string();
+  pipeline.capture = options.capture;
   pipeline.ffprobe_path = options.ffprobe_path;
   pipeline.ffmpeg_path = options.ffmpeg_path;
   pipeline.output_path = options.output_path;
