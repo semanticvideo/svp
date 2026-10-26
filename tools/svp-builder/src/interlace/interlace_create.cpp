@@ -82,6 +82,7 @@ InterlaceCreateResult interlace_create(const InterlaceCreateOptions& options) {
 
   BuildPipelineOptions pipeline_opts;
   pipeline_opts.source_path = options.source_path;
+  pipeline_opts.capture_source_path = options.capture_source_path;
   pipeline_opts.probe_json_path = options.probe_json_path;
   pipeline_opts.ffprobe_path = options.ffprobe_path;
   pipeline_opts.ffmpeg_path = options.ffmpeg_path;

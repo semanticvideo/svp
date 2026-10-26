@@ -84,6 +84,8 @@ inline constexpr std::string_view kCodeMediaInvalidSpectrumTarget =
     "ERR_MEDIA_INVALID_SPECTRUM_TARGET";
 inline constexpr std::string_view kCodeMediaInvalidSpectrumSummary =
     "ERR_MEDIA_INVALID_SPECTRUM_SUMMARY";
+inline constexpr std::string_view kCodeProvenanceInvalidCapture =
+    "ERR_PROVENANCE_INVALID_CAPTURE";
 
 inline constexpr std::string_view kTempCodeInputMissing = "X_VALIDATOR_INPUT_MISSING";
 inline constexpr std::string_view kTempCodeInputNotRegularFile = "X_VALIDATOR_INPUT_NOT_REGULAR_FILE";

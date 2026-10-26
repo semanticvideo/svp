@@ -50,6 +50,11 @@ struct MediaProbe {
 [[nodiscard]] MediaProbe parse_media_probe_json(const nlohmann::json& value,
                                                 std::string_view source_name);
 [[nodiscard]] MediaProbe load_media_probe_json(const std::filesystem::path& path);
+// ffprobe's `-show_format -show_streams` JSON for a file, as it reports it.
+// Throws when ffprobe can't run or its output isn't JSON.
+[[nodiscard]] nlohmann::json run_ffprobe_json(
+    const std::filesystem::path& source_path,
+    const std::filesystem::path& ffprobe_path = "ffprobe");
 [[nodiscard]] MediaProbe probe_media_with_ffprobe(
     const std::filesystem::path& source_path,
     const std::filesystem::path& ffprobe_path = "ffprobe");

@@ -14,6 +14,7 @@ add_library(svp-builder-lib
   src/build_run_report_recorder.cpp
   src/build_stage_metadata.cpp
   src/build_thread_plan.cpp
+  src/capture_provenance.cpp
   src/foundation_color_stage.cpp
   src/foundation_ocr_stage.cpp
   src/microphone_asr_stage.cpp

@@ -26,6 +26,7 @@
 | RC2 | 2026-06-19 | Adds first-class OCR/visible-text observations and structured color observations to SVP Core; defines package paths, schemas, registries, validation codes, index/query tables, provenance rules, builder roadmap changes, fixture requirements, and implementation pause guidance before Phase 03+. |
 | RC2 | 2026-09-18 | Adds measured audio loudness observations to SVP Core: `media/audio/loudness.jsonl` per-window ITU-R BS.1770 records and `media/audio/loudness_summary.json` per-stream integrated loudness, loudness range, and true peak, with required schemas, validation rules, and provenance requirements. |
 | RC2 | 2026-09-18 | Adds measured audio spectrum observations to SVP Core: `media/audio/spectrum.jsonl` per-window IEC 61260 octave-band energy records and `media/audio/spectrum_summary.json` per-stream band statistics, with required schemas, validation rules, and provenance requirements. |
+| RC2 | 2026-10-26 | Adds optional capture metadata to provenance: `provenance/capture.json` records the camera, lens, recording time, start timecode, and location as the source file's own metadata states them, with `capture.schema.json` and validation rules. |
 
 ## Normative artifacts for v1.0
 
@@ -52,7 +53,7 @@ A complete SVP v1.0 release should ship these artifacts together in one public r
 
 This document is the release-candidate seed for `/spec/svp-v1.md`.
 
-`/spec/validation-codes.json`, `/spec/equivalence-profile.json`, `/spec/block-types.json`, `/spec/color-buckets.json`, `/spec/color-spaces.json`, `/spec/ocr-observation-types.json`, `/spec/svp-model-bundle-v1.md`, and `/spec/svp-signature-v1.md` are normative machine-readable companions to this document. `index-manifest.schema.json`, `text-region.schema.json`, `text-observation.schema.json`, `numeric-value.schema.json`, `text-absence.schema.json`, `color-observation.schema.json`, `color-summary.schema.json`, `color-absence.schema.json`, `loudness-observation.schema.json`, `loudness-summary.schema.json`, `spectrum-observation.schema.json`, and `spectrum-summary.schema.json` are required in `/schemas`. If a registry file, schema file, and the prose conflict, the release is defective and MUST be corrected before a final v1.0 tag.
+`/spec/validation-codes.json`, `/spec/equivalence-profile.json`, `/spec/block-types.json`, `/spec/color-buckets.json`, `/spec/color-spaces.json`, `/spec/ocr-observation-types.json`, `/spec/svp-model-bundle-v1.md`, and `/spec/svp-signature-v1.md` are normative machine-readable companions to this document. `index-manifest.schema.json`, `text-region.schema.json`, `text-observation.schema.json`, `numeric-value.schema.json`, `text-absence.schema.json`, `color-observation.schema.json`, `color-summary.schema.json`, `color-absence.schema.json`, `loudness-observation.schema.json`, `loudness-summary.schema.json`, `spectrum-observation.schema.json`, `spectrum-summary.schema.json`, and `capture.schema.json` are required in `/schemas`. If a registry file, schema file, and the prose conflict, the release is defective and MUST be corrected before a final v1.0 tag.
 
 ## RC2 change summary
 
@@ -868,6 +869,7 @@ video.svp
 
   provenance/
     build.json
+    capture.json
     processors.jsonl
     input_hashes.jsonl
     model_hashes.jsonl
@@ -2789,6 +2791,35 @@ RC1 defines this initial validation code registry. The authoritative machine-rea
 
 Signature-related findings affect `authenticity_status`. They MUST NOT by themselves change a structurally valid SVP Core package from `valid` to `invalid`. A signed invalid package remains invalid, and an unsigned valid package remains valid.
 
+### 18.3 Capture metadata
+
+`provenance/capture.json` records what the camera recorded about the shot in the source file's own metadata: the camera, the lens, when recording started, the start timecode, and where the camera was. It is optional. A builder writes it when the source carries any of these, and omits it when the source carries none.
+
+Every value is copied from the source's metadata as written, never inferred or estimated. Values are normalized only in form:
+
+- `recorded` is ISO 8601 with the camera's UTC offset when the source states one, otherwise UTC (`Z`). A timestamp without an offset is not recorded, since its zone would be a guess.
+- `location` is in WGS-84 decimal degrees, north and east positive. A location the source states in another datum, or with a void GPS fix, is not recorded.
+- `start_timecode` is the timecode of the first frame as the source states it.
+- When more than one of the source's metadata states a value, the camera's own record of the shot (Sony NonRealTimeMeta or QuickTime metadata keys) is used; the others only fill what it doesn't state.
+- `sources` names, in order of first use, which metadata the kept values came from: `quicktime_metadata` (QuickTime metadata keys), `sony_nonrealtime_meta` (Sony NonRealTimeMeta XML in an ISO BMFF `meta` box), `mxf_identification` (MXF identification set), and `container_tags` (container creation time, timecode, and MP4 location).
+
+```json
+{
+  "schema_version": "svp-capture-v1",
+  "camera": {"make": "Sony", "model": "ILME-FX3"},
+  "lens": {"model": "FE 24mm F1.4 GM"},
+  "recorded": "2026-01-02T09:30:00-08:00",
+  "start_timecode": "01:00:00:00",
+  "location": {"latitude": 48.8584, "longitude": 2.2945, "fix": "3d",
+               "fixed_utc": "2026-01-02T17:29:58Z"},
+  "sources": ["sony_nonrealtime_meta", "container_tags"]
+}
+```
+
+Capture metadata is provenance about the source, not an observation layer: it MUST NOT be used to override Core records. When a build reads a resized or transcoded copy of the source, capture metadata is read from the source as given, because a re-encoded container may not keep every camera tag. Per-frame camera metadata tracks (lens, exposure, and orientation over time) are not part of `capture.json` in RC2.
+
+`location` identifies where the camera was and is personal data when it locates a person. It is recorded as the source states it; publishing a package publishes it.
+
 ## 19. Labels
 
 Labels are the only non-core SVP v1.0 section.
@@ -3415,6 +3446,16 @@ A strict validator MUST validate spectrum records with these checks:
 6. `target_id` is the canonical `astream_NNNN` ID of the measured original stream and MUST appear in the `original_audio_stream_ids` recorded by `audio_absence.json`. A `target_id` that does not resolve to a recorded original stream is invalid.
 7. Spectrum provenance IDs MUST reference valid processor provenance records.
 
+### 23.5 Capture metadata validation rules
+
+`provenance/capture.json` is optional. When it is present, a strict validator MUST check that:
+
+1. It is readable JSON and validates against `capture.schema.json`.
+2. `location.latitude` is within -90 to 90 and `location.longitude` within -180 to 180, in WGS-84 decimal degrees.
+3. `recorded` carries a UTC offset (`Z` or `±HH:MM`), and `location.fixed_utc` is UTC.
+
+A package without `provenance/capture.json` is valid; its absence means the source carried no capture metadata the builder reads.
+
 ## 24. Security and privacy requirements
 
 SVP packages are untrusted input.
@@ -3629,6 +3670,7 @@ index-manifest.schema.json
 model-bundle.schema.json
 model-lock.schema.json
 signature-sidecar.schema.json
+capture.schema.json
 label.schema.json
 ```
 

@@ -91,7 +91,7 @@ Current real builder output may include these layer families:
 | Spatial/depth/embeddings | depth blocks, embedding indexes, source-derived text embeddings |
 | Relationships | `relationships/relationships.jsonl` plus relationship processor provenance |
 | Index | SQLite/index manifest outputs |
-| Provenance | processor records and stored validation output |
+| Provenance | processor records, stored validation output, and the source's capture metadata (camera, lens, recording time, timecode, location) when it carries any |
 
 Current real builder output may include transcript, OCR/text, color, timeline,
 entities, spatial/depth, embeddings, relationship, index, provenance, and

@@ -32,6 +32,7 @@ required_files=(
   "spec/schemas/color-observation.schema.json"
   "spec/schemas/color-summary.schema.json"
   "spec/schemas/color-absence.schema.json"
+  "spec/schemas/capture.schema.json"
   "spec/companion/SVP_Index_Manifest_v1_RC1.md"
   "spec/companion/SVP_Model_Bundle_v1_RC1.md"
   "spec/companion/SVP_Model_Bundle_v1_RC2.md"

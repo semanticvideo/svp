@@ -12,6 +12,7 @@
 #include "diarization_validation.hpp"
 #include "entity_record_validation.hpp"
 #include "index_validation.hpp"
+#include "capture_validation.hpp"
 #include "loudness_record_validation.hpp"
 #include "spectrum_record_validation.hpp"
 #include "ocr_color_spec.hpp"
@@ -319,6 +320,8 @@ ValidationReport validate_package(const std::filesystem::path& package_path,
     add_spectrum_record_findings(report, registry, probe.path, layout_result.value(),
                                  spectrum_observation_schema,
                                  spectrum_summary_schema);
+    add_capture_findings(report, registry, probe.path, layout_result.value(),
+                         load_json_document(schema_root / "capture.schema.json"));
   } catch (const nlohmann::json::exception& error) {
     const auto registry_root = registry_root_for(resolved_options);
     add_finding(report, make_finding(registry, kTempCodeRegistryInvalid,

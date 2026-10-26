@@ -852,6 +852,16 @@
       "section": "23.4",
       "description": "spectrum_summary.json does not validate against spectrum-summary.schema.json.",
       "introduced": "1.0-rc.2"
+    },
+    {
+      "code": "ERR_PROVENANCE_INVALID_CAPTURE",
+      "severity": "error",
+      "report_bucket": "errors",
+      "affects_core_status": true,
+      "status_effect": "invalid",
+      "section": "23.5",
+      "description": "provenance/capture.json is present but unreadable or does not validate against capture.schema.json.",
+      "introduced": "1.0-rc.2"
     }
   ]
 }

@@ -518,14 +518,18 @@ MediaProbe load_media_probe_json(const std::filesystem::path& path) {
   return parse_media_probe_json(value, path.string());
 }
 
-MediaProbe probe_media_with_ffprobe(const std::filesystem::path& source_path,
-                                    const std::filesystem::path& ffprobe_path) {
+nlohmann::json run_ffprobe_json(const std::filesystem::path& source_path,
+                                const std::filesystem::path& ffprobe_path) {
   const std::string command = shell_quote(ffprobe_path) +
                               " -v error -print_format json -show_format "
                               "-show_streams " +
                               shell_quote(source_path);
-  const std::string output = read_command_output(command);
-  const nlohmann::json ffprobe_output = nlohmann::json::parse(output);
+  return nlohmann::json::parse(read_command_output(command));
+}
+
+MediaProbe probe_media_with_ffprobe(const std::filesystem::path& source_path,
+                                    const std::filesystem::path& ffprobe_path) {
+  const nlohmann::json ffprobe_output = run_ffprobe_json(source_path, ffprobe_path);
   return parse_media_probe_json(ffprobe_json_to_probe_contract(ffprobe_output,
                                                                source_path.string()),
                                 source_path.string());

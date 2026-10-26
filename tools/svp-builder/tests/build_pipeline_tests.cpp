@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cassert>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -328,6 +329,71 @@ void test_pipeline_with_capturing_sink_emits_ordered_events() {
   }
   assert(!found_package_write);
   assert(!found_validate);
+
+  std::filesystem::remove_all(tmp_dir);
+}
+
+// An ISO BMFF file whose file-level `meta` box carries Sony NonRealTimeMeta
+// with a made-up camera, as a build's source.
+void write_isobmff_with_sony_xml(const std::filesystem::path& path) {
+  const auto box = [](const std::string& type, const std::string& payload) {
+    const auto size = static_cast<std::uint32_t>(8 + payload.size());
+    std::string out;
+    for (int shift = 24; shift >= 0; shift -= 8) {
+      out.push_back(static_cast<char>((size >> shift) & 0xFF));
+    }
+    return out + type + payload;
+  };
+  const std::string full_box(4, '\0');
+  const std::string xml =
+      R"(<NonRealTimeMeta><Device manufacturer="Sony" modelName="TEST-CAM"/></NonRealTimeMeta>)";
+  std::ofstream out(path, std::ios::binary);
+  out << box("ftyp", "XAVC") << box("meta", full_box + box("xml ", full_box + xml));
+}
+
+void test_inventory_writes_capture_provenance() {
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "svp_capture_provenance_test";
+  std::filesystem::remove_all(tmp_dir);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path camera_source = tmp_dir / "camera.mp4";
+  write_isobmff_with_sony_xml(camera_source);
+  const std::filesystem::path plain_source = tmp_dir / "plain.mp4";
+  {
+    std::ofstream out(plain_source, std::ios::binary);
+    out << "not a container";
+  }
+
+  const auto build = [&](const std::string& name, const std::filesystem::path& source,
+                         const std::filesystem::path& capture_source) {
+    svp::builder::BuildPipelineOptions options;
+    options.source_path = source.string();
+    options.capture_source_path = capture_source.string();
+    options.probe_json_path = write_minimal_probe_json(tmp_dir).string();
+    options.ffprobe_path = (tmp_dir / "no-such-ffprobe").string();
+    options.output_path = tmp_dir / (name + ".json");
+    options.staging_dir = tmp_dir / ("staging-" + name);
+    options.stop_after = svp::builder::BuildStage::media_ingest;
+    options.quiet = true;
+    svp::builder::BuildPipeline pipeline;
+    assert(pipeline.run(options).exit_code == 0);
+    return options.staging_dir / "provenance" / "capture.json";
+  };
+
+  const auto camera = build("camera", camera_source, {});
+  assert(std::filesystem::exists(camera));
+  std::ifstream camera_json(camera);
+  const nlohmann::json written = nlohmann::json::parse(camera_json);
+  assert(written.at("camera").at("model") == "TEST-CAM");
+  assert(written.at("sources") == nlohmann::json::array({"sony_nonrealtime_meta"}));
+
+  assert(!std::filesystem::exists(build("plain", plain_source, {})));
+  // Its staging directory reused for a source with none: the earlier file goes.
+  assert(!std::filesystem::exists(build("camera", plain_source, {})));
+
+  // A build from a resized copy reads the camera's metadata from the source as given.
+  assert(std::filesystem::exists(build("resized", plain_source, camera_source)));
+  assert(!std::filesystem::exists(build("gone", plain_source, tmp_dir / "missing.mp4")));
 
   std::filesystem::remove_all(tmp_dir);
 }
@@ -1148,6 +1214,7 @@ int main() {
   test_default_progress_sink_returns_null();
   test_pipeline_with_capturing_sink_emits_ordered_events();
   test_pipeline_with_default_sink_preserves_behavior();
+  test_inventory_writes_capture_provenance();
   test_pipeline_package_write_failure_emits_stage_failed_no_validate();
   test_failed_publication_keeps_recovery_journal();
   test_package_build_removes_default_foundation_json_sidecar();
