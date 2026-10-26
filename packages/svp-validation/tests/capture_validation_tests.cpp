@@ -61,7 +61,7 @@ svp::validation::ValidationReport validate_with(const std::string& name,
 
 const char* kValid = R"({
   "schema_version": "svp-capture-v1",
-  "camera": {"make": "Maker", "model": "Cam 1", "software": "1.0"},
+  "camera": {"make": "Maker", "model": "Cam 1", "software": "1.0", "serial_number": "0000001"},
   "lens": {"model": "Lens 24mm"},
   "recorded": "2026-01-02T03:04:05-08:00",
   "start_timecode": "01:02:03:04",
@@ -89,7 +89,7 @@ void test_invalid_capture_is_an_error() {
   assert(has_capture_error(validate_with("recorded", bad.dump())));
 
   bad = nlohmann::json::parse(kValid);
-  bad["camera"]["serial"] = "123";
+  bad["camera"]["owner"] = "Someone";
   assert(has_capture_error(validate_with("unknown-field", bad.dump())));
 
   assert(has_capture_error(validate_with("unreadable", std::string("{not json"))));

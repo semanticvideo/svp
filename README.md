@@ -91,7 +91,7 @@ Current real builder output may include these layer families:
 | Spatial/depth/embeddings | depth blocks, embedding indexes, source-derived text embeddings |
 | Relationships | `relationships/relationships.jsonl` plus relationship processor provenance |
 | Index | SQLite/index manifest outputs |
-| Provenance | processor records, stored validation output, and the source's capture metadata (camera, lens, recording time, timecode, location) when it carries any |
+| Provenance | processor records, stored validation output, and the source's capture metadata (camera and its serial number, lens, recording time, timecode, location) when it carries any |
 
 Current real builder output may include transcript, OCR/text, color, timeline,
 entities, spatial/depth, embeddings, relationship, index, provenance, and
@@ -653,7 +653,8 @@ svp-builder build "$SVP_VIDEO_PATH" \
   [Worker Fleet Setup](docs/macos/Worker_Fleet_Setup.md)).
 - `--max-resolution` resizes on this Mac first (with its paired workers when
   the build is `--distributed`); the resized video is what is sent, and the
-  package describes it either way.
+  package describes it either way. The source's capture metadata is read here
+  and sent with it, since the resized video may not keep every camera tag.
 - The package is the same whichever Mac coordinates it.
 - With `--coordinators`, an existing output is refused unless `--overwrite` is
   given, and only complete packages (`--stop-after package`) are built.

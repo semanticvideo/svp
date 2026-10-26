@@ -5,6 +5,7 @@
 #include "../workers/worker_reach.hpp"
 #include "../workers/worker_restart.hpp"
 
+#include "svp/exec/canonical_json.hpp"
 #include "svp/exec/exec_error.hpp"
 #include "svp/exec/lease_frames.hpp"
 #include "svp/exec/lease_policy.hpp"
@@ -13,14 +14,17 @@
 #include "svp/exec/worker/model_bundles.hpp"
 #include "svp/exec/worker/worker_connection.hpp"
 #include "svp/exec/worker/worker_error.hpp"
+#include "svp/media/capture_metadata.hpp"
 #include "svp/models/hash.hpp"
 #include "svp/models/model_lock.hpp"
 #include "svp/vision/tasks/model_refs.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <fstream>
+#include <optional>
 #include <thread>
 #include <unistd.h>
 
@@ -61,6 +65,43 @@ BlobRef source_blob(const std::filesystem::path& source) {
   digests[source.string()] = Entry{.bytes = bytes, .modified = modified, .blob = blob};
   return blob;
 }
+
+// The capture metadata a job sends with a resized copy, as the file its
+// session sends (provenance/capture.json, canonical JSON); removed when the
+// job ends.
+class CaptureFile {
+ public:
+  explicit CaptureFile(const svp::media::CaptureMetadata& capture) {
+    static std::atomic<std::uint64_t> files{0};
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        ("svp-capture-" + std::to_string(static_cast<long long>(::getpid())) + "-" +
+         std::to_string(++files) + ".json");
+    const std::string text =
+        svp::exec::encode_canonical_json(svp::media::capture_metadata_to_json(capture));
+    {
+      std::ofstream out(path, std::ios::binary | std::ios::trunc);
+      out.write(text.data(), static_cast<std::streamsize>(text.size()));
+      if (!out) {
+        throw std::runtime_error("cannot write " + path.string());
+      }
+    }
+    blob_ = BlobSource{.ref = BlobRef{.blake3 = svp::exec::blake3_digest(text),
+                                      .bytes = text.size()},
+                       .file = path};
+  }
+  CaptureFile(const CaptureFile&) = delete;
+  CaptureFile& operator=(const CaptureFile&) = delete;
+  ~CaptureFile() {
+    std::error_code error;
+    std::filesystem::remove(blob_.file, error);
+  }
+
+  [[nodiscard]] const BlobSource& blob() const { return blob_; }
+
+ private:
+  BlobSource blob_;
+};
 
 RemoteVideoOutcome unavailable(std::string message) {
   return RemoteVideoOutcome{.status = RemoteVideoStatus::unavailable,
@@ -133,6 +174,13 @@ std::string PairedVideoBuilder::name() const {
 RemoteVideoOutcome PairedVideoBuilder::build(const RemoteVideoRequest& request) {
   try {
     const BlobRef source = source_blob(request.source_path);
+    std::optional<CaptureFile> capture;
+    std::optional<svp::exec::ArtifactRef> capture_input;
+    if (request.capture) {
+      capture.emplace(*request.capture);
+      capture_input = svp::exec::ArtifactRef{.blake3 = capture->blob().ref.blake3,
+                                             .bytes = capture->blob().ref.bytes};
+    }
     const svp::exec::TaskSpec spec = make_video_build_spec(VideoBuildSpecInput{
         .build_session_id = supplies_->build_session_id,
         .task_id = request.item_id,
@@ -140,10 +188,16 @@ RemoteVideoOutcome PairedVideoBuilder::build(const RemoteVideoRequest& request) 
         .source = svp::exec::ArtifactRef{.blake3 = source.blake3, .bytes = source.bytes},
         .model_lock = svp::exec::ArtifactRef{.blake3 = supplies_->model_lock.ref.blake3,
                                              .bytes = supplies_->model_lock.ref.bytes},
+        .capture = capture_input,
         .model_refs = supplies_->model_refs});
     svp::builder::workers::WorkerSupplies supplies = *supplies_->base;
     supplies.blobs = {supplies_->model_lock,
                       BlobSource{.ref = source, .file = request.source_path}};
+    std::vector<BlobRef> sent = {source};
+    if (capture) {
+      supplies.blobs.push_back(capture->blob());
+      sent.push_back(capture->blob().ref);
+    }
 
     // The previous job's session left a runtime this Mac's service moves to:
     // it restarts once that session ended, so wait for it to come back.
@@ -211,11 +265,11 @@ RemoteVideoOutcome PairedVideoBuilder::build(const RemoteVideoRequest& request) 
                                                                         : std::string()));
     }
     // Once the job has ended on that Mac for good, what it was sent or made
-    // for the job (the source, and the package once fetched) is released
-    // there (worker protocol 1.2): it deletes them when the job's session
-    // ends, unless another coordinator still claims them. The model lock is
-    // shared by every job and stays. A Mac that turned the job away, or may
-    // be asked again, keeps everything.
+    // for the job (the source, its capture metadata, and the package once
+    // fetched) is released there (worker protocol 1.2): it deletes them when
+    // the job's session ends, unless another coordinator still claims them.
+    // The model lock is shared by every job and stays. A Mac that turned the
+    // job away, or may be asked again, keeps everything.
     WorkerSessionClient client(*connection->reader, *connection->writer);
     const auto release = [&](const std::vector<BlobRef>& blobs) {
       if (worker_accepts_blob_release(ack.protocol)) {
@@ -228,7 +282,7 @@ RemoteVideoOutcome PairedVideoBuilder::build(const RemoteVideoRequest& request) 
       if (result.error && result.error->retryable) {
         return unavailable(message);
       }
-      release({source});
+      release(sent);
       client.shutdown();
       return RemoteVideoOutcome{.status = RemoteVideoStatus::failed, .message = message};
     }
@@ -248,7 +302,8 @@ RemoteVideoOutcome PairedVideoBuilder::build(const RemoteVideoRequest& request) 
     }
     const BlobRef package{.blake3 = record->blake3, .bytes = record->bytes};
     client.fetch_blob(package, request.output_path);
-    release({source, package});
+    sent.push_back(package);
+    release(sent);
     client.shutdown();
     return RemoteVideoOutcome{.status = RemoteVideoStatus::built, .message = {}};
   } catch (const std::exception& error) {

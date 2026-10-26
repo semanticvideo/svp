@@ -31,6 +31,7 @@ struct CaptureMetadata {
   std::optional<std::string> make;
   std::optional<std::string> model;
   std::optional<std::string> software;  // the camera's firmware or OS version
+  std::optional<std::string> serial_number;  // the camera body's, as the camera states it
   std::optional<std::string> lens_model;
   // ISO 8601, with the camera's UTC offset when it records one, else UTC.
   std::optional<std::string> recorded;
@@ -60,5 +61,10 @@ void merge_sony_nonrealtime_meta(CaptureMetadata& capture, std::string_view xml)
 
 // provenance/capture.json (capture.schema.json); absent fields are omitted.
 [[nodiscard]] nlohmann::json capture_metadata_to_json(const CaptureMetadata& capture);
+
+// The capture metadata a provenance/capture.json document states. Throws
+// std::invalid_argument naming the member for a document that isn't one
+// (unknown members included).
+[[nodiscard]] CaptureMetadata capture_metadata_from_json(const nlohmann::json& value);
 
 }  // namespace svp::media

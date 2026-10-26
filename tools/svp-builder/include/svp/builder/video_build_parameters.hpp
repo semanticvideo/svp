@@ -5,11 +5,17 @@
 // --distributed when the batch is, with the batch Mac's runtime, model
 // bundles, and thread plan, and returns the package.
 //
-// Inputs: `source` (the video, a BLAKE3-verified blob) and `model_lock` (the
+// Inputs: `source` (the video, a BLAKE3-verified blob), `model_lock` (the
 // batch Mac's model-lock.json; the task's model_refs name every bundle it
-// pins). Parameters carry the build options that shape the package, each
-// from a closed set; no message carries a path, a command, or an
-// environment variable (plan §4.3):
+// pins), and, when the source sent is a resized copy (build --max-resolution),
+// `capture`: the capture metadata the sending Mac read from the source as
+// given, as provenance/capture.json (a document with no sources when it has
+// none). The package records it instead of reading the copy, whose container
+// may not keep every camera tag. Version 2 added `capture`.
+//
+// Parameters carry the build options that shape the package, each from a
+// closed set; no message carries a path, a command, or an environment
+// variable (plan §4.3):
 //
 //   {"allow_fallback_diarization":bool, "compute_full_blake3":bool,
 //    "core_only_diagnostic":bool, "distributed":bool,
@@ -49,9 +55,10 @@ namespace svp::builder::batch {
 // Equal to svp::exec::worker::kCoordinatingTaskType (local_load.hpp), which
 // the worker agent counts for a Mac that coordinates a video.
 inline constexpr std::string_view kVideoBuildTaskType = "video.build";
-inline constexpr std::uint64_t kVideoBuildTaskTypeVersion = 1;
+inline constexpr std::uint64_t kVideoBuildTaskTypeVersion = 2;
 inline constexpr std::string_view kVideoBuildSourceInput = "source";
 inline constexpr std::string_view kVideoBuildModelLockInput = "model_lock";
+inline constexpr std::string_view kVideoBuildCaptureInput = "capture";
 inline constexpr std::string_view kVideoBuildPackageRole = "video_build_package";
 inline constexpr std::string_view kVideoBuildRunReportRole = "video_build_run_report";
 
@@ -132,6 +139,7 @@ struct VideoBuildSpecInput {
   VideoBuildParameters parameters;
   svp::exec::ArtifactRef source;
   svp::exec::ArtifactRef model_lock;
+  std::optional<svp::exec::ArtifactRef> capture;
   std::vector<svp::exec::TaskModelRef> model_refs;
 };
 [[nodiscard]] svp::exec::TaskSpec make_video_build_spec(const VideoBuildSpecInput& input);

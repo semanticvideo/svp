@@ -15,6 +15,7 @@
 #include "svp/builder/video_build_parameters.hpp"
 
 #include "svp/exec/cancellation_token.hpp"
+#include "svp/media/capture_metadata.hpp"
 #if defined(__APPLE__)
 #include "svp/exec/worker/local_load.hpp"
 #endif
@@ -124,6 +125,12 @@ int run_build_command(const BuildCliOptions& requested, CLI::App* build_subcomma
     parameters.distributed = options.distributed;
     parameters.require_workers = options.require_workers;
     parameters.run_report = !options.run_report_path.empty();
+    // Another Mac gets only the resized copy, so it records the capture
+    // metadata read here from the source as given, as a build here would.
+    std::optional<svp::media::CaptureMetadata> capture;
+    if (resized && resized->geometry) {
+      capture = svp::media::read_capture_metadata(requested.source_path, options.ffprobe_path);
+    }
     svp::exec::CancellationToken cancellation;
     const svp::builder::BuildInterruptScope interrupt_scope(cancellation);
     svp::builder::batch::VideoPlacement placed = svp::builder::batch::place_video(
@@ -132,6 +139,7 @@ int run_build_command(const BuildCliOptions& requested, CLI::App* build_subcomma
          .request = {.item_id = "video",
                      .parameters = parameters,
                      .source_path = options.source_path,
+                     .capture = std::move(capture),
                      .output_path = options.output_path,
                      .run_report_path = options.run_report_path},
          .busy_backoff = svp::builder::batch::kRemoteVideoBusyBackoff,

@@ -141,7 +141,7 @@ const char* kSonyXml = R"(<?xml version="1.0" encoding="UTF-8"?>
 <NonRealTimeMeta xmlns="urn:schemas-professionalDisc:nonRealTimeMeta:ver.2.20">
   <!-- <Device manufacturer="Commented" modelName="Out"/> -->
   <CreationDate value="2026-01-02T03:04:05-08:00"/>
-  <Device manufacturer="Sony" modelName="TEST-CAM" serialNo="1"/>
+  <Device manufacturer="Sony" modelName="TEST-CAM" serialNo=" 0000001 "/>
   <Lens modelName="Test 24mm F1.4 &amp; more"/>
   <AcquisitionRecord>
     <Group name="ExifGPS">
@@ -171,7 +171,9 @@ void test_sony_nonrealtime_meta() {
                              {"com.apple.quicktime.location.ISO6709", "+01.0+001.0/"},
                              {"com.apple.quicktime.location.accuracy.horizontal", "5"},
                              {"timecode", "01:00:00:00"}}));
-  require(capture.make == "Sony" && capture.model == "TEST-CAM", "Device");
+  require(capture.make == "Sony" && capture.model == "TEST-CAM" &&
+              capture.serial_number == "0000001",
+          "Device, its serial number trimmed");
   require(capture.lens_model == "Test 24mm F1.4 & more", "Lens, entities decoded");
   require(capture.recorded == "2026-01-02T03:04:05-08:00",
           "CreationDate wins over the container's creation time");
@@ -280,6 +282,56 @@ void test_json() {
                                  {"start_timecode", "01:00:00:00"},
                                  {"sources", {"container_tags"}}},
           "only what's set: " + json.dump());
+  svp::media::CaptureMetadata serial;
+  serial.serial_number = "0000001";
+  require(!serial.empty() && svp::media::capture_metadata_to_json(serial)["camera"] ==
+                                 nlohmann::json{{"serial_number", "0000001"}},
+          "a serial number alone is capture metadata");
+}
+
+bool rejected(const nlohmann::json& document) {
+  try {
+    (void)svp::media::capture_metadata_from_json(document);
+    return false;
+  } catch (const std::invalid_argument&) {
+    return true;
+  }
+}
+
+void test_json_read_back() {
+  svp::media::CaptureMetadata capture;
+  svp::media::merge_sony_nonrealtime_meta(capture, kSonyXml);
+  svp::media::merge_ffprobe_json(capture, ffprobe_with({{"com.apple.quicktime.software", "2.0"},
+                                                        {"timecode", "01:00:00;00"}}));
+  const nlohmann::json json = svp::media::capture_metadata_to_json(capture);
+  require(svp::media::capture_metadata_to_json(svp::media::capture_metadata_from_json(json)) ==
+              json,
+          "every member reads back: " + json.dump());
+  const svp::media::CaptureMetadata none = svp::media::capture_metadata_from_json(
+      svp::media::capture_metadata_to_json(svp::media::CaptureMetadata{}));
+  require(none.empty() && none.sources.empty(), "a source with none reads back as none");
+
+  const auto with = [&json](const std::string& pointer, const nlohmann::json& value) {
+    nlohmann::json changed = json;
+    changed[nlohmann::json::json_pointer(pointer)] = value;
+    return changed;
+  };
+  require(rejected(nlohmann::json::array()), "not an object");
+  require(rejected(with("/schema_version", "svp-capture-v2")), "another schema version");
+  require(rejected(with("/note", "x")), "an unknown member");
+  require(rejected(with("/camera/lens", "x")), "an unknown camera member");
+  require(rejected(with("/camera/serial_number", " 1")), "untrimmed text");
+  require(rejected(with("/camera/model", 1)), "a number for text");
+  require(rejected(with("/recorded", "2026-01-02T03:04:05")), "a time with no offset");
+  require(rejected(with("/start_timecode", "1:00:00:00")), "not a timecode");
+  require(rejected(with("/location/latitude", 91)), "latitude out of range");
+  require(rejected(with("/location/fix", "1d")), "an unknown fix");
+  require(rejected(with("/location/fixed_utc", "2026-01-02T11:04:03-08:00")),
+          "a fix time not in UTC");
+  require(rejected(with("/sources/0", "exif")), "an unknown source");
+  nlohmann::json no_sources = json;
+  no_sources.erase("sources");
+  require(rejected(no_sources), "sources missing");
 }
 
 struct Tools {
@@ -346,6 +398,7 @@ int main() {
     test_sony_nonrealtime_meta();
     test_sony_xml_in_an_isobmff_meta_box();
     test_json();
+    test_json_read_back();
     if (const auto tools = real_tools()) {
       test_clips_ffmpeg_writes(*tools);
     } else {

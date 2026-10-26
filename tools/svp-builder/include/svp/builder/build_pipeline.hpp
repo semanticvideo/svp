@@ -4,6 +4,7 @@
 #include "svp/builder/distributed_execution.hpp"
 #include "svp/models/thread_plan.hpp"
 #include "svp/builder/runtime_tools.hpp"
+#include "svp/media/capture_metadata.hpp"
 #include "svp/vision/inference_performance.hpp"
 #include "svp/vision/visual_tracking_quality.hpp"
 
@@ -80,6 +81,10 @@ struct BuildPipelineOptions {
   // source as given, when --max-resolution builds from a resized copy. Empty:
   // source_path.
   std::string capture_source_path;
+  // Capture metadata already read from the source as given, by the Mac that
+  // sent this one a resized copy (video_build_parameters.hpp). When set, no
+  // file is read for it.
+  std::optional<svp::media::CaptureMetadata> capture;
   std::string probe_json_path;
   std::string ffprobe_path = "ffprobe";
   std::string ffmpeg_path = "ffmpeg";

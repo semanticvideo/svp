@@ -6,7 +6,10 @@
 #include "svp/media/capture_location.hpp"
 #include "svp/media/media_probe.hpp"
 
+#include <algorithm>
+#include <array>
 #include <exception>
+#include <stdexcept>
 #include <string_view>
 
 namespace svp::media {
@@ -18,6 +21,8 @@ constexpr std::string_view kSchemaVersion = "svp-capture-v1";
 constexpr std::string_view kQuickTime = "quicktime_metadata";
 constexpr std::string_view kMxf = "mxf_identification";
 constexpr std::string_view kContainer = "container_tags";
+constexpr std::array kSources = {kQuickTime, std::string_view("sony_nonrealtime_meta"), kMxf,
+                                 kContainer};
 
 // QuickTime metadata keys (Apple, QuickTime File Format: Metadata Keys).
 constexpr std::string_view kQtMake = "com.apple.quicktime.make";
@@ -111,11 +116,56 @@ bool is_mxf(const nlohmann::json& format) {
   return it != format.end() && it->is_string() && it->get<std::string>() == "mxf";
 }
 
+[[noreturn]] void invalid(const std::string& member, const std::string& why) {
+  throw std::invalid_argument("capture.json: " + member + " " + why);
+}
+
+// `value` as an object with only `allowed` members.
+const nlohmann::json& object_of(const nlohmann::json& value, const std::string& member,
+                                std::initializer_list<std::string_view> allowed) {
+  if (!value.is_object()) {
+    invalid(member, "must be an object");
+  }
+  for (const auto& [name, unused] : value.items()) {
+    if (std::find(allowed.begin(), allowed.end(), name) == allowed.end()) {
+      invalid(member.empty() ? name : member + "." + name, "is not a capture member");
+    }
+  }
+  return value;
+}
+
+// A member that must be text as capture_metadata_to_json writes it: trimmed
+// and not empty.
+std::optional<std::string> text_of(const nlohmann::json& object, std::string_view name,
+                                   const std::string& member) {
+  const auto it = object.find(std::string(name));
+  if (it == object.end()) {
+    return std::nullopt;
+  }
+  if (!it->is_string() || trimmed_text(it->get_ref<const std::string&>()) !=
+                              it->get_ref<const std::string&>()) {
+    invalid(member, "must be text without surrounding whitespace");
+  }
+  return it->get<std::string>();
+}
+
+std::optional<double> number_of(const nlohmann::json& object, std::string_view name,
+                                const std::string& member) {
+  const auto it = object.find(std::string(name));
+  if (it == object.end()) {
+    return std::nullopt;
+  }
+  if (!it->is_number()) {
+    invalid(member, "must be a number");
+  }
+  return it->get<double>();
+}
+
 }  // namespace
 
 bool CaptureMetadata::empty() const {
-  return !make && !model && !software && !lens_model && !recorded && !start_timecode &&
-         !location;
+  return !make && !model && !software && !serial_number && !lens_model && !recorded &&
+         !start_timecode && !location;
 }
 
 void merge_ffprobe_json(CaptureMetadata& capture, const nlohmann::json& ffprobe) {
@@ -195,6 +245,9 @@ nlohmann::json capture_metadata_to_json(const CaptureMetadata& capture) {
   if (capture.software) {
     camera["software"] = *capture.software;
   }
+  if (capture.serial_number) {
+    camera["serial_number"] = *capture.serial_number;
+  }
   if (!camera.empty()) {
     out["camera"] = std::move(camera);
   }
@@ -226,6 +279,81 @@ nlohmann::json capture_metadata_to_json(const CaptureMetadata& capture) {
   }
   out["sources"] = capture.sources;
   return out;
+}
+
+CaptureMetadata capture_metadata_from_json(const nlohmann::json& value) {
+  const nlohmann::json& root = object_of(
+      value, "", {"schema_version", "camera", "lens", "recorded", "start_timecode", "location",
+                  "sources"});
+  if (root.value("schema_version", std::string()) != kSchemaVersion) {
+    invalid("schema_version", "must be " + std::string(kSchemaVersion));
+  }
+  CaptureMetadata capture;
+  if (const auto camera = root.find("camera"); camera != root.end()) {
+    object_of(*camera, "camera", {"make", "model", "software", "serial_number"});
+    capture.make = text_of(*camera, "make", "camera.make");
+    capture.model = text_of(*camera, "model", "camera.model");
+    capture.software = text_of(*camera, "software", "camera.software");
+    capture.serial_number = text_of(*camera, "serial_number", "camera.serial_number");
+  }
+  if (const auto lens = root.find("lens"); lens != root.end()) {
+    object_of(*lens, "lens", {"model"});
+    capture.lens_model = text_of(*lens, "model", "lens.model");
+    if (!capture.lens_model) {
+      invalid("lens.model", "is missing");
+    }
+  }
+  capture.recorded = text_of(root, "recorded", "recorded");
+  if (capture.recorded && normalized_timestamp(*capture.recorded) != capture.recorded) {
+    invalid("recorded", "must be ISO 8601 with a UTC offset");
+  }
+  capture.start_timecode = text_of(root, "start_timecode", "start_timecode");
+  if (capture.start_timecode && !is_timecode(*capture.start_timecode)) {
+    invalid("start_timecode", "is not a timecode");
+  }
+  if (const auto location = root.find("location"); location != root.end()) {
+    object_of(*location, "location",
+              {"latitude", "longitude", "altitude_m", "horizontal_accuracy_m", "fix",
+               "fixed_utc"});
+    const auto latitude = number_of(*location, "latitude", "location.latitude");
+    const auto longitude = number_of(*location, "longitude", "location.longitude");
+    if (!latitude || *latitude < -90.0 || *latitude > 90.0) {
+      invalid("location.latitude", "must be within -90 to 90");
+    }
+    if (!longitude || *longitude < -180.0 || *longitude > 180.0) {
+      invalid("location.longitude", "must be within -180 to 180");
+    }
+    CaptureLocation where{.latitude = *latitude, .longitude = *longitude};
+    where.altitude_m = number_of(*location, "altitude_m", "location.altitude_m");
+    where.horizontal_accuracy_m =
+        number_of(*location, "horizontal_accuracy_m", "location.horizontal_accuracy_m");
+    if (where.horizontal_accuracy_m && *where.horizontal_accuracy_m < 0.0) {
+      invalid("location.horizontal_accuracy_m", "must not be negative");
+    }
+    where.fix = text_of(*location, "fix", "location.fix");
+    if (where.fix && *where.fix != "2d" && *where.fix != "3d") {
+      invalid("location.fix", "must be 2d or 3d");
+    }
+    where.fixed_utc = text_of(*location, "fixed_utc", "location.fixed_utc");
+    if (where.fixed_utc && (normalized_timestamp(*where.fixed_utc) != where.fixed_utc ||
+                            where.fixed_utc->back() != 'Z')) {
+      invalid("location.fixed_utc", "must be ISO 8601 in UTC");
+    }
+    capture.location = std::move(where);
+  }
+  const auto sources = root.find("sources");
+  if (sources == root.end() || !sources->is_array()) {
+    invalid("sources", "must be an array");
+  }
+  for (const auto& source : *sources) {
+    if (!source.is_string() ||
+        std::find(kSources.begin(), kSources.end(), source.get<std::string>()) ==
+            kSources.end()) {
+      invalid("sources", "names an unknown source: " + source.dump());
+    }
+    capture.sources.push_back(source.get<std::string>());
+  }
+  return capture;
 }
 
 }  // namespace svp::media

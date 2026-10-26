@@ -31,6 +31,7 @@ constexpr std::array kParameterFields = {
 
 constexpr std::string_view kSourceMediaType = "application/octet-stream";
 constexpr std::string_view kModelLockMediaType = "application/json";
+constexpr std::string_view kCaptureMediaType = "application/json";
 
 [[noreturn]] void invalid(const std::string& field, const std::string& why) {
   throw std::invalid_argument("video.build parameters: " + field + " " + why);
@@ -240,6 +241,14 @@ svp::exec::TaskSpec make_video_build_spec(const VideoBuildSpecInput& input) {
   model_lock.role = std::string(kVideoBuildModelLockInput);
   spec.inputs.emplace(std::string(kVideoBuildSourceInput), source);
   spec.inputs.emplace(std::string(kVideoBuildModelLockInput), model_lock);
+  nlohmann::json capture_key = nullptr;
+  if (input.capture) {
+    svp::exec::ArtifactRef capture = *input.capture;
+    capture.media_type = std::string(kCaptureMediaType);
+    capture.role = std::string(kVideoBuildCaptureInput);
+    capture_key = svp::exec::blake3_hex(capture.blake3);
+    spec.inputs.emplace(std::string(kVideoBuildCaptureInput), std::move(capture));
+  }
   spec.parameters = video_build_parameters_to_json(input.parameters);
   spec.parameters_blake3 = svp::exec::compute_parameters_blake3(spec.parameters);
   nlohmann::json bundle_ids = nlohmann::json::array();
@@ -252,6 +261,7 @@ svp::exec::TaskSpec make_video_build_spec(const VideoBuildSpecInput& input) {
       svp::exec::blake3_hex(source.blake3),
       std::move(bundle_ids),
       svp::exec::blake3_hex(spec.parameters_blake3),
+      std::move(capture_key),
   }));
   spec.resources = svp::exec::TaskResources{.est_peak_rss_mb = kVideoBuildEstimatedPeakRssMb,
                                             .est_cpu_threads = kVideoBuildEstimatedCpuThreads,
