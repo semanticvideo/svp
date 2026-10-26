@@ -186,7 +186,8 @@ int run_build_command(const BuildCliOptions& requested, CLI::App* build_subcomma
   const std::shared_ptr<svp::builder::DistributedExecution>& distributed = *fleet;
   if (options.output_format != "svp") {
     const int exit_code =
-        telemetry.finish(run_selected_output_build(options, progress_sink, distributed));
+        telemetry.finish(run_selected_output_build(options, requested.source_path,
+                                                   progress_sink, distributed));
     finish_resized(exit_code == 0);
     if (exit_code == 0) {
       std::cout << format_cli_completion(

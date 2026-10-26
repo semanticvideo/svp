@@ -119,12 +119,14 @@ void test_mxf_identification() {
 
 void test_container_fallbacks() {
   nlohmann::json ffprobe = ffprobe_with({{"creation_time", "2026-03-04T05:06:07.250000Z"},
-                                         {"location", "+12.5000-045.2500/"}});
-  ffprobe["streams"] = {{{"codec_type", "video"}},
+                                         {"location", "+12.5000-045.2500/"},
+                                         {"timecode", "1:00:00:02"}});
+  ffprobe["streams"] = {{{"codec_type", "video"}, {"tags", {{"timecode", "10:00:00/02"}}}},
                         {{"codec_type", "data"}, {"tags", {{"timecode", "10:00:00;02"}}}}};
   const auto capture = from_ffprobe(ffprobe);
   require(capture.recorded == "2026-03-04T05:06:07.25Z", "non-zero fraction kept");
-  require(capture.start_timecode == "10:00:00;02", "a stream's timecode");
+  require(capture.start_timecode == "10:00:00;02",
+          "the first stream timecode in the schema's form; others aren't recorded");
   require(capture.location && near(capture.location->latitude, 12.5), "MP4 location tag");
 
   const auto none = from_ffprobe(

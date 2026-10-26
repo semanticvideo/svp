@@ -95,6 +95,17 @@ void set_recorded(CaptureMetadata& capture, const std::string* text,
   }
 }
 
+// A timecode in another form isn't recorded: capture.json would fail its schema.
+void set_timecode(CaptureMetadata& capture, const std::string* value) {
+  if (value == nullptr || capture.start_timecode) {
+    return;
+  }
+  if (auto text = trimmed_text(*value); text && is_timecode(*text)) {
+    capture.start_timecode = std::move(text);
+    note(capture, kContainer);
+  }
+}
+
 bool is_mxf(const nlohmann::json& format) {
   const auto it = format.find("format_name");
   return it != format.end() && it->is_string() && it->get<std::string>() == "mxf";
@@ -140,7 +151,7 @@ void merge_ffprobe_json(CaptureMetadata& capture, const nlohmann::json& ffprobe)
     set_recorded(capture, tag(tags, kMxfModified), kMxf);
   }
 
-  set(capture.start_timecode, tag(tags, "timecode"), capture, kContainer);
+  set_timecode(capture, tag(tags, "timecode"));
   if (const auto streams = ffprobe.find("streams");
       streams != ffprobe.end() && streams->is_array()) {
     for (const auto& stream : *streams) {
@@ -149,7 +160,7 @@ void merge_ffprobe_json(CaptureMetadata& capture, const nlohmann::json& ffprobe)
       }
       const auto stream_tags = stream.find("tags");
       if (stream_tags != stream.end()) {
-        set(capture.start_timecode, tag(*stream_tags, "timecode"), capture, kContainer);
+        set_timecode(capture, tag(*stream_tags, "timecode"));
       }
     }
   }

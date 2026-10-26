@@ -388,6 +388,8 @@ void test_inventory_writes_capture_provenance() {
   assert(written.at("sources") == nlohmann::json::array({"sony_nonrealtime_meta"}));
 
   assert(!std::filesystem::exists(build("plain", plain_source, {})));
+  // Its staging directory reused for a source with none: the earlier file goes.
+  assert(!std::filesystem::exists(build("camera", plain_source, {})));
 
   // A build from a resized copy reads the camera's metadata from the source as given.
   assert(std::filesystem::exists(build("resized", plain_source, camera_source)));

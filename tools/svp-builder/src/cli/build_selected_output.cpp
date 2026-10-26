@@ -11,12 +11,13 @@
 namespace {
 
 svp::builder::InterlaceCreateOptions make_create_options(
-    const BuildCliOptions& options,
+    const BuildCliOptions& options, const std::string& capture_source_path,
     const std::filesystem::path& output_path,
     const std::shared_ptr<svp::builder::BuildProgressSink>& progress_sink,
     const std::shared_ptr<svp::builder::DistributedExecution>& distributed) {
   svp::builder::InterlaceCreateOptions create;
   create.source_path = options.source_path;
+  create.capture_source_path = capture_source_path;
   create.output_path = output_path.string();
   create.staging_dir = options.staging_dir;
   create.model_cache_dir = options.model_cache_dir;
@@ -38,7 +39,7 @@ svp::builder::InterlaceCreateOptions make_create_options(
 }  // namespace
 
 int run_selected_output_build(
-    const BuildCliOptions& options,
+    const BuildCliOptions& options, const std::string& capture_source_path,
     const std::shared_ptr<svp::builder::BuildProgressSink>& progress_sink,
     const std::shared_ptr<svp::builder::DistributedExecution>& distributed) {
   if (options.stop_after != "package") {
@@ -53,7 +54,8 @@ int run_selected_output_build(
 
   if (options.output_format == "svpi") {
     const auto result = svp::builder::interlace_create(
-        make_create_options(options, options.output_path, progress_sink, distributed));
+        make_create_options(options, capture_source_path, options.output_path, progress_sink,
+                            distributed));
     if (!result.success) {
       std::cerr << "SVPI build failed: " << result.error_message << "\n";
       return result.pipeline_failure == svp::builder::BuildPipelineFailure::cancelled
@@ -65,7 +67,7 @@ int run_selected_output_build(
 
   svp::builder::EmbeddedTransportBuildOptions build;
   build.svpi_options = make_create_options(
-      options, std::filesystem::path{}, progress_sink, distributed);
+      options, capture_source_path, std::filesystem::path{}, progress_sink, distributed);
   build.output_path = options.output_path;
   build.overwrite_output = options.overwrite;
   const auto result = svp::builder::build_embedded_svpi_transport(build);

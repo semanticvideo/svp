@@ -19,4 +19,8 @@ namespace svp::media {
 [[nodiscard]] std::optional<std::string> exif_gps_utc(std::string_view date,
                                                       std::string_view time);
 
+// "HH:MM:SS" then ':', ';' or '.' and two or three frame digits, the form
+// capture.schema.json takes for start_timecode.
+[[nodiscard]] bool is_timecode(std::string_view text);
+
 }  // namespace svp::media

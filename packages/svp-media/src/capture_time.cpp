@@ -96,4 +96,17 @@ std::optional<std::string> exif_gps_utc(std::string_view date, std::string_view 
   return out + "T" + trimmed_clock(time) + "Z";
 }
 
+bool is_timecode(std::string_view text) {
+  constexpr std::size_t kFramesAt = 9;
+  constexpr std::size_t kMinFrameDigits = 2;
+  constexpr std::size_t kMaxFrameDigits = 3;
+  if (text.size() < kFramesAt + kMinFrameDigits || text.size() > kFramesAt + kMaxFrameDigits) {
+    return false;
+  }
+  const char separator = text[kFramesAt - 1];
+  return clock_end(text.substr(0, kFramesAt - 1), 0) == kFramesAt - 1 &&
+         (separator == ':' || separator == ';' || separator == '.') &&
+         digits(text, kFramesAt, text.size() - kFramesAt);
+}
+
 }  // namespace svp::media

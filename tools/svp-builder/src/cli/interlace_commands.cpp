@@ -62,6 +62,7 @@ int run_interlace_command(const InterlaceCliOptions& opts) {
 
     svp::builder::InterlaceCreateOptions ic_opts;
     ic_opts.source_path = source_path;
+    ic_opts.capture_source_path = opts.ic_source;
     ic_opts.output_path = opts.ic_out;
     ic_opts.staging_dir = opts.ic_staging;
     ic_opts.model_cache_dir = opts.ic_model_cache;

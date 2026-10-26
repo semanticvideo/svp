@@ -21,11 +21,14 @@ void write_capture_provenance(const BuildPipelineOptions& options,
   }
   const svp::media::CaptureMetadata capture =
       svp::media::read_capture_metadata(source, options.ffprobe_path);
+  const std::filesystem::path entry =
+      staging_dir / std::filesystem::path(std::string(kCaptureProvenanceEntry));
   if (capture.empty()) {
+    // A reused staging directory may hold an earlier build's file.
+    std::filesystem::remove(entry, error);
     return;
   }
-  write_json_file(staging_dir / std::filesystem::path(std::string(kCaptureProvenanceEntry)),
-                  svp::media::capture_metadata_to_json(capture));
+  write_json_file(entry, svp::media::capture_metadata_to_json(capture));
 }
 
 }  // namespace svp::builder
