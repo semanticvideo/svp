@@ -367,7 +367,7 @@ void test_daemon_install_script_points_current() {
        {"AllowedEthernetLocalNetworkAddresses", "AllowedWiFiLocalNetworkAddresses", "10.0.0.0/8",
         "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10",
         "defaults write com.apple.network.local-network \"$key\" -array-add \"$network\"",
-        "restart this Mac"}) {
+        "restart this Mac", "sw_vers -productVersion", "needs 15.5 or later"}) {
     expect(script.find(needed) != std::string::npos,
            "private networks are allowed for local network access: " + std::string(needed));
   }

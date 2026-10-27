@@ -190,7 +190,8 @@ range to Apple's site setting for this (`com.apple.network.local-network`,
 keys `AllowedEthernetLocalNetworkAddresses` and
 `AllowedWiFiLocalNetworkAddresses`), keeping any range already there. macOS
 then treats those networks as not local for every program on that Mac. It
-needs macOS 15.5 or later and takes effect after a restart.
+needs macOS 15.5 or later (on older macOS the install says so and skips it)
+and takes effect after a restart.
 
 A worker installed before this needs it once. On that Mac, run:
 

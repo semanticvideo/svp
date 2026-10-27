@@ -31,31 +31,43 @@ constexpr std::string_view kPrivateNetworks[] = {"10.0.0.0/8",     "172.16.0.0/1
                                                  "192.168.0.0/16", "169.254.0.0/16",
                                                  "fc00::/7",       "fe80::/10"};
 
-// Adds the networks each key lacks, keeping any an administrator set.
+// Adds the networks each key lacks, keeping any an administrator set. Before
+// macOS 15.5 the setting does not exist; the script says so instead.
 std::string allow_private_networks_lines() {
   std::ostringstream out;
-  out << "changed=0\n"
-      << "for key in";
+  out << "version=$(sw_vers -productVersion)\n"
+      << "major=${version%%.*}\n"
+      << "minor=$(printf '%s' \"$version\" | cut -s -d. -f2)\n"
+      << "if [ \"$major\" -lt 15 ] || { [ \"$major\" -eq 15 ] && [ \"${minor:-0}\" -lt 5 ]; }; "
+         "then\n"
+      << "  echo \"svp: macOS $version cannot allow private networks for local network access "
+         "(needs 15.5 or later); until it is updated, a video handed to this Mac is built on "
+         "it alone\"\n"
+      << "else\n"
+      << "  changed=0\n"
+      << "  for key in";
   for (const std::string_view key : kLocalNetworkKeys) {
     out << " " << key;
   }
   out << "; do\n"
-      << "  for network in";
+      << "    for network in";
   for (const std::string_view network : kPrivateNetworks) {
     out << " " << network;
   }
   out << "; do\n"
-      << "    if ! defaults read " << kLocalNetworkDomain
+      << "      if ! defaults read " << kLocalNetworkDomain
       << " \"$key\" 2>/dev/null | grep -qF \"\\\"$network\\\"\"; then\n"
-      << "      defaults write " << kLocalNetworkDomain << " \"$key\" -array-add \"$network\"\n"
-      << "      changed=1\n"
-      << "    fi\n"
+      << "        defaults write " << kLocalNetworkDomain
+      << " \"$key\" -array-add \"$network\"\n"
+      << "        changed=1\n"
+      << "      fi\n"
+      << "    done\n"
       << "  done\n"
-      << "done\n"
-      << "if [ \"$changed\" = 1 ]; then\n"
-      << "  echo 'svp: private networks are now allowed for local network access ("
+      << "  if [ \"$changed\" = 1 ]; then\n"
+      << "    echo 'svp: private networks are now allowed for local network access ("
       << kLocalNetworkDomain << "); restart this Mac once so a video handed to it can use the "
       << "other workers'\n"
+      << "  fi\n"
       << "fi\n";
   return out.str();
 }
