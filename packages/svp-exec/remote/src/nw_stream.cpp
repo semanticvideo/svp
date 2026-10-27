@@ -56,6 +56,25 @@ bool is_end_of_stream_error(nw_error_t error) {
   return code == ECANCELED || code == ECONNRESET || code == ENOTCONN || code == EPIPE;
 }
 
+// Whether the connection waits because macOS local network privacy denies
+// this process (the path then reports no error of its own).
+bool local_network_denied(nw_connection_t connection) {
+  if (connection == nullptr) {
+    return false;
+  }
+  nw_path_t path = nw_connection_copy_current_path(connection);
+  if (path == nullptr) {
+    return false;
+  }
+  bool denied = false;
+  if (__builtin_available(macOS 14.0, *)) {
+    denied = nw_path_get_unsatisfied_reason(path) ==
+             nw_path_unsatisfied_reason_local_network_denied;
+  }
+  nw_release(path);
+  return denied;
+}
+
 std::string describe_remote_endpoint(nw_connection_t connection) {
   nw_path_t path = nw_connection_copy_current_path(connection);
   if (path == nullptr) {
@@ -161,6 +180,9 @@ void on_state(const std::shared_ptr<Shared>& shared, nw_connection_state_t state
         // interface this route is simply not usable now.
         if (shared->phase == StreamPhase::connecting) {
           fail("waiting: ");
+          if (local_network_denied(shared->connection.get())) {
+            shared->failure = "waiting: macOS denies this process local network access";
+          }
         }
         break;
       case nw_connection_state_ready:

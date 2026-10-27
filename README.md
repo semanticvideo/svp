@@ -674,7 +674,9 @@ Set up workers once with the fleet commands; see
 1. `svp-builder workers fleet init` on the first coordinator.
 2. `svp-builder workers fleet token` prints a worker token.
 3. On each new Mac: `svp-builder worker install --join -` with the token on
-   stdin. This asks for that Mac's administrator password once.
+   stdin. This asks for that Mac's administrator password once; restart the
+   Mac afterwards so it may reach the other workers
+   ([Local network access](docs/macos/Worker_Fleet_Setup.md#local-network-access)).
 4. Coordinators pair new workers automatically
    (`svp-builder workers fleet pair`, or the next `--distributed` build).
 

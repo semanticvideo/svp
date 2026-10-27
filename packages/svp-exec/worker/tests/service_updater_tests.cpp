@@ -363,6 +363,17 @@ void test_daemon_install_script_points_current() {
          "the link is owned by the worker's user");
   expect(script.find("$staging/join.json") != std::string::npos,
          "a staged join credential is installed");
+  for (const std::string_view needed :
+       {"AllowedEthernetLocalNetworkAddresses", "AllowedWiFiLocalNetworkAddresses", "10.0.0.0/8",
+        "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10",
+        "defaults write com.apple.network.local-network \"$key\" -array-add \"$network\"",
+        "restart this Mac"}) {
+    expect(script.find(needed) != std::string::npos,
+           "private networks are allowed for local network access: " + std::string(needed));
+  }
+  expect(script.find("defaults write com.apple.network.local-network \"$key\" -array ") ==
+             std::string::npos,
+         "networks an administrator set are kept (added to, never replaced)");
 }
 
 }  // namespace

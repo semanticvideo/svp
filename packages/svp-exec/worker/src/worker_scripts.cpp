@@ -16,6 +16,50 @@ std::string q(const std::filesystem::path& path) { return shell_quote(path.strin
 // times (launchd's own exit timeout for a job is 20 s).
 constexpr int kBootstrapAttempts = 20;
 
+// macOS local network privacy denies a worker service's own outbound
+// connections: the service runs as its user (UserName), which the exemption
+// for launchd daemons does not cover (measured on macOS 27). A worker
+// connects out when it builds a video another Mac handed it, to spread that
+// video over the other workers. Apple's site-administrator setting treats
+// the listed networks as not local for every program (TN3179, macOS 15.5+,
+// effective after a restart): every private, link-local, and unique-local
+// range, so it holds on any site's network.
+constexpr std::string_view kLocalNetworkDomain = "com.apple.network.local-network";
+constexpr std::string_view kLocalNetworkKeys[] = {"AllowedEthernetLocalNetworkAddresses",
+                                                  "AllowedWiFiLocalNetworkAddresses"};
+constexpr std::string_view kPrivateNetworks[] = {"10.0.0.0/8",     "172.16.0.0/12",
+                                                 "192.168.0.0/16", "169.254.0.0/16",
+                                                 "fc00::/7",       "fe80::/10"};
+
+// Adds the networks each key lacks, keeping any an administrator set.
+std::string allow_private_networks_lines() {
+  std::ostringstream out;
+  out << "changed=0\n"
+      << "for key in";
+  for (const std::string_view key : kLocalNetworkKeys) {
+    out << " " << key;
+  }
+  out << "; do\n"
+      << "  for network in";
+  for (const std::string_view network : kPrivateNetworks) {
+    out << " " << network;
+  }
+  out << "; do\n"
+      << "    if ! defaults read " << kLocalNetworkDomain
+      << " \"$key\" 2>/dev/null | grep -qF \"\\\"$network\\\"\"; then\n"
+      << "      defaults write " << kLocalNetworkDomain << " \"$key\" -array-add \"$network\"\n"
+      << "      changed=1\n"
+      << "    fi\n"
+      << "  done\n"
+      << "done\n"
+      << "if [ \"$changed\" = 1 ]; then\n"
+      << "  echo 'svp: private networks are now allowed for local network access ("
+      << kLocalNetworkDomain << "); restart this Mac once so a video handed to it can use the "
+      << "other workers'\n"
+      << "fi\n";
+  return out.str();
+}
+
 std::string bootstrap_with_retry(std::string_view domain, std::string_view plist_variable) {
   std::ostringstream out;
   // The expected transient error is reported only if every attempt fails.
@@ -267,7 +311,8 @@ std::string render_daemon_install_script(const DaemonInstall& install) {
       << bootstrap_with_retry("system", "$plist")
       << "launchctl print \"system/$label\" >/dev/null\n"
       << "rm -rf \"$staging\"\n"
-      << "rmdir \"$(dirname \"$staging\")\" 2>/dev/null || true\n";
+      << "rmdir \"$(dirname \"$staging\")\" 2>/dev/null || true\n"
+      << allow_private_networks_lines();
   return out.str();
 }
 
