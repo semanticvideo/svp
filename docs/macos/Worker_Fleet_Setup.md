@@ -70,7 +70,10 @@ svp-builder workers fleet token --coordinator | ssh <user>@<coordinator> 'svp-bu
 
    This installs the worker service (LaunchDaemon `org.svp.worker`) running
    the runtime of that install folder, stores the join credential (0600), and
-   starts advertising the Mac as joinable. Delete the token file afterwards.
+   starts advertising the Mac as joinable. It also allows the Mac's private
+   networks for local network access; the first time, restart the Mac once
+   (see [Local network access](#local-network-access)). Delete the token file
+   afterwards.
 
    `--dry-run` stages everything and prints the sudo command without running
    it.
@@ -144,8 +147,9 @@ must be moved once to the `current` layout (repoint the plist to
   - **7461:** builds. Every coordinator's sessions and route measurements.
   - **7462:** fleet joins. Only on Macs installed with `worker install
     --join`.
-- Coordinators only connect out. A Mac that is also a worker listens on the
-  same two ports.
+- Coordinators only connect out. A worker building a video another Mac
+  handed it (`--coordinators`) connects out to the other workers the same
+  way. A Mac that is also a worker listens on the same two ports.
 - Everything on both ports is TLS 1.2 with a pre-shared key: each pairing's
   key for builds, the fleet's worker key for joins. A connection without a
   key the worker holds is dropped during the handshake.
@@ -172,6 +176,42 @@ a new plist without them. `0` lets macOS choose a free port each time the
 service starts. If a port is taken, the service logs why in `agent.log` and
 launchd starts it again.
 
+## Local network access
+
+macOS local network privacy denies a worker service's outbound connections:
+the service runs as its user, which Apple's exemption for launchd daemons
+does not cover. A worker connects out only when it builds a video another Mac
+handed it, to spread that video over the other workers. Without access it
+builds the video alone, and its log says the other workers are not used
+because "macOS denies this process local network access".
+
+The worker install therefore adds every private, link-local, and unique-local
+range to Apple's site setting for this (`com.apple.network.local-network`,
+keys `AllowedEthernetLocalNetworkAddresses` and
+`AllowedWiFiLocalNetworkAddresses`), keeping any range already there. macOS
+then treats those networks as not local for every program on that Mac. It
+needs macOS 15.5 or later (on older macOS the install says so and skips it)
+and takes effect after a restart.
+
+A worker installed before this needs it once. On that Mac, run:
+
+```bash
+for key in AllowedEthernetLocalNetworkAddresses AllowedWiFiLocalNetworkAddresses; do
+  for network in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 fc00::/7 fe80::/10; do
+    sudo defaults read com.apple.network.local-network "$key" 2>/dev/null |
+      grep -qF "\"$network\"" ||
+      sudo defaults write com.apple.network.local-network "$key" -array-add "$network"
+  done
+done
+```
+
+Then restart it.
+
+A coordinator started from Terminal or over SSH has access. One started by a
+LaunchAgent or an app needs that program granted Local Network access (System
+Settings > Privacy & Security > Local Network); a LaunchAgent that runs
+`svp-builder` itself is denied.
+
 ## Troubleshooting
 
 - **A worker is not found:** check that its service runs (`pgrep -fl "worker
@@ -181,5 +221,8 @@ launchd starts it again.
   token and run `worker install --join` again on that Mac.
 - **A worker did not update:** the log names the reason, for example a failed
   test-start. Workers only switch when no job is running.
+- **A handed-off video used no other workers:** if its log says "macOS denies
+  this process local network access", see
+  [Local network access](#local-network-access).
 - **Remove a fleet worker from a coordinator:** fleet workers have no SSH
   target, so use `svp-builder workers unpair --forget <pairing-id>`.

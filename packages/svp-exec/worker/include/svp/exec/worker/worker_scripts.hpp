@@ -101,7 +101,10 @@ struct DaemonInstall {
 // the system root (owned by the worker's user), points <root>/current at the
 // runtime as render_point_current_script does (the link owned by the
 // worker's user too), installs the plist root:wheel 0644, and bootstraps the
-// daemon into the system domain.
+// daemon into the system domain. It then allows private networks for local
+// network access (com.apple.network.local-network), without which macOS
+// denies the service's outbound connections, and says when that needs a
+// restart.
 [[nodiscard]] std::string render_daemon_install_script(const DaemonInstall& install);
 
 struct WorkerRemoval {
