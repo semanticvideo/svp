@@ -30,8 +30,9 @@ struct RemoteListenerOptions {
   // name. Bonjour renames on conflict; advertised_name() reports the result.
   // Coordinators find the worker by pairing id, not by this name.
   std::string service_name;
-  // 0 lets the system choose a free port: coordinators learn it from
-  // Bonjour, so it never needs to be fixed.
+  // 0 lets the system choose a free port. Coordinators learn the port from
+  // Bonjour either way; a fixed one is for firewalls that open ports by
+  // number.
   std::uint16_t port = 0;
   TransportPolicy transport{};
   std::chrono::milliseconds advertise_timeout = kDefaultAdvertiseTimeout;
@@ -103,7 +104,9 @@ class RemoteListener {
   [[nodiscard]] std::size_t handshakes_rejected() const;
 
   // Stops advertising and accepting, cancels every session's connection, and
-  // waits for every handler to return. Idempotent.
+  // waits for every handler to return and for the port to be released (within
+  // options.advertise_timeout), so a new listener can take it at once.
+  // Idempotent.
   void stop();
 
   struct Core;

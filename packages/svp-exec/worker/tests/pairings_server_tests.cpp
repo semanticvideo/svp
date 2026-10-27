@@ -15,6 +15,7 @@
 #include "svp/exec/worker/worker_error.hpp"
 #include "svp/exec/worker/worker_id_book.hpp"
 #include "svp/exec/worker/worker_identity.hpp"
+#include "network_test_support.hpp"
 #include "worker_test_support.hpp"
 
 #include <atomic>
@@ -146,6 +147,24 @@ void test_many_pairings_one_listener() {
   expect(harness.server.port() == port, "all of it on the one port");
 }
 
+void test_a_fixed_port() {
+  const std::uint16_t port = svp::exec::test::free_tcp_port();
+  const std::string worker_id = random_fleet_identifier(kWorkerIdPrefix);
+  PairingsServer server{PairingsServerOptions{
+      .worker_id = worker_id,
+      .serve = [](remote::RemoteStream&, const remote::RemoteSessionInfo&,
+                  const CoordinatorResolver&) {},
+      .log = {},
+      .advertise_each_pairing = false,
+      .service_name = worker_id,
+      .transport = {},
+      .port = port}};
+  server.set_pairings({random_key()});
+  expect(server.port() == port, "listens on the port it was given");
+  server.set_pairings({random_key(), random_key()});
+  expect(server.port() == port, "and keeps it when the pairings change");
+}
+
 void test_proofs_cannot_be_forged() {
   Harness harness;
   const remote::PairingKey a = random_key();
@@ -252,6 +271,7 @@ int main() {
   return run_tests("svp-exec-worker-pairings-server-tests",
                    {
                        {"many pairings, one listener", test_many_pairings_one_listener},
+                       {"a fixed port", test_a_fixed_port},
                        {"proofs cannot be forged", test_proofs_cannot_be_forged},
                        {"pairings change while serving", test_pairings_change_while_serving},
                        {"a failed listener change is rebuilt", test_a_failed_listener_change_is_rebuilt},

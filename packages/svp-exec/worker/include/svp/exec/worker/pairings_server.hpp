@@ -54,6 +54,8 @@ struct PairingsServerOptions {
   // Empty: this Mac's computer name.
   std::string service_name;
   svp::exec::remote::TransportPolicy transport{};
+  // 0: any free port (RemoteListenerOptions::port).
+  std::uint16_t port = 0;
   // Runs before the listener is opened or its keys replaced; throwing makes
   // that change fail as a port that cannot be bound would (tests).
   std::function<void()> before_listener_change;

@@ -38,8 +38,14 @@ std::filesystem::path launched_program_path() {
 }  // namespace
 
 int run_worker_serve(const WorkerCliOptions& options) {
+  if (options.port != 0 && options.port == options.join_port) {
+    std::cerr << "svp-builder worker serve: --port and --join-port must differ\n";
+    return 2;
+  }
   WorkerAgentOptions agent;
   agent.root = options.root;
+  agent.session_port = options.port;
+  agent.join_port = options.join_port;
   if (options.memory_reserve_floor_mb != 0) {
     agent.admission.reserve_floor_bytes = options.memory_reserve_floor_mb * 1024ULL * 1024ULL;
   }

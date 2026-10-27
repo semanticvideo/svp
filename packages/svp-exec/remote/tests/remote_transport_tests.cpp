@@ -2,6 +2,7 @@
 // rejected, Bonjour discovery by pairing id, cancellation, and teardown.
 
 #include "exec_test_support.hpp"
+#include "network_test_support.hpp"
 #include "nw_stream.hpp"
 #include "pairing_test_support.hpp"
 #include "svp/exec/exec_error.hpp"
@@ -28,6 +29,7 @@ using namespace svp::exec;
 using namespace svp::exec::remote;
 using svp::exec::test::expect;
 using svp::exec::test::expect_equal;
+using svp::exec::test::free_tcp_port;
 using svp::exec::test::run_tests;
 namespace pairing = svp::exec::remote::test;
 
@@ -400,6 +402,34 @@ void test_unadvertised_listener_replaces_its_keys() {
                       "an advertising listener cannot change its keys");
 }
 
+void test_a_fixed_port_is_kept_and_not_shared() {
+  const PairingKey first = pairing::random_pairing("svp-transport-fixed-a");
+  const PairingKey second = pairing::random_pairing("svp-transport-fixed-b");
+  RemoteListenerOptions options;
+  options.pairing = first;
+  options.advertise = false;
+  options.port = free_tcp_port();
+  RemoteListener listener(options, echo_frames);
+  listener.start();
+  expect(listener.port() == options.port, "listens on the port it was given");
+  listener.replace_keys(second, {first});
+  expect(listener.port() == options.port, "keeps it when its keys change");
+
+  RemoteListenerOptions other_options;
+  other_options.pairing = second;
+  other_options.advertise = false;
+  other_options.port = options.port;
+  RemoteListener other(other_options, echo_frames);
+  expect_remote_error(RemoteErrorCode::listener_failed, [&] { other.start(); },
+                      "a second listener cannot take a port in use");
+
+  // As the worker restarts its join listener: stop, then at once a new one.
+  listener.stop();
+  RemoteListener next(other_options, echo_frames);
+  next.start();
+  expect(next.port() == options.port, "a stopped listener's port is free at once");
+}
+
 void test_a_spoofed_advertisement_does_not_displace_the_worker() {
   const PairingKey genuine_key = pairing::random_pairing("svp-transport-genuine");
   const PairingKey spoof_key = pairing::random_pairing("svp-transport-spoof");
@@ -533,6 +563,8 @@ int main() {
                         test_exporter_is_shared_and_per_connection},
                        {"unadvertised listener replaces its keys",
                         test_unadvertised_listener_replaces_its_keys},
+                       {"a fixed port is kept and not shared",
+                        test_a_fixed_port_is_kept_and_not_shared},
                        {"advertiser registers and withdraws", test_advertiser_registers_and_withdraws},
                        {"a spoofed advertisement does not displace the worker",
                         test_a_spoofed_advertisement_does_not_displace_the_worker},

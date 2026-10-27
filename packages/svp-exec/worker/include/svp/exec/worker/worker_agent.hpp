@@ -22,10 +22,17 @@
 
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 
 namespace svp::exec::worker {
+
+// The ports `worker serve` listens on unless told otherwise, so a firewall
+// can open them by number: sessions (every pairing) and fleet joins. Both
+// are unassigned in the IANA registry.
+inline constexpr std::uint16_t kDefaultWorkerSessionPort = 7461;
+inline constexpr std::uint16_t kDefaultWorkerJoinPort = 7462;
 
 // The agent's main thread only waits for signals (sigwait). Other threads
 // wake it with this signal to restart after a self-update or to start the
@@ -40,6 +47,9 @@ struct WorkerAgentOptions {
   // Started through <root>/current (service_link.hpp); without it the agent
   // never moves itself to another runtime.
   bool launched_through_current = false;
+  // Listening ports; 0 lets the system choose (RemoteListenerOptions::port).
+  std::uint16_t session_port = 0;
+  std::uint16_t join_port = 0;
 };
 
 // Serves until SIGINT or SIGTERM (returns 0) or a self-update (returns

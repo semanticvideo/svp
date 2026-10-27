@@ -73,6 +73,7 @@ void PairingsServer::open_or_replace_listener(const remote::PairingKey& first,
   listener_options.accepted_keys = accepted;
   listener_options.advertise = false;
   listener_options.transport = options_.transport;
+  listener_options.port = options_.port;
   auto listener = std::make_unique<remote::RemoteListener>(
       listener_options,
       [this](remote::RemoteStream& stream, const remote::RemoteSessionInfo& info) {

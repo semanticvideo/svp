@@ -96,6 +96,10 @@ void register_workers_cli(CLI::App& app, WorkersCliOptions& workers, WorkerCliOp
   worker.serve->add_option("--root", worker.root, "Worker root directory")->required();
   worker.serve->add_option("--memory-reserve-floor-mb", worker.memory_reserve_floor_mb,
                            "Override the admission reserve floor (MiB)");
+  worker.serve->add_option("--port", worker.port, "TCP port for coordinators' sessions (0: any)")
+      ->capture_default_str();
+  worker.serve->add_option("--join-port", worker.join_port, "TCP port for fleet joins (0: any)")
+      ->capture_default_str();
   worker.verify_runtime =
       worker.worker->add_subcommand("verify-runtime", "Verify a runtime directory");
   worker.verify_runtime->add_option("--runtime-dir", worker.runtime_dir, "Runtime directory")

@@ -19,13 +19,17 @@
 //       Run ON a new worker Mac (asks for its administrator password once,
 //       through sudo): installs the LaunchDaemon with the runtime this
 //       svp-builder belongs to, and the join credential.
-//   worker serve --root <dir> [--memory-reserve-floor-mb <n>]
-//       The launchd entry point (worker_agent.hpp).
+//   worker serve --root <dir> [--memory-reserve-floor-mb <n>] [--port <n>]
+//                [--join-port <n>]
+//       The launchd entry point (worker_agent.hpp). Listens on TCP 7461
+//       (sessions) and 7462 (fleet joins) unless told otherwise.
 //   worker --serve-fd <fd> --cas-root <dir> --session-dir <dir>
 //          --model-store <dir> --worker-session-id <id> --runtime-id b3:<hex>
 //       One session process (session_process.hpp).
 //   worker verify-runtime --runtime-dir <dir> [--expect b3:<hex>]
 //       Verifies a runtime directory against its manifest; prints its id.
+
+#include "svp/exec/worker/worker_agent.hpp"
 
 #include <CLI/CLI.hpp>
 
@@ -72,6 +76,8 @@ struct WorkerCliOptions {
   std::string runtime_id;
   std::string root;
   std::uint64_t memory_reserve_floor_mb = 0;
+  std::uint16_t port = svp::exec::worker::kDefaultWorkerSessionPort;
+  std::uint16_t join_port = svp::exec::worker::kDefaultWorkerJoinPort;
   std::string runtime_dir;
   std::string expect;
   std::string join_token;

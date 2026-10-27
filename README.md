@@ -687,6 +687,11 @@ is reachable.
 `svp-builder workers pair <user>@<host> --system-service` still pairs a worker
 over SSH.
 
+Coordinators find workers with Bonjour (mDNS, UDP 5353). Each worker listens
+on TCP 7461 for builds and TCP 7462 for fleet joins, all TLS with pre-shared
+keys. To open a firewall or change the ports, see
+[Network and firewalls](docs/macos/Worker_Fleet_Setup.md#network-and-firewalls).
+
 ## Create and Use SVPI Sidecars
 
 Create a semantic `.svpi` sidecar from source media:
