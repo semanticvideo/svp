@@ -295,7 +295,10 @@ void RemoteListener::start() {
   }
   if (!failure.empty()) {
     stop();
-    throw RemoteTransportError(RemoteErrorCode::listener_failed, failure);
+    throw RemoteTransportError(RemoteErrorCode::listener_failed,
+                               options.port == 0
+                                   ? failure
+                                   : "port " + std::to_string(options.port) + ": " + failure);
   }
 }
 
@@ -394,6 +397,7 @@ std::size_t RemoteListener::handshakes_rejected() const {
 void RemoteListener::stop() {
   std::list<std::shared_ptr<Core::Session>> sessions;
   NwRef<nw_listener_t> listener;
+  std::shared_ptr<Opening> opening;
   {
     const std::lock_guard lock(core_->mutex);
     if (core_->stopping) {
@@ -402,9 +406,15 @@ void RemoteListener::stop() {
     core_->stopping = true;
     sessions.swap(core_->sessions);
     listener = std::move(core_->listener);
+    opening = core_->opening;
   }
   if (listener) {
     nw_listener_cancel(listener.get());
+    if (opening) {
+      std::unique_lock lock(opening->mutex);
+      opening->changed.wait_for(lock, core_->options.advertise_timeout,
+                                [&] { return opening->cancelled; });
+    }
   }
   for (const auto& session : sessions) {
     session->stream->cancel();

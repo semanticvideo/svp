@@ -134,6 +134,44 @@ names a fixed `runtimes/<id>/bin/svp-builder` path does not update itself; it
 must be moved once to the `current` layout (repoint the plist to
 `<worker root>/current/bin/svp-builder`, which needs sudo on that Mac).
 
+## Network and firewalls
+
+- Coordinators find workers with Bonjour: mDNS on UDP 5353 (multicast
+  224.0.0.251 and ff02::fb). Macs on different subnets or VLANs need mDNS
+  allowed or reflected between them. A network that carries no multicast
+  between the Macs is not supported.
+- Each worker service listens on two TCP ports:
+  - **7461:** builds. Every coordinator's sessions and route measurements.
+  - **7462:** fleet joins. Only on Macs installed with `worker install
+    --join`.
+- Coordinators only connect out. A Mac that is also a worker listens on the
+  same two ports.
+- Everything on both ports is TLS 1.2 with a pre-shared key: each pairing's
+  key for builds, the fleet's worker key for joins. A connection without a
+  key the worker holds is dropped during the handshake.
+
+To use other ports on a Mac, add `--port <n>` and `--join-port <n>` after
+`worker serve --root <worker root>` in the job's plist, then reload the job.
+Fleet workers and `--system-service` workers run a LaunchDaemon:
+
+```bash
+sudo launchctl bootout system/org.svp.worker
+sudo launchctl bootstrap system /Library/LaunchDaemons/org.svp.worker.plist
+```
+
+Workers paired over SSH without `--system-service` run a LaunchAgent; as the
+worker user:
+
+```bash
+launchctl bootout gui/$(id -u)/org.svp.worker
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/org.svp.worker.plist
+```
+
+Updates keep the plist, so the ports stay. Installing the worker again writes
+a new plist without them. `0` lets macOS choose a free port each time the
+service starts. If a port is taken, the service logs why in `agent.log` and
+launchd starts it again.
+
 ## Troubleshooting
 
 - **A worker is not found:** check that its service runs (`pgrep -fl "worker

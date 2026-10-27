@@ -45,12 +45,15 @@ void wake_main_thread() { ::kill(::getpid(), kAgentWakeSignal); }
 class AgentListeners {
  public:
   AgentListeners(AgentCore& core, ServiceUpdater& updater, const WorkerLayout& layout,
-                 std::string worker_id, std::mutex& credential_mutex)
+                 std::string worker_id, std::mutex& credential_mutex, std::uint16_t session_port,
+                 std::uint16_t join_port)
       : credential_mutex_(credential_mutex),
         core_(core),
         updater_(updater),
         layout_(layout),
         worker_id_(worker_id),
+        session_port_(session_port),
+        join_port_(join_port),
         pairings_(PairingsServerOptions{
             .worker_id = std::move(worker_id),
             .serve =
@@ -59,7 +62,8 @@ class AgentListeners {
             .log = log_line,
             .advertise_each_pairing = true,
             .service_name = {},
-            .transport = {}}) {}
+            .transport = {},
+            .port = session_port}) {}
 
   ~AgentListeners() { stop_all(); }
 
@@ -76,6 +80,12 @@ class AgentListeners {
     if (pairings_.pairing_count() != before || keys.size() != before) {
       log_line("serving " + std::to_string(keys.size()) + " pairing(s) on port " +
                std::to_string(pairings_.port()));
+    }
+    // Changing keys rebinds the port; when that fails the listener takes any
+    // free one, which a firewall opened by port number then blocks.
+    if (session_port_ != 0 && pairings_.port() != 0 && pairings_.port() != session_port_) {
+      log_line("port " + std::to_string(session_port_) + " could not be bound again; serving on " +
+               std::to_string(pairings_.port()) + " until the agent restarts");
     }
   }
 
@@ -96,6 +106,7 @@ class AgentListeners {
     remote::RemoteListenerOptions listener_options;
     listener_options.pairing = join_listener_key(*credential);
     listener_options.advertise = false;
+    listener_options.port = join_port_;
     join_ = std::make_unique<remote::RemoteListener>(
         listener_options, [this](remote::RemoteStream& stream,
                                  const remote::RemoteSessionInfo& info) { serve_join(stream, info); });
@@ -207,6 +218,8 @@ class AgentListeners {
   ServiceUpdater& updater_;
   WorkerLayout layout_;
   std::string worker_id_;
+  std::uint16_t session_port_;
+  std::uint16_t join_port_;
   PairingsServer pairings_;
   std::unique_ptr<remote::RemoteListener> join_;
   std::unique_ptr<remote::ServiceAdvertiser> join_advertisement_;
@@ -345,7 +358,8 @@ int run_worker_agent(const WorkerAgentOptions& options) {
     return kWorkerRestartExitCode;
   }
 
-  AgentListeners listeners(core, updater, layout, worker_id, credential_mutex);
+  AgentListeners listeners(core, updater, layout, worker_id, credential_mutex,
+                           options.session_port, options.join_port);
   // Only a listener that cannot open ends the agent (launchd restarts it);
   // advertising never does (pairings_server.hpp).
   listeners.rescan_pairings();
