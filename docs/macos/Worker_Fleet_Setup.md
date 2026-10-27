@@ -151,12 +151,20 @@ must be moved once to the `current` layout (repoint the plist to
   key the worker holds is dropped during the handshake.
 
 To use other ports on a Mac, add `--port <n>` and `--join-port <n>` after
-`worker serve --root <worker root>` in the job's plist
-(`/Library/LaunchDaemons/org.svp.worker.plist`), then reload the job:
+`worker serve --root <worker root>` in the job's plist, then reload the job.
+Fleet workers and `--system-service` workers run a LaunchDaemon:
 
 ```bash
 sudo launchctl bootout system/org.svp.worker
 sudo launchctl bootstrap system /Library/LaunchDaemons/org.svp.worker.plist
+```
+
+Workers paired over SSH without `--system-service` run a LaunchAgent; as the
+worker user:
+
+```bash
+launchctl bootout gui/$(id -u)/org.svp.worker
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/org.svp.worker.plist
 ```
 
 Updates keep the plist, so the ports stay. Installing the worker again writes
