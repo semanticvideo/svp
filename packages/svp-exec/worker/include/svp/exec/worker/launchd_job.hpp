@@ -21,8 +21,10 @@
 //     also runs the in-process TCP of the connections it accepts: over
 //     Thunderbolt networking, where that TCP keeps recovering lost segments,
 //     a worker's replies to a route probe measured 29-37 MB/s, against
-//     99-137 MB/s as Interactive. Admission (admission.hpp) is what protects
-//     other workloads.
+//     99-137 MB/s as Interactive. Only the agent runs uncapped: the session
+//     processes that run tasks are started under the utility cap
+//     (session_process.hpp), and admission (admission.hpp) bounds their
+//     memory, so other workloads keep the priority they had.
 //   Umask 077: everything the agent creates is private to the worker's user.
 //   LaunchDaemon only: UserName runs the job as the worker's user, never as
 //     root (plan §4.3), and HOME is set to that user's home because a daemon
