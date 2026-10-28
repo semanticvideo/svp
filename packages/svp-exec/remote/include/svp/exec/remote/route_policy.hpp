@@ -75,10 +75,10 @@ struct RouteProbe {
 //          used.
 //   Within a tier the route with the highest measured throughput (the
 //   slower of its two directions) wins; ties go to the lowest handshake
-//   latency. Reported link rates are not trusted: on Macs whose Thunderbolt
-//   links report more than 4 Gb/s, Network framework TCP measured about
-//   1.3 MB/s coordinator-to-worker over Thunderbolt while gigabit Ethernet
-//   between the same Macs carried 115 MB/s both ways.
+//   latency. Reported link rates are not trusted: over Thunderbolt links
+//   that report 40 Gb/s or more, a worker's replies measured 100-170 MB/s,
+//   near gigabit Ethernet's 115 MB/s (make_pinned_connection has why the
+//   coordinator's direction is faster).
 //
 //   discovery_timeout 5 s: mDNS repeats an unanswered query after 1 s and
 //          then at doubling intervals (RFC 6762 §5.2), so 5 s covers three

@@ -5,6 +5,7 @@
 #include "network_test_support.hpp"
 #include "nw_stream.hpp"
 #include "pairing_test_support.hpp"
+#include "route_measurement.hpp"
 #include "svp/exec/exec_error.hpp"
 #include "svp/exec/frame_stream.hpp"
 #include "svp/exec/remote/remote_connector.hpp"
@@ -139,6 +140,29 @@ void test_tls_psk_round_trip() {
   expect(listener.sessions_started() == 1, "one worker session served");
   expect(listener.route_probes_served() >= 1, "routes were measured by probes, not sessions");
   expect(listener.handshakes_rejected() == 0, "no handshake rejected");
+}
+
+// Connections the coordinator opens ask for multipath (make_pinned_connection
+// has why); the round trip above proves such a connection works against a
+// listener.
+void test_opened_connections_ask_for_multipath() {
+  namespace remote_detail = svp::exec::remote::detail;
+  const PairingKey key = pairing::random_pairing("svp-transport");
+  // Never started, so nothing needs to listen there.
+  remote_detail::RouteTarget target;
+  auto& loopback = reinterpret_cast<sockaddr_in&>(target.address);
+  loopback.sin_len = sizeof(sockaddr_in);
+  loopback.sin_family = AF_INET;
+  loopback.sin_port = htons(9);
+  loopback.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  for (const std::string_view protocol : {kSessionAlpn, kRouteProbeAlpn}) {
+    const remote_detail::NwRef<nw_connection_t> connection =
+        remote_detail::make_pinned_connection(target, key, TransportPolicy{}, protocol);
+    const auto parameters = remote_detail::NwRef<nw_parameters_t>::adopt(
+        nw_connection_copy_parameters(connection.get()));
+    expect(nw_parameters_get_multipath_service(parameters.get()) == nw_multipath_service_handover,
+           std::string(protocol) + " connection asks for multipath handover");
+  }
 }
 
 // A peer that resets the connection while our write is in flight must fail
@@ -553,6 +577,8 @@ int main() {
   return run_tests("svp-exec-remote-transport-tests",
                    {
                        {"TLS-PSK round trip", test_tls_psk_round_trip},
+                       {"opened connections ask for multipath",
+                        test_opened_connections_ask_for_multipath},
                        {"peer reset fails a write in flight",
                         test_peer_reset_fails_a_write_in_flight},
                        {"wrong secret is rejected", test_wrong_secret_is_rejected},
