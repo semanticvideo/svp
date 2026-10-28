@@ -487,6 +487,45 @@ void test_a_spoofed_advertisement_does_not_displace_the_worker() {
          "the spoofed instance is never served a session");
 }
 
+// A worker's join listener advertises the worker's id beside its join id, on
+// a port where the coordinator's pairing never authenticates.
+void test_discovery_skips_instances_of_other_pairings() {
+  const PairingKey key = pairing::random_pairing("svp-transport-member");
+  const PairingKey join_key = pairing::random_pairing("svp-transport-join");
+  const std::string worker_id = "svpn-" + key.pairing_id;
+  RemoteListenerOptions worker_options;
+  worker_options.pairing = key;
+  worker_options.advertise = false;
+  RemoteListener worker(worker_options, echo_frames);
+  worker.start();
+  RemoteListenerOptions join_options;
+  join_options.pairing = join_key;
+  join_options.advertise = false;
+  RemoteListener join(join_options, echo_frames);
+  join.start();
+  ServiceAdvertiser own_ad(ServiceAdvertisement{
+      .name = "own-" + key.pairing_id, .port = worker.port(), .txt = {{"worker", worker_id}}});
+  ServiceAdvertiser pairing_ad(
+      ServiceAdvertisement{.name = key.pairing_id,
+                           .port = worker.port(),
+                           .txt = {{"pairing", key.pairing_id}, {"worker", worker_id}}});
+  ServiceAdvertiser join_ad(
+      ServiceAdvertisement{.name = join_key.pairing_id,
+                           .port = join.port(),
+                           .txt = {{"pairing", join_key.pairing_id}, {"worker", worker_id}}});
+  expect(own_ad.wait_registered(std::chrono::seconds(10)) &&
+             pairing_ad.wait_registered(std::chrono::seconds(10)) &&
+             join_ad.wait_registered(std::chrono::seconds(10)),
+         "all registered");
+  RemoteConnector connector(RemoteConnectorOptions{.pairing = key, .worker_id = worker_id});
+  std::set<std::string> names;
+  for (const DiscoveredWorker& found : connector.discover()) {
+    names.insert(found.service_name);
+  }
+  expect(names == std::set<std::string>{own_ad.registered_name(), pairing_ad.registered_name()},
+         "the worker's own instance and its instance for this pairing, not the join listener's");
+}
+
 void test_advertiser_registers_and_withdraws() {
   const std::string id = pairing::random_pairing("svp-transport-ad").pairing_id;
   {
@@ -594,6 +633,8 @@ int main() {
                        {"advertiser registers and withdraws", test_advertiser_registers_and_withdraws},
                        {"a spoofed advertisement does not displace the worker",
                         test_a_spoofed_advertisement_does_not_displace_the_worker},
+                       {"discovery skips instances of other pairings",
+                        test_discovery_skips_instances_of_other_pairings},
                        {"advertise retry backoff", test_advertise_retry_backoff},
                        {"cancelled connector", test_cancelled_connector},
                        {"cancel interrupts discovery", test_cancel_interrupts_discovery},

@@ -216,8 +216,14 @@ std::vector<DiscoveredService> browse_for_worker(std::string_view worker_id,
                         pairing = std::string(pairing_id)](const auto& txt) {
     const auto by_worker = txt.find(std::string(kWorkerTxtKey));
     const auto by_pairing = txt.find(std::string(kPairingTxtKey));
-    return (by_worker != txt.end() && by_worker->second == worker) ||
-           (by_pairing != txt.end() && by_pairing->second == pairing);
+    // An instance that names a pairing is for that pairing only. The worker's
+    // join listener names its join id on a port of its own, where this
+    // pairing never authenticates; an instance for another of the worker's
+    // pairings shares the worker's own instance's port.
+    if (by_pairing != txt.end()) {
+      return by_pairing->second == pairing;
+    }
+    return by_worker != txt.end() && by_worker->second == worker;
   };
   // Every match is kept until route measurement authenticates it: a host
   // on the LAN can advertise any worker id, and must not displace the
