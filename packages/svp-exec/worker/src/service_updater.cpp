@@ -5,6 +5,11 @@
 #include "svp/exec/worker/service_link.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 
+#include <algorithm>
+#include <optional>
+#include <system_error>
+#include <vector>
+
 namespace svp::exec::worker {
 namespace {
 
@@ -209,6 +214,96 @@ UpdateStep ServiceUpdater::consider() {
     }
     return UpdateStep::switched;
   }
+}
+
+RuntimePrune ServiceUpdater::prune_runtimes() {
+  RuntimePrune prune;
+  if (!enabled()) {
+    return prune;
+  }
+  // Held throughout, so try_enter_session() waits for it.
+  const std::lock_guard lock(mutex_);
+  if (live_ > 0 || testing_ || restarting_) {
+    return prune;
+  }
+  struct Installed {
+    RuntimeRelease release;
+    std::uint64_t bytes = 0;
+  };
+  const WorkerRuntimeStore store(options_.layout.runtimes());
+  const std::vector<Blake3Digest> installed = store.list();
+  std::vector<Installed> older;
+  for (const Blake3Digest& runtime_id : installed) {
+    RuntimeManifest manifest;
+    try {
+      manifest = load_runtime_manifest(runtime_manifest_path(store.directory_of(runtime_id)));
+    } catch (const std::exception&) {
+      continue;
+    }
+    const RuntimeRelease release = runtime_release_of(manifest, store.directory_of(runtime_id));
+    if (runtime_id != own_.runtime_id && !is_newer_release(release, own_)) {
+      older.push_back(Installed{.release = release, .bytes = manifest_bytes(manifest)});
+    }
+  }
+  const Installed* previous = nullptr;
+  for (const Installed& runtime : older) {
+    if (runtime.release.release_stamp &&
+        (previous == nullptr || is_newer_release(runtime.release, previous->release))) {
+      previous = &runtime;
+    }
+  }
+  // Never the runtime launchd starts, whatever its release.
+  const std::optional<Blake3Digest> current = read_current_runtime(options_.layout);
+  for (const Installed& runtime : older) {
+    if (&runtime == previous || runtime.release.runtime_id == current) {
+      continue;
+    }
+    std::error_code error;
+    std::filesystem::remove_all(store.directory_of(runtime.release.runtime_id), error);
+    if (error) {
+      log("runtime cleanup: cannot remove " + describe(runtime.release) + ": " +
+          error.message());
+      continue;
+    }
+    ++prune.removed_runtimes;
+    prune.removed_bytes += runtime.bytes;
+  }
+  // Installs run only in sessions, and none is live: an install a crash
+  // left unfinished, or a runtime directory that no longer verifies (a crash
+  // during a removal or a replacement), is never used again.
+  std::vector<std::filesystem::path> unusable;
+  std::error_code error;
+  std::filesystem::directory_iterator entry(options_.layout.runtimes(), error);
+  for (; !error && entry != std::filesystem::directory_iterator(); entry.increment(error)) {
+    const std::string name = entry->path().filename().string();
+    const std::optional<Blake3Digest> runtime_id = parse_blake3_hex(name);
+    const bool damaged = runtime_id &&
+                         std::find(installed.begin(), installed.end(), *runtime_id) ==
+                             installed.end() &&
+                         *runtime_id != own_.runtime_id && runtime_id != current;
+    if (name.starts_with(kRuntimeIncomingPrefix) || damaged) {
+      unusable.push_back(entry->path());
+    }
+  }
+  if (error) {
+    log("runtime cleanup: cannot list " + options_.layout.runtimes().string() + ": " +
+        error.message());
+  }
+  for (const std::filesystem::path& path : unusable) {
+    std::error_code removal;
+    std::filesystem::remove_all(path, removal);
+    if (!removal) {
+      ++prune.removed_unusable;
+    }
+  }
+  if (prune.removed_runtimes > 0 || prune.removed_unusable > 0) {
+    log("runtime cleanup: removed " + std::to_string(prune.removed_runtimes) +
+        " runtime(s) (" + std::to_string(prune.removed_bytes) + " bytes) and " +
+        std::to_string(prune.removed_unusable) + " unfinished or damaged install(s); kept " +
+        describe(own_) + (previous ? " and " + describe(previous->release) : std::string()) +
+        " and any newer");
+  }
+  return prune;
 }
 
 }  // namespace svp::exec::worker

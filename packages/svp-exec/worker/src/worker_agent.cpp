@@ -356,6 +356,9 @@ int run_worker_agent(const WorkerAgentOptions& options) {
   } else if (updater.consider() == UpdateStep::switched) {
     clear_worker_scratch(layout);
     return kWorkerRestartExitCode;
+  } else {
+    // Before any session can start (service_updater.hpp).
+    (void)updater.prune_runtimes();
   }
 
   AgentListeners listeners(core, updater, layout, worker_id, credential_mutex,

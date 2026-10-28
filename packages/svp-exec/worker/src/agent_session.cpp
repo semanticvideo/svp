@@ -156,6 +156,7 @@ class AgentSession {
     // released (by this session or another) may be deletable now.
     pins_.reset();
     (void)core_.released().sweep(cas_);
+    core_.enforce_cache_budget();
   }
 
  private:
@@ -183,6 +184,9 @@ class AgentSession {
             pin(blob.blake3);
             if (!cas_.has(blob.blake3)) {
               missing.blobs.push_back(blob);
+            } else {
+              // Declared for use: the most recently used for eviction.
+              cas_.refresh(blob.blake3);
             }
           }
           output_.write(make_blob_answer_frame(missing));
@@ -254,9 +258,20 @@ class AgentSession {
   // Pins `digest` for this session, before its presence is answered, so a
   // concurrent release either sees the pin or has already deleted the blob
   // (which is then reported missing), and claims it for this session's
-  // coordinator (released_blobs.hpp). Pinning is best effort, like every
-  // cache pin (RC2 §20.5.2): without a pin set the session runs unpinned.
+  // coordinator (released_blobs.hpp).
   void pin(const Blake3Digest& digest) {
+    hold(digest);
+    // A session that names no coordinator could never give its claim back
+    // from another session; its pins alone protect what it uses.
+    if (named_coordinator_) {
+      core_.released().claim(coordinator_id_, digest);
+    }
+  }
+
+  // Pins `digest` for this session without claiming it. Pinning is best
+  // effort, like every cache pin (RC2 §20.5.2): without a pin set the
+  // session runs unpinned.
+  void hold(const Blake3Digest& digest) {
     if (!pins_ && !pins_failed_) {
       CacheResult<CasPinSet> pins =
           cas_.pin_set(session_id_ + std::string(kAgentPinHolderSuffix));
@@ -268,11 +283,6 @@ class AgentSession {
     }
     if (pins_) {
       (void)pins_->add(digest);
-    }
-    // A session that names no coordinator could never give its claim back
-    // from another session; its pins alone protect what it uses.
-    if (named_coordinator_) {
-      core_.released().claim(coordinator_id_, digest);
     }
   }
 
@@ -323,6 +333,10 @@ class AgentSession {
 
   // BLOB_GET: the blobs answer, then the blob in BLOB_PUT chunks.
   void send_blob(const BlobRef& blob) {
+    // Before the presence check, so neither a release nor another session's
+    // eviction removes it before it is opened. Fetching is not declaring,
+    // so it is not claimed.
+    hold(blob.blake3);
     CacheResult<std::ifstream> opened =
         cas_.has(blob.blake3) ? cas_.open(blob.blake3) : CacheResult<std::ifstream>(CacheError{});
     output_.write(make_blob_answer_frame(BlobQuery{
@@ -459,7 +473,8 @@ class AgentSession {
   CasStore cas_;
   CoordinatorHello hello_;
   std::unique_ptr<BlobReceiver> receiver_;
-  // The blobs this session declared (pin()); released in finish().
+  // The blobs this session declared (pin()) or is sending (hold());
+  // released in finish().
   std::optional<CasPinSet> pins_;
   bool pins_failed_ = false;
   std::optional<SessionProcess> process_;
@@ -486,7 +501,8 @@ AgentCore::AgentCore(AgentCoreOptions options)
       models_(options_.layout.models()),
       cas_([&] {
         create_worker_layout(options_.layout);
-        CacheResult<CasStore> store = CasStore::at(options_.layout.cas());
+        CacheResult<CasStore> store =
+            CasStore::at(options_.layout.cas(), CasStoreOptions{.policy = options_.cache_policy});
         if (!store) {
           throw WorkerError(WorkerErrorCode::io, "cannot open the worker cache " +
                                                      options_.layout.cas().string() + ": " +
@@ -499,6 +515,17 @@ AgentCore::AgentCore(AgentCoreOptions options)
   }
   if (!options_.launcher) {
     options_.launcher = [](const SessionLaunch& launch) { return spawn_session_process(launch); };
+  }
+}
+
+void AgentCore::enforce_cache_budget() {
+  const std::lock_guard lock(eviction_mutex_);
+  for (int attempt = 1; attempt <= kEvictionAttempts; ++attempt) {
+    const CacheResult<EvictionReport> report = cas_.evict();
+    if (report || report.error().code != CacheErrorCode::busy) {
+      return;
+    }
+    std::this_thread::sleep_for(kEvictionRetryPause);
   }
 }
 

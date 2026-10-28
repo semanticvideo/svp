@@ -28,7 +28,10 @@
 //      BLOB_RELEASE (protocol 1.2) hands blobs to the agent's ReleasedBlobs
 //      (released_blobs.hpp), which deletes them once nothing pins them; the
 //      agent tries again when each session ends, after its session process
-//      has exited and its pins are gone.
+//      has exited and its pins are gone. Then it evicts least-recently-used
+//      unpinned blobs down to the cache's size budget, so blobs no release
+//      reaches (a coordinator that crashed or lost the connection first, or
+//      a release the agent forgot by restarting) do not stay forever.
 //
 // A put or query the worker cannot honour is answered with ERROR
 // {"code","message"} and ends the session, as plan §4.3 defines ERROR.
@@ -51,11 +54,18 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 
 namespace svp::exec::worker {
+
+// AgentCore::enforce_cache_budget: a session process holds the eviction lock
+// only while it adds a pin; five tries 50 ms apart hold a session's end at
+// most a quarter second.
+inline constexpr int kEvictionAttempts = 5;
+inline constexpr std::chrono::milliseconds kEvictionRetryPause{50};
 
 struct AgentCoreOptions {
   WorkerLayout layout;
@@ -65,6 +75,9 @@ struct AgentCoreOptions {
   std::optional<Blake3Digest> agent_runtime_id;
   std::chrono::milliseconds shutdown_grace = kDefaultWorkerShutdownGrace;
   FrameLimits frame_limits{};
+  // The worker cache's size budget (cache_policy.hpp), enforced when each
+  // session ends.
+  CachePolicy cache_policy{};
   // Injectable for tests; default sample_memory().
   std::function<MemorySnapshot()> sample_memory;
   // Injectable for tests: a session process's memory in use
@@ -110,6 +123,11 @@ class AgentCore {
   [[nodiscard]] const WorkerRuntimeStore& runtimes() const noexcept { return runtimes_; }
   [[nodiscard]] const WorkerModelStore& models() const noexcept { return models_; }
   [[nodiscard]] CasStore cas() const { return cas_; }
+  // Evicts down to the cache's size budget, one session's end at a time, so
+  // a second never finds the first holding the eviction lock. Still `busy`
+  // (a session process adding pins), it tries again kEvictionAttempts times
+  // before leaving the rest to the next session's end.
+  void enforce_cache_budget();
   [[nodiscard]] MemorySnapshot memory() const;
   [[nodiscard]] SessionProcess launch(const SessionLaunch& launch) const;
 
@@ -128,6 +146,7 @@ class AgentCore {
   WorkerRuntimeStore runtimes_;
   WorkerModelStore models_;
   CasStore cas_;
+  std::mutex eviction_mutex_;
 };
 
 enum class AgentSessionEnd {

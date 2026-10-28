@@ -29,7 +29,17 @@
 // Checked when the agent starts, after every runtime a session installs, and
 // whenever a session ends. Disabled (with a logged reason) when the service
 // was not started through <root>/current, or its own runtime is unknown.
-// Old runtimes are never deleted here.
+//
+// Old runtimes are deleted by prune_runtimes(), which the agent calls when it
+// starts, before it serves any session; so after every switch. It keeps the
+// service's own runtime, every runtime newer than it (a switch still to come,
+// or one whose test-start failed), and the newest stamped runtime older than
+// it (the one to go back to), and deletes the rest along with runtime
+// installs a crash left unfinished or damaged. A coordinator whose runtime
+// was deleted sends it again on its next session (RUNTIME_PUT), at most once
+// per service start; nothing runs from a deleted runtime, since sessions run
+// from their coordinator's runtime and none is live. Without it every
+// runtime ever pushed stayed: 26-28 on workers in use, about 3 GB.
 
 #include "svp/exec/blake3_digest.hpp"
 #include "svp/exec/runtime_release.hpp"
@@ -90,6 +100,16 @@ enum class UpdateStep {
 
 [[nodiscard]] std::string_view update_step_name(UpdateStep step) noexcept;
 
+// What prune_runtimes() deleted.
+struct RuntimePrune {
+  std::uint64_t removed_runtimes = 0;
+  // The removed runtimes' files, as their manifests list them.
+  std::uint64_t removed_bytes = 0;
+  // Unfinished installs (runtimes/.incoming-*) and runtime directories
+  // whose manifest does not name them, removed.
+  std::uint64_t removed_unusable = 0;
+};
+
 class ServiceUpdater {
  public:
   explicit ServiceUpdater(ServiceUpdaterOptions options);
@@ -107,6 +127,11 @@ class ServiceUpdater {
 
   // Steps 1-4 above, synchronously.
   UpdateStep consider();
+
+  // Deletes the runtimes the service no longer needs (see above). Does
+  // nothing while updating is off, a session is live, or a candidate is
+  // being tested or switched to; no session starts while it runs.
+  RuntimePrune prune_runtimes();
 
   // What HELLO_ACK reports (hello_messages.hpp `service`): whether this
   // service updates itself, its own release stamp, the runtimes whose

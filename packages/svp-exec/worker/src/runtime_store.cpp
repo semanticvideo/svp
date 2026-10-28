@@ -142,8 +142,9 @@ void WorkerRuntimeStore::install_from_cas(const Blake3Digest& runtime_id, const 
   }
   const std::filesystem::path target = directory_of(runtime_id);
   const std::filesystem::path stage =
-      runtimes_dir_ / (".incoming-" + blake3_hex(runtime_id) + "-" + std::to_string(::getpid()) +
-                       "-" + std::to_string(reinterpret_cast<std::uintptr_t>(&decoded)));
+      runtimes_dir_ / (std::string(kRuntimeIncomingPrefix) + blake3_hex(runtime_id) + "-" +
+                       std::to_string(::getpid()) + "-" +
+                       std::to_string(reinterpret_cast<std::uintptr_t>(&decoded)));
   std::error_code error;
   std::filesystem::remove_all(stage, error);
   std::filesystem::create_directories(stage, error);
