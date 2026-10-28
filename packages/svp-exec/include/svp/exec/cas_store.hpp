@@ -83,6 +83,9 @@ class CasStore {
 
   // Presence only; does not hash.
   [[nodiscard]] bool has(const Blake3Digest& digest) const;
+  // Refreshes recency without reading the blob, for a use that has()
+  // answered. Nothing happens for a blob that is not stored.
+  void refresh(const Blake3Digest& digest);
 
   // Verified read. A blob that fails verification is removed and reported as
   // `corrupt`.

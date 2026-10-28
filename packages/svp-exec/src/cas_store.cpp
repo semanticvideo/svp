@@ -158,6 +158,10 @@ bool CasStore::has(const Blake3Digest& digest) const {
   return fs::is_regular_file(detail::cas_blob_path(root_, digest), error);
 }
 
+void CasStore::refresh(const Blake3Digest& digest) {
+  touch(detail::cas_blob_path(root_, digest), options_.now);
+}
+
 CacheResult<std::vector<std::byte>> CasStore::get(const Blake3Digest& digest) {
   const fs::path path = detail::cas_blob_path(root_, digest);
   std::error_code error;

@@ -5,6 +5,8 @@
 #include "svp/exec/worker/service_link.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 
+#include <algorithm>
+#include <optional>
 #include <system_error>
 #include <vector>
 
@@ -229,8 +231,9 @@ RuntimePrune ServiceUpdater::prune_runtimes() {
     std::uint64_t bytes = 0;
   };
   const WorkerRuntimeStore store(options_.layout.runtimes());
+  const std::vector<Blake3Digest> installed = store.list();
   std::vector<Installed> older;
-  for (const Blake3Digest& runtime_id : store.list()) {
+  for (const Blake3Digest& runtime_id : installed) {
     RuntimeManifest manifest;
     try {
       manifest = load_runtime_manifest(runtime_manifest_path(store.directory_of(runtime_id)));
@@ -265,26 +268,38 @@ RuntimePrune ServiceUpdater::prune_runtimes() {
     ++prune.removed_runtimes;
     prune.removed_bytes += runtime.bytes;
   }
-  // Installs run only in sessions, and none is live.
-  std::vector<std::filesystem::path> incomplete;
+  // Installs run only in sessions, and none is live: an install a crash
+  // left unfinished, or a runtime directory that no longer verifies (a crash
+  // during a removal or a replacement), is never used again.
+  std::vector<std::filesystem::path> unusable;
   std::error_code error;
-  for (const auto& entry :
-       std::filesystem::directory_iterator(options_.layout.runtimes(), error)) {
-    if (entry.path().filename().string().starts_with(kRuntimeIncomingPrefix)) {
-      incomplete.push_back(entry.path());
+  std::filesystem::directory_iterator entry(options_.layout.runtimes(), error);
+  for (; !error && entry != std::filesystem::directory_iterator(); entry.increment(error)) {
+    const std::string name = entry->path().filename().string();
+    const std::optional<Blake3Digest> runtime_id = parse_blake3_hex(name);
+    const bool damaged = runtime_id &&
+                         std::find(installed.begin(), installed.end(), *runtime_id) ==
+                             installed.end() &&
+                         *runtime_id != own_.runtime_id && runtime_id != current;
+    if (name.starts_with(kRuntimeIncomingPrefix) || damaged) {
+      unusable.push_back(entry->path());
     }
   }
-  for (const std::filesystem::path& path : incomplete) {
+  if (error) {
+    log("runtime cleanup: cannot list " + options_.layout.runtimes().string() + ": " +
+        error.message());
+  }
+  for (const std::filesystem::path& path : unusable) {
     std::error_code removal;
     std::filesystem::remove_all(path, removal);
     if (!removal) {
-      ++prune.removed_incomplete;
+      ++prune.removed_unusable;
     }
   }
-  if (prune.removed_runtimes > 0 || prune.removed_incomplete > 0) {
+  if (prune.removed_runtimes > 0 || prune.removed_unusable > 0) {
     log("runtime cleanup: removed " + std::to_string(prune.removed_runtimes) +
         " runtime(s) (" + std::to_string(prune.removed_bytes) + " bytes) and " +
-        std::to_string(prune.removed_incomplete) + " unfinished install(s); kept " +
+        std::to_string(prune.removed_unusable) + " unfinished or damaged install(s); kept " +
         describe(own_) + (previous ? " and " + describe(previous->release) : std::string()) +
         " and any newer");
   }

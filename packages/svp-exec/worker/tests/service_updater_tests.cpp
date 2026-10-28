@@ -297,17 +297,20 @@ void test_prune_keeps_own_newer_and_previous() {
   const Blake3Digest unstamped = install_runtime(fixture.layout, std::nullopt, "unstamped");
   const Blake3Digest newer = install_runtime(fixture.layout, 30, "newer");
   fs::create_directories(fixture.layout.runtimes() / ".incoming-left-by-a-crash/bin");
+  // A runtime directory whose manifest a crash removed.
+  const Blake3Digest damaged = install_runtime(fixture.layout, 12, "damaged");
+  fs::remove(runtime_manifest_path(fixture.layout.runtime(damaged)));
   ServiceUpdater updater = fixture.updater();
   const RuntimePrune prune = updater.prune_runtimes();
-  expect(prune.removed_runtimes == 3 && prune.removed_incomplete == 1,
-         "three runtimes and one unfinished install removed");
+  expect(prune.removed_runtimes == 3 && prune.removed_unusable == 2,
+         "three runtimes, one unfinished install and one damaged runtime removed");
   expect(prune.removed_bytes > 0, "their size is reported");
   expect(runtime_directories(fixture.layout) ==
              std::set<std::string>{svp::exec::blake3_hex(fixture.own),
                                    svp::exec::blake3_hex(previous),
                                    svp::exec::blake3_hex(newer)},
          "kept: its own, the newest stamped older one, and the newer one");
-  for (const Blake3Digest& gone : {oldest, old, unstamped}) {
+  for (const Blake3Digest& gone : {oldest, old, unstamped, damaged}) {
     expect(!fs::exists(fixture.layout.runtime(gone)), "an older runtime is gone");
   }
   expect(read_current_runtime(fixture.layout) == fixture.own, "current is unchanged");

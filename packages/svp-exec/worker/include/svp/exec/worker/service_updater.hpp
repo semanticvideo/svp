@@ -35,11 +35,11 @@
 // service's own runtime, every runtime newer than it (a switch still to come,
 // or one whose test-start failed), and the newest stamped runtime older than
 // it (the one to go back to), and deletes the rest along with runtime
-// installs a crash left unfinished. A coordinator whose runtime was deleted
-// sends it again on its next session (RUNTIME_PUT), at most once per service
-// start; nothing runs from a deleted runtime, since sessions run from their
-// coordinator's runtime and none is live. Without it every runtime ever
-// pushed stayed: 26-28 on workers in use, about 3 GB.
+// installs a crash left unfinished or damaged. A coordinator whose runtime
+// was deleted sends it again on its next session (RUNTIME_PUT), at most once
+// per service start; nothing runs from a deleted runtime, since sessions run
+// from their coordinator's runtime and none is live. Without it every
+// runtime ever pushed stayed: 26-28 on workers in use, about 3 GB.
 
 #include "svp/exec/blake3_digest.hpp"
 #include "svp/exec/runtime_release.hpp"
@@ -105,8 +105,9 @@ struct RuntimePrune {
   std::uint64_t removed_runtimes = 0;
   // The removed runtimes' files, as their manifests list them.
   std::uint64_t removed_bytes = 0;
-  // Unfinished installs (runtimes/.incoming-*) removed.
-  std::uint64_t removed_incomplete = 0;
+  // Unfinished installs (runtimes/.incoming-*) and runtime directories
+  // whose manifest does not name them, removed.
+  std::uint64_t removed_unusable = 0;
 };
 
 class ServiceUpdater {

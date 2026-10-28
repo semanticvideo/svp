@@ -54,11 +54,18 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 
 namespace svp::exec::worker {
+
+// AgentCore::enforce_cache_budget: a session process holds the eviction lock
+// only while it adds a pin; five tries 50 ms apart hold a session's end at
+// most a quarter second.
+inline constexpr int kEvictionAttempts = 5;
+inline constexpr std::chrono::milliseconds kEvictionRetryPause{50};
 
 struct AgentCoreOptions {
   WorkerLayout layout;
@@ -116,6 +123,11 @@ class AgentCore {
   [[nodiscard]] const WorkerRuntimeStore& runtimes() const noexcept { return runtimes_; }
   [[nodiscard]] const WorkerModelStore& models() const noexcept { return models_; }
   [[nodiscard]] CasStore cas() const { return cas_; }
+  // Evicts down to the cache's size budget, one session's end at a time, so
+  // a second never finds the first holding the eviction lock. Still `busy`
+  // (a session process adding pins), it tries again kEvictionAttempts times
+  // before leaving the rest to the next session's end.
+  void enforce_cache_budget();
   [[nodiscard]] MemorySnapshot memory() const;
   [[nodiscard]] SessionProcess launch(const SessionLaunch& launch) const;
 
@@ -134,6 +146,7 @@ class AgentCore {
   WorkerRuntimeStore runtimes_;
   WorkerModelStore models_;
   CasStore cas_;
+  std::mutex eviction_mutex_;
 };
 
 enum class AgentSessionEnd {

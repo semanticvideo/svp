@@ -503,6 +503,26 @@ void test_cache_budget_is_enforced_when_a_session_ends() {
   expect(cas.has(newer.ref.blake3), "the cache keeps what fits its budget");
 }
 
+// A blob a session declares again (BLOB_HAVE answers it present) counts as
+// just used, so the budget evicts the one nobody asked for since.
+void test_declared_blob_counts_as_recently_used() {
+  TemporaryDirectory sources("svp-cache-recency");
+  const BlobSource reused = blob_file(sources.path, "reused", 400);
+  const BlobSource unused = blob_file(sources.path, "unused", 400);
+  AgentHarness agent({}, "coordinator-a", CachePolicy{.max_bytes = reused.ref.bytes});
+  WorkerSessionClient client = agent.client();
+  (void)client.hello(hello_for(toy_runtime()));
+  TransferStats stats;
+  client.send_blobs({reused}, stats);
+  client.send_blobs({unused}, stats);
+  client.send_blobs({reused}, stats);  // already present: only declared
+  client.shutdown();
+  expect(agent.wait() == AgentSessionEnd::shutdown, "session ends on SHUTDOWN");
+  CasStore cas = agent.core().cas();
+  expect(cas.has(reused.ref.blake3), "the blob declared again stays");
+  expect(!cas.has(unused.ref.blake3), "the blob nobody asked for since is evicted");
+}
+
 void test_tampered_runtime_is_never_run() {
   AgentHarness agent;
   const CoordinatorRuntime runtime = toy_runtime();
@@ -620,6 +640,7 @@ int main(int argc, char** argv) {
           {"release during a sweep is kept", test_release_during_a_sweep_is_kept},
           {"cache budget is enforced when a session ends",
            test_cache_budget_is_enforced_when_a_session_ends},
+          {"declared blob counts as recently used", test_declared_blob_counts_as_recently_used},
           {"tampered runtime is never run", test_tampered_runtime_is_never_run},
           {"bad blob is refused", test_bad_blob_is_refused},
           {"model bundle push is lock-verified", test_model_bundle_push_is_lock_verified},
