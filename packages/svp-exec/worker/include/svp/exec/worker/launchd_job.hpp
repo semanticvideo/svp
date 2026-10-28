@@ -14,10 +14,15 @@
 //   ThrottleInterval kWorkerJobThrottleSeconds: launchd's own default (10 s),
 //     stated explicitly because RemoteExecutor's reconnect window
 //     (remote_executor.hpp) is sized from it.
-//   ProcessType Standard: Background would confine the agent's sessions to
-//     efficiency cores and throttle their I/O on Apple Silicon, so measured
-//     capacity would understate the Mac; admission (admission.hpp) is what
-//     protects other workloads.
+//   ProcessType Interactive: launchd caps every other type below an app's
+//     priority. Background confines the agent's sessions to efficiency
+//     cores and throttles their I/O on Apple Silicon, so measured capacity
+//     would understate the Mac. Standard runs it at utility priority, which
+//     also runs the in-process TCP of the connections it accepts: over
+//     Thunderbolt networking, where that TCP keeps recovering lost segments,
+//     a worker's replies to a route probe measured 29-37 MB/s, against
+//     99-137 MB/s as Interactive. Admission (admission.hpp) is what protects
+//     other workloads.
 //   Umask 077: everything the agent creates is private to the worker's user.
 //   LaunchDaemon only: UserName runs the job as the worker's user, never as
 //     root (plan §4.3), and HOME is set to that user's home because a daemon

@@ -91,7 +91,7 @@ std::string render_launchd_plist(const WorkerServiceSpec& spec) {
       << "    <false/>\n"
       << kIndent << "</dict>\n";
   key_string(out, kIndent, "Label", spec.label);
-  key_string(out, kIndent, "ProcessType", "Standard");
+  key_string(out, kIndent, "ProcessType", "Interactive");
   out << kIndent << "<key>ProgramArguments</key>\n" << kIndent << "<array>\n";
   for (const std::string& argument : spec.program_arguments) {
     out << "    <string>" << xml_escape(argument) << "</string>\n";
