@@ -8,9 +8,14 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace svp::exec::worker {
+
+// Name prefix of a runtime being installed under <runtimes>; renamed to the
+// runtime's hex once it verifies (install_from_cas).
+inline constexpr std::string_view kRuntimeIncomingPrefix = ".incoming-";
 
 // Verifies a runtime directory (worker_layout.hpp layout): its manifest
 // decodes, its runtime_id equals `expected` when given, and every file

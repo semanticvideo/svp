@@ -5,6 +5,9 @@
 #include "svp/exec/worker/service_link.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 
+#include <system_error>
+#include <vector>
+
 namespace svp::exec::worker {
 namespace {
 
@@ -209,6 +212,83 @@ UpdateStep ServiceUpdater::consider() {
     }
     return UpdateStep::switched;
   }
+}
+
+RuntimePrune ServiceUpdater::prune_runtimes() {
+  RuntimePrune prune;
+  if (!enabled()) {
+    return prune;
+  }
+  // Held throughout, so try_enter_session() waits for it.
+  const std::lock_guard lock(mutex_);
+  if (live_ > 0 || testing_ || restarting_) {
+    return prune;
+  }
+  struct Installed {
+    RuntimeRelease release;
+    std::uint64_t bytes = 0;
+  };
+  const WorkerRuntimeStore store(options_.layout.runtimes());
+  std::vector<Installed> older;
+  for (const Blake3Digest& runtime_id : store.list()) {
+    RuntimeManifest manifest;
+    try {
+      manifest = load_runtime_manifest(runtime_manifest_path(store.directory_of(runtime_id)));
+    } catch (const std::exception&) {
+      continue;
+    }
+    const RuntimeRelease release = runtime_release_of(manifest, store.directory_of(runtime_id));
+    if (runtime_id != own_.runtime_id && !is_newer_release(release, own_)) {
+      older.push_back(Installed{.release = release, .bytes = manifest_bytes(manifest)});
+    }
+  }
+  const Installed* previous = nullptr;
+  for (const Installed& runtime : older) {
+    if (runtime.release.release_stamp &&
+        (previous == nullptr || is_newer_release(runtime.release, previous->release))) {
+      previous = &runtime;
+    }
+  }
+  // Never the runtime launchd starts, whatever its release.
+  const std::optional<Blake3Digest> current = read_current_runtime(options_.layout);
+  for (const Installed& runtime : older) {
+    if (&runtime == previous || runtime.release.runtime_id == current) {
+      continue;
+    }
+    std::error_code error;
+    std::filesystem::remove_all(store.directory_of(runtime.release.runtime_id), error);
+    if (error) {
+      log("runtime cleanup: cannot remove " + describe(runtime.release) + ": " +
+          error.message());
+      continue;
+    }
+    ++prune.removed_runtimes;
+    prune.removed_bytes += runtime.bytes;
+  }
+  // Installs run only in sessions, and none is live.
+  std::vector<std::filesystem::path> incomplete;
+  std::error_code error;
+  for (const auto& entry :
+       std::filesystem::directory_iterator(options_.layout.runtimes(), error)) {
+    if (entry.path().filename().string().starts_with(kRuntimeIncomingPrefix)) {
+      incomplete.push_back(entry.path());
+    }
+  }
+  for (const std::filesystem::path& path : incomplete) {
+    std::error_code removal;
+    std::filesystem::remove_all(path, removal);
+    if (!removal) {
+      ++prune.removed_incomplete;
+    }
+  }
+  if (prune.removed_runtimes > 0 || prune.removed_incomplete > 0) {
+    log("runtime cleanup: removed " + std::to_string(prune.removed_runtimes) +
+        " runtime(s) (" + std::to_string(prune.removed_bytes) + " bytes) and " +
+        std::to_string(prune.removed_incomplete) + " unfinished install(s); kept " +
+        describe(own_) + (previous ? " and " + describe(previous->release) : std::string()) +
+        " and any newer");
+  }
+  return prune;
 }
 
 }  // namespace svp::exec::worker

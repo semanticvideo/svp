@@ -1,8 +1,9 @@
 // The worker service moving itself to a newer runtime (service_updater.hpp):
 // the `current` link and its atomic swap, the release order (never a
 // downgrade), switching only while no session is live, a failed test-start
-// keeping the current runtime, the restart exit status, the real test-start
-// of a runtime program, and the install scripts' link.
+// keeping the current runtime, deleting the runtimes it no longer needs, the
+// restart exit status, the real test-start of a runtime program, and the
+// install scripts' link.
 
 #include "svp/exec/canonical_json.hpp"
 #include "svp/exec/runtime_manifest.hpp"
@@ -279,6 +280,64 @@ void test_disabled_without_the_current_link() {
   expect(read_current_runtime(fixture.layout) == fixture.own, "current is unchanged");
 }
 
+// The runtimes left under <root>/runtimes, as directories (installed or not).
+std::set<std::string> runtime_directories(const WorkerLayout& layout) {
+  std::set<std::string> names;
+  for (const auto& entry : fs::directory_iterator(layout.runtimes())) {
+    names.insert(entry.path().filename().string());
+  }
+  return names;
+}
+
+void test_prune_keeps_own_newer_and_previous() {
+  Fixture fixture(20);
+  const Blake3Digest oldest = install_runtime(fixture.layout, 5, "oldest");
+  const Blake3Digest old = install_runtime(fixture.layout, 10, "old");
+  const Blake3Digest previous = install_runtime(fixture.layout, 15, "previous");
+  const Blake3Digest unstamped = install_runtime(fixture.layout, std::nullopt, "unstamped");
+  const Blake3Digest newer = install_runtime(fixture.layout, 30, "newer");
+  fs::create_directories(fixture.layout.runtimes() / ".incoming-left-by-a-crash/bin");
+  ServiceUpdater updater = fixture.updater();
+  const RuntimePrune prune = updater.prune_runtimes();
+  expect(prune.removed_runtimes == 3 && prune.removed_incomplete == 1,
+         "three runtimes and one unfinished install removed");
+  expect(prune.removed_bytes > 0, "their size is reported");
+  expect(runtime_directories(fixture.layout) ==
+             std::set<std::string>{svp::exec::blake3_hex(fixture.own),
+                                   svp::exec::blake3_hex(previous),
+                                   svp::exec::blake3_hex(newer)},
+         "kept: its own, the newest stamped older one, and the newer one");
+  for (const Blake3Digest& gone : {oldest, old, unstamped}) {
+    expect(!fs::exists(fixture.layout.runtime(gone)), "an older runtime is gone");
+  }
+  expect(read_current_runtime(fixture.layout) == fixture.own, "current is unchanged");
+  expect(fixture.restarts == 0 && fixture.tested.empty(), "pruning neither tests nor switches");
+  expect(updater.prune_runtimes().removed_runtimes == 0, "a second prune finds nothing");
+}
+
+void test_prune_waits_for_idle() {
+  Fixture fixture(20);
+  const Blake3Digest old = install_runtime(fixture.layout, 10, "old");
+  (void)install_runtime(fixture.layout, 15, "previous");
+  ServiceUpdater updater = fixture.updater();
+  expect(updater.try_enter_session(), "a session starts");
+  expect(updater.prune_runtimes().removed_runtimes == 0, "nothing is removed while it is live");
+  expect(fs::exists(fixture.layout.runtime(old)), "the old runtime stays");
+  updater.leave_session();
+  expect(updater.prune_runtimes().removed_runtimes == 1, "removed once no session is live");
+  expect(!fs::exists(fixture.layout.runtime(old)), "the old runtime is gone");
+}
+
+void test_prune_needs_updating_on() {
+  Fixture fixture(20);
+  const Blake3Digest old = install_runtime(fixture.layout, 10, "old");
+  (void)install_runtime(fixture.layout, 15, "previous");
+  ServiceUpdater updater = fixture.updater(/*launched_through_current=*/false);
+  expect(updater.prune_runtimes().removed_runtimes == 0,
+         "a service that does not know what it runs removes nothing");
+  expect(fs::exists(fixture.layout.runtime(old)), "the old runtime stays");
+}
+
 void test_restart_exit_code() {
   expect(kWorkerRestartExitCode == EX_TEMPFAIL, "the restart status is EX_TEMPFAIL");
   expect(kWorkerRestartExitCode != 0, "launchd's KeepAlive restarts a nonzero exit");
@@ -394,6 +453,9 @@ int main() {
           {"damaged candidate is not adopted", test_damaged_candidate_is_not_adopted},
           {"reports its state for HELLO_ACK", test_reports_its_state_for_hello_ack},
           {"disabled without the current link", test_disabled_without_the_current_link},
+          {"prune keeps own, newer and previous", test_prune_keeps_own_newer_and_previous},
+          {"prune waits for idle", test_prune_waits_for_idle},
+          {"prune needs updating on", test_prune_needs_updating_on},
           {"restart exit code", test_restart_exit_code},
           {"real test-start", test_real_test_start},
           {"point-current script on a scratch root", test_point_current_script_on_a_scratch_root},
