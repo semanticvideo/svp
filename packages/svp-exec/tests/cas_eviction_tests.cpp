@@ -85,6 +85,20 @@ void test_repeated_put_refreshes_recency() {
   expect(store.has(a) && !store.has(b), "re-put blob counts as recently used");
 }
 
+void test_refresh_counts_as_a_use() {
+  TemporaryDirectory scratch(kSuite);
+  SteppingClock clock;
+  CasStore store = store_with_limit(scratch.path / "cache", 1, clock);
+  const Blake3Digest a = put_blob(store, 'a');
+  const Blake3Digest b = put_blob(store, 'b');
+  store.refresh(a);  // a use that has() answered, without reading
+  expect_ok(store.evict(), "evict");
+  expect(store.has(a) && !store.has(b), "a refreshed blob counts as recently used");
+  const Blake3Digest absent = blake3_digest(as_byte_span(blob_content('z')));
+  store.refresh(absent);
+  expect(!store.has(absent), "refreshing a blob that is not stored stores nothing");
+}
+
 void test_pins_are_respected() {
   TemporaryDirectory scratch(kSuite);
   SteppingClock clock;
@@ -213,6 +227,7 @@ int main() {
                                {"evicts_least_recently_used", test_evicts_least_recently_used},
                                {"repeated_put_refreshes_recency",
                                 test_repeated_put_refreshes_recency},
+                               {"refresh_counts_as_a_use", test_refresh_counts_as_a_use},
                                {"pins_are_respected", test_pins_are_respected},
                                {"pin_before_put_protects_blob", test_pin_before_put_protects_blob},
                                {"dead_holder_pins_expire", test_dead_holder_pins_expire},
