@@ -156,6 +156,7 @@ class AgentSession {
     // released (by this session or another) may be deletable now.
     pins_.reset();
     (void)core_.released().sweep(cas_);
+    (void)cas_.evict();
   }
 
  private:
@@ -486,7 +487,8 @@ AgentCore::AgentCore(AgentCoreOptions options)
       models_(options_.layout.models()),
       cas_([&] {
         create_worker_layout(options_.layout);
-        CacheResult<CasStore> store = CasStore::at(options_.layout.cas());
+        CacheResult<CasStore> store =
+            CasStore::at(options_.layout.cas(), CasStoreOptions{.policy = options_.cache_policy});
         if (!store) {
           throw WorkerError(WorkerErrorCode::io, "cannot open the worker cache " +
                                                      options_.layout.cas().string() + ": " +

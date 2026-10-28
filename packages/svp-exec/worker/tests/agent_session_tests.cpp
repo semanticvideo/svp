@@ -1,8 +1,9 @@
 // The worker agent's session (plan §4.3, §4.4) end to end over a socket
 // pair: HELLO refusal on an OS mismatch, runtime push and verification, a
 // toy task run by a session process spawned from the pushed runtime, memory
-// admission, model bundle push with lock verification, cleanup, and
-// BLOB_RELEASE (released blobs deleted once no coordinator claims them).
+// admission, model bundle push with lock verification, cleanup, BLOB_RELEASE
+// (released blobs deleted once no coordinator claims them), and the cache's
+// size budget.
 //
 //   svp-exec-worker-agent-session-tests <svp-exec-test-worker>
 
@@ -34,7 +35,8 @@ fs::path g_test_worker;
 
 class AgentHarness {
  public:
-  explicit AgentHarness(SlotSharing::LocalLoad local_load = {}, std::string coordinator_id = {})
+  explicit AgentHarness(SlotSharing::LocalLoad local_load = {}, std::string coordinator_id = {},
+                        CachePolicy cache_policy = {})
       : scratch_("svp-agent-session") {
     core_ = std::make_unique<AgentCore>(AgentCoreOptions{
         .layout = WorkerLayout{.root = scratch_.path / "Worker"},
@@ -43,6 +45,7 @@ class AgentHarness {
         .agent_runtime_id = std::nullopt,
         .shutdown_grace = std::chrono::milliseconds{2'000},
         .frame_limits = {},
+        .cache_policy = cache_policy,
         .sample_memory =
             [this] {
               return MemorySnapshot{.available_bytes = available_.load(),
@@ -479,6 +482,27 @@ void test_release_during_a_sweep_is_kept() {
   expect(released.pending() == 0, "nothing left to delete");
 }
 
+// Blobs no release reaches leave, least recently used first, once a session's
+// end finds the cache over its size budget.
+void test_cache_budget_is_enforced_when_a_session_ends() {
+  TemporaryDirectory sources("svp-cache-budget");
+  const BlobSource older = blob_file(sources.path, "older", 500);
+  const BlobSource newer = blob_file(sources.path, "newer", 400);
+  AgentHarness agent({}, "coordinator-a", CachePolicy{.max_bytes = newer.ref.bytes});
+  WorkerSessionClient client = agent.client();
+  (void)client.hello(hello_for(toy_runtime()));
+  TransferStats stats;
+  client.send_blobs({older}, stats);
+  client.send_blobs({newer}, stats);
+  CasStore cas = agent.core().cas();
+  expect(cas.has(older.ref.blake3) && cas.has(newer.ref.blake3),
+         "the session's pins keep both while it runs, over budget");
+  client.shutdown();
+  expect(agent.wait() == AgentSessionEnd::shutdown, "session ends on SHUTDOWN");
+  expect(!cas.has(older.ref.blake3), "the least recently used blob is evicted");
+  expect(cas.has(newer.ref.blake3), "the cache keeps what fits its budget");
+}
+
 void test_tampered_runtime_is_never_run() {
   AgentHarness agent;
   const CoordinatorRuntime runtime = toy_runtime();
@@ -594,6 +618,8 @@ int main(int argc, char** argv) {
            test_release_keeps_a_blob_another_coordinator_claims},
           {"released blobs honour later claims", test_released_blobs_honour_later_claims},
           {"release during a sweep is kept", test_release_during_a_sweep_is_kept},
+          {"cache budget is enforced when a session ends",
+           test_cache_budget_is_enforced_when_a_session_ends},
           {"tampered runtime is never run", test_tampered_runtime_is_never_run},
           {"bad blob is refused", test_bad_blob_is_refused},
           {"model bundle push is lock-verified", test_model_bundle_push_is_lock_verified},

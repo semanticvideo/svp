@@ -28,7 +28,10 @@
 //      BLOB_RELEASE (protocol 1.2) hands blobs to the agent's ReleasedBlobs
 //      (released_blobs.hpp), which deletes them once nothing pins them; the
 //      agent tries again when each session ends, after its session process
-//      has exited and its pins are gone.
+//      has exited and its pins are gone. Then it evicts least-recently-used
+//      unpinned blobs down to the cache's size budget, so blobs no release
+//      reaches (a coordinator that crashed or lost the connection first, or
+//      a release the agent forgot by restarting) do not stay forever.
 //
 // A put or query the worker cannot honour is answered with ERROR
 // {"code","message"} and ends the session, as plan §4.3 defines ERROR.
@@ -65,6 +68,9 @@ struct AgentCoreOptions {
   std::optional<Blake3Digest> agent_runtime_id;
   std::chrono::milliseconds shutdown_grace = kDefaultWorkerShutdownGrace;
   FrameLimits frame_limits{};
+  // The worker cache's size budget (cache_policy.hpp), enforced when each
+  // session ends.
+  CachePolicy cache_policy{};
   // Injectable for tests; default sample_memory().
   std::function<MemorySnapshot()> sample_memory;
   // Injectable for tests: a session process's memory in use
