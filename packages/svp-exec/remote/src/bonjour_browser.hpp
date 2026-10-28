@@ -44,8 +44,9 @@ struct DiscoveredService {
 
 // Browses for the worker advertising `worker_id` (TXT kWorkerTxtKey), or,
 // for a worker that predates worker ids, an instance advertising
-// `pairing_id`. Returns every match: which one is genuine is decided by
-// route authentication, never by the advertisement.
+// `pairing_id`. An instance advertising another pairing id never matches,
+// whatever worker id it carries. Returns every match: which one is genuine
+// is decided by route authentication, never by the advertisement.
 [[nodiscard]] std::vector<DiscoveredService> browse_for_worker(
     std::string_view worker_id, std::string_view pairing_id, const RoutePolicy& policy,
     const std::shared_ptr<WaitSignal>& signal);

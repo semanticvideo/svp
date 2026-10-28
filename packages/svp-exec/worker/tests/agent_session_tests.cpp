@@ -13,6 +13,7 @@
 #include "svp/exec/worker/coordinator_session.hpp"
 #include "svp/exec/worker/fleet_member_messages.hpp"
 #include "svp/exec/worker/runtime_source.hpp"
+#include "svp/exec/worker/session_process.hpp"
 #include "svp/exec/worker/transfer_messages.hpp"
 #include "toy_tasks.hpp"
 #include "worker_test_support.hpp"
@@ -597,6 +598,25 @@ void test_model_bundle_push_is_lock_verified() {
   expect(!agent.core().models().has(forged.bundle_blake3), "forged bundle not installed");
 }
 
+// Tasks keep the utility cap launchd's Standard once gave the whole job; only
+// the agent runs uncapped (session_process.hpp, launchd_job.hpp).
+void test_session_process_runs_capped() {
+  TemporaryDirectory runtime("svp-capped-session");
+  // A session program that records its own scheduling priority.
+  write_file(runtime.path / std::string(kSessionProgram),
+             "#!/bin/sh\n/bin/ps -o pri= -p $$ > \"" + (runtime.path / "pri").string() + "\"\n");
+  fs::permissions(runtime.path / std::string(kSessionProgram), fs::perms::owner_all);
+  SessionProcess process = spawn_session_process(make_session_launch(
+      runtime.path, runtime.path / "cas", runtime.path, runtime.path / "models", "ws-capped",
+      Blake3Digest{}));
+  (void)finish_session_process(process, std::chrono::seconds(10));
+  const int priority = std::stoi(read_file(runtime.path / "pri"));
+  // Utility threads run at priority 20; uncapped ones at 31 (more when the
+  // caller is itself interactive).
+  expect(priority <= 20, "the session process runs at utility priority or lower, not " +
+                             std::to_string(priority));
+}
+
 void test_disconnect_stops_the_session_process() {
   AgentHarness agent;
   const CoordinatorRuntime runtime = toy_runtime();
@@ -645,5 +665,6 @@ int main(int argc, char** argv) {
           {"bad blob is refused", test_bad_blob_is_refused},
           {"model bundle push is lock-verified", test_model_bundle_push_is_lock_verified},
           {"disconnect stops the session process", test_disconnect_stops_the_session_process},
+          {"session process runs capped", test_session_process_runs_capped},
       });
 }

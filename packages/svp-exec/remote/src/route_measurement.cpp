@@ -120,6 +120,14 @@ NwRef<nw_connection_t> make_pinned_connection(const RouteTarget& target, const P
                                               std::string_view application_protocol) {
   const NwRef<nw_parameters_t> parameters =
       make_tls_psk_parameters(key, transport, {std::string(application_protocol)});
+  // Asking for multipath puts the connection on the kernel's TCP; on the
+  // wire it is the same TCP as without (its SYN carries no multipath
+  // option). Network framework's default TCP sends about 1 MB/s over
+  // Thunderbolt networking, where the 14 KB offloaded segments it sends are
+  // never acknowledged; the kernel's carries about 2 GB/s over the same
+  // link. Only connections a Mac opens can do this: a multipath listener
+  // accepts nothing.
+  nw_parameters_set_multipath_service(parameters.get(), nw_multipath_service_handover);
   if (target.interface) {
     nw_parameters_require_interface(parameters.get(), target.interface.get());
   }

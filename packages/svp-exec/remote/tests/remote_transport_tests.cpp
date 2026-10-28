@@ -5,6 +5,7 @@
 #include "network_test_support.hpp"
 #include "nw_stream.hpp"
 #include "pairing_test_support.hpp"
+#include "route_measurement.hpp"
 #include "svp/exec/exec_error.hpp"
 #include "svp/exec/frame_stream.hpp"
 #include "svp/exec/remote/remote_connector.hpp"
@@ -139,6 +140,29 @@ void test_tls_psk_round_trip() {
   expect(listener.sessions_started() == 1, "one worker session served");
   expect(listener.route_probes_served() >= 1, "routes were measured by probes, not sessions");
   expect(listener.handshakes_rejected() == 0, "no handshake rejected");
+}
+
+// Connections the coordinator opens ask for multipath (make_pinned_connection
+// has why); the round trip above proves such a connection works against a
+// listener.
+void test_opened_connections_ask_for_multipath() {
+  namespace remote_detail = svp::exec::remote::detail;
+  const PairingKey key = pairing::random_pairing("svp-transport");
+  // Never started, so nothing needs to listen there.
+  remote_detail::RouteTarget target;
+  auto& loopback = reinterpret_cast<sockaddr_in&>(target.address);
+  loopback.sin_len = sizeof(sockaddr_in);
+  loopback.sin_family = AF_INET;
+  loopback.sin_port = htons(9);
+  loopback.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  for (const std::string_view protocol : {kSessionAlpn, kRouteProbeAlpn}) {
+    const remote_detail::NwRef<nw_connection_t> connection =
+        remote_detail::make_pinned_connection(target, key, TransportPolicy{}, protocol);
+    const auto parameters = remote_detail::NwRef<nw_parameters_t>::adopt(
+        nw_connection_copy_parameters(connection.get()));
+    expect(nw_parameters_get_multipath_service(parameters.get()) == nw_multipath_service_handover,
+           std::string(protocol) + " connection asks for multipath handover");
+  }
 }
 
 // A peer that resets the connection while our write is in flight must fail
@@ -463,6 +487,45 @@ void test_a_spoofed_advertisement_does_not_displace_the_worker() {
          "the spoofed instance is never served a session");
 }
 
+// A worker's join listener advertises the worker's id beside its join id, on
+// a port where the coordinator's pairing never authenticates.
+void test_discovery_skips_instances_of_other_pairings() {
+  const PairingKey key = pairing::random_pairing("svp-transport-member");
+  const PairingKey join_key = pairing::random_pairing("svp-transport-join");
+  const std::string worker_id = "svpn-" + key.pairing_id;
+  RemoteListenerOptions worker_options;
+  worker_options.pairing = key;
+  worker_options.advertise = false;
+  RemoteListener worker(worker_options, echo_frames);
+  worker.start();
+  RemoteListenerOptions join_options;
+  join_options.pairing = join_key;
+  join_options.advertise = false;
+  RemoteListener join(join_options, echo_frames);
+  join.start();
+  ServiceAdvertiser own_ad(ServiceAdvertisement{
+      .name = "own-" + key.pairing_id, .port = worker.port(), .txt = {{"worker", worker_id}}});
+  ServiceAdvertiser pairing_ad(
+      ServiceAdvertisement{.name = key.pairing_id,
+                           .port = worker.port(),
+                           .txt = {{"pairing", key.pairing_id}, {"worker", worker_id}}});
+  ServiceAdvertiser join_ad(
+      ServiceAdvertisement{.name = join_key.pairing_id,
+                           .port = join.port(),
+                           .txt = {{"pairing", join_key.pairing_id}, {"worker", worker_id}}});
+  expect(own_ad.wait_registered(std::chrono::seconds(10)) &&
+             pairing_ad.wait_registered(std::chrono::seconds(10)) &&
+             join_ad.wait_registered(std::chrono::seconds(10)),
+         "all registered");
+  RemoteConnector connector(RemoteConnectorOptions{.pairing = key, .worker_id = worker_id});
+  std::set<std::string> names;
+  for (const DiscoveredWorker& found : connector.discover()) {
+    names.insert(found.service_name);
+  }
+  expect(names == std::set<std::string>{own_ad.registered_name(), pairing_ad.registered_name()},
+         "the worker's own instance and its instance for this pairing, not the join listener's");
+}
+
 void test_advertiser_registers_and_withdraws() {
   const std::string id = pairing::random_pairing("svp-transport-ad").pairing_id;
   {
@@ -553,6 +616,8 @@ int main() {
   return run_tests("svp-exec-remote-transport-tests",
                    {
                        {"TLS-PSK round trip", test_tls_psk_round_trip},
+                       {"opened connections ask for multipath",
+                        test_opened_connections_ask_for_multipath},
                        {"peer reset fails a write in flight",
                         test_peer_reset_fails_a_write_in_flight},
                        {"wrong secret is rejected", test_wrong_secret_is_rejected},
@@ -568,6 +633,8 @@ int main() {
                        {"advertiser registers and withdraws", test_advertiser_registers_and_withdraws},
                        {"a spoofed advertisement does not displace the worker",
                         test_a_spoofed_advertisement_does_not_displace_the_worker},
+                       {"discovery skips instances of other pairings",
+                        test_discovery_skips_instances_of_other_pairings},
                        {"advertise retry backoff", test_advertise_retry_backoff},
                        {"cancelled connector", test_cancelled_connector},
                        {"cancel interrupts discovery", test_cancel_interrupts_discovery},

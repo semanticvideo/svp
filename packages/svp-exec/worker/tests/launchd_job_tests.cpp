@@ -103,6 +103,8 @@ void test_daemon_plist_runs_as_the_worker_user() {
                "a self-update exit (nonzero) restarts the daemon");
   expect_equal(plutil_extract(scratch.path, plist, "UserName"), "w & co",
                "UserName is the worker user, XML-escaped");
+  expect_equal(plutil_extract(scratch.path, plist, "ProcessType"), "Interactive",
+               "not capped below an app's priority (launchd_job.hpp)");
   expect_equal(plutil_extract(scratch.path, plist, "EnvironmentVariables.HOME"), "/Users/w",
                "HOME is the worker user's home");
   expect_equal(launchd_plist_path(WorkerServiceMode::system_daemon, "/Users/w").string(),
