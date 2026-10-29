@@ -26,6 +26,7 @@
 #include <set>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -533,13 +534,14 @@ void test_discovery_skips_instances_of_other_pairings() {
 }
 
 // A worker Mac that is asleep: Bonjour finds it (its network adapter answers
-// for it), but its port completes no handshake until it wakes. Accepts on
-// its own port and holds each connection silent until `wake_at`; after that
-// it relays each connection to the real listener on `target_port`.
+// for it), but its port completes no handshake until the traffic reaching it
+// has woken it, `wake_delay` after the first connection (as a Mac takes
+// seconds to wake). Until then it holds each connection silent; after that it
+// relays each connection to the real listener on `target_port`.
 class SleepingWorker {
  public:
-  SleepingWorker(std::uint16_t target_port, std::chrono::steady_clock::time_point wake_at)
-      : target_port_(target_port), wake_at_(wake_at) {
+  SleepingWorker(std::uint16_t target_port, std::chrono::milliseconds wake_delay)
+      : target_port_(target_port), wake_delay_(wake_delay) {
     listen_fd_ = ::socket(AF_INET6, SOCK_STREAM, 0);
     int no = 0;
     int yes = 1;
@@ -595,7 +597,11 @@ class SleepingWorker {
       ::setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes));
       const std::lock_guard lock(mutex_);
       open_fds_.push_back(client);
-      if (std::chrono::steady_clock::now() < wake_at_) {
+      const auto now = std::chrono::steady_clock::now();
+      if (!woken_at_) {
+        woken_at_ = now + wake_delay_;
+      }
+      if (now < *woken_at_) {
         ++held_;
         continue;
       }
@@ -635,7 +641,9 @@ class SleepingWorker {
   }
 
   std::uint16_t target_port_;
-  std::chrono::steady_clock::time_point wake_at_;
+  std::chrono::milliseconds wake_delay_;
+  // Guarded by mutex_: when the first connection's traffic has woken it.
+  std::optional<std::chrono::steady_clock::time_point> woken_at_;
   int listen_fd_ = -1;
   std::uint16_t port_ = 0;
   std::atomic<bool> stop_{false};
@@ -656,12 +664,14 @@ void test_a_sleeping_worker_is_reached_once_it_wakes() {
   options.advertise = false;
   RemoteListener listener(options, echo_frames);
   listener.start();
-  const auto started = std::chrono::steady_clock::now();
-  SleepingWorker sleeper(listener.port(), started + std::chrono::seconds(3));
+  // Longer than a handshake's wait is not needed: the first round's
+  // connections stay silent even after it wakes, as a real Mac's do.
+  SleepingWorker sleeper(listener.port(), std::chrono::seconds(3));
   ServiceAdvertiser ad(ServiceAdvertisement{
       .name = "sleeper-" + key.pairing_id, .port = sleeper.port(), .txt = {{"worker", worker_id}}});
   expect(ad.wait_registered(std::chrono::seconds(10)), "registered");
   RemoteConnector connector(RemoteConnectorOptions{.pairing = key, .worker_id = worker_id});
+  const auto started = std::chrono::steady_clock::now();
   RemoteConnection connection = connector.connect();
   expect(sleeper.held_while_asleep() > 0, "the first handshakes found it asleep");
   expect(std::chrono::steady_clock::now() - started >= TransportPolicy{}.handshake_timeout,
@@ -682,8 +692,7 @@ void test_a_worker_that_never_wakes_fails_after_the_wake_window() {
   options.advertise = false;
   RemoteListener listener(options, echo_frames);
   listener.start();
-  SleepingWorker sleeper(listener.port(),
-                         std::chrono::steady_clock::now() + std::chrono::hours(1));
+  SleepingWorker sleeper(listener.port(), std::chrono::hours(1));
   ServiceAdvertiser ad(ServiceAdvertisement{
       .name = "asleep-" + key.pairing_id, .port = sleeper.port(), .txt = {{"worker", worker_id}}});
   expect(ad.wait_registered(std::chrono::seconds(10)), "registered");
@@ -696,7 +705,9 @@ void test_a_worker_that_never_wakes_fails_after_the_wake_window() {
                       "a worker that stays asleep has no route");
   const auto elapsed = std::chrono::steady_clock::now() - started;
   expect(elapsed >= routes.wake_window, "it was measured until the wake window passed");
-  expect(elapsed < routes.wake_window + 2 * TransportPolicy{}.handshake_timeout,
+  // Plus discovery, which comes before the first measurement.
+  expect(elapsed < routes.wake_window + 2 * TransportPolicy{}.handshake_timeout +
+                       routes.discovery_timeout,
          "and no longer than one more round");
 }
 

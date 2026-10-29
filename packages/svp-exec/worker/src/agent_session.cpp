@@ -602,6 +602,26 @@ std::string_view agent_session_end_name(AgentSessionEnd end) noexcept {
   return "unknown";
 }
 
+namespace {
+
+// Starts the Mac's linger (AgentCore::linger_awake) however a session is
+// left, returned from or thrown out of. Declared after the session's
+// StayAwake, so the linger starts before those assertions go: a Mac in dark
+// wake sleeps the moment it holds none.
+struct LingerOnExit {
+  const AgentCore& core;
+  const std::string& session_id;
+  ~LingerOnExit() {
+    try {
+      core.linger_awake(session_id);
+    } catch (...) {
+      // Best effort, like the assertions themselves (stay_awake.hpp).
+    }
+  }
+};
+
+}  // namespace
+
 AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWriter& output,
                                     const std::string& worker_session_id,
                                     const std::function<void()>& close_input,
@@ -610,13 +630,11 @@ AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWr
   AgentSessionEnd end = AgentSessionEnd::input_closed;
   {
     const StayAwake awake(std::string(kSessionSleepAssertionPrefix) + worker_session_id);
+    const LingerOnExit linger{core, worker_session_id};
     AgentSession session(core, output, worker_session_id, close_input,
                          std::string(coordinator_id));
     end = session.run(input);
     session.finish();
-    // Before this session's assertions go: a Mac in dark wake sleeps the
-    // moment it holds none.
-    core.linger_awake(worker_session_id);
   }
   --core.active_sessions;
   return end;
@@ -630,12 +648,10 @@ AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWr
   AgentSessionEnd end = AgentSessionEnd::input_closed;
   {
     const StayAwake awake(std::string(kSessionSleepAssertionPrefix) + worker_session_id);
+    const LingerOnExit linger{core, worker_session_id};
     AgentSession session(core, output, worker_session_id, close_input, {}, resolve);
     end = session.run(input);
     session.finish();
-    // Before this session's assertions go: a Mac in dark wake sleeps the
-    // moment it holds none.
-    core.linger_awake(worker_session_id);
   }
   --core.active_sessions;
   return end;
