@@ -12,11 +12,16 @@
 #include "svp/exec/worker/agent_session.hpp"
 #include "svp/exec/worker/coordinator_session.hpp"
 #include "svp/exec/worker/fleet_member_messages.hpp"
+#include "svp/exec/worker/idle_sleep_assertion.hpp"
 #include "svp/exec/worker/runtime_source.hpp"
 #include "svp/exec/worker/session_process.hpp"
 #include "svp/exec/worker/transfer_messages.hpp"
 #include "toy_tasks.hpp"
 #include "worker_test_support.hpp"
+
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/pwr_mgt/IOPMLib.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <csignal>
@@ -617,6 +622,63 @@ void test_session_process_runs_capped() {
                              std::to_string(priority));
 }
 
+// This process's PreventUserIdleSystemSleep assertions whose name starts
+// with `prefix`, as the system lists them (`pmset -g assertions`).
+std::vector<std::string> idle_sleep_assertions(std::string_view prefix) {
+  std::vector<std::string> names;
+  CFDictionaryRef by_process = nullptr;
+  if (IOPMCopyAssertionsByProcess(&by_process) != kIOReturnSuccess || by_process == nullptr) {
+    return names;
+  }
+  const int pid = ::getpid();
+  CFNumberRef key = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &pid);
+  const auto list = static_cast<CFArrayRef>(CFDictionaryGetValue(by_process, key));
+  CFRelease(key);
+  for (CFIndex index = 0; list != nullptr && index < CFArrayGetCount(list); ++index) {
+    const auto assertion = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(list, index));
+    const auto type =
+        static_cast<CFStringRef>(CFDictionaryGetValue(assertion, kIOPMAssertionTypeKey));
+    const auto name =
+        static_cast<CFStringRef>(CFDictionaryGetValue(assertion, kIOPMAssertionNameKey));
+    char text[256] = {};
+    if (type == nullptr || name == nullptr ||
+        CFStringCompare(type, kIOPMAssertionTypePreventUserIdleSystemSleep, 0) !=
+            kCFCompareEqualTo ||
+        !CFStringGetCString(name, text, sizeof(text), kCFStringEncodingUTF8)) {
+      continue;
+    }
+    if (std::string_view(text).starts_with(prefix)) {
+      names.emplace_back(text);
+    }
+  }
+  CFRelease(by_process);
+  return names;
+}
+
+// A worker whose energy settings sleep it when idle stays awake while it
+// serves a session, and sleeps as they say again once the session ends.
+void test_a_session_keeps_the_mac_awake() {
+  {
+    const IdleSleepAssertion direct("SVP test assertion");
+    expect(direct.held(), "the system accepts the assertion");
+    expect(idle_sleep_assertions("SVP test assertion").size() == 1, "and lists it");
+  }
+  expect(idle_sleep_assertions("SVP test assertion").empty(), "released with its owner");
+  expect(idle_sleep_assertions(kSessionSleepAssertionPrefix).empty(), "no session, none held");
+  {
+    AgentHarness agent;
+    WorkerSessionClient client = agent.client();
+    (void)client.hello(hello_for(toy_runtime()));
+    const std::vector<std::string> held = idle_sleep_assertions(kSessionSleepAssertionPrefix);
+    expect(held.size() == 1 && held.front().find("ws-test-") != std::string::npos,
+           "while the session runs, one assertion names it");
+    client.shutdown();
+    expect(agent.wait() == AgentSessionEnd::shutdown, "session ends on SHUTDOWN");
+    expect(idle_sleep_assertions(kSessionSleepAssertionPrefix).empty(),
+           "released when the session ends");
+  }
+}
+
 void test_disconnect_stops_the_session_process() {
   AgentHarness agent;
   const CoordinatorRuntime runtime = toy_runtime();
@@ -665,6 +727,7 @@ int main(int argc, char** argv) {
           {"bad blob is refused", test_bad_blob_is_refused},
           {"model bundle push is lock-verified", test_model_bundle_push_is_lock_verified},
           {"disconnect stops the session process", test_disconnect_stops_the_session_process},
+          {"a session keeps the Mac awake", test_a_session_keeps_the_mac_awake},
           {"session process runs capped", test_session_process_runs_capped},
       });
 }
