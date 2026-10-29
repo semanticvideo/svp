@@ -59,6 +59,9 @@ struct RouteProbe {
   // waiting for a probe that can no longer win.
   std::chrono::microseconds measuring{0};
   std::string failure;
+  // Failed because its handshake did not finish in time, as a sleeping
+  // worker's does (RoutePolicy wake_window).
+  bool handshake_timed_out = false;
 
   // The slower direction: what a route sustains for transfers both ways.
   [[nodiscard]] double throughput() const;
@@ -102,10 +105,19 @@ struct RouteProbe {
 //          unmeasured, and the bound keeps connect time predictable. A probe
 //          that provably cannot beat the best measured route is not waited
 //          for at all (RouteProbe::measuring).
+//   wake_window 30 s from the first measurement: a worker Mac that is asleep
+//          still answers Bonjour (its network adapter does, on its behalf),
+//          so it is found, but it wakes only when traffic reaches it, and
+//          then only partly (dark wake). Measured on a Mac mini: 9 s from the
+//          first connection attempt to its listener answering, against a
+//          5 s handshake_timeout. When every route's handshake timed out,
+//          the routes are measured again until wake_window has passed; the
+//          attempts are what wake it. Zero fails at the first measurement.
 inline constexpr std::chrono::milliseconds kDefaultDiscoveryTimeout{5'000};
 inline constexpr std::chrono::milliseconds kDefaultDiscoverySettle{500};
 inline constexpr std::uint64_t kDefaultRouteProbeBytes = 4ULL * 1024ULL * 1024ULL;
 inline constexpr std::chrono::milliseconds kDefaultRouteProbeTimeout{1'000};
+inline constexpr std::chrono::milliseconds kDefaultWakeWindow{30'000};
 
 struct RoutePolicy {
   std::vector<std::vector<RouteMedium>> tiers = {
@@ -118,11 +130,13 @@ struct RoutePolicy {
   std::chrono::milliseconds discovery_settle = kDefaultDiscoverySettle;
   std::uint64_t probe_bytes = kDefaultRouteProbeBytes;
   std::chrono::milliseconds probe_timeout = kDefaultRouteProbeTimeout;
+  std::chrono::milliseconds wake_window = kDefaultWakeWindow;
 };
 
 // Throws RemoteTransportError(invalid_configuration) unless there is at least
-// one tier, no medium appears twice, every duration is positive, and
-// probe_bytes is between 1 and kMaxRouteProbeBytes (transport_policy.hpp).
+// one tier, no medium appears twice, every duration is positive (wake_window
+// may be zero), and probe_bytes is between 1 and kMaxRouteProbeBytes
+// (transport_policy.hpp).
 void validate_route_policy(const RoutePolicy& policy);
 
 // Index of the tier holding `medium`, or nullopt when the policy never uses it.

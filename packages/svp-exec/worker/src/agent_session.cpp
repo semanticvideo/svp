@@ -6,14 +6,18 @@
 #include "svp/exec/task_frames.hpp"
 #include "svp/exec/worker/blob_receiver.hpp"
 #include "svp/exec/worker/fleet_member_messages.hpp"
+#include "svp/exec/worker/stay_awake.hpp"
 #include "svp/exec/worker/transfer_messages.hpp"
 #include "svp/exec/worker/worker_error.hpp"
+
+#include <dispatch/dispatch.h>
 
 #include <algorithm>
 #include <condition_variable>
 #include <fstream>
 #include <csignal>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <sys/socket.h>
 #include <thread>
@@ -529,6 +533,22 @@ void AgentCore::enforce_cache_budget() {
   }
 }
 
+void AgentCore::linger_awake(const std::string& session_id) const {
+  if (options_.session_linger.count() <= 0) {
+    return;
+  }
+  // The block owns the assertion; it is released when the block has run.
+  auto awake = std::make_shared<const StayAwake>(std::string(kSessionSleepAssertionPrefix) +
+                                                 session_id + " (ended)");
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                               std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   options_.session_linger)
+                                   .count()),
+                 dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                   (void)awake;
+                 });
+}
+
 MemorySnapshot AgentCore::memory() const { return options_.sample_memory(); }
 
 SessionProcess AgentCore::launch(const SessionLaunch& launch) const {
@@ -582,6 +602,26 @@ std::string_view agent_session_end_name(AgentSessionEnd end) noexcept {
   return "unknown";
 }
 
+namespace {
+
+// Starts the Mac's linger (AgentCore::linger_awake) however a session is
+// left, returned from or thrown out of. Declared after the session's
+// StayAwake, so the linger starts before those assertions go: a Mac in dark
+// wake sleeps the moment it holds none.
+struct LingerOnExit {
+  const AgentCore& core;
+  const std::string& session_id;
+  ~LingerOnExit() {
+    try {
+      core.linger_awake(session_id);
+    } catch (...) {
+      // Best effort, like the assertions themselves (stay_awake.hpp).
+    }
+  }
+};
+
+}  // namespace
+
 AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWriter& output,
                                     const std::string& worker_session_id,
                                     const std::function<void()>& close_input,
@@ -589,6 +629,8 @@ AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWr
   ++core.active_sessions;
   AgentSessionEnd end = AgentSessionEnd::input_closed;
   {
+    const StayAwake awake(std::string(kSessionSleepAssertionPrefix) + worker_session_id);
+    const LingerOnExit linger{core, worker_session_id};
     AgentSession session(core, output, worker_session_id, close_input,
                          std::string(coordinator_id));
     end = session.run(input);
@@ -605,6 +647,8 @@ AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWr
   ++core.active_sessions;
   AgentSessionEnd end = AgentSessionEnd::input_closed;
   {
+    const StayAwake awake(std::string(kSessionSleepAssertionPrefix) + worker_session_id);
+    const LingerOnExit linger{core, worker_session_id};
     AgentSession session(core, output, worker_session_id, close_input, {}, resolve);
     end = session.run(input);
     session.finish();

@@ -9,6 +9,7 @@
 #include "tls_psk_parameters.hpp"
 #include "wait_signal.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <set>
 #include <utility>
@@ -172,8 +173,23 @@ RemoteConnection RemoteConnector::connect() {
   for (const Candidate& candidate : candidates) {
     targets.push_back(candidate.target);
   }
-  detail::RouteMeasurement measurement = detail::measure_routes(
-      targets, options.pairing, options.transport, options.routes, signal);
+  // A sleeping worker is found but answers no handshake until the attempts
+  // wake it (route_policy.hpp wake_window): measure again while every route
+  // timed out and the window has not passed.
+  const auto first_measurement = std::chrono::steady_clock::now();
+  detail::RouteMeasurement measurement;
+  while (true) {
+    measurement = detail::measure_routes(targets, options.pairing, options.transport,
+                                         options.routes, signal);
+    const bool all_timed_out =
+        !measurement.winner && !measurement.probes.empty() &&
+        std::all_of(measurement.probes.begin(), measurement.probes.end(),
+                    [](const RouteProbe& probe) { return probe.handshake_timed_out; });
+    if (!all_timed_out ||
+        std::chrono::steady_clock::now() - first_measurement >= options.routes.wake_window) {
+      break;
+    }
+  }
   if (!measurement.winner) {
     std::string reasons;
     for (const RouteProbe& probe : measurement.probes) {

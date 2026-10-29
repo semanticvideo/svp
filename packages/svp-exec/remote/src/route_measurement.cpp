@@ -90,6 +90,7 @@ void run_probe(ProbeSlot& slot, Clock::time_point handshake_deadline, std::uint6
       slot.finished = true;
       slot.probe.state = RouteProbeState::failed;
       slot.tls_failure = stream.failed_in_tls();
+      slot.probe.handshake_timed_out = !ready && stream.failure().empty();
       slot.probe.failure = ready                      ? "peer negotiated an unexpected TLS session"
                            : stream.failure().empty() ? "handshake timed out"
                                                       : stream.failure();
@@ -185,6 +186,7 @@ RouteMeasurement measure_routes(const std::vector<RouteTarget>& targets, const P
           probe.state = slot.authenticated ? RouteProbeState::ready : RouteProbeState::failed;
           probe.failure = slot.authenticated ? "throughput probe did not finish in time"
                                              : "handshake timed out";
+          probe.handshake_timed_out = !slot.authenticated;
         }
         measurement.any_tls_failure = measurement.any_tls_failure || slot.tls_failure;
         measurement.probes.push_back(std::move(probe));

@@ -38,6 +38,7 @@ add_library(svp-exec-worker
   src/session_memory.cpp
   src/session_process.cpp
   src/slot_sharing.cpp
+  src/stay_awake.cpp
   src/transfer_messages.cpp
   src/worker_agent.cpp
   src/worker_connection.cpp
@@ -72,6 +73,8 @@ target_link_libraries(svp-exec-worker
     # P-256 signing and ECDH for fleet join (fleet_crypto.hpp).
     "-framework Security"
     "-framework CoreFoundation"
+    # Sessions keep the Mac awake (stay_awake.hpp).
+    "-framework IOKit"
 )
 
 if(BUILD_TESTING)
@@ -107,6 +110,9 @@ if(BUILD_TESTING)
     set_tests_properties(svp-exec-worker-${SVP_EXEC_TEST_NAME}-tests PROPERTIES TIMEOUT 120)
   endforeach()
   add_dependencies(svp-exec-worker-agent-session-tests svp-exec-test-worker)
+  # Reads this process's power assertions (IOPMCopyAssertionsByProcess).
+  target_link_libraries(svp-exec-worker-agent-session-tests PRIVATE
+    "-framework IOKit" "-framework CoreFoundation")
   # Opens TLS listeners and registers Bonjour instances on this Mac, like the
   # remote transport tests.
   set_tests_properties(svp-exec-worker-pairings-server-tests PROPERTIES LABELS network)

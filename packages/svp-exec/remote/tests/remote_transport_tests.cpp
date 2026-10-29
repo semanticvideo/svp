@@ -13,13 +13,20 @@
 #include "svp/exec/remote/remote_listener.hpp"
 #include "svp/exec/remote/service_advertiser.hpp"
 
+#include <netinet/in.h>
+#include <poll.h>
+#include <sys/socket.h>
 #include <sys/sysctl.h>
+#include <unistd.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <functional>
 #include <set>
 #include <iostream>
+#include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -526,6 +533,184 @@ void test_discovery_skips_instances_of_other_pairings() {
          "the worker's own instance and its instance for this pairing, not the join listener's");
 }
 
+// A worker Mac that is asleep: Bonjour finds it (its network adapter answers
+// for it), but its port completes no handshake until the traffic reaching it
+// has woken it, `wake_delay` after the first connection (as a Mac takes
+// seconds to wake). Until then it holds each connection silent; after that it
+// relays each connection to the real listener on `target_port`.
+class SleepingWorker {
+ public:
+  SleepingWorker(std::uint16_t target_port, std::chrono::milliseconds wake_delay)
+      : target_port_(target_port), wake_delay_(wake_delay) {
+    listen_fd_ = ::socket(AF_INET6, SOCK_STREAM, 0);
+    int no = 0;
+    int yes = 1;
+    ::setsockopt(listen_fd_, IPPROTO_IPV6, IPV6_V6ONLY, &no, sizeof(no));
+    ::setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    sockaddr_in6 address{};
+    address.sin6_family = AF_INET6;
+    address.sin6_addr = in6addr_any;
+    socklen_t length = sizeof(address);
+    if (::bind(listen_fd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
+        ::listen(listen_fd_, 64) != 0 ||
+        ::getsockname(listen_fd_, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
+      throw std::runtime_error("sleeping worker cannot listen");
+    }
+    port_ = ntohs(address.sin6_port);
+    accepting_ = std::thread([this] { accept_loop(); });
+  }
+  ~SleepingWorker() {
+    stop_ = true;
+    accepting_.join();
+    ::close(listen_fd_);
+    const std::lock_guard lock(mutex_);
+    for (const int fd : open_fds_) {
+      ::shutdown(fd, SHUT_RDWR);
+    }
+    for (std::thread& relay : relays_) {
+      relay.join();
+    }
+    for (const int fd : open_fds_) {
+      ::close(fd);
+    }
+  }
+  SleepingWorker(const SleepingWorker&) = delete;
+  SleepingWorker& operator=(const SleepingWorker&) = delete;
+
+  [[nodiscard]] std::uint16_t port() const { return port_; }
+  [[nodiscard]] int held_while_asleep() const { return held_; }
+
+ private:
+  void accept_loop() {
+    while (!stop_) {
+      pollfd ready{.fd = listen_fd_, .events = POLLIN, .revents = 0};
+      if (::poll(&ready, 1, 50) <= 0) {
+        continue;
+      }
+      const int client = ::accept(listen_fd_, nullptr, nullptr);
+      if (client < 0) {
+        continue;
+      }
+      // A relay writing to a peer that already closed gets an error, not a
+      // SIGPIPE that ends the test process.
+      int yes = 1;
+      ::setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes));
+      const std::lock_guard lock(mutex_);
+      open_fds_.push_back(client);
+      const auto now = std::chrono::steady_clock::now();
+      if (!woken_at_) {
+        woken_at_ = now + wake_delay_;
+      }
+      if (now < *woken_at_) {
+        ++held_;
+        continue;
+      }
+      const int upstream = ::socket(AF_INET, SOCK_STREAM, 0);
+      ::setsockopt(upstream, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes));
+      sockaddr_in target{};
+      target.sin_len = sizeof(target);
+      target.sin_family = AF_INET;
+      target.sin_port = htons(target_port_);
+      target.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+      if (::connect(upstream, reinterpret_cast<sockaddr*>(&target), sizeof(target)) != 0) {
+        ::close(upstream);
+        continue;
+      }
+      open_fds_.push_back(upstream);
+      relays_.emplace_back([client, upstream] { relay(client, upstream); });
+    }
+  }
+  static void relay(int a, int b) {
+    std::array<char, 65536> buffer{};
+    pollfd fds[2] = {{.fd = a, .events = POLLIN, .revents = 0},
+                     {.fd = b, .events = POLLIN, .revents = 0}};
+    while (::poll(fds, 2, -1) > 0) {
+      for (int side = 0; side < 2; ++side) {
+        if ((fds[side].revents & (POLLIN | POLLHUP | POLLERR)) == 0) {
+          continue;
+        }
+        const ssize_t count = ::read(fds[side].fd, buffer.data(), buffer.size());
+        if (count <= 0 || ::write(fds[1 - side].fd, buffer.data(), static_cast<size_t>(count)) !=
+                              count) {
+          ::shutdown(a, SHUT_RDWR);
+          ::shutdown(b, SHUT_RDWR);
+          return;
+        }
+      }
+    }
+  }
+
+  std::uint16_t target_port_;
+  std::chrono::milliseconds wake_delay_;
+  // Guarded by mutex_: when the first connection's traffic has woken it.
+  std::optional<std::chrono::steady_clock::time_point> woken_at_;
+  int listen_fd_ = -1;
+  std::uint16_t port_ = 0;
+  std::atomic<bool> stop_{false};
+  std::atomic<int> held_{0};
+  std::mutex mutex_;
+  std::vector<int> open_fds_;
+  std::vector<std::thread> relays_;
+  std::thread accepting_;
+};
+
+// The worker is asleep for the first round of handshakes; the coordinator
+// measures again until the attempts have woken it (RoutePolicy wake_window).
+void test_a_sleeping_worker_is_reached_once_it_wakes() {
+  const PairingKey key = pairing::random_pairing("svp-transport-sleeper");
+  const std::string worker_id = "svpn-" + key.pairing_id;
+  RemoteListenerOptions options;
+  options.pairing = key;
+  options.advertise = false;
+  RemoteListener listener(options, echo_frames);
+  listener.start();
+  // Longer than a handshake's wait is not needed: the first round's
+  // connections stay silent even after it wakes, as a real Mac's do.
+  SleepingWorker sleeper(listener.port(), std::chrono::seconds(3));
+  ServiceAdvertiser ad(ServiceAdvertisement{
+      .name = "sleeper-" + key.pairing_id, .port = sleeper.port(), .txt = {{"worker", worker_id}}});
+  expect(ad.wait_registered(std::chrono::seconds(10)), "registered");
+  RemoteConnector connector(RemoteConnectorOptions{.pairing = key, .worker_id = worker_id});
+  const auto started = std::chrono::steady_clock::now();
+  RemoteConnection connection = connector.connect();
+  expect(sleeper.held_while_asleep() > 0, "the first handshakes found it asleep");
+  expect(std::chrono::steady_clock::now() - started >= TransportPolicy{}.handshake_timeout,
+         "and the routes were measured again after they timed out");
+  StreamFrameReader reader(*connection.stream);
+  StreamFrameWriter writer(*connection.stream);
+  writer.write(Frame{.type = MessageType::hello, .body = nlohmann::json::object(), .payloads = {}});
+  expect(reader.read().has_value(), "the woken worker serves the session");
+}
+
+// A worker that never wakes fails once the wake window has passed, not at
+// the first timeout and not forever.
+void test_a_worker_that_never_wakes_fails_after_the_wake_window() {
+  const PairingKey key = pairing::random_pairing("svp-transport-asleep");
+  const std::string worker_id = "svpn-" + key.pairing_id;
+  RemoteListenerOptions options;
+  options.pairing = key;
+  options.advertise = false;
+  RemoteListener listener(options, echo_frames);
+  listener.start();
+  SleepingWorker sleeper(listener.port(), std::chrono::hours(1));
+  ServiceAdvertiser ad(ServiceAdvertisement{
+      .name = "asleep-" + key.pairing_id, .port = sleeper.port(), .txt = {{"worker", worker_id}}});
+  expect(ad.wait_registered(std::chrono::seconds(10)), "registered");
+  RoutePolicy routes;
+  routes.wake_window = std::chrono::seconds(7);
+  RemoteConnector connector(
+      RemoteConnectorOptions{.pairing = key, .worker_id = worker_id, .routes = routes});
+  const auto started = std::chrono::steady_clock::now();
+  expect_remote_error(RemoteErrorCode::no_route, [&] { (void)connector.connect(); },
+                      "a worker that stays asleep has no route");
+  const auto elapsed = std::chrono::steady_clock::now() - started;
+  expect(elapsed >= routes.wake_window, "it was measured until the wake window passed");
+  // Plus discovery, which comes before the first measurement.
+  expect(elapsed < routes.wake_window + 2 * TransportPolicy{}.handshake_timeout +
+                       routes.discovery_timeout,
+         "and no longer than one more round");
+}
+
 void test_advertiser_registers_and_withdraws() {
   const std::string id = pairing::random_pairing("svp-transport-ad").pairing_id;
   {
@@ -631,6 +816,10 @@ int main() {
                        {"a fixed port is kept and not shared",
                         test_a_fixed_port_is_kept_and_not_shared},
                        {"advertiser registers and withdraws", test_advertiser_registers_and_withdraws},
+                       {"a sleeping worker is reached once it wakes",
+                        test_a_sleeping_worker_is_reached_once_it_wakes},
+                       {"a worker that never wakes fails after the wake window",
+                        test_a_worker_that_never_wakes_fails_after_the_wake_window},
                        {"a spoofed advertisement does not displace the worker",
                         test_a_spoofed_advertisement_does_not_displace_the_worker},
                        {"discovery skips instances of other pairings",

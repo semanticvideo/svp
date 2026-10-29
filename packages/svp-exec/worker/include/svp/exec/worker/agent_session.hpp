@@ -65,6 +65,12 @@ namespace svp::exec::worker {
 // only while it adds a pin; five tries 50 ms apart hold a session's end at
 // most a quarter second.
 inline constexpr int kEvictionAttempts = 5;
+// How long the Mac stays awake after a session ends (AgentCore::linger_awake).
+// The sessions of one job follow each other about a second apart (a
+// worker's calibration is eight), and a worker that its coordinator woke
+// fell asleep again 1-2 s after each one ended, to be woken by the next; a
+// minute covers the gaps and an idle worker still sleeps a minute later.
+inline constexpr std::chrono::milliseconds kDefaultSessionLinger{60'000};
 inline constexpr std::chrono::milliseconds kEvictionRetryPause{50};
 
 struct AgentCoreOptions {
@@ -78,6 +84,8 @@ struct AgentCoreOptions {
   // The worker cache's size budget (cache_policy.hpp), enforced when each
   // session ends.
   CachePolicy cache_policy{};
+  // How long the Mac stays awake after each session ends; zero: not at all.
+  std::chrono::milliseconds session_linger = kDefaultSessionLinger;
   // Injectable for tests; default sample_memory().
   std::function<MemorySnapshot()> sample_memory;
   // Injectable for tests: a session process's memory in use
@@ -128,6 +136,10 @@ class AgentCore {
   // (a session process adding pins), it tries again kEvictionAttempts times
   // before leaving the rest to the next session's end.
   void enforce_cache_budget();
+  // Keeps the Mac awake for options().session_linger more, after the session
+  // `session_id` ended (stay_awake.hpp), so the next session of the same job
+  // does not find it asleep.
+  void linger_awake(const std::string& session_id) const;
   [[nodiscard]] MemorySnapshot memory() const;
   [[nodiscard]] SessionProcess launch(const SessionLaunch& launch) const;
 
@@ -160,7 +172,11 @@ enum class AgentSessionEnd {
 
 [[nodiscard]] std::string_view agent_session_end_name(AgentSessionEnd end) noexcept;
 
-// Serves one session until it ends. `worker_session_id` must be a record
+// The name of a session's stay-awake assertions, before its session id.
+inline constexpr std::string_view kSessionSleepAssertionPrefix = "SVP worker session ";
+
+// Serves one session until it ends, keeping the Mac awake until then
+// (stay_awake.hpp). `worker_session_id` must be a record
 // identifier unique on this worker (it names the scratch directory and is
 // stamped into results). `close_input` must make a blocked input.read()
 // return (the transport's cancel); it is called when the session process

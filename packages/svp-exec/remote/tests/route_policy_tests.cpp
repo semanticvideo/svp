@@ -150,6 +150,12 @@ void test_policy_validation() {
   RoutePolicy oversize;
   oversize.probe_bytes = kMaxRouteProbeBytes + 1;
   expect_invalid(oversize, "a probe larger than workers answer is rejected");
+  RoutePolicy negative_wake;
+  negative_wake.wake_window = std::chrono::milliseconds{-1};
+  expect_invalid(negative_wake, "a negative wake window is rejected");
+  RoutePolicy no_wake;
+  no_wake.wake_window = std::chrono::milliseconds{0};
+  validate_route_policy(no_wake);
   validate_route_policy(RoutePolicy{});
 }
 

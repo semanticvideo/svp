@@ -12,11 +12,16 @@
 #include "svp/exec/worker/agent_session.hpp"
 #include "svp/exec/worker/coordinator_session.hpp"
 #include "svp/exec/worker/fleet_member_messages.hpp"
+#include "svp/exec/worker/stay_awake.hpp"
 #include "svp/exec/worker/runtime_source.hpp"
 #include "svp/exec/worker/session_process.hpp"
 #include "svp/exec/worker/transfer_messages.hpp"
 #include "toy_tasks.hpp"
 #include "worker_test_support.hpp"
+
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/pwr_mgt/IOPMLib.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <csignal>
@@ -37,7 +42,8 @@ fs::path g_test_worker;
 class AgentHarness {
  public:
   explicit AgentHarness(SlotSharing::LocalLoad local_load = {}, std::string coordinator_id = {},
-                        CachePolicy cache_policy = {})
+                        CachePolicy cache_policy = {},
+                        std::chrono::milliseconds session_linger = std::chrono::milliseconds{0})
       : scratch_("svp-agent-session") {
     core_ = std::make_unique<AgentCore>(AgentCoreOptions{
         .layout = WorkerLayout{.root = scratch_.path / "Worker"},
@@ -47,6 +53,7 @@ class AgentHarness {
         .shutdown_grace = std::chrono::milliseconds{2'000},
         .frame_limits = {},
         .cache_policy = cache_policy,
+        .session_linger = session_linger,
         .sample_memory =
             [this] {
               return MemorySnapshot{.available_bytes = available_.load(),
@@ -190,6 +197,8 @@ struct FleetAgent {
     core = std::make_unique<AgentCore>(AgentCoreOptions{
         .layout = WorkerLayout{.root = scratch.path / "Worker"},
         .host = detect_host_facts(),
+        // No linger: later tests count this process's assertions.
+        .session_linger = std::chrono::milliseconds{0},
         .fleet_state =
             [this] {
               const std::lock_guard lock(mutex);
@@ -617,6 +626,101 @@ void test_session_process_runs_capped() {
                              std::to_string(priority));
 }
 
+// This process's assertions of `type` whose name starts with `prefix`, as
+// the system lists them (`pmset -g assertions`).
+std::vector<std::string> assertions(CFStringRef type, std::string_view prefix) {
+  std::vector<std::string> names;
+  CFDictionaryRef by_process = nullptr;
+  if (IOPMCopyAssertionsByProcess(&by_process) != kIOReturnSuccess || by_process == nullptr) {
+    return names;
+  }
+  const int pid = ::getpid();
+  CFNumberRef key = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &pid);
+  const auto list = static_cast<CFArrayRef>(CFDictionaryGetValue(by_process, key));
+  CFRelease(key);
+  for (CFIndex index = 0; list != nullptr && index < CFArrayGetCount(list); ++index) {
+    const auto assertion = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(list, index));
+    const auto listed_type =
+        static_cast<CFStringRef>(CFDictionaryGetValue(assertion, kIOPMAssertionTypeKey));
+    const auto name =
+        static_cast<CFStringRef>(CFDictionaryGetValue(assertion, kIOPMAssertionNameKey));
+    char text[256] = {};
+    if (listed_type == nullptr || name == nullptr ||
+        CFStringCompare(listed_type, type, 0) != kCFCompareEqualTo ||
+        !CFStringGetCString(name, text, sizeof(text), kCFStringEncodingUTF8)) {
+      continue;
+    }
+    if (std::string_view(text).starts_with(prefix)) {
+      names.emplace_back(text);
+    }
+  }
+  CFRelease(by_process);
+  return names;
+}
+
+// Both of a session's assertions (stay_awake.hpp) named `prefix`.
+std::size_t stay_awake_assertions(std::string_view prefix) {
+  const std::vector<std::string> idle =
+      assertions(kIOPMAssertionTypePreventUserIdleSystemSleep, prefix);
+  const std::vector<std::string> system = assertions(kIOPMAssertionTypePreventSystemSleep, prefix);
+  return idle.size() == system.size() ? idle.size() : 0;
+}
+
+// A worker whose energy settings sleep it, or that was woken to serve, stays
+// awake while it serves a session, and sleeps as they say once it ends.
+void test_a_session_keeps_the_mac_awake() {
+  {
+    const StayAwake direct("SVP test assertion");
+    expect(direct.held(), "the system accepts both assertions");
+    expect(stay_awake_assertions("SVP test assertion") == 1, "and lists one of each type");
+  }
+  expect(assertions(kIOPMAssertionTypePreventUserIdleSystemSleep, "SVP test assertion").empty() &&
+             assertions(kIOPMAssertionTypePreventSystemSleep, "SVP test assertion").empty(),
+         "released with their owner");
+  expect(stay_awake_assertions(kSessionSleepAssertionPrefix) == 0, "no session, none held");
+  {
+    AgentHarness agent;
+    WorkerSessionClient client = agent.client();
+    (void)client.hello(hello_for(toy_runtime()));
+    const std::vector<std::string> held =
+        assertions(kIOPMAssertionTypePreventSystemSleep, kSessionSleepAssertionPrefix);
+    expect(stay_awake_assertions(kSessionSleepAssertionPrefix) == 1 && held.size() == 1 &&
+               held.front().find("ws-test-") != std::string::npos,
+           "while the session runs, one of each type names it");
+    client.shutdown();
+    expect(agent.wait() == AgentSessionEnd::shutdown, "session ends on SHUTDOWN");
+    const bool idle_released =
+        assertions(kIOPMAssertionTypePreventUserIdleSystemSleep, kSessionSleepAssertionPrefix)
+            .empty();
+    const bool system_released =
+        assertions(kIOPMAssertionTypePreventSystemSleep, kSessionSleepAssertionPrefix).empty();
+    expect(idle_released && system_released, "released when the session ends");
+  }
+}
+
+// After a session ends the Mac stays awake for the linger, so the next
+// session of the same job does not find it asleep, and not longer.
+void test_the_mac_stays_awake_briefly_after_a_session() {
+  const auto linger = std::chrono::milliseconds{1'500};
+  {
+    AgentHarness agent({}, {}, {}, linger);
+    WorkerSessionClient client = agent.client();
+    (void)client.hello(hello_for(toy_runtime()));
+    client.shutdown();
+    expect(agent.wait() == AgentSessionEnd::shutdown, "session ends on SHUTDOWN");
+    const std::vector<std::string> lingering =
+        assertions(kIOPMAssertionTypePreventSystemSleep, kSessionSleepAssertionPrefix);
+    expect(stay_awake_assertions(kSessionSleepAssertionPrefix) == 1 && lingering.size() == 1 &&
+               lingering.front().ends_with("(ended)"),
+           "after the session, one of each type holds the Mac for the linger");
+  }
+  std::this_thread::sleep_for(linger + std::chrono::milliseconds{1'000});
+  expect(assertions(kIOPMAssertionTypePreventSystemSleep, kSessionSleepAssertionPrefix).empty() &&
+             assertions(kIOPMAssertionTypePreventUserIdleSystemSleep, kSessionSleepAssertionPrefix)
+                 .empty(),
+         "released once the linger has passed");
+}
+
 void test_disconnect_stops_the_session_process() {
   AgentHarness agent;
   const CoordinatorRuntime runtime = toy_runtime();
@@ -665,6 +769,9 @@ int main(int argc, char** argv) {
           {"bad blob is refused", test_bad_blob_is_refused},
           {"model bundle push is lock-verified", test_model_bundle_push_is_lock_verified},
           {"disconnect stops the session process", test_disconnect_stops_the_session_process},
+          {"a session keeps the Mac awake", test_a_session_keeps_the_mac_awake},
+          {"the Mac stays awake briefly after a session",
+           test_the_mac_stays_awake_briefly_after_a_session},
           {"session process runs capped", test_session_process_runs_capped},
       });
 }
