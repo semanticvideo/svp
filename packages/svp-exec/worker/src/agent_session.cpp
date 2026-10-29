@@ -614,8 +614,10 @@ AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWr
                          std::string(coordinator_id));
     end = session.run(input);
     session.finish();
+    // Before this session's assertions go: a Mac in dark wake sleeps the
+    // moment it holds none.
+    core.linger_awake(worker_session_id);
   }
-  core.linger_awake(worker_session_id);
   --core.active_sessions;
   return end;
 }
@@ -631,8 +633,10 @@ AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWr
     AgentSession session(core, output, worker_session_id, close_input, {}, resolve);
     end = session.run(input);
     session.finish();
+    // Before this session's assertions go: a Mac in dark wake sleeps the
+    // moment it holds none.
+    core.linger_awake(worker_session_id);
   }
-  core.linger_awake(worker_session_id);
   --core.active_sessions;
   return end;
 }
