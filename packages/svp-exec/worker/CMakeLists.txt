@@ -19,7 +19,6 @@ add_library(svp-exec-worker
   src/hex_bytes.cpp
   src/hello_messages.cpp
   src/host_facts.cpp
-  src/idle_sleep_assertion.cpp
   src/join_service.cpp
   src/launchd_job.cpp
   src/local_load.cpp
@@ -39,6 +38,7 @@ add_library(svp-exec-worker
   src/session_memory.cpp
   src/session_process.cpp
   src/slot_sharing.cpp
+  src/stay_awake.cpp
   src/transfer_messages.cpp
   src/worker_agent.cpp
   src/worker_connection.cpp
@@ -73,7 +73,7 @@ target_link_libraries(svp-exec-worker
     # P-256 signing and ECDH for fleet join (fleet_crypto.hpp).
     "-framework Security"
     "-framework CoreFoundation"
-    # Sessions keep the Mac from idle sleep (idle_sleep_assertion.hpp).
+    # Sessions keep the Mac awake (stay_awake.hpp).
     "-framework IOKit"
 )
 

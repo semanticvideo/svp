@@ -6,7 +6,7 @@
 #include "svp/exec/task_frames.hpp"
 #include "svp/exec/worker/blob_receiver.hpp"
 #include "svp/exec/worker/fleet_member_messages.hpp"
-#include "svp/exec/worker/idle_sleep_assertion.hpp"
+#include "svp/exec/worker/stay_awake.hpp"
 #include "svp/exec/worker/transfer_messages.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 
@@ -590,7 +590,7 @@ AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWr
   ++core.active_sessions;
   AgentSessionEnd end = AgentSessionEnd::input_closed;
   {
-    const IdleSleepAssertion awake(std::string(kSessionSleepAssertionPrefix) + worker_session_id);
+    const StayAwake awake(std::string(kSessionSleepAssertionPrefix) + worker_session_id);
     AgentSession session(core, output, worker_session_id, close_input,
                          std::string(coordinator_id));
     end = session.run(input);
@@ -607,7 +607,7 @@ AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWr
   ++core.active_sessions;
   AgentSessionEnd end = AgentSessionEnd::input_closed;
   {
-    const IdleSleepAssertion awake(std::string(kSessionSleepAssertionPrefix) + worker_session_id);
+    const StayAwake awake(std::string(kSessionSleepAssertionPrefix) + worker_session_id);
     AgentSession session(core, output, worker_session_id, close_input, {}, resolve);
     end = session.run(input);
     session.finish();

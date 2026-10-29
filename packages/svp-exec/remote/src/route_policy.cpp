@@ -58,6 +58,7 @@ void validate_route_policy(const RoutePolicy& policy) {
   }
   if (seen.empty() || policy.discovery_timeout.count() <= 0 ||
       policy.discovery_settle.count() <= 0 || policy.probe_timeout.count() <= 0 ||
+      policy.wake_window.count() < 0 ||
       policy.probe_bytes == 0 || policy.probe_bytes > kMaxRouteProbeBytes) {
     throw RemoteTransportError(RemoteErrorCode::invalid_configuration,
                                "route policy needs a tier, positive durations, and probe_bytes "

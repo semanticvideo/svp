@@ -160,11 +160,11 @@ enum class AgentSessionEnd {
 
 [[nodiscard]] std::string_view agent_session_end_name(AgentSessionEnd end) noexcept;
 
-// The name of a session's idle-sleep assertion, before its session id.
+// The name of a session's stay-awake assertions, before its session id.
 inline constexpr std::string_view kSessionSleepAssertionPrefix = "SVP worker session ";
 
-// Serves one session until it ends, keeping the Mac from idle sleep until
-// then (idle_sleep_assertion.hpp). `worker_session_id` must be a record
+// Serves one session until it ends, keeping the Mac awake until then
+// (stay_awake.hpp). `worker_session_id` must be a record
 // identifier unique on this worker (it names the scratch directory and is
 // stamped into results). `close_input` must make a blocked input.read()
 // return (the transport's cancel); it is called when the session process

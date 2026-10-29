@@ -12,7 +12,7 @@
 #include "svp/exec/worker/agent_session.hpp"
 #include "svp/exec/worker/coordinator_session.hpp"
 #include "svp/exec/worker/fleet_member_messages.hpp"
-#include "svp/exec/worker/idle_sleep_assertion.hpp"
+#include "svp/exec/worker/stay_awake.hpp"
 #include "svp/exec/worker/runtime_source.hpp"
 #include "svp/exec/worker/session_process.hpp"
 #include "svp/exec/worker/transfer_messages.hpp"
@@ -622,9 +622,9 @@ void test_session_process_runs_capped() {
                              std::to_string(priority));
 }
 
-// This process's PreventUserIdleSystemSleep assertions whose name starts
-// with `prefix`, as the system lists them (`pmset -g assertions`).
-std::vector<std::string> idle_sleep_assertions(std::string_view prefix) {
+// This process's assertions of `type` whose name starts with `prefix`, as
+// the system lists them (`pmset -g assertions`).
+std::vector<std::string> assertions(CFStringRef type, std::string_view prefix) {
   std::vector<std::string> names;
   CFDictionaryRef by_process = nullptr;
   if (IOPMCopyAssertionsByProcess(&by_process) != kIOReturnSuccess || by_process == nullptr) {
@@ -636,14 +636,13 @@ std::vector<std::string> idle_sleep_assertions(std::string_view prefix) {
   CFRelease(key);
   for (CFIndex index = 0; list != nullptr && index < CFArrayGetCount(list); ++index) {
     const auto assertion = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(list, index));
-    const auto type =
+    const auto listed_type =
         static_cast<CFStringRef>(CFDictionaryGetValue(assertion, kIOPMAssertionTypeKey));
     const auto name =
         static_cast<CFStringRef>(CFDictionaryGetValue(assertion, kIOPMAssertionNameKey));
     char text[256] = {};
-    if (type == nullptr || name == nullptr ||
-        CFStringCompare(type, kIOPMAssertionTypePreventUserIdleSystemSleep, 0) !=
-            kCFCompareEqualTo ||
+    if (listed_type == nullptr || name == nullptr ||
+        CFStringCompare(listed_type, type, 0) != kCFCompareEqualTo ||
         !CFStringGetCString(name, text, sizeof(text), kCFStringEncodingUTF8)) {
       continue;
     }
@@ -655,27 +654,43 @@ std::vector<std::string> idle_sleep_assertions(std::string_view prefix) {
   return names;
 }
 
-// A worker whose energy settings sleep it when idle stays awake while it
-// serves a session, and sleeps as they say again once the session ends.
+// Both of a session's assertions (stay_awake.hpp) named `prefix`.
+std::size_t stay_awake_assertions(std::string_view prefix) {
+  const std::vector<std::string> idle =
+      assertions(kIOPMAssertionTypePreventUserIdleSystemSleep, prefix);
+  const std::vector<std::string> system = assertions(kIOPMAssertionTypePreventSystemSleep, prefix);
+  return idle.size() == system.size() ? idle.size() : 0;
+}
+
+// A worker whose energy settings sleep it, or that was woken to serve, stays
+// awake while it serves a session, and sleeps as they say once it ends.
 void test_a_session_keeps_the_mac_awake() {
   {
-    const IdleSleepAssertion direct("SVP test assertion");
-    expect(direct.held(), "the system accepts the assertion");
-    expect(idle_sleep_assertions("SVP test assertion").size() == 1, "and lists it");
+    const StayAwake direct("SVP test assertion");
+    expect(direct.held(), "the system accepts both assertions");
+    expect(stay_awake_assertions("SVP test assertion") == 1, "and lists one of each type");
   }
-  expect(idle_sleep_assertions("SVP test assertion").empty(), "released with its owner");
-  expect(idle_sleep_assertions(kSessionSleepAssertionPrefix).empty(), "no session, none held");
+  expect(assertions(kIOPMAssertionTypePreventUserIdleSystemSleep, "SVP test assertion").empty() &&
+             assertions(kIOPMAssertionTypePreventSystemSleep, "SVP test assertion").empty(),
+         "released with their owner");
+  expect(stay_awake_assertions(kSessionSleepAssertionPrefix) == 0, "no session, none held");
   {
     AgentHarness agent;
     WorkerSessionClient client = agent.client();
     (void)client.hello(hello_for(toy_runtime()));
-    const std::vector<std::string> held = idle_sleep_assertions(kSessionSleepAssertionPrefix);
-    expect(held.size() == 1 && held.front().find("ws-test-") != std::string::npos,
-           "while the session runs, one assertion names it");
+    const std::vector<std::string> held =
+        assertions(kIOPMAssertionTypePreventSystemSleep, kSessionSleepAssertionPrefix);
+    expect(stay_awake_assertions(kSessionSleepAssertionPrefix) == 1 && held.size() == 1 &&
+               held.front().find("ws-test-") != std::string::npos,
+           "while the session runs, one of each type names it");
     client.shutdown();
     expect(agent.wait() == AgentSessionEnd::shutdown, "session ends on SHUTDOWN");
-    expect(idle_sleep_assertions(kSessionSleepAssertionPrefix).empty(),
-           "released when the session ends");
+    const bool idle_released =
+        assertions(kIOPMAssertionTypePreventUserIdleSystemSleep, kSessionSleepAssertionPrefix)
+            .empty();
+    const bool system_released =
+        assertions(kIOPMAssertionTypePreventSystemSleep, kSessionSleepAssertionPrefix).empty();
+    expect(idle_released && system_released, "released when the session ends");
   }
 }
 
