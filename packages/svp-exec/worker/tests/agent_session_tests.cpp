@@ -42,7 +42,8 @@ fs::path g_test_worker;
 class AgentHarness {
  public:
   explicit AgentHarness(SlotSharing::LocalLoad local_load = {}, std::string coordinator_id = {},
-                        CachePolicy cache_policy = {})
+                        CachePolicy cache_policy = {},
+                        std::chrono::milliseconds session_linger = std::chrono::milliseconds{0})
       : scratch_("svp-agent-session") {
     core_ = std::make_unique<AgentCore>(AgentCoreOptions{
         .layout = WorkerLayout{.root = scratch_.path / "Worker"},
@@ -52,6 +53,7 @@ class AgentHarness {
         .shutdown_grace = std::chrono::milliseconds{2'000},
         .frame_limits = {},
         .cache_policy = cache_policy,
+        .session_linger = session_linger,
         .sample_memory =
             [this] {
               return MemorySnapshot{.available_bytes = available_.load(),
@@ -195,6 +197,8 @@ struct FleetAgent {
     core = std::make_unique<AgentCore>(AgentCoreOptions{
         .layout = WorkerLayout{.root = scratch.path / "Worker"},
         .host = detect_host_facts(),
+        // No linger: later tests count this process's assertions.
+        .session_linger = std::chrono::milliseconds{0},
         .fleet_state =
             [this] {
               const std::lock_guard lock(mutex);
@@ -694,6 +698,29 @@ void test_a_session_keeps_the_mac_awake() {
   }
 }
 
+// After a session ends the Mac stays awake for the linger, so the next
+// session of the same job does not find it asleep, and not longer.
+void test_the_mac_stays_awake_briefly_after_a_session() {
+  const auto linger = std::chrono::milliseconds{1'500};
+  {
+    AgentHarness agent({}, {}, {}, linger);
+    WorkerSessionClient client = agent.client();
+    (void)client.hello(hello_for(toy_runtime()));
+    client.shutdown();
+    expect(agent.wait() == AgentSessionEnd::shutdown, "session ends on SHUTDOWN");
+    const std::vector<std::string> lingering =
+        assertions(kIOPMAssertionTypePreventSystemSleep, kSessionSleepAssertionPrefix);
+    expect(stay_awake_assertions(kSessionSleepAssertionPrefix) == 1 && lingering.size() == 1 &&
+               lingering.front().ends_with("(ended)"),
+           "after the session, one of each type holds the Mac for the linger");
+  }
+  std::this_thread::sleep_for(linger + std::chrono::milliseconds{1'000});
+  expect(assertions(kIOPMAssertionTypePreventSystemSleep, kSessionSleepAssertionPrefix).empty() &&
+             assertions(kIOPMAssertionTypePreventUserIdleSystemSleep, kSessionSleepAssertionPrefix)
+                 .empty(),
+         "released once the linger has passed");
+}
+
 void test_disconnect_stops_the_session_process() {
   AgentHarness agent;
   const CoordinatorRuntime runtime = toy_runtime();
@@ -743,6 +770,8 @@ int main(int argc, char** argv) {
           {"model bundle push is lock-verified", test_model_bundle_push_is_lock_verified},
           {"disconnect stops the session process", test_disconnect_stops_the_session_process},
           {"a session keeps the Mac awake", test_a_session_keeps_the_mac_awake},
+          {"the Mac stays awake briefly after a session",
+           test_the_mac_stays_awake_briefly_after_a_session},
           {"session process runs capped", test_session_process_runs_capped},
       });
 }

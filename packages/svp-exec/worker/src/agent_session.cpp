@@ -10,11 +10,14 @@
 #include "svp/exec/worker/transfer_messages.hpp"
 #include "svp/exec/worker/worker_error.hpp"
 
+#include <dispatch/dispatch.h>
+
 #include <algorithm>
 #include <condition_variable>
 #include <fstream>
 #include <csignal>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <sys/socket.h>
 #include <thread>
@@ -530,6 +533,22 @@ void AgentCore::enforce_cache_budget() {
   }
 }
 
+void AgentCore::linger_awake(const std::string& session_id) const {
+  if (options_.session_linger.count() <= 0) {
+    return;
+  }
+  // The block owns the assertion; it is released when the block has run.
+  auto awake = std::make_shared<const StayAwake>(std::string(kSessionSleepAssertionPrefix) +
+                                                 session_id + " (ended)");
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                               std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   options_.session_linger)
+                                   .count()),
+                 dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                   (void)awake;
+                 });
+}
+
 MemorySnapshot AgentCore::memory() const { return options_.sample_memory(); }
 
 SessionProcess AgentCore::launch(const SessionLaunch& launch) const {
@@ -596,6 +615,7 @@ AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWr
     end = session.run(input);
     session.finish();
   }
+  core.linger_awake(worker_session_id);
   --core.active_sessions;
   return end;
 }
@@ -612,6 +632,7 @@ AgentSessionEnd serve_agent_session(AgentCore& core, FrameReader& input, FrameWr
     end = session.run(input);
     session.finish();
   }
+  core.linger_awake(worker_session_id);
   --core.active_sessions;
   return end;
 }

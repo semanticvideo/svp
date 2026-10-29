@@ -589,6 +589,10 @@ class SleepingWorker {
       if (client < 0) {
         continue;
       }
+      // A relay writing to a peer that already closed gets an error, not a
+      // SIGPIPE that ends the test process.
+      int yes = 1;
+      ::setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes));
       const std::lock_guard lock(mutex_);
       open_fds_.push_back(client);
       if (std::chrono::steady_clock::now() < wake_at_) {
@@ -596,6 +600,7 @@ class SleepingWorker {
         continue;
       }
       const int upstream = ::socket(AF_INET, SOCK_STREAM, 0);
+      ::setsockopt(upstream, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes));
       sockaddr_in target{};
       target.sin_len = sizeof(target);
       target.sin_family = AF_INET;

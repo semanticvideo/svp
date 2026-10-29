@@ -19,8 +19,10 @@
 //                               by its coordinator keeps running the job,
 //                               and so does one told to sleep mid-job.
 //
-// Both go when the session ends, so an idle worker sleeps as its settings
-// say. Best effort: a session whose assertions are refused still runs.
+// Both go a minute after the session ends (AgentCore::linger_awake), so the
+// next session of the same job finds the Mac awake and an idle worker then
+// sleeps as its settings say. Best effort: a session whose assertions are
+// refused still runs.
 
 #include <cstdint>
 #include <string>
